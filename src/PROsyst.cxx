@@ -460,6 +460,8 @@ namespace PROfit {
                 const float y1 = ratios[0].GetBinContent(i);
                 const float y2 = ratios[1].GetBinContent(i);
                 const float slope = (y2 - y1)/(syst.knobval[1] - syst.knobval[0]);
+                // Mirror about 0 for MCMC
+                spline.push_back({(float)(-syst.knobval[1]), {y2, -slope, 0, 0}});
                 spline.push_back({(float)syst.knobval[0], {slope * (float)syst.knobval[0] + y1, slope, 0, 0}});
                 spline_coeffs.push_back(spline);
                 continue;
