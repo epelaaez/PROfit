@@ -225,7 +225,7 @@
 </MCFile>
 
 <!-- ############################3 ICARUS ##################### -->
-<MCFile treename="events/selectedNu" filename="/pnfs/sbnd/persistent/users/noza/sBruce/icarus_bnbcv/icarus_bnbcv_files_test.txt" scale = "1.0" pot="8.01169e20"> 
+<MCFile treename="events/selectedNu" filename="/pnfs/sbnd/persistent/users/noza/sBruce/icarus_bnbcv/icarus_bnbcv_files.txt" scale = "1.0" pot="8.01169e20"> 
     <friend treename="events/multisigmaTree" />
     <friend treename="events/multisimTree" />
     <branch
