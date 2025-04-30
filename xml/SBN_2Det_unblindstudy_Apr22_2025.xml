@@ -6,14 +6,14 @@
 <detector name="ICARUS" />
 
 <channel name="numu" unit="Reconstructed Neutrino Energy [GeV]">
-    <bins edges="0.3 0.4 0.45 0.5 0.55 0.6 0.65 0.7 0.75 0.8 0.85 0.9 0.95 1.0 1.25 1.5 2.0 3.0"/>
+    <bins min="0.0" max="3" nbins="30"/>
     <truebins min="0" max="2" nbins="100"/>
     <otherbins unit="True E [GeV]" min="0" max="3" nbins="20"/>
     <subchannel name="numucc" plotname="#nu_{#mu} CC" color="#99CCFF"/>
 </channel>
 
 <channel name="nue" unit="Reconstructed Neutrino Energy [GeV]">
-    <bins min="0.0" max="2" nbins="20"/>
+    <bins min="0.0" max="3" nbins="30"/>
     <truebins min="0" max="2" nbins="100"/>
     <otherbins unit="True E [GeV]" min="0" max="3" nbins="20"/>
     <subchannel name="intrinsic" plotname="#nu_{e} CC" color="#33CC33"/>
@@ -194,7 +194,7 @@
 </MCFile>
     
  
-<MCFile treename="events/selectedNu" filename="/pnfs/sbnd/persistent/users/noza/sBruce/sbnd_nue/sbnd_nue_files.txt" scale = "1.0" pot="5.14507e19"> 
+<MCFile treename="events/selectedNu" filename="/pnfs/sbnd/persistent/users/noza/sBruce/sbnd_nue/sbnd_nue_files.txt" scale = "1.0" pot="7.002e21"> 
     <friend treename="events/multisigmaTree" />
     <friend treename="events/multisimTree" />   
     <branch
@@ -209,7 +209,7 @@
         />
 </MCFile>
 
-<MCFile treename="events/selectedNu" filename="/pnfs/sbnd/persistent/users/noza/sBruce/sbnd_fullosc/sbnd_fullosc_files.txt" scale = "1.0" pot="7.002e21"> 
+<MCFile treename="events/selectedNu" filename="/pnfs/sbnd/persistent/users/noza/sBruce/sbnd_fullosc/sbnd_fullosc_files.txt" scale = "1.0" pot="5.14507e19"> 
     <friend treename="events/multisigmaTree" />
     <friend treename="events/multisimTree" />
     <branch
