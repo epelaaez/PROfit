@@ -65,6 +65,7 @@ public:
         lb << -2, -std::numeric_limits<float>::infinity();
         ub << 2, 0;
         default_val << -10, -10;
+
     };
 
     /* Function: 3+1 numu->numue disapperance prob in SBL approx */
@@ -122,6 +123,12 @@ public:
         lb << -2, -std::numeric_limits<float>::infinity();
         ub << 2, 0;
         default_val << -std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity();
+    
+        log<LOG_INFO>(L"%1% || setting up a model nueapp, with  %2% params.")     % __func__ % nparams;
+        for(int i=0; i< nparams;i++){
+            log<LOG_INFO>(L"%1% || Param %2% is %3% with lower bound/upper bound of %4%/%5% and default %6%")     % __func__ % i % param_names[i].c_str() % lb[i] % ub[i] % default_val[i];
+        }
+
     };
 
     float Pmue(float dmsq, float sinsq2thmue, float le) const{
