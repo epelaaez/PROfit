@@ -30,13 +30,13 @@ namespace PROfit {
             }
         }
         Eigen::MatrixXf fractional_mcstat_cov = other_index < 0 ? prop.mcStatErr.array().square().inverse().matrix().asDiagonal()
-                                                                : prop.otherMCStatErr[other_index].array().square().inverse().matrix().asDiagonal();
+            : prop.otherMCStatErr[other_index].array().square().inverse().matrix().asDiagonal();
         toFiniteMatrix(fractional_mcstat_cov);
         Eigen::MatrixXf mcstat_corr = GenerateCorrMatrix(fractional_mcstat_cov);
         syst_map["mcstat"] = {covmat.size(), SystType::Covariance};
         covmat.push_back(fractional_mcstat_cov);
         corrmat.push_back(mcstat_corr);
-        
+
         fractional_covariance = this->SumMatrices();
     }
 
@@ -47,23 +47,23 @@ namespace PROfit {
             log<LOG_DEBUG>(L"%1% | Looking up systematic %2% from subset list.") % __func__ % name.c_str();
             const auto &[idx, stype] = syst_map.at(name);
             switch(stype) {
-            case SystType::Spline:
-                ret.syst_map[name] = std::make_pair(ret.splines.size(), SystType::Spline);
-                ret.spline_names.push_back(name);
-                ret.splines.push_back(splines[idx]);
-                ret.spline_hi.push_back(spline_hi[idx]);
-                ret.spline_lo.push_back(spline_lo[idx]);
-                ret.spline_binnings.push_back(spline_binnings[idx]);
-                break;
-            case SystType::Covariance:
-                ret.syst_map[name] = std::make_pair(ret.covmat.size(), SystType::Covariance);
-                ret.covar_names.push_back(name);
-                ret.covmat.push_back(covmat[idx]);
-                ret.corrmat.push_back(corrmat[idx]);
-                break;
-            default:
-                log<LOG_ERROR>(L"%1% || Unrecognized syst type %2% for syst %3%.") % __func__ % static_cast<int>(stype) % name.c_str();
-                break;
+                case SystType::Spline:
+                    ret.syst_map[name] = std::make_pair(ret.splines.size(), SystType::Spline);
+                    ret.spline_names.push_back(name);
+                    ret.splines.push_back(splines[idx]);
+                    ret.spline_hi.push_back(spline_hi[idx]);
+                    ret.spline_lo.push_back(spline_lo[idx]);
+                    ret.spline_binnings.push_back(spline_binnings[idx]);
+                    break;
+                case SystType::Covariance:
+                    ret.syst_map[name] = std::make_pair(ret.covmat.size(), SystType::Covariance);
+                    ret.covar_names.push_back(name);
+                    ret.covmat.push_back(covmat[idx]);
+                    ret.corrmat.push_back(corrmat[idx]);
+                    break;
+                default:
+                    log<LOG_ERROR>(L"%1% || Unrecognized syst type %2% for syst %3%.") % __func__ % static_cast<int>(stype) % name.c_str();
+                    break;
             }
         }
         ret.fractional_covariance = ret.covmat.size() ? ret.SumMatrices()
@@ -78,23 +78,23 @@ namespace PROfit {
             if(std::find(systs.begin(), systs.end(), name) != systs.end()) continue;
             const auto &[idx, stype] = spair;
             switch(stype) {
-            case SystType::Spline:
-                ret.syst_map[name] = std::make_pair(ret.splines.size(), SystType::Spline);
-                ret.spline_names.push_back(name);
-                ret.splines.push_back(splines[idx]);
-                ret.spline_hi.push_back(spline_hi[idx]);
-                ret.spline_lo.push_back(spline_lo[idx]);
-                ret.spline_binnings.push_back(spline_binnings[idx]);
-                break;
-            case SystType::Covariance:
-                ret.syst_map[name] = std::make_pair(ret.covmat.size(), SystType::Covariance);
-                ret.covar_names.push_back(name);
-                ret.covmat.push_back(covmat[idx]);
-                ret.corrmat.push_back(corrmat[idx]);
-                break;
-            default:
-                log<LOG_ERROR>(L"%1% || Unrecognized syst type %2% for syst %3%.") % __func__ % static_cast<int>(stype) % name.c_str();
-                break;
+                case SystType::Spline:
+                    ret.syst_map[name] = std::make_pair(ret.splines.size(), SystType::Spline);
+                    ret.spline_names.push_back(name);
+                    ret.splines.push_back(splines[idx]);
+                    ret.spline_hi.push_back(spline_hi[idx]);
+                    ret.spline_lo.push_back(spline_lo[idx]);
+                    ret.spline_binnings.push_back(spline_binnings[idx]);
+                    break;
+                case SystType::Covariance:
+                    ret.syst_map[name] = std::make_pair(ret.covmat.size(), SystType::Covariance);
+                    ret.covar_names.push_back(name);
+                    ret.covmat.push_back(covmat[idx]);
+                    ret.corrmat.push_back(corrmat[idx]);
+                    break;
+                default:
+                    log<LOG_ERROR>(L"%1% || Unrecognized syst type %2% for syst %3%.") % __func__ % static_cast<int>(stype) % name.c_str();
+                    break;
             }
         }
         ret.fractional_covariance = ret.covmat.size() ? ret.SumMatrices()
@@ -102,29 +102,29 @@ namespace PROfit {
         ret.other_index = other_index;
         return ret;
     }
-    
+
     PROsyst PROsyst::allsplines2cov(const PROconfig &config, const PROpeller &prop, uint32_t seed) const {
         PROsyst ret;
         for(const auto &[name, spair]: syst_map) {
             const auto &[idx, stype] = spair;
             switch(stype) {
-            case SystType::Spline: {
-                ret.syst_map[name] = std::make_pair(ret.covmat.size(), SystType::Covariance);
-                ret.covar_names.push_back(name);
-                Eigen::MatrixXf cov = spline2cov(idx, config, prop, seed);
-                Eigen::MatrixXf cor = GenerateCorrMatrix(cov);
-                ret.covmat.push_back(cov);
-                ret.corrmat.push_back(cor);
-                } break;
-            case SystType::Covariance:
-                ret.syst_map[name] = std::make_pair(ret.covmat.size(), SystType::Covariance);
-                ret.covar_names.push_back(name);
-                ret.covmat.push_back(covmat[idx]);
-                ret.corrmat.push_back(corrmat[idx]);
-                break;
-            default:
-                log<LOG_ERROR>(L"%1% || Unrecognized syst type %2% for syst %3%.") % __func__ % static_cast<int>(stype) % name.c_str();
-                break;
+                case SystType::Spline: {
+                                           ret.syst_map[name] = std::make_pair(ret.covmat.size(), SystType::Covariance);
+                                           ret.covar_names.push_back(name);
+                                           Eigen::MatrixXf cov = spline2cov(idx, config, prop, seed);
+                                           Eigen::MatrixXf cor = GenerateCorrMatrix(cov);
+                                           ret.covmat.push_back(cov);
+                                           ret.corrmat.push_back(cor);
+                                       } break;
+                case SystType::Covariance:
+                                       ret.syst_map[name] = std::make_pair(ret.covmat.size(), SystType::Covariance);
+                                       ret.covar_names.push_back(name);
+                                       ret.covmat.push_back(covmat[idx]);
+                                       ret.corrmat.push_back(corrmat[idx]);
+                                       break;
+                default:
+                                       log<LOG_ERROR>(L"%1% || Unrecognized syst type %2% for syst %3%.") % __func__ % static_cast<int>(stype) % name.c_str();
+                                       break;
             }
         }
         ret.fractional_covariance = ret.covmat.size() ? ret.SumMatrices()
@@ -234,7 +234,7 @@ namespace PROfit {
             log<LOG_ERROR>(L"%1% || ERROR, you asked for a flat systematic but its not in NAME:percentate format %2%") % __func__  % sysname.c_str();
             exit(EXIT_FAILURE);
         }
-        
+
         std::string wild = sysname.substr(0, colonPos);
         std::string sflat_percent  = sysname.substr(colonPos + 1);
         float flat_percent = std::stof(sflat_percent);
@@ -243,9 +243,9 @@ namespace PROfit {
         log<LOG_INFO>(L"%1% || Wildcard %2% (and percent %3%) which matches: ") % __func__  % wild.c_str() % flat_percent;
         std::vector<std::string> flatnames;
         for(auto & name: config.m_fullnames){
-                if(name.find(wild)!=std::string::npos){
-                    flatnames.push_back(name); 
-                }
+            if(name.find(wild)!=std::string::npos){
+                flatnames.push_back(name); 
+            }
         }
         log<LOG_INFO>(L"%1% || %2% . ") % __func__  % flatnames;
 
@@ -438,7 +438,7 @@ namespace PROfit {
         for(size_t i = 0; i < syst.p_multi_spec.size(); ++i) {
             //log<LOG_ERROR>(L"%1% || p_multi_spec, knobval, i, cv (%2%): %3%") % __func__ % tolerance % val;
 
-        
+
             if(syst.knobval[i] > 0 && !found0) {
                 ratios.push_back(*syst.p_cv / *syst.p_cv);
                 found0 = true;
@@ -545,7 +545,7 @@ namespace PROfit {
             const int spline_bin = 
                 binning == -2 ? prop.true_bin_indices[i] :
                 binning == -1 ? prop.bin_indices[i]
-                              : prop.other_bin_indices[i][binning];
+                : prop.other_bin_indices[i][binning];
             const int reco_bin = other_index < 0 ? prop.bin_indices[i] : prop.other_bin_indices[other_index][i];
             ret.Fill(reco_bin, GetSplineShift(name, shift, spline_bin) * prop.added_weights[i]);
         }
@@ -560,7 +560,7 @@ namespace PROfit {
             const int spline_bin = 
                 binning == -2 ? prop.true_bin_indices[i] :
                 binning == -1 ? prop.bin_indices[i]
-                              : prop.other_bin_indices[i][binning];
+                : prop.other_bin_indices[i][binning];
             const int reco_bin = other_index < 0 ? prop.bin_indices[i] : prop.other_bin_indices[other_index][i];
             ret.Fill(reco_bin, GetSplineShift(syst_num, shift, spline_bin) * prop.added_weights[i]);
         }
@@ -579,7 +579,7 @@ namespace PROfit {
                 const int spline_bin = 
                     binning == -2 ? prop.true_bin_indices[i] :
                     binning == -1 ? prop.bin_indices[i]
-                                  : prop.other_bin_indices[i][binning];
+                    : prop.other_bin_indices[i][binning];
                 weight *= GetSplineShift(names[j], shifts[j], spline_bin);
             }
             ret.Fill(reco_bin, weight * prop.added_weights[i]);
@@ -599,7 +599,7 @@ namespace PROfit {
                 const int spline_bin = 
                     binning == -2 ? prop.true_bin_indices[i] :
                     binning == -1 ? prop.bin_indices[i]
-                                  : prop.other_bin_indices[i][binning];
+                    : prop.other_bin_indices[i][binning];
                 weight *= GetSplineShift(syst_nums[j], shifts[j], spline_bin);
             }
             ret.Fill(reco_bin, weight * prop.added_weights[i]);
@@ -619,7 +619,7 @@ namespace PROfit {
                 const int spline_bin = 
                     binning == -2 ? prop.true_bin_indices[i] :
                     binning == -1 ? prop.bin_indices[i]
-                                  : prop.other_bin_indices[i][binning];
+                    : prop.other_bin_indices[i][binning];
                 weight *= GetSplineShift(j, shifts[j], spline_bin);
             }
             ret.Fill(reco_bin, weight * prop.added_weights[i]);
@@ -664,33 +664,63 @@ namespace PROfit {
         Eigen::MatrixXf diag = cv_vec.asDiagonal();
         Eigen::MatrixXf full_cov = diag * fractional_covariance * diag;
         Eigen::MatrixXf coll = other_index < 0 ? CollapseMatrix(config, full_cov) : CollapseMatrix(config, full_cov, other_index);
-        Eigen::LDLT<Eigen::MatrixXf> ldlt(coll);
-        Eigen::MatrixXf L = ldlt.matrixL(); 
-        Eigen::VectorXf D_sqrt = ldlt.vectorD().array().sqrt();  
-        Eigen::PermutationMatrix<Eigen::Dynamic, Eigen::Dynamic> P(ldlt.transpositionsP());
+        /*Eigen::LDLT<Eigen::MatrixXf> ldlt(coll);
+          Eigen::MatrixXf L = ldlt.matrixL(); 
+          Eigen::VectorXf D_sqrt = ldlt.vectorD().array().sqrt();  
+          Eigen::PermutationMatrix<Eigen::Dynamic, Eigen::Dynamic> P(ldlt.transpositionsP());
 
-        if (ldlt.info() != Eigen::Success) {
-            log<LOG_ERROR>(L"%1% | Eigen LLT has failed!") % __func__ ;
-            Eigen::FullPivLU<Eigen::MatrixXf> lu_decomp(coll);
-            int rank = lu_decomp.rank();
-            int size = coll.rows();
-            if (!coll.isApprox(coll.transpose())) {
-                log<LOG_ERROR>(L"%1% | Matrix is not symmetric! Rank %2% and size %3%") % __func__ % rank % size ;
-            }
-            Eigen::SelfAdjointEigenSolver<Eigen::MatrixXf> eigensolver(coll);
-            if (eigensolver.eigenvalues().minCoeff() <= 0) {
-                log<LOG_ERROR>(L"%1% | Matrix is not positive semi definite, minCoeff is %2%. Rank %3% and size %4% ") % __func__ % eigensolver.eigenvalues().minCoeff() % rank % size;
-            }
-            Eigen::JacobiSVD<Eigen::MatrixXf> svd(coll);
-            log<LOG_ERROR>(L"%1% | Singular values: %2% ") % __func__ % svd.singularValues();
-            
-            Eigen::IOFormat fmt(Eigen::StreamPrecision, Eigen::DontAlignCols, " ", "\n", "", "", "", "");
-            std::ostringstream oss;
-            oss << coll.format(fmt);
-            log<LOG_ERROR>(L"%1% | Matrix is %2% ") % __func__ % oss.str().c_str();
+          if (ldlt.info() != Eigen::Success) {
+          log<LOG_ERROR>(L"%1% | Eigen LLT has failed!") % __func__ ;
+          Eigen::FullPivLU<Eigen::MatrixXf> lu_decomp(coll);
+          int rank = lu_decomp.rank();
+          int size = coll.rows();
+          if (!coll.isApprox(coll.transpose())) {
+          log<LOG_ERROR>(L"%1% | Matrix is not symmetric! Rank %2% and size %3%") % __func__ % rank % size ;
+          }
+          Eigen::SelfAdjointEigenSolver<Eigen::MatrixXf> eigensolver(coll);
+          if (eigensolver.eigenvalues().minCoeff() <= 0) {
+          log<LOG_ERROR>(L"%1% | Matrix is not positive semi definite, minCoeff is %2%. Rank %3% and size %4% ") % __func__ % eigensolver.eigenvalues().minCoeff() % rank % size;
+          }
+          Eigen::JacobiSVD<Eigen::MatrixXf> svd(coll);
+          log<LOG_ERROR>(L"%1% | Singular values: %2% ") % __func__ % svd.singularValues();
+
+          Eigen::IOFormat fmt(Eigen::StreamPrecision, Eigen::DontAlignCols, " ", "\n", "", "", "", "");
+          std::ostringstream oss;
+          oss << coll.format(fmt);
+          log<LOG_ERROR>(L"%1% | Matrix is %2% ") % __func__ % oss.str().c_str();
+          exit(EXIT_FAILURE);
+          }
+          return P * L * D_sqrt.asDiagonal();*/
+        Eigen::JacobiSVD<Eigen::MatrixXf> svd(coll, Eigen::ComputeThinU | Eigen::ComputeThinV);
+        const auto& U = svd.matrixU();
+        const auto& S = svd.singularValues();
+
+        log<LOG_DEBUG>(L"%1% | Singular values: %2% ") % __func__ % svd.singularValues();
+
+        Eigen::FullPivLU<Eigen::MatrixXf> lu_decomp(coll);
+          int rank = lu_decomp.rank();
+          int size = coll.rows();
+          log<LOG_DEBUG>(L"%1% | Matrix is Rank %2% and size %3%") % __func__ % rank % size ;
+
+        float tol = 1e-8f * S.maxCoeff(); // Some cutoff? is this value impactful on out matricies? need to test
+        std::vector<int> keep;
+        for (int i = 0; i < S.size(); ++i) {
+            if (S(i) > tol) keep.push_back(i);
+        }
+
+        if (keep.empty()) {
+            log<LOG_ERROR>(L"%1% | All singular values are below tolerance, cannot sample. Blarg.") % __func__;
             exit(EXIT_FAILURE);
         }
-        return P * L * D_sqrt.asDiagonal();
+
+        //going to keep only the singular values that give meaningful variance
+        Eigen::MatrixXf fallback_sampler = Eigen::MatrixXf::Zero(coll.rows(), coll.cols());
+        for (size_t i = 0; i < keep.size(); ++i) {
+                fallback_sampler.col(i) = U.col(keep[i]) * std::sqrt(S(keep[i]));
+        }
+
+        return fallback_sampler;
+
     }
 };
 
