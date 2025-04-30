@@ -671,13 +671,19 @@ namespace PROfit {
 
         if (ldlt.info() != Eigen::Success) {
             log<LOG_ERROR>(L"%1% | Eigen LLT has failed!") % __func__ ;
+            Eigen::FullPivLU<Eigen::MatrixXf> lu_decomp(coll);
+            int rank = lu_decomp.rank();
+            int size = coll.rows();
             if (!coll.isApprox(coll.transpose())) {
-                log<LOG_ERROR>(L"%1% | Matrix is not symmetric!") % __func__ ;
+                log<LOG_ERROR>(L"%1% | Matrix is not symmetric! Rank %2% and size %3%") % __func__ % rank % size ;
             }
             Eigen::SelfAdjointEigenSolver<Eigen::MatrixXf> eigensolver(coll);
             if (eigensolver.eigenvalues().minCoeff() <= 0) {
-                log<LOG_ERROR>(L"%1% | Matrix is not positive semi definite, minCoeff is %2% ") % __func__ % eigensolver.eigenvalues().minCoeff();
+                log<LOG_ERROR>(L"%1% | Matrix is not positive semi definite, minCoeff is %2%. Rank %3% and size %4% ") % __func__ % eigensolver.eigenvalues().minCoeff() % rank % size;
             }
+            Eigen::JacobiSVD<Eigen::MatrixXf> svd(coll);
+            log<LOG_ERROR>(L"%1% | Singular values: %2% ") % __func__ % svd.singularValues();
+            
             Eigen::IOFormat fmt(Eigen::StreamPrecision, Eigen::DontAlignCols, " ", "\n", "", "", "", "");
             std::ostringstream oss;
             oss << coll.format(fmt);
