@@ -233,11 +233,11 @@ int main(int argc, char* argv[])
     for(size_t i = 0; i < config.m_num_other_vars; ++i)
         other_systs.emplace_back(prop, config, systsstructs.at(i+1), shapeonly, i);
     std::unique_ptr<PROmodel> model = get_model_from_string(config.m_model_tag, prop);
-    std::unique_ptr<PROmodel> default_model = get_model_from_string(config.m_model_tag, prop);
     std::unique_ptr<PROmodel> null_model = std::make_unique<NullModel>(prop);
 
     //Pysics parameter input
         Eigen::VectorXf pparams = Eigen::VectorXf::Constant(model->nparams + systs.GetNSplines(), 0);
+        Eigen::VectorXf CVpparams = Eigen::VectorXf::Constant(model->nparams + systs.GetNSplines(), 0);
         if(osc_params.size()) {
             if(osc_params.size() != model->nparams) {
                 log<LOG_ERROR>(L"%1% || Incorrect number of physics parameters provided. Expected %2%, found %3%.")
@@ -246,11 +246,13 @@ int main(int argc, char* argv[])
             }
             for(size_t i = 0; i < osc_params.size(); ++i) {
                 pparams(i) = std::log10(osc_params[i]);
+                CVpparams(i) = model->default_val(i); 
                 //if(std::isinf(pparams(i))) pparams(i) = -10;
             }
         } else {
             for(size_t i = 0; i < model->nparams; ++i) {
                 pparams(i) = model->default_val(i); 
+                CVpparams(i) = model->default_val(i); 
             }
         }
 
@@ -805,7 +807,7 @@ int main(int argc, char* argv[])
     }
     if(*proplot_command){
         //PROspec spec = FillCVSpectrum(config, prop, !eventbyevent);
-        PROspec spec = FillRecoSpectra(config, prop, systs, *default_model, pparams, !eventbyevent);
+        PROspec spec = FillRecoSpectra(config, prop, systs, *model, CVpparams, !eventbyevent);
         PlotOptions opt = PlotOptions::CVasStack;
         if(binwidth_scale) opt |= PlotOptions::BinWidthScaled;
         if(area_normalized) opt |= PlotOptions::AreaNormalized;
