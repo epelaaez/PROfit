@@ -119,10 +119,6 @@ float PROfitter::Fit(PROmetric &metric, const Eigen::VectorXf &seed_pt ) {
         try {
             x = PSO.getGlobalBestPosition();
             log<LOG_INFO>(L"%1% || Starting local minimization attempt %2%/%3%") % __func__ % attempt % fitconfig.n_max_local_retries;
-            log<LOG_DEBUG>(L"%1% || -- x is %2% ") % __func__ % x;
-            log<LOG_DEBUG>(L"%1% || -- fx is %2%") % __func__ % fx;
-            log<LOG_DEBUG>(L"%1% || -- lb is %2%") % __func__ % lb;
-            log<LOG_DEBUG>(L"%1% || -- ub is %2%") % __func__ % ub;
             niter = solver.minimize(metric, x, fx, lb, ub);
             chi2s_localfits.push_back(fx);
 
