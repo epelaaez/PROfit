@@ -62,7 +62,7 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
 float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient, bool rungradient){
     size_t nparams = model.nparams+syst->GetNSplines();
     size_t nsyst = syst->GetNSplines();
-    log<LOG_DEBUG>(L"%1% || nparams is %2%, nsyst is %3% ") % __func__ % nparams % nsyst;    
+    //log<LOG_DEBUG>(L"%1% || nparams is %2%, nsyst is %3% ") % __func__ % nparams % nsyst;    
 
     // Get Spectra from FillRecoSpectra
     Eigen::VectorXf subvector2 = param.segment(nparams - nsyst, nsyst);
@@ -113,12 +113,15 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
             float value_grad = (delta.transpose())*inverted_collapsed_full_covariance*(delta) + dmsq_penalty + pull;
             
             gradient(i) = (value_grad-value)/(tmpParams(i) - param(i));
+
+            if(gradient(i)!=gradient(i)){
+        }
+
+
         }
     }
     //std::cout<<"Grad: "<<gradient<<std::endl;
 
-    //log<LOG_DEBUG>(L"%1% || value %2%, last_value %3%, pull") % __func__ % value  % last_value % pull;
-    log<LOG_DEBUG>(L"%1% || FINISHED ITERATION got vals: %2% %3%") % __func__ % value % last_value ;
 
     //Update last param
     last_param = param;
