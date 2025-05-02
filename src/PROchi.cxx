@@ -64,8 +64,6 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
     size_t nsyst = syst->GetNSplines();
     //log<LOG_DEBUG>(L"%1% || nparams is %2%, nsyst is %3% ") % __func__ % nparams % nsyst;    
 
-    log<LOG_DEBUG>(L"%1% || Hmm param %2% ") % __func__ % param  ;
-    log<LOG_DEBUG>(L"%1% || Hmm grad %2% ") % __func__ % gradient  ;
     // Get Spectra from FillRecoSpectra
     Eigen::VectorXf subvector2 = param.segment(nparams - nsyst, nsyst);
     
@@ -117,10 +115,6 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
             gradient(i) = (value_grad-value)/(tmpParams(i) - param(i));
 
             if(gradient(i)!=gradient(i)){
-            log<LOG_DEBUG>(L"%1% || NAN value_grad %2% ") % __func__ % value_grad  ;
-            log<LOG_DEBUG>(L"%1% || NAN value %2% ") % __func__ % value  ;
-            log<LOG_DEBUG>(L"%1% || NAN tmpParams %2% ") % __func__ % tmpParams(i)  ;
-            log<LOG_DEBUG>(L"%1% || NAN param %2%  ") % __func__ % param(i)  ;
         }
 
 
@@ -128,15 +122,6 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
     }
     //std::cout<<"Grad: "<<gradient<<std::endl;
 
-    log<LOG_DEBUG>(L"%1% || FINISHED ITERATION got vals: %2% %3% : diff %4%") % __func__ % value % last_value % (value-last_value) ;
-    if(value!=value){
-        log<LOG_DEBUG>(L"%1% ||  covar %2% pull %3% ") % __func__ %  covar_portion % pull ;
-        log<LOG_DEBUG>(L"%1% || NAN Delta %2% ") % __func__ % delta  ;
-        log<LOG_DEBUG>(L"%1% || NAN param %2% ") % __func__ % param  ;
-        log<LOG_DEBUG>(L"%1% || NAN grad %2% ") % __func__ % gradient  ;
-        log<LOG_DEBUG>(L"%1% || NAN spec %2%  ") % __func__ % result.Spec()  ;
-        exit(EXIT_FAILURE);
-    }
 
     //Update last param
     last_param = param;
