@@ -237,6 +237,7 @@ int main(int argc, char* argv[])
 
     //Pysics parameter input
         Eigen::VectorXf pparams = Eigen::VectorXf::Constant(model->nparams + systs.GetNSplines(), 0);
+        Eigen::VectorXf CVpparams = Eigen::VectorXf::Constant(model->nparams + systs.GetNSplines(), 0);
         if(osc_params.size()) {
             if(osc_params.size() != model->nparams) {
                 log<LOG_ERROR>(L"%1% || Incorrect number of physics parameters provided. Expected %2%, found %3%.")
@@ -245,11 +246,13 @@ int main(int argc, char* argv[])
             }
             for(size_t i = 0; i < osc_params.size(); ++i) {
                 pparams(i) = std::log10(osc_params[i]);
+                CVpparams(i) = model->default_val(i); 
                 //if(std::isinf(pparams(i))) pparams(i) = -10;
             }
         } else {
             for(size_t i = 0; i < model->nparams; ++i) {
                 pparams(i) = model->default_val(i); 
+                CVpparams(i) = model->default_val(i); 
             }
         }
 
@@ -803,7 +806,8 @@ int main(int argc, char* argv[])
         //***********************************************************************
     }
     if(*proplot_command){
-        PROspec spec = FillCVSpectrum(config, prop, !eventbyevent);
+        //PROspec spec = FillCVSpectrum(config, prop, !eventbyevent);
+        PROspec spec = FillRecoSpectra(config, prop, systs, *model, CVpparams, !eventbyevent);
         PlotOptions opt = PlotOptions::CVasStack;
         if(binwidth_scale) opt |= PlotOptions::BinWidthScaled;
         if(area_normalized) opt |= PlotOptions::AreaNormalized;
