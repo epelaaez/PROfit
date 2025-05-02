@@ -43,7 +43,7 @@ FetchContent_Declare(
     lbfgspp
     SYSTEM
     GIT_REPOSITORY https://github.com/markrosslonergan/LBFGSpp
-    GIT_TAG        93cda62bd874bbff88973facd4eb92c3b5df9817
+    GIT_TAG        253e837bbff0460bddd84cd9883715c18aa19426
     )
 else()
 FetchContent_Declare(
@@ -54,7 +54,7 @@ FetchContent_Declare(
 FetchContent_Declare(
     lbfgspp
     GIT_REPOSITORY https://github.com/markrosslonergan/LBFGSpp
-    GIT_TAG        93cda62bd874bbff88973facd4eb92c3b5df9817
+    GIT_TAG        253e837bbff0460bddd84cd9883715c18aa19426
     )
 endif()
 FetchContent_MakeAvailable(eigen)
