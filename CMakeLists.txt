@@ -42,8 +42,8 @@ FetchContent_Declare(
 FetchContent_Declare(
     lbfgspp
     SYSTEM
-    GIT_REPOSITORY https://github.com/gputnam/LBFGSpp
-    GIT_TAG        d0149638e0f89b6c5b001d202f65273705ec7117
+    GIT_REPOSITORY https://github.com/markrosslonergan/LBFGSpp
+    GIT_TAG        6ddb11231ac2c2674fef788a760ac7dfa1b1c335
     )
 else()
 FetchContent_Declare(
