@@ -3,7 +3,7 @@ cmake_minimum_required (VERSION 3.19)
 
 project (
     PROfit
-    VERSION 0.9.1
+    VERSION 1.0.1
     DESCRIPTION "A PROfessional PROfitable PROtractable Fitter"
     LANGUAGES CXX)
 message(STATUS "Building PROfit version: ${PROJECT_VERSION}")
@@ -42,8 +42,8 @@ FetchContent_Declare(
 FetchContent_Declare(
     lbfgspp
     SYSTEM
-    GIT_REPOSITORY https://github.com/gputnam/LBFGSpp
-    GIT_TAG        d0149638e0f89b6c5b001d202f65273705ec7117
+    GIT_REPOSITORY https://github.com/markrosslonergan/LBFGSpp
+    GIT_TAG        253e837bbff0460bddd84cd9883715c18aa19426
     )
 else()
 FetchContent_Declare(
@@ -53,8 +53,8 @@ FetchContent_Declare(
     )
 FetchContent_Declare(
     lbfgspp
-    GIT_REPOSITORY https://github.com/gputnam/LBFGSpp
-    GIT_TAG        d0149638e0f89b6c5b001d202f65273705ec7117
+    GIT_REPOSITORY https://github.com/markrosslonergan/LBFGSpp
+    GIT_TAG        253e837bbff0460bddd84cd9883715c18aa19426
     )
 endif()
 FetchContent_MakeAvailable(eigen)
