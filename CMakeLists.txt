@@ -53,7 +53,6 @@ FetchContent_Declare(
     )
 FetchContent_Declare(
     lbfgspp
-    SYSTEM
     GIT_REPOSITORY https://github.com/markrosslonergan/LBFGSpp
     GIT_TAG        93cda62bd874bbff88973facd4eb92c3b5df9817
     )

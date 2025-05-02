@@ -226,7 +226,7 @@ int main(int argc, char* argv[])
             }
         }
         //Now check syststructs, if there is any!
-        if(systsstructs.front().size()->0){
+        if(systsstructs.front().size()>0){
             log<LOG_INFO>(L"%1% || Done loading. Config hash (%2%) and binary loaded PROsyst hash(%3%) are here. ") % __func__ %  config.hash % systsstructs[0][0].hash;
             if( config.hash!=systsstructs.front().front().hash){
                 if(force){
