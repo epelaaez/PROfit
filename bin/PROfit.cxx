@@ -97,7 +97,7 @@ int main(int argc, char* argv[])
 
     size_t nuniv;
 
-   
+
     //Global Arguments for all PROfit enables subcommands.
     app.add_option("-x,--xml", xmlname, "Input PROfit XML configuration file.")->required();
     app.add_option("-v,--verbosity", GLOBAL_LEVEL, "Verbosity Level [1-4]->[Error,Warning,Info,Debug].")->default_val(GLOBAL_LEVEL);
@@ -179,9 +179,9 @@ int main(int argc, char* argv[])
 
     log<LOG_INFO>(L" %1% ") % getIcon().c_str()  ;
     std::string final_output_tag =analysis_tag +"_"+output_tag;
- 
 
-    
+
+
 
     log<LOG_INFO>(L"%1% || ##################################################################") % __func__  ;
     log<LOG_INFO>(L"%1% || ####################### PROfit version v%2% ######################") % __func__ % PROJECT_VERSION_STR ;
@@ -214,16 +214,31 @@ int main(int argc, char* argv[])
         prop.load(propBinName);
         loadSystStructVector(systsstructs, systBinName);
 
-        log<LOG_INFO>(L"%1% || Done loading. Config hash (%2%) and binary loaded PROpeller (%3%) or PROsyst hash(%4%) are here. ") % __func__ %  config.hash % prop.hash % systsstructs[0][0].hash;
-        if(config.hash!=prop.hash && config.hash!=systsstructs.front().front().hash){
+        //is hash right for PROpeller first?
+        log<LOG_INFO>(L"%1% || Done loading. Config hash (%2%) and binary loaded PROpeller (%3%) are here. ") % __func__ %  config.hash % prop.hash ;
+        if(config.hash!=prop.hash){
             if(force){
-                log<LOG_WARNING>(L"%1% || WARNING config hash (%2%) and binary loaded PROpeller (%3%) or PROsyst hash(%4%) not compatable! ") % __func__ %  config.hash % prop.hash % systsstructs.front().front().hash;
+                log<LOG_WARNING>(L"%1% || WARNING config hash (%2%) and binary loaded PROpeller (%3%)  not compatable! ") % __func__ %  config.hash % prop.hash ;
                 log<LOG_WARNING>(L"%1% || WARNING But we are forcing ahead, be SUPER clear and happy you understand what your doing.  ") % __func__;
             }else{
-                log<LOG_ERROR>(L"%1% || ERROR config hash (%2%) and binary loaded PROpeller (%3%) or PROsyst hash(%4%) not compatable! ") % __func__ %  config.hash % prop.hash % systsstructs.front().front().hash;
+                log<LOG_ERROR>(L"%1% || ERROR config hash (%2%) and binary loaded PROpeller (%3%)  not compatable! ") % __func__ %  config.hash % prop.hash ;
                 return 1;
             }
         }
+        //Now check syststructs, if there is any!
+        if(systsstructs.front().size()->0){
+            log<LOG_INFO>(L"%1% || Done loading. Config hash (%2%) and binary loaded PROsyst hash(%3%) are here. ") % __func__ %  config.hash % systsstructs[0][0].hash;
+            if( config.hash!=systsstructs.front().front().hash){
+                if(force){
+                    log<LOG_WARNING>(L"%1% || WARNING config hash (%2%) and binary loaded PROsyst hash(%3%) not compatable! ") % __func__ %  config.hash %  systsstructs.front().front().hash;
+                    log<LOG_WARNING>(L"%1% || WARNING But we are forcing ahead, be SUPER clear and happy you understand what your doing.  ") % __func__;
+                }else{
+                    log<LOG_ERROR>(L"%1% || ERROR config hash (%2%) and binary loaded PROsyst hash(%3%) not compatable! ") % __func__ %  config.hash %  systsstructs.front().front().hash;
+                    return 1;
+                }
+            }
+        }
+
     }
 
 
@@ -236,38 +251,38 @@ int main(int argc, char* argv[])
     std::unique_ptr<PROmodel> null_model = std::make_unique<NullModel>(prop);
 
     //Pysics parameter input
-        Eigen::VectorXf pparams = Eigen::VectorXf::Constant(model->nparams + systs.GetNSplines(), 0);
-        if(osc_params.size()) {
-            if(osc_params.size() != model->nparams) {
-                log<LOG_ERROR>(L"%1% || Incorrect number of physics parameters provided. Expected %2%, found %3%.")
-                    % __func__ % model->nparams % osc_params.size();
-                exit(EXIT_FAILURE);
-            }
-            for(size_t i = 0; i < osc_params.size(); ++i) {
-                pparams(i) = std::log10(osc_params[i]);
-                //if(std::isinf(pparams(i))) pparams(i) = -10;
-            }
-        } else {
-            for(size_t i = 0; i < model->nparams; ++i) {
-                pparams(i) = model->default_val(i); 
-            }
+    Eigen::VectorXf pparams = Eigen::VectorXf::Constant(model->nparams + systs.GetNSplines(), 0);
+    if(osc_params.size()) {
+        if(osc_params.size() != model->nparams) {
+            log<LOG_ERROR>(L"%1% || Incorrect number of physics parameters provided. Expected %2%, found %3%.")
+                % __func__ % model->nparams % osc_params.size();
+            exit(EXIT_FAILURE);
         }
+        for(size_t i = 0; i < osc_params.size(); ++i) {
+            pparams(i) = std::log10(osc_params[i]);
+            //if(std::isinf(pparams(i))) pparams(i) = -10;
+        }
+    } else {
+        for(size_t i = 0; i < model->nparams; ++i) {
+            pparams(i) = model->default_val(i); 
+        }
+    }
 
-        //Spline injection studies
-        Eigen::VectorXf allparams = Eigen::VectorXf::Constant(model->nparams + systs.GetNSplines(), 0);
-        Eigen::VectorXf systparams = Eigen::VectorXf::Constant(systs.GetNSplines(), 0);
-        for(size_t i = 0; i < model->nparams; ++i) allparams(i) = pparams(i);
-        for(const auto& [name, shift]: injected_systs) {
-            log<LOG_INFO>(L"%1% || Injected syst: %2% shifted by %3%") % __func__ % name.c_str() % shift;
-            auto it = std::find(systs.spline_names.begin(), systs.spline_names.end(), name);
-            if(it == systs.spline_names.end()) {
-                log<LOG_ERROR>(L"%1% || Error: Unrecognized spline %2%. Ignoring this injected shift.") % __func__ % name.c_str();
-                continue;
-            }
-            int idx = std::distance(systs.spline_names.begin(), it);
-            allparams(idx+model->nparams) = shift;
-            systparams(idx) = shift;
+    //Spline injection studies
+    Eigen::VectorXf allparams = Eigen::VectorXf::Constant(model->nparams + systs.GetNSplines(), 0);
+    Eigen::VectorXf systparams = Eigen::VectorXf::Constant(systs.GetNSplines(), 0);
+    for(size_t i = 0; i < model->nparams; ++i) allparams(i) = pparams(i);
+    for(const auto& [name, shift]: injected_systs) {
+        log<LOG_INFO>(L"%1% || Injected syst: %2% shifted by %3%") % __func__ % name.c_str() % shift;
+        auto it = std::find(systs.spline_names.begin(), systs.spline_names.end(), name);
+        if(it == systs.spline_names.end()) {
+            log<LOG_ERROR>(L"%1% || Error: Unrecognized spline %2%. Ignoring this injected shift.") % __func__ % name.c_str();
+            continue;
         }
+        int idx = std::distance(systs.spline_names.begin(), it);
+        allparams(idx+model->nparams) = shift;
+        systparams(idx) = shift;
+    }
 
     //Seed time
     PROseed myseed(nthread, global_seed);
@@ -336,10 +351,10 @@ int main(int argc, char* argv[])
             }
         }
 
-    if(*profile_command || *surface_command || *protest_command){
-                    log<LOG_ERROR>(L"%1% || ERROR --data can only be used with plot subcommand! ") % __func__  ;
-                    return 1;
-    }
+        if(*profile_command || *surface_command || *protest_command){
+            log<LOG_ERROR>(L"%1% || ERROR --data can only be used with plot subcommand! ") % __func__  ;
+            return 1;
+        }
 
 
     }//if no data, use injected or fake data;
@@ -400,12 +415,12 @@ int main(int argc, char* argv[])
     log<LOG_INFO>(L"%1% || Starting from fit preset :  %2%.")% __func__ % fit_preset.c_str();
     if (allowed_preset.find(fit_preset) == allowed_preset.end()) {
         log<LOG_ERROR>(L"%1% || ERROR allowed fit_presets are good, fast or overkill. You entred : %2%.")% __func__ % fit_preset.c_str();
-                return 1;
+        return 1;
     }
     //Some global minimizer params
     // This runs for the single best gobal fit
     PROfitterConfig fitconfig(global_fit_options, fit_preset, false);
-    
+
 
 
     //Some Scan minimizer params.
@@ -454,8 +469,8 @@ int main(int argc, char* argv[])
         for(size_t i = nphys; i < nparams; ++i) {
             lb(i) = metric_to_use->GetSysts().spline_lo[i-nphys];
             ub(i) = metric_to_use->GetSysts().spline_hi[i-nphys];
-        
-        
+
+
         }
         PROfitter fitter(ub, lb, fitconfig);
 
@@ -466,15 +481,15 @@ int main(int argc, char* argv[])
         Eigen::VectorXf best_fit = fitter.best_fit;
         Eigen::MatrixXf post_covar = fitter.Covariance();
 
-        
+
         log<LOG_INFO>(L"%1% || ################################################") % __func__;
         log<LOG_INFO>(L"%1% || ########### Global Best Fit Results ############") % __func__;
         log<LOG_INFO>(L"%1% || ################################################") % __func__;
         log<LOG_INFO>(L"%1% || Global Best Fit chi^2: %2%") %__func__ % chi2;
         log<LOG_INFO>(L"%1% || at paramters: ") % __func__;
-    
+
         for(size_t i = 0; i< nparams; i++){
-        
+
             if(i<nphys){
                 log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % metric_to_use->GetModel().pretty_param_names[i].c_str() % best_fit(i);
             }else{
@@ -482,7 +497,7 @@ int main(int argc, char* argv[])
             }
         }
         log<LOG_INFO>(L"%1% || ################################################") % __func__;
-        
+
         // TODO: Not sure I understand this covariance matrix
         log<LOG_INFO>(L"%1% || Starting a metropolis hastings chain to estimate the covariace matrix aroud the above best fit. Run and Burn is (%2%,%3%);") % __func__%fitconfig.MCMCiter % fitconfig.MCMCburn;
         Metropolis mh(simple_target{*metric_to_use}, simple_proposal(*metric_to_use, dseed(PROseed::global_rng)), best_fit, dseed(PROseed::global_rng));
@@ -529,7 +544,7 @@ int main(int argc, char* argv[])
             post_hist.SetBinContent(i+1, bf.Spec()(i));
             pre_hist.SetBinContent(i+1, cv.Spec()(i));
         }
-        
+
         log<LOG_INFO>(L"%1% || Finished the metropolis hastings chain ") % __func__;
 
         std::vector<TH1D> priors, posteriors;
@@ -548,7 +563,7 @@ int main(int argc, char* argv[])
         Metropolis mh_post(simple_target{*metric_to_use}, simple_proposal(*metric_to_use, dseed(PROseed::global_rng), 0.2, fixed_pars), best_fit, dseed(PROseed::global_rng));
         log<LOG_INFO>(L"%1% || Starting global getPostFitErrorBand() ") % __func__;
         std::unique_ptr<TGraphAsymmErrors> post_err_band = getMCMCErrorBand(mh_post, fitconfig.MCMCburn, fitconfig.MCMCiter, config, prop, *metric_to_use, best_fit, posteriors, spline_covariance, binwidth_scale);
-        
+
         TPaveText chi2text(0.59, 0.50, 0.89, 0.59, "NDC");
         chi2text.AddText(hname.c_str());
         chi2text.SetFillColor(0);
@@ -747,24 +762,24 @@ int main(int argc, char* argv[])
                 if(single_brazil) break;
             }
         } else if(run_brazil) { // if brazil_thows.size() > 0
-                for(const std::string &in: brazil_throws) {
-                    brazil_band_surfaces.emplace_back(*metric, xaxis_idx, yaxis_idx, nbinsx, logx ? PROsurf::LogAxis : PROsurf::LinAxis, xlo, xhi,
-                            nbinsy, logy ? PROsurf::LogAxis : PROsurf::LinAxis, ylo, yhi);
+            for(const std::string &in: brazil_throws) {
+                brazil_band_surfaces.emplace_back(*metric, xaxis_idx, yaxis_idx, nbinsx, logx ? PROsurf::LogAxis : PROsurf::LinAxis, xlo, xhi,
+                        nbinsy, logy ? PROsurf::LogAxis : PROsurf::LinAxis, ylo, yhi);
 
-                    TFile fin(in.c_str());
-                    // TODO: Check that axes and labels are the same
-                    TH2D *surf = fin.Get<TH2D>("surf");
-                    if(!surf) {
-                        log<LOG_ERROR>(L"%1% || Could not find a TH2D called 'surf' in the file %2%. Terminating.")
-                            % __func__ % in.c_str();
-                        return EXIT_FAILURE;
-                    }
-                    for(size_t i = 0; i < surface.nbinsx; ++i) {
-                        for(size_t j = 0; j < surface.nbinsy; ++j) {
-                            brazil_band_surfaces.back().surface(i,j) = surf->GetBinContent(i,j);
-                        }
+                TFile fin(in.c_str());
+                // TODO: Check that axes and labels are the same
+                TH2D *surf = fin.Get<TH2D>("surf");
+                if(!surf) {
+                    log<LOG_ERROR>(L"%1% || Could not find a TH2D called 'surf' in the file %2%. Terminating.")
+                        % __func__ % in.c_str();
+                    return EXIT_FAILURE;
+                }
+                for(size_t i = 0; i < surface.nbinsx; ++i) {
+                    for(size_t j = 0; j < surface.nbinsy; ++j) {
+                        brazil_band_surfaces.back().surface(i,j) = surf->GetBinContent(i,j);
                     }
                 }
+            }
         }
 
         if(run_brazil && !single_brazil) {
@@ -787,7 +802,7 @@ int main(int argc, char* argv[])
                     surf98.SetBinContent(i+1, j+1, values[(size_t)(0.977 * values.size())]);
                 }
             }
-            
+
             fout.cd();
             surf02.Write();
             surf16.Write();
@@ -1140,8 +1155,8 @@ int main(int argc, char* argv[])
             fc_args args{todo + (i >= addone), &dchi2s.back(), &outs.back(), config, prop, systs, chi2, pparams, L, scanFitConfig,(*myseed.getThreadSeeds())[i], (int)i, !eventbyevent};
 
             threads.emplace_back([args]() {
-             PROfit::fc_worker(args);
-            });
+                    PROfit::fc_worker(args);
+                    });
         }
         for(auto&& t: threads) {
             t.join();
@@ -1204,11 +1219,11 @@ int main(int argc, char* argv[])
     }
 
 
-        //***********************************************************************
-        //***********************************************************************
-        //******************** TEST AREA TEST AREA     **************************
-        //***********************************************************************
-        //***********************************************************************
+    //***********************************************************************
+    //***********************************************************************
+    //******************** TEST AREA TEST AREA     **************************
+    //***********************************************************************
+    //***********************************************************************
     if(*protest_command){
         log<LOG_INFO>(L"%1% || PROtest. Place anything here, a playground for testing things .") % __func__;
 
