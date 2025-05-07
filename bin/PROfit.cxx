@@ -412,6 +412,43 @@ int main(int argc, char* argv[])
             syst = syst.excluding(systs_excluded);
     }
 
+    //Pysics parameter input
+    pparams = Eigen::VectorXf::Constant(model->nparams + systs.GetNSplines(), 0);
+    CVpparams = Eigen::VectorXf::Constant(model->nparams + systs.GetNSplines(), 0);
+    if(osc_params.size()) {
+        if(osc_params.size() != model->nparams) {
+            log<LOG_ERROR>(L"%1% || Incorrect number of physics parameters provided. Expected %2%, found %3%.")
+                % __func__ % model->nparams % osc_params.size();
+            exit(EXIT_FAILURE);
+        }
+        for(size_t i = 0; i < osc_params.size(); ++i) {
+            pparams(i) = std::log10(osc_params[i]);
+            CVpparams(i) = model->default_val(i); 
+            //if(std::isinf(pparams(i))) pparams(i) = -10;
+        }
+    } else {
+        for(size_t i = 0; i < model->nparams; ++i) {
+            pparams(i) = model->default_val(i); 
+            CVpparams(i) = model->default_val(i); 
+        }
+    }
+
+    //Spline injection studies
+    allparams = Eigen::VectorXf::Constant(model->nparams + systs.GetNSplines(), 0);
+    systparams = Eigen::VectorXf::Constant(systs.GetNSplines(), 0);
+    for(size_t i = 0; i < model->nparams; ++i) allparams(i) = pparams(i);
+    for(const auto& [name, shift]: injected_systs) {
+        log<LOG_INFO>(L"%1% || Injected syst: %2% shifted by %3%") % __func__ % name.c_str() % shift;
+        auto it = std::find(systs.spline_names.begin(), systs.spline_names.end(), name);
+        if(it == systs.spline_names.end()) {
+            log<LOG_ERROR>(L"%1% || Error: Unrecognized spline %2%. Ignoring this injected shift.") % __func__ % name.c_str();
+            continue;
+        }
+        int idx = std::distance(systs.spline_names.begin(), it);
+        allparams(idx+model->nparams) = shift;
+        systparams(idx) = shift;
+    }
+
 
     PROsyst allcovsyst = systs.allsplines2cov(config, prop, dseed(PROseed::global_rng));
 
