@@ -11,12 +11,15 @@
 #include <numpy/arrayobject.h>
 
 // PROfit includes
+#define TYPE_FLOAT
 #include "PROconfig.h"
 #include "PROcreate.h"
 #include "PROtocall.h"
 #include "PROsyst.h"
+#include "PROchi.h"
+#include "PROmodel.h"
+#include "PROdata.h"
 #include "PROlog.h"
-#include "PROsc.h"
 #include "PROcess.h"
 #include "PROsurf.h"
 #include "PROfitter.h"
@@ -30,6 +33,7 @@ namespace py = pybind11;
 
 // expected by PROfit for printing stuff
 log_level_t GLOBAL_LEVEL = LOG_DEBUG;
+std::wostream *OSTREAM = &wcout;
 
 // Dummy class to associate with global variables
 namespace PROfit {
@@ -113,8 +117,8 @@ PROfit::SystStruct init_SystStruct_np(
   // Convert float buffer to float 
 
   // turn the numpy vectors into c++ vectors
-  std::vector<float> knobvals = buffer_to_vector<float>(knobvals_np);
-  std::vector<float> knobinds = buffer_to_vector<float>(knobinds_np);
+  std::vector<eweight_type> knobvals = buffer_to_vector<eweight_type>(knobvals_np);
+  std::vector<eweight_type> knobinds = buffer_to_vector<eweight_type>(knobinds_np);
 
   return PROfit::SystStruct(name, n_univ, mode, formula, knobvals, knobinds, index);
 }
@@ -176,26 +180,25 @@ PYBIND11_MODULE(_profit, m) {
     m.def("FindGlobalTrueBin", py::vectorize([](PROfit::PROconfig &c, float v, std::string &s) { return PROfit::FindGlobalTrueBin(c, v, s);}));
     m.def("FindGlobalTrueBin", py::vectorize([](PROfit::PROconfig &c, float v, int i) { return PROfit::FindGlobalTrueBin(c, v, i);}));
 
+    // m.def("FillRecoSpectra", py::overload_cast<const PROfit::PROconfig &, 
+    //                                           const PROfit::PROpeller &, 
+    //                                           const PROfit::PROsyst &, 
+    //                                           const std::map<std::string, float> &, 
+    //                                           bool>(&PROfit::FillRecoSpectra));
     m.def("FillRecoSpectra", py::overload_cast<const PROfit::PROconfig &, 
                                                const PROfit::PROpeller &, 
                                                const PROfit::PROsyst &, 
-                                               const std::map<std::string, float> &, 
-                                               bool>(&PROfit::FillRecoSpectra));
-    m.def("FillRecoSpectra", py::overload_cast<const PROfit::PROconfig &, 
-                                               const PROfit::PROpeller &, 
-                                               const PROfit::PROsyst &, 
-                                               const PROfit::PROsc *, 
-                                               const std::vector<float> &,
-                                               const std::vector<float> &, 
+                                               const PROfit::PROmodel &,
+                                               const Eigen::VectorXf &,
                                                bool>(&PROfit::FillRecoSpectra));
     m.def("FillCVSpectrum", &PROfit::FillCVSpectrum);
 
-    m.def("PROcess_CAFAna", [](const PROfit::PROconfig &config) -> std::pair<std::vector<PROfit::SystStruct>, PROfit::PROpeller> {
+    m.def("PROcess_CAFAna", [](const PROfit::PROconfig &config) -> std::pair<std::vector<std::vector<PROfit::SystStruct>>, PROfit::PROpeller> {
       //Inititilize PROpeller to keep MC
       PROfit::PROpeller prop;
 
       //Initilize objects for systematics storage
-      std::vector<PROfit::SystStruct> systsstructs;
+      std::vector<std::vector<PROfit::SystStruct>> systsstructs;
       PROcess_CAFAna(config, systsstructs, prop);  
       return {systsstructs, prop};
     });
@@ -238,7 +241,6 @@ PYBIND11_MODULE(_profit, m) {
             [](const PROfit::BranchVariable &b) {return ttreeformula_getter(b.branch_true_L_formula.get());})
         .def_property_readonly("branch_true_pdg_formula", 
             [](const PROfit::BranchVariable &b) {return ttreeformula_getter(b.branch_true_pdg_formula.get());})
-        .def_readonly("oscillate", &PROfit::BranchVariable::oscillate)
         .def_readonly("true_param_name", &PROfit::BranchVariable::true_param_name)
         .def_readonly("true_L_name", &PROfit::BranchVariable::true_L_name)
         .def_readonly("pdg_name", &PROfit::BranchVariable::pdg_name)
@@ -329,7 +331,6 @@ PYBIND11_MODULE(_profit, m) {
              std::vector<float> &, 
              std::vector<float> &, 
              std::vector<float> &, 
-             std::vector<int> &, 
              std::vector<float> &, 
              std::vector<int> &, 
              std::vector<int> &, 
@@ -342,21 +343,13 @@ PYBIND11_MODULE(_profit, m) {
              [](PROfit::PROpeller &p) -> Eigen::VectorXf& {return p.histLE;},
              [](PROfit::PROpeller &p, const Eigen::VectorXf &v) {p.histLE = v;}, 
              py::return_value_policy::reference_internal)
-        .def_property("reco",
-             [](PROfit::PROpeller &p) {return py::array(p.reco.size(), p.reco.data(), py::capsule(&p.reco, [](void *v) {}));},
-             [](PROfit::PROpeller &p, const py::buffer buf) {p.reco = buffer_to_vector<float>(buf);}, 
+        .def_property("pmom",
+             [](PROfit::PROpeller &p) {return py::array(p.pmom.size(), p.pmom.data(), py::capsule(&p.pmom, [](void *v) {}));},
+             [](PROfit::PROpeller &p, const py::buffer buf) {p.pmom = buffer_to_vector<float>(buf);}, 
              py::return_value_policy::reference_internal)
-        .def_property("truth",
-             [](PROfit::PROpeller &p) {return py::array(p.truth.size(), p.truth.data(), py::capsule(&p.truth, [](void *v) {}));},
-             [](PROfit::PROpeller &p, const py::buffer buf) {p.truth = buffer_to_vector<float>(buf);}, 
-             py::return_value_policy::reference_internal)
-        .def_property("baseline",
-             [](PROfit::PROpeller &p) {return py::array(p.baseline.size(), p.baseline.data(), py::capsule(&p.baseline, [](void *v) {}));},
-             [](PROfit::PROpeller &p, const py::buffer buf) {p.baseline = buffer_to_vector<float>(buf);}, 
-             py::return_value_policy::reference_internal)
-        .def_property("pdg",
-             [](PROfit::PROpeller &p) {return py::array(p.pdg.size(), p.pdg.data(), py::capsule(&p.pdg, [](void *v) {}));},
-             [](PROfit::PROpeller &p, const py::buffer buf) {p.pdg = buffer_to_vector<int>(buf);}, 
+        .def_property("trueLE",
+             [](PROfit::PROpeller &p) {return py::array(p.trueLE.size(), p.trueLE.data(), py::capsule(&p.trueLE, [](void *v) {}));},
+             [](PROfit::PROpeller &p, const py::buffer buf) {p.trueLE = buffer_to_vector<float>(buf);}, 
              py::return_value_policy::reference_internal)
         .def_property("added_weights",
              [](PROfit::PROpeller &p) {return py::array(p.added_weights.size(), p.added_weights.data(), py::capsule(&p.added_weights, [](void *v) {}));},
@@ -410,7 +403,7 @@ PYBIND11_MODULE(_profit, m) {
         // PROsyst takes vector of systematics by reference. However, when passing a list from python,
         // There is no way to get around constructing a vector from the list (and copying SystStructs).
         // To make this explicit, we take the vector by value, and pass it to the class by reference.
-        .def(py::init([](std::vector<PROfit::SystStruct> s) {return PROfit::PROsyst(s);}))
+        .def(py::init([](const PROfit::PROpeller &prop, const PROfit::PROconfig &config, std::vector<PROfit::SystStruct> s) {return PROfit::PROsyst(prop, config, s);}))
         // Empty PROsyst of size N
         .def(py::init(&init_PROsyst_empty))
         // Empty PROsyst of size determined by config
@@ -432,17 +425,39 @@ PYBIND11_MODULE(_profit, m) {
         .def("Spec", &PROfit::PROspec::Spec, py::return_value_policy::reference_internal) 
         .def("Error", &PROfit::PROspec::Error, py::return_value_policy::reference_internal);
 
-    // PROsc
-    py::class_<PROfit::PROsc>(m, "PROsc")
+    // PROdata
+    py::class_<PROfit::PROdata, std::shared_ptr<PROfit::PROdata>>(m, "PROdata")
+        .def(py::init<>())
+        .def(py::init<size_t>())
+        .def(py::init<const PROfit::PROdata&>())
+        .def("Spec", &PROfit::PROdata::Spec, py::return_value_policy::reference_internal) 
+        .def("Error", &PROfit::PROdata::Error, py::return_value_policy::reference_internal);
+
+    // PROmodels
+    py::class_<PROfit::PROmodel>(m, "PROmodel");
+
+    py::class_<PROfit::NullModel, PROfit::PROmodel>(m, "NullModel")
         .def(py::init<const PROfit::PROpeller&>())
-        .def(py::init<const PROfit::PROsc&>());
+        .def(py::init<const PROfit::NullModel&>());
+
+    py::class_<PROfit::PROnumudis, PROfit::PROmodel>(m, "PROnumudis")
+        .def(py::init<const PROfit::PROpeller&>())
+        .def(py::init<const PROfit::PROnumudis&>());
+
+    py::class_<PROfit::PROnueapp, PROfit::PROmodel>(m, "PROnueapp")
+        .def(py::init<const PROfit::PROpeller&>())
+        .def(py::init<const PROfit::PROnueapp&>());
+
+    py::class_<PROfit::PRO3p1, PROfit::PROmodel>(m, "PRO3p1")
+        .def(py::init<const PROfit::PROpeller&>())
+        .def(py::init<const PROfit::PRO3p1&>());
 
     // PROsurf
     py::class_<PROfit::PROsurf>(m, "PROsurf")
-        .def(py::init<size_t, const Eigen::VectorXf &, size_t, const Eigen::VectorXf &>())
-        .def(py::init<size_t, PROfit::PROsurf::LogLin, float, float, size_t, PROfit::PROsurf::LogLin, float, float>())
+        .def(py::init<PROfit::PROmetric &, size_t, size_t, size_t, const Eigen::VectorXf &, size_t, const Eigen::VectorXf &>())
+        .def(py::init<PROfit::PROmetric &, size_t, size_t, size_t, PROfit::PROsurf::LogLin, float, float, size_t, PROfit::PROsurf::LogLin, float, float>())
         .def(py::init<const PROfit::PROsurf &>())
-        .def(py::init([](const Eigen::VectorXf &xe, const Eigen::VectorXf &ye) {return PROfit::PROsurf(xe.size()-1, xe, ye.size()-1, ye);}))
+        .def(py::init([](PROfit::PROmetric& m, size_t x_idx, size_t y_idx, const Eigen::VectorXf &xe, const Eigen::VectorXf &ye) {return PROfit::PROsurf(m, x_idx, y_idx, xe.size()-1, xe, ye.size()-1, ye);}))
         .def("FillSurfaceStat", &PROfit::PROsurf::FillSurfaceStat)
         .def("FillSurface", &PROfit::PROsurf::FillSurface)
         .def_readonly("edges_x",  &PROfit::PROsurf::edges_x)
@@ -458,9 +473,9 @@ PYBIND11_MODULE(_profit, m) {
 
     // PROchi
     py::class_<PROfit::PROchi, PROfit::PROmetric>(m, "PROchi")
-        .def(py::init<const std::string, const PROfit::PROconfig *, const PROfit::PROpeller *, 
-                      const PROfit::PROsyst *, const PROfit::PROsc *, const PROfit::PROspec &,
-                      int, int, PROfit::PROchi::EvalStrategy, std::vector<float>>(), 
+        .def(py::init<const std::string, const PROfit::PROconfig &, const PROfit::PROpeller &, 
+                      const PROfit::PROsyst *, const PROfit::PROmodel &, const PROfit::PROdata &,
+                      PROfit::PROchi::EvalStrategy, std::vector<float>>(), 
              // Keep alive's for all of the objects that PROchi holds by reference
              py::keep_alive<0, 2>(), py::keep_alive<0, 3>(), py::keep_alive<0, 4>(), py::keep_alive<0, 5>())
         .def("__call__", [](PROfit::PROchi &chi, const Eigen::VectorXf &param, bool rungradient=true) -> std::variant<float, std::pair<float, Eigen::VectorXf>> {
@@ -484,7 +499,7 @@ PYBIND11_MODULE(_profit, m) {
 
     // PROfitter
     py::class_<PROfit::PROfitter>(m, "PROfitter")
-        .def(py::init<const Eigen::VectorXf, const Eigen::VectorXf, const LBFGSpp::LBFGSBParam<float>&>(), py::keep_alive<0, 3>())
+        .def(py::init<const Eigen::VectorXf, const Eigen::VectorXf, PROfit::PROfitterConfig>(), py::keep_alive<0, 3>())
         .def(py::init<const PROfit::PROfitter&>())
         .def("Fit", &PROfit::PROfitter::Fit)
         .def("FinalGradient", &PROfit::PROfitter::FinalGradient)
@@ -493,12 +508,15 @@ PYBIND11_MODULE(_profit, m) {
         .def("InverseHessian", &PROfit::PROfitter::InverseHessian)
         .def("Covariance", &PROfit::PROfitter::Covariance)
         .def("BestFit", &PROfit::PROfitter::BestFit)
-        .def_readwrite("n_multistart", &PROfit::PROfitter::n_multistart)
-        .def_readwrite("n_localfit", &PROfit::PROfitter::n_localfit)
+        .def_readwrite("fitconfig", &PROfit::PROfitter::fitconfig)
         .def_readonly("ub",  &PROfit::PROfitter::ub)
         .def_readonly("lb",  &PROfit::PROfitter::lb)
-        .def_readonly("param",  &PROfit::PROfitter::param)
         .def_readonly("best_fit",  &PROfit::PROfitter::best_fit);
+
+    py::class_<PROfit::PROfitterConfig>(m, "PROfitterConfig")
+        .def_readwrite("n_multistart", &PROfit::PROfitterConfig::n_multistart)
+        .def_readwrite("n_localfit", &PROfit::PROfitterConfig::n_localfit)
+        .def_readonly("param",  &PROfit::PROfitterConfig::param);
 
     // LBFGSBParam for PROfitter
     py::class_<LBFGSpp::LBFGSBParam<float>>(m, "LBFGSBParam")

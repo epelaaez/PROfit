@@ -180,14 +180,14 @@ def process_branch(c, branch, evws, mcpot, subchannel_index, syst_vector, syst_a
     valid = (global_bin >= 0) & (global_true_bin >= 0)
 
     # Fill values in vectors
-    inprop.reco = np.concatenate((inprop.reco, reco_value[valid]))
+    # inprop.reco = np.concatenate((inprop.reco, reco_value[valid]))
+    # inprop.pdg = np.concatenate((inprop.pdg, pdg_id[valid]))
     inprop.added_weights = np.concatenate((inprop.added_weights, mc_weight[valid]))
     inprop.bin_indices = np.concatenate((inprop.bin_indices, global_bin[valid]))
-    inprop.pdg = np.concatenate((inprop.pdg, pdg_id[valid]))
-    inprop.truth = np.concatenate((inprop.truth, true_param[valid]))
-    inprop.baseline = np.concatenate((inprop.baseline, baseline[valid]))
+    inprop.trueLE = np.concatenate((inprop.trueLE, true_value[valid]))
     inprop.model_rule = np.concatenate((inprop.model_rule, model_rule[valid]))
     inprop.true_bin_indices = np.concatenate((inprop.true_bin_indices, global_true_bin[valid]))
+
     # Fill the histogram
     # 
     # IMPORTANT GOTCHA:
