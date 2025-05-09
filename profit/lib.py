@@ -1,9 +1,9 @@
 import profit
 
 # re-export simple classes that we don't need to futz with
-from _profit import SystStruct, PROpeller, PROsyst, PROspec, PROlog, PROsurf, LogLin, PROchi, EvalStrategy, LBFGSBParam, PROfitter, PROfitterConfig, PROmodel, NullModel, PROnumudis, PROnueapp, PRO3p1
+from _profit import SystStruct, PROpeller, PROsyst, PROspec, PROlog, PROsurf, LogLin, PROchi, EvalStrategy, LBFGSBParam, PROfitter, PROfitterConfig, PROmodel, NullModel, PROnumudis, PROnueapp, PRO3p1, PROdata
 # re-export helper functions
-from _profit import PROcess_CAFAna, FindGlobalBin, FindGlobalTrueBin, FillRecoSpectra, FillCVSpectrum, savePROsurf
+from _profit import PROcess_CAFAna, FindGlobalBin, FindGlobalTrueBin, FillRecoSpectra, FillCVSpectrum, savePROsurf, CreatePROspecCV, CreatePROdata
 # make Globals available
 from _profit import Globals
 

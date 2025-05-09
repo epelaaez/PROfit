@@ -67,12 +67,23 @@ def init_syst_structs(c, ew):
         if mode == "spline":
             syst_structs[-1].knobval = np.array([-3.0, -2.0, -1.0, 0.0, 1.0, 2.0, 3.0], dtype=np.float32)
             syst_structs[-1].knob_index = np.array([-3.0, -2.0, -1.0, 0.0, 1.0, 2.0, 3.0], dtype=np.float32)
+            syst_structs[-1].binning = c.m_mcgen_variation_binning_map[syst]
 
     for s in syst_structs:
         s.SanityCheck()
 
     for s in syst_structs:
-        s.CreateSpecs(c.m_num_truebins_total if s.mode == "spline" else c.m_num_bins_total)
+        if s.mode == "covariance":
+            nbins = c.m_num_bins_total
+        else:
+            if s.binning == -2:
+                nbins = c.m_num_truebins_total
+            elif s.binning == -1:
+                nbins = c.m_num_bins_total
+            else:
+                pass # TODO: implement other binning
+
+        s.CreateSpecs(nbins)
 
     return syst_structs
 
@@ -204,10 +215,16 @@ def process_branch(c, branch, evws, mcpot, subchannel_index, syst_vector, syst_a
         evw = evws.systematic(s.GetSysName())
 
         if s.mode == "spline":
-            s.FillCV(global_true_bin[valid], mc_weight[valid])
+            if s.binning == -2:
+                spline_bin = global_true_bin
+            elif s.binning == -1: 
+                spline_bin = global_bin
+            else:
+                pass # TODO -- implement
+
+            s.FillCV(spline_bin[valid], mc_weight[valid])
             for i_univ, shift in enumerate(s.knobval):
-                s.FillUniverse(i_univ, global_true_bin[valid], (mc_weight*additional_weight*evw.shift(shift))[valid])
-        # TODO: WHY DO NON-SPLINE SYSTEMATICS USE RECO VARIABLE???
+                s.FillUniverse(i_univ, spline_bin[valid], (mc_weight*additional_weight*evw.shift(shift))[valid])
         else:
             s.FillCV(global_bin[valid], mc_weight[valid])
             for i_univ in range(s.GetNUniverse()):

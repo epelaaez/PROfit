@@ -10,8 +10,25 @@ class PROXMLSubChannel:
    def to_xml(self, element):
        s = ET.SubElement(element, "subchannel")
        s.set("name", self.name)
-       s.set("plotname", self.plotname)
-       s.set("color", self.color)
+       if self.plotname:
+           s.set("plotname", self.plotname)
+       if self.color:
+           s.set("color", self.color)
+
+@dataclass
+class PROXMLOther:
+    min: int
+    max: int
+    nbins: int
+    unit: str = ""
+
+    def to_xml(self, element):
+        s = ET.SubElement(element, "otherbins")
+        s.set("min", "%i" % self.min)
+        s.set("max", "%i" % self.max)
+        s.set("nbins", "%i" % self.nbins)
+        if self.unit:
+            s.set("unit", self.unit)
 
 @dataclass
 class PROXMLChannel:
@@ -21,12 +38,14 @@ class PROXMLChannel:
     truebin_min: float = 0
     truebin_max: float = 2
     truebin_nbin: int = 200
+    otherbins: list[PROXMLOther] = field(default_factory=list)
     subchannel: list[PROXMLSubChannel] = field(default_factory=list)
 
     def to_xml(self):
         elem = ET.Element("channel")
         elem.set("name", self.name)
-        elem.set("unit", self.unit)
+        if self.unit:
+            elem.set("unit", self.unit)
 
         bins = ET.SubElement(elem, "bins")
         bins.set("edges", " ".join([str(b) for b in self.bins]))
@@ -35,6 +54,9 @@ class PROXMLChannel:
         truebins.set("min", str(self.truebin_min))
         truebins.set("max", str(self.truebin_max))
         truebins.set("nbins", str(self.truebin_nbin))
+
+        for o in self.otherbins:
+            o.to_xml(elem)
 
         for s in self.subchannel:
             s.to_xml(elem)
@@ -45,11 +67,14 @@ class PROXMLChannel:
 class PROXMLVariation:
     name: str
     type: str
+    binning: str = ""
 
     def to_xml(self, element, vartype):
         s = ET.SubElement(element, "%slist" % vartype)
         s.set("type", self.type)
         s.text = self.name
+        if self.binning:
+            s.set("binning", self.binning)
 
 @dataclass
 class PROXMLModelRule:

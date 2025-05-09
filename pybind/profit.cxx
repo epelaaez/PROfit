@@ -6,12 +6,12 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/eigen.h>
+#include <pybind11/functional.h>
 
 // numpy includes
 #include <numpy/arrayobject.h>
 
 // PROfit includes
-#define TYPE_FLOAT
 #include "PROconfig.h"
 #include "PROcreate.h"
 #include "PROtocall.h"
@@ -193,6 +193,9 @@ PYBIND11_MODULE(_profit, m) {
                                                bool>(&PROfit::FillRecoSpectra));
     m.def("FillCVSpectrum", &PROfit::FillCVSpectrum);
 
+    m.def("CreatePROdata", &PROfit::CreatePROdata);
+    m.def("CreatePROspecCV", &PROfit::CreatePROspecCV);
+
     m.def("PROcess_CAFAna", [](const PROfit::PROconfig &config) -> std::pair<std::vector<std::vector<PROfit::SystStruct>>, PROfit::PROpeller> {
       //Inititilize PROpeller to keep MC
       PROfit::PROpeller prop;
@@ -317,6 +320,7 @@ PYBIND11_MODULE(_profit, m) {
         .def_readonly("m_mcgen_variation_denylist",  &PROfit::PROconfig::m_mcgen_variation_denylist)
         .def_readonly("m_mcgen_variation_type",  &PROfit::PROconfig::m_mcgen_variation_type)
         .def_readonly("m_mcgen_variation_type_map",  &PROfit::PROconfig::m_mcgen_variation_type_map)
+        .def_readonly("m_mcgen_variation_binning_map", &PROfit::PROconfig::m_mcgen_variation_binning_map)
         .def_readonly("m_mcgen_shapeonly_listmap",  &PROfit::PROconfig::m_mcgen_shapeonly_listmap)
         .def_readonly("systematic_name",  &PROfit::PROconfig::systematic_name)
         .def_readonly("m_model_tag",  &PROfit::PROconfig::m_model_tag)
@@ -350,6 +354,10 @@ PYBIND11_MODULE(_profit, m) {
         .def_property("trueLE",
              [](PROfit::PROpeller &p) {return py::array(p.trueLE.size(), p.trueLE.data(), py::capsule(&p.trueLE, [](void *v) {}));},
              [](PROfit::PROpeller &p, const py::buffer buf) {p.trueLE = buffer_to_vector<float>(buf);}, 
+             py::return_value_policy::reference_internal)
+        .def_property("mcStatErr",
+             [](PROfit::PROpeller &p) -> Eigen::VectorXf& {return p.mcStatErr;},
+             [](PROfit::PROpeller &p, const Eigen::VectorXf &h) {p.mcStatErr = h;}, 
              py::return_value_policy::reference_internal)
         .def_property("added_weights",
              [](PROfit::PROpeller &p) {return py::array(p.added_weights.size(), p.added_weights.data(), py::capsule(&p.added_weights, [](void *v) {}));},
@@ -392,6 +400,7 @@ PYBIND11_MODULE(_profit, m) {
         .def_readonly("weight_formula",  &PROfit::SystStruct::weight_formula)
         .def_readwrite("knobval", &PROfit::SystStruct::knobval)
         .def_readwrite("knob_index", &PROfit::SystStruct::knob_index)
+        .def_readwrite("binning", &PROfit::SystStruct::binning)
         .def_readwrite("p_cv", &PROfit::SystStruct::p_cv)
         .def_readwrite("p_multi_spec", &PROfit::SystStruct::p_multi_spec)
         .def_readonly("index",  &PROfit::SystStruct::index);
@@ -412,10 +421,22 @@ PYBIND11_MODULE(_profit, m) {
         .def("GrabSpline", &PROfit::PROsyst::GrabSpline)
         .def("GetNSplines", py::overload_cast<>(&PROfit::PROsyst::GetNSplines, py::const_))
         .def("CreateMatrix", &PROfit::PROsyst::CreateMatrix)
+        .def("GetSystType", &PROfit::PROsyst::GetSystType)
         .def("subset", &PROfit::PROsyst::subset)
         .def("excluding", &PROfit::PROsyst::excluding)
-        .def_readwrite("fractional_covariance", &PROfit::PROsyst::fractional_covariance);
+        .def("GetSplineShift", py::overload_cast<int, float, int>(&PROfit::PROsyst::GetSplineShift, py::const_))
+        .def("GetSplineShift", py::overload_cast<std::string, float, int>(&PROfit::PROsyst::GetSplineShift, py::const_))
+        .def_readwrite("fractional_covariance", &PROfit::PROsyst::fractional_covariance)
+        .def_readonly("spline_binnings", &PROfit::PROsyst::spline_binnings)
+        .def_readonly("spline_names", &PROfit::PROsyst::spline_names)
+        .def_readonly("covar_names", &PROfit::PROsyst::covar_names)
+        .def_readonly("spline_lo", &PROfit::PROsyst::spline_lo)
+        .def_readonly("spline_hi", &PROfit::PROsyst::spline_hi);
        
+    py::enum_<PROfit::PROsyst::SystType>(m, "SystType")
+        .value("Spline", PROfit::PROsyst::SystType::Spline)
+        .value("Covariance", PROfit::PROsyst::SystType::Covariance)
+        .value("MFA", PROfit::PROsyst::SystType::MFA);
 
     // PROspec
     py::class_<PROfit::PROspec, std::shared_ptr<PROfit::PROspec>>(m, "PROspec")
@@ -430,11 +451,13 @@ PYBIND11_MODULE(_profit, m) {
         .def(py::init<>())
         .def(py::init<size_t>())
         .def(py::init<const PROfit::PROdata&>())
+        .def(py::init<const PROfit::PROconfig&, const PROfit::PROspec&>())
         .def("Spec", &PROfit::PROdata::Spec, py::return_value_policy::reference_internal) 
         .def("Error", &PROfit::PROdata::Error, py::return_value_policy::reference_internal);
 
     // PROmodels
-    py::class_<PROfit::PROmodel>(m, "PROmodel");
+    py::class_<PROfit::PROmodel>(m, "PROmodel")
+        .def_readonly("model_functions", &PROfit::PROmodel::model_functions);
 
     py::class_<PROfit::NullModel, PROfit::PROmodel>(m, "NullModel")
         .def(py::init<const PROfit::PROpeller&>())
@@ -469,7 +492,10 @@ PYBIND11_MODULE(_profit, m) {
         .value("LogAxis", PROfit::PROsurf::LogLin::LogAxis);
 
     // PROmetric
-    py::class_<PROfit::PROmetric>(m, "PROmetric");
+    py::class_<PROfit::PROmetric>(m, "PROmetric")
+        .def("nParams", &PROfit::PROmetric::nParams)
+        .def("UpperBound", &PROfit::PROmetric::UpperBound)
+        .def("LowerBound", &PROfit::PROmetric::LowerBound);
 
     // PROchi
     py::class_<PROfit::PROchi, PROfit::PROmetric>(m, "PROchi")
@@ -490,7 +516,8 @@ PYBIND11_MODULE(_profit, m) {
               return {v};
             }
 
-        }, py::arg("param"), py::arg("rungradient") = true);
+        }, py::arg("param"), py::arg("rungradient") = true)
+        .def("Pull", &PROfit::PROchi::Pull);
 
     py::enum_<PROfit::PROchi::EvalStrategy>(m, "EvalStrategy")
         .value("EventByEvent", PROfit::PROchi::EvalStrategy::EventByEvent)
@@ -498,10 +525,17 @@ PYBIND11_MODULE(_profit, m) {
         .value("BinnedChi2", PROfit::PROchi::EvalStrategy::BinnedChi2);
 
     // PROfitter
+    py::class_<PROfit::PROfitterConfig>(m, "PROfitterConfig")
+        .def(py::init<>())
+        .def_readwrite("n_multistart", &PROfit::PROfitterConfig::n_multistart)
+        .def_readwrite("n_localfit", &PROfit::PROfitterConfig::n_localfit)
+        .def_readwrite("param",  &PROfit::PROfitterConfig::param);
+
     py::class_<PROfit::PROfitter>(m, "PROfitter")
-        .def(py::init<const Eigen::VectorXf, const Eigen::VectorXf, PROfit::PROfitterConfig>(), py::keep_alive<0, 3>())
+        .def(py::init<const Eigen::VectorXf, const Eigen::VectorXf, PROfit::PROfitterConfig>(), py::keep_alive<0, 3>(), pybind11::arg("ub"), pybind11::arg("lb"), pybind11::arg("config") = PROfit::PROfitterConfig{})
         .def(py::init<const PROfit::PROfitter&>())
         .def("Fit", &PROfit::PROfitter::Fit)
+        .def("Fit", [](PROfit::PROfitter &fitter, PROfit::PROmetric &metric) {return fitter.Fit(metric);}, py::arg("metric"))
         .def("FinalGradient", &PROfit::PROfitter::FinalGradient)
         .def("FinalGradientNorm", &PROfit::PROfitter::FinalGradientNorm)
         .def("Hessian", &PROfit::PROfitter::Hessian)
@@ -512,11 +546,6 @@ PYBIND11_MODULE(_profit, m) {
         .def_readonly("ub",  &PROfit::PROfitter::ub)
         .def_readonly("lb",  &PROfit::PROfitter::lb)
         .def_readonly("best_fit",  &PROfit::PROfitter::best_fit);
-
-    py::class_<PROfit::PROfitterConfig>(m, "PROfitterConfig")
-        .def_readwrite("n_multistart", &PROfit::PROfitterConfig::n_multistart)
-        .def_readwrite("n_localfit", &PROfit::PROfitterConfig::n_localfit)
-        .def_readonly("param",  &PROfit::PROfitterConfig::param);
 
     // LBFGSBParam for PROfitter
     py::class_<LBFGSpp::LBFGSBParam<float>>(m, "LBFGSBParam")
