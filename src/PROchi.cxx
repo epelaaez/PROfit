@@ -60,7 +60,7 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
 
 
 float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient, bool rungradient){
-    size_t nparams = model.nparams+syst->GetNSplines();
+    size_t nparams = nParams();
     size_t nsyst = syst->GetNSplines();
     //log<LOG_DEBUG>(L"%1% || nparams is %2%, nsyst is %3% ") % __func__ % nparams % nsyst;    
 

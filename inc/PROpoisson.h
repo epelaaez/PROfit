@@ -90,9 +90,6 @@ namespace PROfit{
             void fixSpline(int fix, float valin);
 
             float getSingleChannelChi(size_t channel_index) ;
-
-            int nParams() const {return GetModel().nparams + GetSysts().GetNSplines();}
-                
     };
 }
 #endif

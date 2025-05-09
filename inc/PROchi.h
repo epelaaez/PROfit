@@ -92,8 +92,6 @@ namespace PROfit{
 
             float getSingleChannelChi(size_t channel_index) ;
 
-            int nParams() const {return GetModel().nparams + GetSysts().GetNSplines();}
-                
     };
 }
 #endif
