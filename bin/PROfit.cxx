@@ -279,8 +279,16 @@ int main(int argc, char* argv[])
         log<LOG_INFO>(L"%1% || Injected syst: %2% shifted by %3%") % __func__ % name.c_str() % shift;
         auto it = std::find(systs.spline_names.begin(), systs.spline_names.end(), name);
         if(it == systs.spline_names.end()) {
-            log<LOG_ERROR>(L"%1% || Error: Unrecognized spline %2%. Ignoring this injected shift.") % __func__ % name.c_str();
-            continue;
+            for(const auto &[xml_name, plot_name]: config.m_mcgen_variation_plotname_map) {
+                if(name == plot_name) {
+                    it = std::find(systs.spline_names.begin(), systs.spline_names.end(), xml_name);
+                    break;
+                }
+            }
+            if(it == systs.spline_names.end()) {
+                log<LOG_ERROR>(L"%1% || Error: Unrecognized spline %2%. Ignoring this injected shift.") % __func__ % name.c_str();
+                continue;
+            }
         }
         int idx = std::distance(systs.spline_names.begin(), it);
         allparams(idx+model->nparams) = shift;
@@ -441,8 +449,16 @@ int main(int argc, char* argv[])
         log<LOG_INFO>(L"%1% || Injected syst: %2% shifted by %3%") % __func__ % name.c_str() % shift;
         auto it = std::find(systs.spline_names.begin(), systs.spline_names.end(), name);
         if(it == systs.spline_names.end()) {
-            log<LOG_ERROR>(L"%1% || Error: Unrecognized spline %2%. Ignoring this injected shift.") % __func__ % name.c_str();
-            continue;
+            for(const auto &[xml_name, plot_name]: config.m_mcgen_variation_plotname_map) {
+                if(name == plot_name) {
+                    it = std::find(systs.spline_names.begin(), systs.spline_names.end(), xml_name);
+                    break;
+                }
+            }
+            if(it == systs.spline_names.end()) {
+                log<LOG_ERROR>(L"%1% || Error: Unrecognized spline %2%. Ignoring this injected shift.") % __func__ % name.c_str();
+                continue;
+            }
         }
         int idx = std::distance(systs.spline_names.begin(), it);
         allparams(idx+model->nparams) = shift;
@@ -672,11 +688,31 @@ int main(int argc, char* argv[])
             xaxis_idx = std::distance(model->param_names.begin(), loc);
         } else if(const auto loc = std::find(systs.spline_names.begin(), systs.spline_names.end(), xvar); loc != systs.spline_names.end()) {
             xaxis_idx = std::distance(systs.spline_names.begin(), loc);
+        } else {
+            for(const auto &[xml_name, plot_name]: config.m_mcgen_variation_plotname_map) {
+                if(xvar == plot_name) {
+                    const auto loc = std::find(systs.spline_names.begin(), systs.spline_names.end(), xml_name);
+                    if(loc != systs.spline_names.end()) {
+                        xaxis_idx = std::distance(systs.spline_names.begin(), loc);
+                    }
+                    break;
+                }
+            }
         }
         if(const auto loc = std::find(model->param_names.begin(), model->param_names.end(), yvar); loc != model->param_names.end()) {
             yaxis_idx = std::distance(model->param_names.begin(), loc);
         } else if(const auto loc = std::find(systs.spline_names.begin(), systs.spline_names.end(), yvar); loc != systs.spline_names.end()) {
             yaxis_idx = std::distance(systs.spline_names.begin(), loc);
+        } else {
+            for(const auto &[xml_name, plot_name]: config.m_mcgen_variation_plotname_map) {
+                if(yvar == plot_name) {
+                    const auto loc = std::find(systs.spline_names.begin(), systs.spline_names.end(), xml_name);
+                    if(loc != systs.spline_names.end()) {
+                        yaxis_idx = std::distance(systs.spline_names.begin(), loc);
+                    }
+                    break;
+                }
+            }
         }
         size_t nbinsx = grid_size[0], nbinsy = grid_size[1];
         PROsurf surface(*metric, xaxis_idx, yaxis_idx, nbinsx, logx ? PROsurf::LogAxis : PROsurf::LinAxis, xlo, xhi,
