@@ -91,7 +91,7 @@ def init_propeller(c):
     prop = profit.PROpeller()
     prop.hist = np.zeros((c.m_num_truebins_total, c.m_num_bins_total))
     prop.histLE = np.zeros((c.m_num_truebins_total,))
-    prop.mcStatErr = np.zeros((c.m_num_truebins_total,))
+    # prop.mcStatErr = np.zeros((c.m_num_bins_total,))
 
     edges = np.array(c.m_channel_truebin_edges)
     edges_lo = edges[:, :-1].flatten()
