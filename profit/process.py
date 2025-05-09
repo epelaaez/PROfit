@@ -91,6 +91,7 @@ def init_propeller(c):
     prop = profit.PROpeller()
     prop.hist = np.zeros((c.m_num_truebins_total, c.m_num_bins_total))
     prop.histLE = np.zeros((c.m_num_truebins_total,))
+    prop.mcStatErr = np.zeros((c.m_num_truebins_total,))
 
     edges = np.array(c.m_channel_truebin_edges)
     edges_lo = edges[:, :-1].flatten()
@@ -178,7 +179,6 @@ def process_branch(c, branch, evws, mcpot, subchannel_index, syst_vector, syst_a
     mc_weight = branch.GetMonteCarloWeight()
     mc_weight *= c.m_plot_pot / mcpot
 
-    # fix mcweight to be series. TODO: remove fix
     if not isinstance(mc_weight, pd.Series):
         mc_weight = pd.Series(mc_weight, true_param.index)
 
@@ -198,6 +198,8 @@ def process_branch(c, branch, evws, mcpot, subchannel_index, syst_vector, syst_a
     inprop.trueLE = np.concatenate((inprop.trueLE, true_value[valid]))
     inprop.model_rule = np.concatenate((inprop.model_rule, model_rule[valid]))
     inprop.true_bin_indices = np.concatenate((inprop.true_bin_indices, global_true_bin[valid]))
+
+    # TODO add other, mcStatErr
 
     # Fill the histogram
     # 
@@ -220,7 +222,7 @@ def process_branch(c, branch, evws, mcpot, subchannel_index, syst_vector, syst_a
             elif s.binning == -1: 
                 spline_bin = global_bin
             else:
-                pass # TODO -- implement
+                pass # TODO -- implement other binning
 
             s.FillCV(spline_bin[valid], mc_weight[valid])
             for i_univ, shift in enumerate(s.knobval):
