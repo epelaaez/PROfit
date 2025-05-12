@@ -180,17 +180,21 @@ PYBIND11_MODULE(_profit, m) {
     m.def("FindGlobalTrueBin", py::vectorize([](PROfit::PROconfig &c, float v, std::string &s) { return PROfit::FindGlobalTrueBin(c, v, s);}));
     m.def("FindGlobalTrueBin", py::vectorize([](PROfit::PROconfig &c, float v, int i) { return PROfit::FindGlobalTrueBin(c, v, i);}));
 
-    // m.def("FillRecoSpectra", py::overload_cast<const PROfit::PROconfig &, 
-    //                                           const PROfit::PROpeller &, 
-    //                                           const PROfit::PROsyst &, 
-    //                                           const std::map<std::string, float> &, 
-    //                                           bool>(&PROfit::FillRecoSpectra));
+    m.def("FillRecoSpectra", py::overload_cast<const PROfit::PROconfig &, 
+                                               const PROfit::PROpeller &, 
+                                               const PROfit::PROsyst &, 
+                                               const PROfit::PROmodel &,
+                                               const std::map<std::string, float> &, 
+                                               bool>(&PROfit::FillRecoSpectra),
+                                               py::arg("inconfig"), py::arg("inprop"), py::arg("insyst"), py::arg("inmodel"), py::arg("inparam") = std::map<std::string, float>{}, py::arg("binned") = true);
     m.def("FillRecoSpectra", py::overload_cast<const PROfit::PROconfig &, 
                                                const PROfit::PROpeller &, 
                                                const PROfit::PROsyst &, 
                                                const PROfit::PROmodel &,
                                                const Eigen::VectorXf &,
-                                               bool>(&PROfit::FillRecoSpectra));
+                                               bool>(&PROfit::FillRecoSpectra),
+                                               py::arg("inconfig"), py::arg("inprop"), py::arg("insyst"), py::arg("inmodel"), py::arg("inparam"), py::arg("binned") = true);
+
     m.def("FillCVSpectrum", &PROfit::FillCVSpectrum);
 
     m.def("CreatePROdata", &PROfit::CreatePROdata);
