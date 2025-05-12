@@ -2,6 +2,17 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 
 @dataclass
+class PROXMLCorrelation:
+    systA: str
+    systB: str
+    correlation: float
+
+    def to_xml(self):
+        e = ET.Element("correlation")
+        e.text = "%s %s %f" % (self.systA, self.systB, self.correlation)
+        return e
+
+@dataclass
 class PROXMLSubChannel:
    name: str
    plotname: str = ""
@@ -168,6 +179,7 @@ class PROXMLMaker:
     allow_variation_list: list[PROXMLVariation] = field(default_factory=list)
     deny_variation_list: list[PROXMLVariation] = field(default_factory=list)
     mcfile: list[PROXMLMCFile] = field(default_factory=list)
+    correlations: list[PROXMLCorrelation] = field(default_factory=list)
 
     def to_xml(self):
         elements = []
@@ -198,5 +210,8 @@ class PROXMLMaker:
 
         for m in self.mcfile:
             elements.append(m.to_xml())
+
+        for c in self.correlations:
+            elements.append(c.to_xml())
 
         return "\n\n".join([ET.tostring(e, encoding="unicode") for e in elements])
