@@ -411,13 +411,49 @@ int main(int argc, char* argv[])
     // Leave this after creating fake data so we can make fake data using systs that aren't
     // included in the fit.
     if(syst_list.size()) {
-        systs = systs.subset(syst_list);
+        std::vector<std::string> systs_to_include;
+        for(const auto &s: syst_list) {
+            bool istag = false;
+            for(const auto &[syst, tags]: config.m_mcgen_variation_tags) {
+                if(std::find(tags.begin(), tags.end(), s) != std::end(tags)) {
+                    istag = true;
+                    systs_to_include.push_back(syst);
+                }
+            }
+            if(!istag) systs_to_include.push_back(s);
+        }
+        for(std::string &name: systs_to_include) {
+            for(const auto &[xml_name, plot_name]: config.m_mcgen_variation_plotname_map) {
+                if(name == plot_name) {
+                    name = xml_name;
+                }
+            }
+        }
+        systs = systs.subset(systs_to_include);
         for(PROsyst &syst: other_systs)
-            syst = syst.subset(syst_list);
+            syst = syst.subset(systs_to_include);
     } else if(systs_excluded.size()) {
-        systs = systs.excluding(systs_excluded);
+        std::vector<std::string> systs_to_exclude;
+        for(const auto &s: systs_excluded) {
+            bool istag = false;
+            for(const auto &[syst, tags]: config.m_mcgen_variation_tags) {
+                if(std::find(tags.begin(), tags.end(), s) != std::end(tags)) {
+                    istag = true;
+                    systs_to_exclude.push_back(syst);
+                }
+            }
+            if(!istag) systs_to_exclude.push_back(s);
+        }
+        for(std::string &name: systs_to_exclude) {
+            for(const auto &[xml_name, plot_name]: config.m_mcgen_variation_plotname_map) {
+                if(name == plot_name) {
+                    name = xml_name;
+                }
+            }
+        }
+        systs = systs.excluding(systs_to_exclude);
         for(PROsyst &syst: other_systs)
-            syst = syst.excluding(systs_excluded);
+            syst = syst.excluding(systs_to_exclude);
     }
 
     //Pysics parameter input
@@ -448,7 +484,6 @@ int main(int argc, char* argv[])
     for(const auto& [name, shift]: injected_systs) {
         log<LOG_INFO>(L"%1% || Injected syst: %2% shifted by %3%") % __func__ % name.c_str() % shift;
         auto it = std::find(systs.spline_names.begin(), systs.spline_names.end(), name);
-        if(it == systs.spline_names.end()) {
             for(const auto &[xml_name, plot_name]: config.m_mcgen_variation_plotname_map) {
                 if(name == plot_name) {
                     it = std::find(systs.spline_names.begin(), systs.spline_names.end(), xml_name);
@@ -459,7 +494,7 @@ int main(int argc, char* argv[])
                 log<LOG_ERROR>(L"%1% || Error: Unrecognized spline %2%. Ignoring this injected shift.") % __func__ % name.c_str();
                 continue;
             }
-        }
+        
         int idx = std::distance(systs.spline_names.begin(), it);
         allparams(idx+model->nparams) = shift;
         systparams(idx) = shift;
