@@ -551,14 +551,15 @@ int main(int argc, char* argv[])
         mh.run(fitconfig.MCMCburn,fitconfig.MCMCiter, action);
 
         TH2D covhist("ch", "", nparams, 0, nparams, nparams, 0, nparams);
-        TH2D physhist("ph","", nparams, 0, nparams, nphys, 0, nphys);
+        TH2D physhist;
+        if(nphys > 0) physhist = TH2D("ph","", nparams, 0, nparams, nphys, 0, nphys);
         for(size_t i = 0; i < nparams; ++i) {
             std::string label = i < metric_to_use->GetModel().nparams 
                 ? metric_to_use->GetModel().pretty_param_names[i]
                 : config.m_mcgen_variation_plotname_map[metric_to_use->GetSysts().spline_names[i-metric_to_use->GetModel().nparams]].c_str();
             covhist.GetXaxis()->SetBinLabel(i+1, label.c_str());
             covhist.GetYaxis()->SetBinLabel(i+1, label.c_str());
-            physhist.GetXaxis()->SetBinLabel(i+1, label.c_str());
+            if(nphys > 0) physhist.GetXaxis()->SetBinLabel(i+1, label.c_str());
             if(i < metric_to_use->GetModel().nparams) physhist.GetYaxis()->SetBinLabel(i+1, label.c_str());
             for(size_t j = 0; j < nparams; ++j) {
                 covhist.SetBinContent(i+1, j+1, covmat(i,j)/count);
@@ -571,8 +572,10 @@ int main(int argc, char* argv[])
         covhist.SetMinimum(-1);
         covhist.Draw("colz");
         c1.Print((final_output_tag+"_postfit_cov.pdf").c_str());
-        physhist.Draw("colz");
-        c1.Print("phys_cov.pdf");
+        if(nphys > 0) {
+            physhist.Draw("colz");
+            c1.Print("phys_cov.pdf");
+        }
         log<LOG_INFO>(L"%1% || MCMC acceptance is  %2%. ") % __func__% ((double)count /fitconfig.MCMCiter);
 
         std::string hname = "#chi^{2}/ndf = " + to_string(chi2) + "/" + to_string(config.m_num_bins_total_collapsed);
