@@ -343,7 +343,8 @@ namespace PROfit{
             std::vector<std::vector<std::string>> m_mcgen_eventweight_branch_names;
             std::vector<std::vector<int>> m_mcgen_eventweight_branch_syst;
 
-            //specific bits for covariancegeneration
+            //specific bits for covairiancegeneration
+            bool m_use_mcstats = false;
             std::vector<std::string> m_mcgen_weightmaps_formulas;
             std::vector<bool> m_mcgen_weightmaps_uses;
             std::vector<std::string> m_mcgen_weightmaps_patterns;
