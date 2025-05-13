@@ -769,6 +769,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 const char *plot_name = pAllowList->Attribute("plotname");
                 const char *binning = pAllowList->Attribute("binning");
                 const char *knobs = pAllowList->Attribute("knobvals");
+                const char *tags = pAllowList->Attribute("tag");
                 m_mcgen_variation_type.push_back(variation_type);
                 m_mcgen_variation_type_map[wt] = variation_type;
                 m_mcgen_variation_allowlist.push_back(wt);
@@ -804,15 +805,26 @@ int PROconfig::LoadFromXML(const std::string &filename){
                     std::vector<double> knobs_vec;
                     const char *c = knobs, *begin = NULL;
                     while(*c) {
-                        if(!begin) begin = c;
-                        if(isspace(*c)) {
+                        if(begin && isspace(*c)) {
                             knobs_vec.push_back(strtod(begin, NULL));
                             begin = NULL;
-                        }
+                        } else if(!begin && !isspace(*c)) begin = c;
                         ++c;
                     }
                     knobs_vec.push_back(strtod(begin, NULL));
                     m_mcgen_variation_knobval_override[wt] = knobs_vec;
+                }
+                if(tags) {
+                    std::vector<std::string> tags_vec;
+                    const char *c = tags, *begin = NULL;
+                    while(*c) {
+                        if(begin && isspace(*c)) {
+                            tags_vec.push_back(std::string(begin, c-1));
+                            begin = NULL;
+                        } else if(!begin && !isspace(*c)) begin = c;
+                        ++c;
+                    }
+                    m_mcgen_variation_tags[wt] = tags_vec;
                 }
                 log<LOG_DEBUG>(L"%1% || Allowlisting variations: %2%") % __func__ % wt.c_str() ;
                 pAllowList = pAllowList->NextSiblingElement("allowlist");
