@@ -818,12 +818,13 @@ int PROconfig::LoadFromXML(const std::string &filename){
                     std::vector<std::string> tags_vec;
                     const char *c = tags, *begin = NULL;
                     while(*c) {
-                        if(begin && isspace(*c)) {
-                            tags_vec.push_back(std::string(begin, c-1));
+                        if(begin && *c == ',') {
+                            tags_vec.push_back(std::string(begin, c));
                             begin = NULL;
                         } else if(!begin && !isspace(*c)) begin = c;
                         ++c;
                     }
+                    if(begin) tags_vec.push_back(std::string(begin, c));
                     m_mcgen_variation_tags[wt] = tags_vec;
                 }
                 log<LOG_DEBUG>(L"%1% || Allowlisting variations: %2%") % __func__ % wt.c_str() ;
