@@ -764,7 +764,9 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
             tinyxml2::XMLElement *pAllowList = pList->FirstChildElement("allowlist");
             while(pAllowList){
-                std::string wt = std::string(pAllowList->GetText());
+                const char *text = pAllowList->GetText();
+                std::string wt = "null";
+                if(text) wt = std::string(text);
                 const char *variation_type = pAllowList->Attribute("type");
                 const char *plot_name = pAllowList->Attribute("plotname");
                 const char *binning = pAllowList->Attribute("binning");
@@ -1048,6 +1050,8 @@ int PROconfig::LoadFromXML(const std::string &filename){
         }
          else if(m_mcgen_variation_type[i] == "norm"){
             m_num_variation_type_norm+=1;
+        }else if(m_mcgen_variation_type[i] == "mcstat"){
+            m_use_mcstats = true;
         }
 
     }
@@ -1056,6 +1060,12 @@ int PROconfig::LoadFromXML(const std::string &filename){
     log<LOG_INFO>(L"%1% || num_variation_type_flat: %2% ") % __func__ % m_num_variation_type_flat;
     log<LOG_INFO>(L"%1% || num_variation_type_norm: %2% ") % __func__ % m_num_variation_type_norm;
     log<LOG_INFO>(L"%1% || num_variation_type_spline: %2% ") % __func__ % m_num_variation_type_spline; 
+    if(m_use_mcstats){
+        log<LOG_INFO>(L"%1% || Using MC intrinsic stat uncertainty. ") % __func__  ;
+    }else{
+        log<LOG_INFO>(L"%1% || Not using MC intrinsic stat uncertainty. Check this is what you want. ") % __func__ ; 
+    }
+
 
 
     this->CalcTotalBins();
