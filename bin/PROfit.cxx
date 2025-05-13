@@ -414,6 +414,13 @@ int main(int argc, char* argv[])
             }
             if(!istag) systs_to_include.push_back(s);
         }
+        for(std::string &name: systs_to_include) {
+            for(const auto &[xml_name, plot_name]: config.m_mcgen_variation_plotname_map) {
+                if(name == plot_name) {
+                    name = xml_name;
+                }
+            }
+        }
         systs = systs.subset(systs_to_include);
         for(PROsyst &syst: other_systs)
             syst = syst.subset(systs_to_include);
@@ -428,6 +435,13 @@ int main(int argc, char* argv[])
                 }
             }
             if(!istag) systs_to_exclude.push_back(s);
+        }
+        for(std::string &name: systs_to_exclude) {
+            for(const auto &[xml_name, plot_name]: config.m_mcgen_variation_plotname_map) {
+                if(name == plot_name) {
+                    name = xml_name;
+                }
+            }
         }
         systs = systs.excluding(systs_to_exclude);
         for(PROsyst &syst: other_systs)
