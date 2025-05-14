@@ -40,6 +40,12 @@ namespace PROfit {
             corrmat.push_back(mcstat_corr);
         }
 
+        if(covmat.size()==0){
+            int nbins = other_index < 0 ? config.m_num_bins_total : config.m_num_other_bins_total[other_index];
+            Eigen::MatrixXf fracM = Eigen::MatrixXf::Zero(nbins, nbins);
+            covmat.push_back(fracM);
+        }
+
         fractional_covariance = this->SumMatrices();
     }
 
@@ -178,6 +184,7 @@ namespace PROfit {
         }else{
             log<LOG_ERROR>(L"%1% || There is no covariance available!") % __func__;
             log<LOG_ERROR>(L"%1% || Returning empty matrix") % __func__;
+
         }
         return sum_matrix;
     }
