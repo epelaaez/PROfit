@@ -51,7 +51,7 @@ namespace PROfit {
 
             size_t GetNSplines() { return splines.size(); }
 
-            size_t GetNCovar() const { return covmat.size(); }
+            size_t GetNCovar() const { return n_covar; }
 
             //----- Spline and Covariance matrix related ---
             //----- Spline and Covariance matrix related ---
@@ -129,7 +129,8 @@ namespace PROfit {
         private:
             std::unordered_map<std::string, std::pair<size_t, SystType>> syst_map;
             std::vector<Spline> splines;
-            [[maybe_unused]] size_t n_splines;
+            [[maybe_unused]] size_t n_splines = 0;
+            size_t n_covar = 0;
             std::vector<Eigen::MatrixXf> covmat;
             std::vector<Eigen::MatrixXf> corrmat;
             int other_index;
