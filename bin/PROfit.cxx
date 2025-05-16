@@ -370,42 +370,49 @@ int main(int argc, char* argv[])
 
     }//if no data, use injected or fake data;
     else{
-        //Create CV or injected data spectrum for all subsequent steps
-        //this now will inject osc param, splines and reweight all at once
-        PROspec data_spec = osc_params.size() || injected_systs.size() ? FillRecoSpectra(config, prop, systs, *model, allparams, !eventbyevent) :  FillCVSpectrum(config, prop, !eventbyevent);
 
-        //Only for reweighting tests
-        if (!mockreweights.empty()) {
-            log<LOG_INFO>(L"%1% || Will use reweighted MC (with any requested oscillations) as data for this study") % __func__  ;
-            log<LOG_INFO>(L"%1% || Any parameter shifts requested will be ignored (fix later?)") % __func__  ;
-            auto file = std::make_unique<TFile>(reweights_file.c_str());
-            log<LOG_DEBUG>(L"%1% || Set file to : %2% ") % __func__ % reweights_file.c_str();
-            log<LOG_DEBUG>(L"%1% || Size of reweights vector : %2% ") % __func__ % mockreweights.size() ;
-            for (size_t i=0; i < mockreweights.size(); ++i) {
-                log<LOG_DEBUG>(L"%1% || Mock reweight i : %2% ") % __func__ % mockreweights[i].c_str() ;
-                TH2D* rwhist = (TH2D*)file->Get(mockreweights[i].c_str());
-                weighthists.push_back(rwhist);
-                log<LOG_DEBUG>(L"%1% || Read in weight hist ") % __func__ ;      
-            }
-            data_spec = FillWeightedSpectrumFromHist(config, prop, weighthists, *model, allparams, !eventbyevent);
+      //Only for reweighting tests                                                                                                                                       
+      if (!mockreweights.empty()) {
+        log<LOG_INFO>(L"%1% || Will use reweighted MC (with any requested oscillations and parameter shifts) as data for this study") % __func__  ;
+        auto file = std::make_unique<TFile>(reweights_file.c_str());
+        log<LOG_DEBUG>(L"%1% || Set file to : %2% ") % __func__ % reweights_file.c_str();
+        log<LOG_DEBUG>(L"%1% || Size of reweights vector : %2% ") % __func__ % mockreweights.size() ;
+        for (size_t i=0; i < mockreweights.size(); ++i) {
+          log<LOG_DEBUG>(L"%1% || Mock reweight i : %2% ") % __func__ % mockreweights[i].c_str() ;
+          TH2D* rwhist = (TH2D*)file->Get(mockreweights[i].c_str());
+          //std::string newName = "rwhist_" + std::to_string(i);
+          //TH2D* clonedHist = static_cast<TH2D*>(rwhist->Clone(newName.c_str()));
+	  rwhist->SetDirectory(0);
+          weighthists.push_back(rwhist);
+          log<LOG_DEBUG>(L"%1% || Read in weight hist with %2% entries ") % __func__ % rwhist->GetEntries();
         }
-        if(poisson_throw) data_spec = PROspec::PoissonVariation(data_spec, dseed(myseed.global_rng));
-        Eigen::VectorXf data_vec = CollapseMatrix(config, data_spec.Spec());
-        Eigen::VectorXf err_vec_sq = data_spec.Error().array().square();
-        Eigen::VectorXf err_vec = CollapseMatrix(config, err_vec_sq).array().sqrt();
-        //data = PROdata(data_vec, err_vec);
-        data = PROdata(data_vec, data_vec.array().sqrt());
+      }
 
-        for(size_t io = 0; io < config.m_num_other_vars; ++io) {
-            PROspec data_spec = osc_params.size() || injected_systs.size() 
-                ? FillOtherRecoSpectra(config, prop, systs, *model, allparams, io)
-                : FillOtherCVSpectrum(config, prop, io);
+      //Create CV or injected data spectrum for all subsequent steps                                                                                                          //this now will inject osc param, splines and reweight all at once                                                                                                 
+      for (size_t i=0; i < weighthists.size(); ++i) {
+        TH2D *rwhist = weighthists[i];
+        log<LOG_DEBUG>(L"%1% || Passing weight hist with %2% entries ") % __func__ % rwhist->GetEntries();
+      }
 
-            Eigen::VectorXf data_vec = CollapseMatrix(config, data_spec.Spec(), io);
-            Eigen::VectorXf err_vec_sq = data_spec.Error().array().square();
-            Eigen::VectorXf err_vec = CollapseMatrix(config, err_vec_sq, io).array().sqrt();
-            other_data.push_back(PROdata(data_vec, err_vec));
-        }
+      PROspec data_spec = osc_params.size() || injected_systs.size() || weighthists.size() ? FillRecoSpectra(config, prop, systs, *model, allparams, weighthists, !eventbyevent) :  FillCVSpectrum(config, prop, !eventbyevent);
+
+      if(poisson_throw) data_spec = PROspec::PoissonVariation(data_spec, dseed(myseed.global_rng));
+      Eigen::VectorXf data_vec = CollapseMatrix(config, data_spec.Spec());
+      Eigen::VectorXf err_vec_sq = data_spec.Error().array().square();
+      Eigen::VectorXf err_vec = CollapseMatrix(config, err_vec_sq).array().sqrt();
+      //data = PROdata(data_vec, err_vec);
+      data = PROdata(data_vec, data_vec.array().sqrt());
+
+      for(size_t io = 0; io < config.m_num_other_vars; ++io) {
+	PROspec data_spec = osc_params.size() || injected_systs.size() || weighthists.size() 
+	  ? FillOtherRecoSpectra(config, prop, systs, *model, allparams, io, weighthists)
+	  : FillOtherCVSpectrum(config, prop, io);
+
+	Eigen::VectorXf data_vec = CollapseMatrix(config, data_spec.Spec(), io);
+	Eigen::VectorXf err_vec_sq = data_spec.Error().array().square();
+	Eigen::VectorXf err_vec = CollapseMatrix(config, err_vec_sq, io).array().sqrt();
+	other_data.push_back(PROdata(data_vec, err_vec));
+      }
     }
 
     // Leave this after creating fake data so we can make fake data using systs that aren't
@@ -1082,80 +1089,6 @@ int main(int argc, char* argv[])
             other_err_bands.push_back(getErrorBand(config, prop, other_systs[io], binwidth_scale, io));
             plot_channels(final_output_tag+"_PROplot_other_"+std::to_string(io)+"_ErrorBand.pdf", config, other_cvs[io], {}, other_data[io], 
                     other_err_bands.back().get(), {}, NULL, opt | PlotOptions::DataMCRatio, io);
-        }
-
-        if (!mockreweights.empty()) {
-
-            //stupid hack, must be a better way to do this
-            //Set up options:
-            std::vector<const char*> xlabel(4);
-            xlabel[0] = "Reconstructed Neutrino Energy";
-            xlabel[1] = "True Leading Proton Momentum";
-            xlabel[2] = "True Leading Proton Cos(Theta)";
-            xlabel[3] = "Check what variable you are plotting!";
-            int xi;
-            if (xmlname.find("standard") != std::string::npos) {
-                xi = 0;
-            }
-            else if (xmlname.find("pmom") != std::string::npos) {
-                xi = 1;
-            }
-            else if (xmlname.find("costh") != std::string::npos) {  
-                xi = 2;
-            }
-            else {
-                xi = 3;
-            }
-
-            TH1D hcv = spec.toTH1D_Collapsed(config,0);
-            TH1D hmock = data.toTH1D(config,0);
-            if(binwidth_scale){
-                hcv.Scale(1, "width");
-                hmock.Scale(1, "width");
-            }
-            hcv.GetYaxis()->SetTitle("Events/GeV");
-            hmock.GetYaxis()->SetTitle("Events/GeV");
-            hcv.GetXaxis()->SetTitle(xlabel[xi]);
-            hmock.GetXaxis()->SetTitle(xlabel[xi]);
-            hcv.SetTitle("");
-            hmock.SetTitle("");
-
-            TCanvas *c2 = new TCanvas((final_output_tag+"_spec_cv").c_str(), (final_output_tag+"_spec_cv").c_str(), 800, 800);
-            hmock.SetLineColor(kBlack);
-            hcv.SetLineColor(5);
-            hcv.SetFillColor(5);
-            TRatioPlot * rp = new TRatioPlot(&hcv,&hmock);
-            rp->Draw();
-            rp->GetLowerRefGraph()->SetMarkerStyle(21);
-            TGraphAsymmErrors *lowerGraph = dynamic_cast<TGraphAsymmErrors*>(rp->GetLowerRefGraph());
-            if (lowerGraph) {
-                int nPoints = lowerGraph->GetN();
-                for (int i = 0; i < nPoints; i++) {
-                    lowerGraph->SetPointError(i, 0, 0, 0, 0); // Set both x and y errors to zero
-                }
-            }
-            std::unique_ptr<TLegend> leg = std::make_unique<TLegend>(0.35,0.7,0.89,0.89);
-            leg->SetFillStyle(0);
-            leg->SetLineWidth(0);
-            leg->AddEntry(&hcv,"CV","f");
-            leg->AddEntry(&hmock,"Mock data: ", "l");
-            TObject *null = new TObject(); 
-
-            for(const auto& [name, shift]: injected_systs) {
-                char ns[6];
-                snprintf(ns, sizeof(ns),"%.2f", shift);
-                leg->AddEntry(null, (name+": "+ns+ " sigma").c_str(),"");
-            }
-
-            for (const auto& m : mockreweights) {
-                leg->AddEntry(null, m.c_str(),"");
-            }
-            for (const auto& m : osc_params) {
-                leg->AddEntry(null, ("param: "+std::to_string(m)).c_str(),"");
-            }
-
-            leg->Draw();
-            c2->SaveAs((final_output_tag+"_ReWeight_spec.pdf").c_str());
         }
 
         if(with_splines) {
