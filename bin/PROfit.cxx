@@ -665,12 +665,14 @@ int main(int argc, char* argv[])
         log<LOG_INFO>(L"%1% || Starting global getPostFitErrorBand() ") % __func__;
         std::unique_ptr<TGraphAsymmErrors> post_err_band = getMCMCErrorBand(mh_post, fitconfig.MCMCburn, fitconfig.MCMCiter, config, prop, *metric_to_use, best_fit, posteriors, spline_covariance, binwidth_scale);
 
+        std::vector<TPaveText> texts;
         TPaveText chi2text(0.59, 0.50, 0.89, 0.59, "NDC");
         chi2text.AddText(hname.c_str());
         chi2text.SetFillColor(0);
         chi2text.SetBorderSize(0);
         chi2text.SetTextAlign(12);
-        plot_channels((final_output_tag+"_PROfile_hists.pdf"), config, cv, bf, data, err_band.get(), post_err_band.get(), &chi2text, PlotOptions::DataPostfitRatio);
+        texts.push_back(chi2text);
+        plot_channels((final_output_tag+"_PROfile_hists.pdf"), config, cv, bf, data, err_band.get(), post_err_band.get(), texts, PlotOptions::DataPostfitRatio);
 
         TCanvas c;
         c.Print((final_output_tag+"_postfit_posteriors.pdf[").c_str());
@@ -942,13 +944,14 @@ int main(int argc, char* argv[])
         //PROspec spec = FillCVSpectrum(config, prop, !eventbyevent);
         PROspec spec = FillRecoSpectra(config, prop, systs, *model, CVpparams, !eventbyevent);
         PlotOptions opt = PlotOptions::CVasStack;
+        std::vector<TPaveText> notext;
         if(binwidth_scale) opt |= PlotOptions::BinWidthScaled;
         if(area_normalized) opt |= PlotOptions::AreaNormalized;
-        plot_channels(final_output_tag+"_PROplot_CV.pdf", config, spec, {}, {}, {}, {}, NULL, opt);
+        plot_channels(final_output_tag+"_PROplot_CV.pdf", config, spec, {}, {}, {}, {}, notext, opt);
         std::vector<PROspec> other_cvs;
         for(size_t io = 0; io < config.m_num_other_vars; ++io) {
             other_cvs.push_back(FillOtherCVSpectrum(config, prop, io));
-            plot_channels(final_output_tag+"_other_"+std::to_string(io)+"_PROplot_CV.pdf", config, other_cvs.back(), {}, {}, {}, {}, NULL, opt, io);
+            plot_channels(final_output_tag+"_other_"+std::to_string(io)+"_PROplot_CV.pdf", config, other_cvs.back(), {}, {}, {}, {}, notext, opt, io);
         }
 
         std::map<std::string, std::unique_ptr<TH1D>> cv_hists = getCVHists(spec, config, binwidth_scale);
@@ -1069,26 +1072,36 @@ int main(int argc, char* argv[])
         }
 
         //errorband
-        //
-        //TODO: Multiple channels
         int global_channel_index = 0;
         std::unique_ptr<PROmetric> allcov_metric(metric->Clone());
         allcov_metric->override_systs(allcovsyst);
-        double chival = allcov_metric->getSingleChannelChi(global_channel_index);
-        int ndf = config.m_channel_num_bins[global_channel_index] - bool(opt&PlotOptions::AreaNormalized);
-        log<LOG_INFO>(L"%1% || On channel %2% the datamc chi^2/ndof is %3%/%4% .") % __func__ % global_channel_index % chival % ndf;
-        TPaveText chi2text(0.59, 0.50, 0.89, 0.59, "NDC");
-        chi2text.AddText(("#chi^{2}/ndf = "+to_string_prec(chival,2)+"/"+std::to_string(ndf)).c_str());
-        chi2text.SetFillColor(0);
-        chi2text.SetBorderSize(0);
-        chi2text.SetTextAlign(12);
+        std::vector<TPaveText> channel_chitexts;
+        std::vector<TPaveText> other_channel_chitexts; //todo
+        for(size_t im = 0; im < config.m_num_modes; im++){
+                for(size_t id =0; id < config.m_num_detectors; id++){
+                    for(size_t ic = 0; ic < config.m_num_channels; ic++){
+                        
+                    double chival = allcov_metric->getSingleChannelChi(global_channel_index);
+                    int ndf = config.m_channel_num_bins[global_channel_index] - bool(opt&PlotOptions::AreaNormalized);
+                    log<LOG_INFO>(L"%1% || On channel %2% the datamc chi^2/ndof is %3%/%4% .") % __func__ % global_channel_index % chival % ndf;
+                    TPaveText chi2text(0.59, 0.50, 0.89, 0.59, "NDC");
+                    chi2text.AddText(("#chi^{2}/ndf = "+to_string_prec(chival,2)+"/"+std::to_string(ndf)).c_str());
+                    chi2text.SetFillColor(0);
+                    chi2text.SetBorderSize(0);
+                    chi2text.SetTextAlign(12);
+                    channel_chitexts.push_back(chi2text);
+                    global_channel_index++;
+                    }
+                }
+        }
+
         std::unique_ptr<TGraphAsymmErrors> err_band = getErrorBand(config, prop, systs, binwidth_scale);
-        plot_channels(final_output_tag+"_PROplot_ErrorBand.pdf", config, spec, {}, data, err_band.get(), {}, &chi2text, opt | PlotOptions::DataMCRatio);
+        plot_channels(final_output_tag+"_PROplot_ErrorBand.pdf", config, spec, {}, data, err_band.get(), {}, channel_chitexts, opt | PlotOptions::DataMCRatio);
         std::vector<std::unique_ptr<TGraphAsymmErrors>> other_err_bands;
         for(size_t io = 0; io < config.m_num_other_vars; ++io) {
             other_err_bands.push_back(getErrorBand(config, prop, other_systs[io], binwidth_scale, io));
             plot_channels(final_output_tag+"_PROplot_other_"+std::to_string(io)+"_ErrorBand.pdf", config, other_cvs[io], {}, other_data[io], 
-                    other_err_bands.back().get(), {}, NULL, opt | PlotOptions::DataMCRatio, io);
+                    other_err_bands.back().get(), {}, other_channel_chitexts, opt | PlotOptions::DataMCRatio, io);
         }
 
         if(with_splines) {

@@ -444,6 +444,9 @@ namespace PROfit{
             /* Function: given channel index, return list of bin edges for this channel */
             const std::vector<float>& GetChannelOtherBinEdges(size_t channel_index, size_t other_index) const;
 
+            /* Function: Given a global channel index return the local channel index */
+            size_t GetLocalChannelIndex(size_t global_channel_index) const; 
+
             /* Function: Hex to int*/
             int HexToROOTColor(const std::string& hexColor) const;
 

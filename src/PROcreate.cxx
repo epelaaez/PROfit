@@ -1011,14 +1011,11 @@ namespace PROfit {
             // grab the subchannel index
             int num_branch = inconfig.m_branch_variables[fid].size();
             auto& branches = inconfig.m_branch_variables[fid];
-            std::vector<int> channel_index(num_branch, 0); 
+            std::vector<std::string> branch_fullname(num_branch,0);
             log<LOG_INFO>(L"%1% || This file includes %2% branch/channels") % __func__ % num_branch;
             for(int ib = 0; ib != num_branch; ++ib) {
-
-                const std::string& subchannel_name = inconfig.m_branch_variables[fid][ib]->associated_hist;
-                // Note: This will only work if there's only 1 subchannel per channel
-                channel_index[ib] = inconfig.GetSubchannelIndex(subchannel_name);
-                log<LOG_DEBUG>(L"%1% || Subchannel: %2% maps to index: %3%") % __func__ % subchannel_name.c_str() % channel_index[ib];
+                const std::string& hist_name = inconfig.m_branch_variables[fid][ib]->associated_hist;
+                branch_fullname.push_back(hist_name);
             }
 
             // loop over all entries
@@ -1037,17 +1034,18 @@ namespace PROfit {
                         continue;
 
                     //find bins
-                    int global_bin = FindGlobalBin(inconfig, reco_value, channel_index[ib]);
+                     
+                    int global_bin = FindGlobalBin(inconfig, reco_value, branch_fullname[ib]);
                     if(global_bin < 0 )  //out of range
                         continue;
 
                     std::vector<int> other_bin_indices;
                     for(size_t i = 0; i < other_params.size(); ++i) {
-                        other_bin_indices.push_back(FindGlobalOtherBin(inconfig, other_params[i], channel_index[ib], i));
+                        other_bin_indices.push_back(FindGlobalOtherBin(inconfig, other_params[i], branch_fullname[ib], i));
                     }
 
                     if(i%100==0)	
-                        log<LOG_DEBUG>(L"%1% || Subchannel %2% -- Reco variable value: %3%, MC event weight: %4%, correponds to global bin: %5%") % __func__ %  channel_index[ib] % reco_value % additional_weight % global_bin;
+                        log<LOG_DEBUG>(L"%1% || Subchannel %2% -- Reco variable value: %3%, MC event weight: %4%, correponds to global bin: %5%") % __func__ %  branch_fullname[ib].c_str() % reco_value % additional_weight % global_bin;
 
                     data[0].Fill(global_bin, additional_weight);
                     for(size_t io = 0; io < inconfig.m_num_other_vars; ++io)

@@ -21,12 +21,15 @@ namespace PROfit {
                 spline_lo.push_back(syst.knobval[0]);
                 spline_hi.push_back(syst.knobval.back());
                 spline_binnings.push_back(syst.binning);
+                ++n_splines;
             } else if(syst.mode == "covariance") {
                 this->CreateMatrix(syst);
                 covar_names.push_back(syst.systname);
+                ++n_covar;
             }else if(syst.mode == "flat"){
                 this->CreateFlatMatrix(config, syst); 
                 covar_names.push_back(syst.systname); 
+                ++n_covar;
             }
         }
         
@@ -38,6 +41,13 @@ namespace PROfit {
             syst_map["mcstat"] = {covmat.size(), SystType::Covariance};
             covmat.push_back(fractional_mcstat_cov);
             corrmat.push_back(mcstat_corr);
+            ++n_covar;
+        }
+
+        if(covmat.size()==0){
+            int nbins = other_index < 0 ? config.m_num_bins_total : config.m_num_other_bins_total[other_index];
+            Eigen::MatrixXf fracM = Eigen::MatrixXf::Zero(nbins, nbins);
+            covmat.push_back(fracM);
         }
 
         fractional_covariance = this->SumMatrices();
@@ -57,12 +67,14 @@ namespace PROfit {
                     ret.spline_hi.push_back(spline_hi[idx]);
                     ret.spline_lo.push_back(spline_lo[idx]);
                     ret.spline_binnings.push_back(spline_binnings[idx]);
+                    ++ret.n_splines;
                     break;
                 case SystType::Covariance:
                     ret.syst_map[name] = std::make_pair(ret.covmat.size(), SystType::Covariance);
                     ret.covar_names.push_back(name);
                     ret.covmat.push_back(covmat[idx]);
                     ret.corrmat.push_back(corrmat[idx]);
+                    ++ret.n_covar;
                     break;
                 default:
                     log<LOG_ERROR>(L"%1% || Unrecognized syst type %2% for syst %3%.") % __func__ % static_cast<int>(stype) % name.c_str();
@@ -88,12 +100,14 @@ namespace PROfit {
                     ret.spline_hi.push_back(spline_hi[idx]);
                     ret.spline_lo.push_back(spline_lo[idx]);
                     ret.spline_binnings.push_back(spline_binnings[idx]);
+                    ++ret.n_splines;
                     break;
                 case SystType::Covariance:
                     ret.syst_map[name] = std::make_pair(ret.covmat.size(), SystType::Covariance);
                     ret.covar_names.push_back(name);
                     ret.covmat.push_back(covmat[idx]);
                     ret.corrmat.push_back(corrmat[idx]);
+                    ++ret.n_covar;
                     break;
                 default:
                     log<LOG_ERROR>(L"%1% || Unrecognized syst type %2% for syst %3%.") % __func__ % static_cast<int>(stype) % name.c_str();
@@ -118,12 +132,14 @@ namespace PROfit {
                                            Eigen::MatrixXf cor = GenerateCorrMatrix(cov);
                                            ret.covmat.push_back(cov);
                                            ret.corrmat.push_back(cor);
+                                           ++ret.n_covar;
                                        } break;
                 case SystType::Covariance:
                                        ret.syst_map[name] = std::make_pair(ret.covmat.size(), SystType::Covariance);
                                        ret.covar_names.push_back(name);
                                        ret.covmat.push_back(covmat[idx]);
                                        ret.corrmat.push_back(corrmat[idx]);
+                                       ++ret.n_covar;
                                        break;
                 default:
                                        log<LOG_ERROR>(L"%1% || Unrecognized syst type %2% for syst %3%.") % __func__ % static_cast<int>(stype) % name.c_str();
@@ -178,6 +194,7 @@ namespace PROfit {
         }else{
             log<LOG_ERROR>(L"%1% || There is no covariance available!") % __func__;
             log<LOG_ERROR>(L"%1% || Returning empty matrix") % __func__;
+
         }
         return sum_matrix;
     }
