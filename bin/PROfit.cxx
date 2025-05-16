@@ -397,6 +397,7 @@ int main(int argc, char* argv[])
         data = PROdata(data_vec, data_vec.array().sqrt());
 
         for(size_t io = 0; io < config.m_num_other_vars; ++io) {
+            
             PROspec data_spec = osc_params.size() || injected_systs.size() 
                 ? FillOtherRecoSpectra(config, prop, systs, *model, allparams, io)
                 : FillOtherCVSpectrum(config, prop, io);

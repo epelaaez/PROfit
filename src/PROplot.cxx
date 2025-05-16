@@ -192,6 +192,9 @@ namespace PROfit{
             for(size_t det = 0; det < config.m_num_detectors; ++det) {
                 for(size_t channel = 0; channel < config.m_num_channels; ++channel) {
                     size_t channel_nbins = other_index < 0 ? config.m_channel_num_bins[channel] : config.m_channel_num_other_bins[channel][other_index];
+
+                    log<LOG_DEBUG>(L"%1% || mode %2% det %3% channel %4% ") % __func__ % mode % det % channel;
+                   
                     std::vector<float> edges = other_index < 0 ? config.GetChannelBinEdges(0) : config.GetChannelOtherBinEdges(0, other_index);
                     std::string xtitle = other_index < 0 ? config.m_channel_units[channel] : config.m_channel_other_units[channel][other_index];
                     std::string hist_title = config.m_detector_plotnames[det]  + " "+ config.m_channel_plotnames[channel]+";"+xtitle+";"+ytitle;
@@ -242,6 +245,7 @@ namespace PROfit{
                     if(errband) {
                         channel_errband = new TGraphAsymmErrors(&cv_hist);
                         int channel_start = other_index < 0 ? config.GetCollapsedGlobalBinStart(global_channel_index) : config.GetCollapsedGlobalOtherBinStart(global_channel_index, other_index);
+
                         for(size_t bin = 0; bin < channel_nbins; ++bin) {
                             float scale = 1.0;
                             if(bool(opt&PlotOptions::AreaNormalized)) {
@@ -292,6 +296,7 @@ namespace PROfit{
 
                     TH1D data_hist;
                     if(data) {
+
                         data_hist = data->toTH1D(config, global_channel_index, other_index);
                         data_hist.SetLineColor(kBlack);
                         data_hist.SetLineWidth(2);
@@ -305,12 +310,14 @@ namespace PROfit{
                             data_hist.Scale(1.0/data_hist.Integral());
                     }
 
+
                     /*******************/
                     /* Draw everything */
                     /*******************/
 
                     if(bool(opt&PlotOptions::DataMCRatio) || bool(opt&PlotOptions::DataPostfitRatio))
                         p1.cd();
+
 
                     if(cv) {
                         if(bool(opt&PlotOptions::CVasStack)) {
