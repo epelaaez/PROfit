@@ -193,8 +193,6 @@ namespace PROfit{
                 for(size_t channel = 0; channel < config.m_num_channels; ++channel) {
                     size_t channel_nbins = other_index < 0 ? config.m_channel_num_bins[channel] : config.m_channel_num_other_bins[channel][other_index];
 
-                    log<LOG_DEBUG>(L"%1% || mode %2% det %3% channel %4% ") % __func__ % mode % det % channel;
-                   
                     std::vector<float> edges = other_index < 0 ? config.GetChannelBinEdges(0) : config.GetChannelOtherBinEdges(0, other_index);
                     std::string xtitle = other_index < 0 ? config.m_channel_units[channel] : config.m_channel_other_units[channel][other_index];
                     std::string hist_title = config.m_detector_plotnames[det]  + " "+ config.m_channel_plotnames[channel]+";"+xtitle+";"+ytitle;

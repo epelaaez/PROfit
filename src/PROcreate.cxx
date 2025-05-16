@@ -1016,9 +1016,6 @@ namespace PROfit {
             for(int ib = 0; ib != num_branch; ++ib) {
                 const std::string& hist_name = inconfig.m_branch_variables[fid][ib]->associated_hist;
                 branch_fullname.push_back(hist_name);
-                // Note: This will only work if there's only 1 subchannel per channel
-                //channel_index[ib] = inconfig.GetSubchannelIndex(subchannel_name);
-                log<LOG_DEBUG>(L"%1% || BARGHist is  %2% ") % __func__ % hist_name.c_str();
             }
 
             // loop over all entries
