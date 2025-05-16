@@ -168,7 +168,7 @@ namespace PROfit{
     }
 
 
-    void plot_channels(const std::string &filename, const PROconfig &config, std::optional<PROspec> cv, std::optional<PROspec> best_fit, std::optional<PROdata> data, std::optional<TGraphAsymmErrors*> errband, std::optional<TGraphAsymmErrors*> posterrband, TPaveText *text, PlotOptions opt, int other_index) {
+    void plot_channels(const std::string &filename, const PROconfig &config, std::optional<PROspec> cv, std::optional<PROspec> best_fit, std::optional<PROdata> data, std::optional<TGraphAsymmErrors*> errband, std::optional<TGraphAsymmErrors*> posterrband, std::vector<TPaveText> &texts, PlotOptions opt, int other_index) {
         TCanvas c;
         c.Print((filename+"[").c_str());
 
@@ -342,8 +342,12 @@ namespace PROfit{
                         else data_hist.Draw("E1P");
                     }
 
-                    if(text) {
-                        text->Draw("same");
+                    if(texts.size()!=0) {
+                        if(texts.size()==1){
+                            texts.front().Draw("same");
+                        }else{
+                            texts[global_channel_index].Draw("same");
+                        }
                     }
 
                     leg->Draw("same");
