@@ -107,12 +107,12 @@ namespace PROfit{
                 for (const auto& [detector, value] : scaling) {
 
                     if (value <= 0.0f) {
-                        log<LOG_ERROR>(L"%1% || Scale factor %.2f for '%2%' is invalid. Must be > 0.")
+                        log<LOG_ERROR>(L"%1% || Scale factor %2% for '%3%' is invalid. Must be > 0.")
                            % __func__ % value % detector.c_str();
                         exit(EXIT_FAILURE);
                     }
 
-                    log<LOG_INFO>(L"%1% || Wildcard '%2%' with scaling factor %.2f matches:")
+                    log<LOG_INFO>(L"%1% || Wildcard '%2%' with scaling factor %3% matches:")
                         % __func__ % detector.c_str() % value;
 
                     std::vector<std::string> scalenames;
@@ -166,7 +166,7 @@ namespace PROfit{
                     }
 
 
-                    log<LOG_INFO>(L"%1% || Applied %.2f scaling for '%2%'")
+                    log<LOG_INFO>(L"%1% || Applied %2% scaling for '%3%'")
                         % __func__ % value % detector.c_str();
                 
                 }
