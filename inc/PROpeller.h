@@ -102,6 +102,70 @@ namespace PROfit{
                 log<LOG_INFO>(L"%1% || Serialization load of PROpeller from file  %2% took %3% seconds") % __func__ % filename.c_str() %elapsed.count();
             }
 
+            // Scale detector weights for POT studies
+            void scale(const PROconfig &inconfig, std::map<std::string, float> scaling){
+                for (const auto& [detector, value] : scaling) {
+
+                    if (value <= 0.0f || value >= 1.0f) {
+                        log<LOG_ERROR>(L"%1% || Scale factor %.2f for '%2%' is invalid. Must be > 0 and < 1.")
+                           % __func__ % value % detector.c_str();
+                        exit(EXIT_FAILURE);
+                    }
+
+                    log<LOG_INFO>(L"%1% || Wildcard '%2%' with scaling factor %.2f matches:")
+                        % __func__ % detector.c_str() % value;
+
+                    std::vector<std::string> scalenames;
+                    for (const auto& name : inconfig.m_fullnames) {
+                        if (name.find(detector) != std::string::npos) {
+                            scalenames.push_back(name);
+                        }
+                    }
+
+                    log<LOG_INFO>(L"%1% || %2% . ") % __func__  % scalenames;
+
+                    std::vector<int> scalerecobins;
+                    for(auto &name: scalenames){
+                        size_t is = inconfig.GetSubchannelIndex(name);     
+                        size_t ic = inconfig.GetChannelIndex(is); 
+
+                        size_t start = inconfig.GetGlobalBinStart(is); 
+                        for(size_t b = 0; b < inconfig.m_channel_num_bins[ic] ; b++){
+                            scalerecobins.push_back((int)(start+b));
+                        }
+                    }
+
+                    std::vector<int> scaletruebins;
+                    for(auto &name: scalenames){
+                        size_t is = inconfig.GetSubchannelIndex(name);     
+                        size_t ic = inconfig.GetChannelIndex(is); 
+                        size_t start = inconfig.GetGlobalTrueBinStart(is); 
+                        for(size_t b = 0; b < inconfig.m_channel_num_truebins[ic] ; b++){
+                            scaletruebins.push_back((int)(start+b));
+                        }
+                    }
+
+                    log<LOG_INFO>(L"%1% || and scales reco bins  %2% and true bins %3%.") % __func__  %  scalerecobins %  scaletruebins;
+
+                    for (int r : scaletruebins) {
+                        histLE(r) *= value;
+                        for (int c : scalerecobins) {
+                            hist(r, c) *= value;
+                        }
+                    }
+
+                    for (int c : scalerecobins) {
+                        added_weights[c] *= value;
+                        mcStatErr(c) *= value;
+                    }
+
+
+                    log<LOG_INFO>(L"%1% || Applied %.2f scaling for '%2%'")
+                        % __func__ % value % detector.c_str();
+                
+                }
+    
+            }
 
     };
 
