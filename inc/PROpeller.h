@@ -106,8 +106,8 @@ namespace PROfit{
             void scale(const PROconfig &inconfig, std::map<std::string, float> scaling){
                 for (const auto& [detector, value] : scaling) {
 
-                    if (value <= 0.0f || value >= 1.0f) {
-                        log<LOG_ERROR>(L"%1% || Scale factor %.2f for '%2%' is invalid. Must be > 0 and < 1.")
+                    if (value <= 0.0f) {
+                        log<LOG_ERROR>(L"%1% || Scale factor %.2f for '%2%' is invalid. Must be > 0.")
                            % __func__ % value % detector.c_str();
                         exit(EXIT_FAILURE);
                     }
@@ -155,8 +155,14 @@ namespace PROfit{
                     }
 
                     for (int c : scalerecobins) {
-                        added_weights[c] *= value;
                         mcStatErr(c) *= value;
+                    }
+
+                    for (size_t i = 0; i < added_weights.size(); ++i) {
+                        int bin = bin_indices[i];
+                        if (std::find(scalerecobins.begin(), scalerecobins.end(), bin) != scalerecobins.end()) {
+                            added_weights[i] *= value;
+                        }
                     }
 
 
