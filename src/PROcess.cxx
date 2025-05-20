@@ -40,6 +40,34 @@ namespace PROfit {
         return myspectrum;
     }
 
+    PROspec FillRecoSpectra(const PROconfig &inconfig, const PROpeller &inprop, const PROsyst &insyst, const PROmodel &inmodel, const std::map<std::string, float> &inparams, bool binned) {
+      // default parameters
+      Eigen::VectorXf params = Eigen::VectorXf::Zero(inmodel.nparams + insyst.GetNSplines());
+
+      // default pulls are all 0. Set the default model parameters
+      for (size_t ind = 0; ind < inmodel.nparams; ind++) params[ind] = inmodel.default_val[ind];
+
+      // set parameters configured by user
+      for (auto const &pair: inparams) {
+        auto it1 = std::find(insyst.spline_names.begin(), insyst.spline_names.end(), pair.first);
+        auto it2 = std::find(inmodel.param_names.begin(), inmodel.param_names.end(), pair.first);
+        if (it1 != insyst.spline_names.end()) {
+          int ind = std::distance(insyst.spline_names.begin(), it1);
+          params[ind + inmodel.nparams] = pair.second;
+        }
+        else if (it2 != inmodel.param_names.end()) {
+          int ind = std::distance(inmodel.param_names.begin(), it2);
+          params[ind] = pair.second;
+        }
+        else {
+          log<LOG_WARNING>(L"%1% | unable to find parameters %2% . Skipping.") % __func__ % pair.first.c_str();
+        }
+      }
+      
+
+      return FillRecoSpectra(inconfig, inprop, insyst, inmodel, params, binned);
+    }
+
     PROspec FillRecoSpectra(const PROconfig &inconfig, const PROpeller &inprop, const PROsyst &insyst, const PROmodel &inmodel, const Eigen::VectorXf &params, bool binned){
         PROspec myspectrum(inconfig.m_num_bins_total);
         Eigen::VectorXf phys   = params.segment(0, inmodel.nparams);
