@@ -35,7 +35,7 @@ namespace PROfit {
         
         if(config.m_use_mcstats){
             Eigen::MatrixXf fractional_mcstat_cov = other_index < 0 ? prop.mcStatErr.array().square().inverse().matrix().asDiagonal()
-                : prop.otherMCStatErr[other_index].array().square().inverse().matrix().asDiagonal();
+                            : prop.otherMCStatErr[other_index].array().square().inverse().matrix().asDiagonal();
             toFiniteMatrix(fractional_mcstat_cov);
             Eigen::MatrixXf mcstat_corr = GenerateCorrMatrix(fractional_mcstat_cov);
             syst_map["mcstat"] = {covmat.size(), SystType::Covariance};
@@ -357,6 +357,7 @@ namespace PROfit {
         if(!PROsyst::isPositiveSemiDefinite_WithTolerance(frac_covar_matrix,Eigen::NumTraits<float>::dummy_precision())){
             log<LOG_ERROR>(L"%1% || Fractional Covariance Matrix is not positive semi-definite!") % __func__;
             log<LOG_ERROR>(L"Terminating.");
+            log<LOG_ERROR>(L" Matrix is %1% .") % frac_covar_matrix;
             exit(EXIT_FAILURE);
         }
 

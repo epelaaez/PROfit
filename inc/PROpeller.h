@@ -102,6 +102,101 @@ namespace PROfit{
                 log<LOG_INFO>(L"%1% || Serialization load of PROpeller from file  %2% took %3% seconds") % __func__ % filename.c_str() %elapsed.count();
             }
 
+            // Scale detector weights for POT studies
+            void scale(const PROconfig &inconfig, std::map<std::string, float> scaling){
+                for (const auto& [detector, value] : scaling) {
+
+                    if (value <= 0.0f) {
+                        log<LOG_ERROR>(L"%1% || Scale factor %2% for '%3%' is invalid. Must be > 0.")
+                            % __func__ % value % detector.c_str();
+                        exit(EXIT_FAILURE);
+                    }
+
+                    log<LOG_INFO>(L"%1% || Wildcard '%2%' with scaling factor %3% matches:")
+                        % __func__ % detector.c_str() % value;
+
+                    std::vector<std::string> scalenames;
+                    for (const auto& name : inconfig.m_fullnames) {
+                        if (name.find(detector) != std::string::npos) {
+                            scalenames.push_back(name);
+                        }
+                    }
+
+                    log<LOG_INFO>(L"%1% || %2% . ") % __func__  % scalenames;
+
+                    std::vector<int> scalerecobins;
+                    for(auto &name: scalenames){
+                        size_t is = inconfig.GetSubchannelIndex(name);     
+                        size_t ic = inconfig.GetChannelIndex(is); 
+
+                        size_t start = inconfig.GetGlobalBinStart(is); 
+                        for(size_t b = 0; b < inconfig.m_channel_num_bins[ic] ; b++){
+                            scalerecobins.push_back((int)(start+b));
+                        }
+                    }
+
+                    std::vector<int> scaletruebins;
+                    for(auto &name: scalenames){
+                        size_t is = inconfig.GetSubchannelIndex(name);     
+                        size_t ic = inconfig.GetChannelIndex(is); 
+                        size_t start = inconfig.GetGlobalTrueBinStart(is); 
+                        for(size_t b = 0; b < inconfig.m_channel_num_truebins[ic] ; b++){
+                            scaletruebins.push_back((int)(start+b));
+                        }
+                    }
+
+
+                    std::vector<std::vector<int>> scaleotherbins;
+                    for(size_t io =0; io<inconfig.m_num_other_vars; io++){
+                        std::vector<int> tmpbins;
+                        for(auto &name: scalenames){
+                            size_t is = inconfig.GetSubchannelIndex(name);     
+                            size_t ic = inconfig.GetChannelIndex(is); 
+                            size_t start = inconfig.GetGlobalOtherBinStart(is,io); 
+                            for(size_t b = 0; b < inconfig.m_channel_num_other_bins[io][ic] ; b++){
+                                tmpbins.push_back((int)(start+b));
+                            }
+                        }
+                        scaleotherbins.push_back(tmpbins);
+
+                    }
+
+
+                    log<LOG_INFO>(L"%1% || and scales reco bins  %2% and true bins %3%.") % __func__  %  scalerecobins %  scaletruebins;
+
+                    for (int r : scaletruebins) {
+                        for (int c : scalerecobins) {
+                            hist(r, c) *= value;
+                        }
+                    }
+
+
+                    for(size_t io =0; io<inconfig.m_num_other_vars; io++){
+                        for (int o : scaleotherbins[io]) {
+                            for (int r : scalerecobins) {
+                                (other_hists[io])(o, r) *= value;
+                            }
+                        }
+                    }
+                    //mcStarErr is only used for calculating fractional error later. Fractional does not change. 
+                    //for (int c : scalerecobins) {
+                    //    mcStatErr(c) *= value;
+                    //}
+
+                    for (size_t i = 0; i < added_weights.size(); ++i) {
+                        int bin = bin_indices[i];
+                        if (std::find(scalerecobins.begin(), scalerecobins.end(), bin) != scalerecobins.end()) {
+                            added_weights[i] *= value;
+                        }
+                    }
+
+
+                    log<LOG_INFO>(L"%1% || Applied %2% scaling for '%3%'")
+                        % __func__ % value % detector.c_str();
+
+                }
+
+            }
 
     };
 
