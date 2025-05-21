@@ -79,9 +79,9 @@ bool PROconfig::SameChannels(const PROconfig &one, const PROconfig &two) {
             return false;
         }
         for(size_t j = 0; j < one.m_channel_variable_num_bins[one.i_prime][i]+1; ++j) {
-            if(one.m_channel_bin_edges[i][j] != two.m_channel_bin_edges[i][j]) {
+            if(one.m_channel_variable_bin_edges[one.i_prime][i][j] != two.m_channel_variable_bin_edges[two.i_prime][i][j]) {
                 log<LOG_WARNING>(L"%1% || Found different bin edge for bin %2% in channel %3%. %4% vs %5%")
-                    % __func__ % j % one.m_channel_names[i].c_str() % one.m_channel_bin_edges[i][j] % two.m_channel_bin_edges[i][j];
+                    % __func__ % j % one.m_channel_names[i].c_str() % one.m_channel_variable_bin_edges[one.i_prime][i][j] % two.m_channel_variable_bin_edges[two.i_prime][i][j];
                 return false;
             }
         }
@@ -290,13 +290,13 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 if(m_bool_rate_only){
                     m_channel_variable_num_bins[i_prime].push_back(1);
                     std::vector<float> counting_exp_bin = {binedge.front(), binedge.back()};
-                    m_channel_bin_edges.push_back(counting_exp_bin);
+                    m_channel_variable_bin_edges[i_prime].push_back(counting_exp_bin);
                     std::vector<float> counting_exp_width = {binedge.front()-binedge.back()};
-                    m_channel_bin_widths.push_back(counting_exp_width);
+                    m_channel_variable_bin_widths[i_prime].push_back(counting_exp_width);
                 }else{
                     m_channel_variable_num_bins[i_prime].push_back(nbinsp);
-                    m_channel_bin_edges.push_back(binedge);
-                    m_channel_bin_widths.push_back(binwidth);
+                    m_channel_variable_bin_edges[i_prime].push_back(binedge);
+                    m_channel_variable_bin_widths[i_prime].push_back(binwidth);
                 }
 
             }else if (rmin!=NULL && rmax!=NULL && rnbins!=NULL ){
@@ -316,13 +316,13 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 if(m_bool_rate_only){
                     m_channel_variable_num_bins[i_prime].push_back(1);
                     std::vector<float> counting_exp_bin = {binedge.front(), binedge.back()};
-                    m_channel_bin_edges.push_back(counting_exp_bin);
+                    m_channel_variable_bin_edges[i_prime].push_back(counting_exp_bin);
                     std::vector<float> counting_exp_width = {binedge.front()-binedge.back()};
-                    m_channel_bin_widths.push_back(counting_exp_width);
+                    m_channel_variable_bin_widths[i_prime].push_back(counting_exp_width);
                 }else{
                     m_channel_variable_num_bins[i_prime].push_back(nbinsp);
-                    m_channel_bin_edges.push_back(binedge);
-                    m_channel_bin_widths.push_back(binwidth);
+                    m_channel_variable_bin_edges[i_prime].push_back(binedge);
+                    m_channel_variable_bin_widths[i_prime].push_back(binwidth);
                 }
             }else{
                 log<LOG_ERROR>(L"%1% || ERROR: You need to define a reco binning using either edges or min/max/nsteps @ line %2% in %3% ") % __func__ % __LINE__  % __FILE__;
@@ -1179,7 +1179,7 @@ const std::vector<float>& PROconfig::GetChannelBinEdges(size_t channel_index) co
         exit(EXIT_FAILURE);
     }
 
-    return m_channel_bin_edges[channel_index];
+    return m_channel_variable_bin_edges[i_prime][channel_index];
 }
 
 size_t PROconfig::GetChannelNTrueBins(size_t channel_index) const{
@@ -1297,8 +1297,8 @@ void PROconfig::remove_unused_channel(){
         for(size_t i=0, chan_index = 0; i< m_channel_bool.size(); ++i){
             if(m_channel_bool[i]){
                 temp_channel_num_bins[chan_index] = m_channel_variable_num_bins[i_prime][i];
-                temp_channel_bin_edges[chan_index] = m_channel_bin_edges[i];
-                temp_channel_bin_widths[chan_index] = m_channel_bin_widths[i];
+                temp_channel_bin_edges[chan_index] = m_channel_variable_bin_edges[i_prime][i];
+                temp_channel_bin_widths[chan_index] = m_channel_variable_bin_widths[i_prime][i];
 
                 temp_channel_num_truebins[chan_index] = m_channel_num_truebins[i];
                 temp_channel_truebin_edges[chan_index] = m_channel_truebin_edges[i];
@@ -1318,8 +1318,8 @@ void PROconfig::remove_unused_channel(){
         }
 
         m_channel_variable_num_bins[i_prime] = temp_channel_num_bins;
-        m_channel_bin_edges = temp_channel_bin_edges;
-        m_channel_bin_widths = temp_channel_bin_widths;
+        m_channel_variable_bin_edges[i_prime] = temp_channel_bin_edges;
+        m_channel_variable_bin_widths[i_prime] = temp_channel_bin_widths;
         m_channel_num_truebins = temp_channel_num_truebins;
         m_channel_truebin_edges = temp_channel_truebin_edges;
         m_channel_truebin_widths = temp_channel_truebin_widths;
@@ -1722,7 +1722,7 @@ uint32_t PROconfig::CalcHash() const{
     };
 
     unique_string << vecToString(m_fullnames);
-    for (const auto& vec : m_channel_bin_edges) 
+    for (const auto& vec : m_channel_variable_bin_edges[i_prime]) 
         unique_string << vecToString(vec);
 
     for (const auto& vec : m_channel_truebin_edges) 

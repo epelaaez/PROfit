@@ -277,7 +277,7 @@ namespace PROfit{
 
            
             /* old reco  TBD*/ 
-            std::vector<size_t> m_channel_num_bins;
+            //std::vector<size_t> m_channel_num_bins;
             std::vector<std::vector<float> > m_channel_bin_edges;
             std::vector<std::vector<float> > m_channel_bin_widths;
 
