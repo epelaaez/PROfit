@@ -282,7 +282,7 @@ namespace PROfit {
         //create 2D multi-universe spec for covariances
         for(auto& s : syst_vector){
             if(s.mode=="covariance")
-                s.CreateSpecs(inconfig.m_num_bins_total);	
+                s.CreateSpecs(inconfig.m_num_variable_bins_total[inconfig.i_prime]);	
         }
 
 
@@ -736,26 +736,26 @@ namespace PROfit {
                 if(s.mode=="flat")
                     continue;	
                 s.CreateSpecs(
-                        s.mode == "covariance" && i == 0 ? inconfig.m_num_bins_total :
-                        s.mode == "covariance" ? inconfig.m_num_other_bins_total[i-1] :
-                        s.binning == -2 ? inconfig.m_num_truebins_total : 
-                        s.binning == -1 ? inconfig.m_num_bins_total  
-                                        : inconfig.m_num_other_bins_total[s.binning]); 
+                        s.mode == "covariance" && i == 0 ? inconfig.m_num_variable_bins_total[inconfig.i_prime] :
+                        s.mode == "covariance" ? inconfig.m_num_variable_bins_total[i-1] :
+                        s.binning == -2 ? inconfig.m_num_variable_bins_total[inconfig.i_osc] : 
+                        s.binning == -1 ? inconfig.m_num_variable_bins_total[inconfig.i_prime]  
+                                        : inconfig.m_num_variable_bins_total[s.binning]); 
             }
         }
 
-        inprop.mcStatErr = Eigen::VectorXf::Constant(inconfig.m_num_bins_total, 0);
-        inprop.hist = Eigen::MatrixXf::Constant(inconfig.m_num_truebins_total, inconfig.m_num_bins_total, 0);
+        inprop.mcStatErr = Eigen::VectorXf::Constant(inconfig.m_num_variable_bins_total[inconfig.i_prime], 0);
+        inprop.hist = Eigen::MatrixXf::Constant(inconfig.m_num_variable_bins_total[i_osc], inconfig.m_num_variable_bins_total[inconfig.i_prime], 0);
         for(size_t i = 0; i < inconfig.m_num_other_vars; ++i) {
-            inprop.otherMCStatErr.push_back(Eigen::VectorXf::Constant(inconfig.m_num_other_bins_total[i], 0));
-            inprop.other_hists.push_back(Eigen::MatrixXf::Constant(inconfig.m_num_other_bins_total[i], inconfig.m_num_bins_total, 0));
+            inprop.otherMCStatErr.push_back(Eigen::VectorXf::Constant(inconfig.m_num_variable_bins_total[i], 0));
+            inprop.other_hists.push_back(Eigen::MatrixXf::Constant(inconfig.m_num_variable_bins_total[i], inconfig.m_num_variable_bins_total[inconfig.i_prime], 0));
         }
-        inprop.histLE = Eigen::VectorXf::Constant(inconfig.m_num_truebins_total, 0);
+        inprop.histLE = Eigen::VectorXf::Constant(inconfig.m_num_variable_bins_total[i_osc], 0);
         size_t LE_bin = 0;
         for(size_t im = 0; im < inconfig.m_num_modes; im++){
             for(size_t id =0; id < inconfig.m_num_detectors; id++){
                 for(size_t ic = 0; ic < inconfig.m_num_channels; ic++){
-                    const std::vector<float> &edges = inconfig.m_channel_truebin_edges[ic];
+                    const std::vector<float> &edges = inconfig.m_channel_variable_bin_edges[inconfig.i_osc][ic];
                     for(size_t sc = 0; sc < inconfig.m_num_subchannels.at(ic); sc++){
                         for(size_t j = 0; j < edges.size() - 1; ++j){
                             inprop.histLE(LE_bin++) = (edges[j+1] + edges[j])/2;
@@ -999,9 +999,9 @@ namespace PROfit {
 
         time_t start_time = time(nullptr);
         std::vector<PROdata> data;
-        data.emplace_back(inconfig.m_num_bins_total);
+        data.emplace_back(inconfig.m_num_variable_bins_total[inconfig.i_prime]);
         for(size_t io = 0; io < inconfig.m_num_other_vars; ++io)
-            data.emplace_back(inconfig.m_num_other_bins_total[io]);
+            data.emplace_back(inconfig.m_num_variable_bins_total[io]);
         log<LOG_INFO>(L"%1% || Start reading the files..") % __func__;
         for(int fid=0; fid < num_files; ++fid) {
             const auto& fn = inconfig.m_mcgen_file_name.at(fid);
@@ -1165,7 +1165,7 @@ namespace PROfit {
 
 
         time_t start_time = time(nullptr);
-        PROspec spec(inconfig.m_num_bins_total);
+        PROspec spec(inconfig.m_num_variable_bins_total[inconfig.i_prime]);
 
 
         log<LOG_INFO>(L"%1% || Start reading the files..") % __func__;

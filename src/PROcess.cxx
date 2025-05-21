@@ -13,7 +13,7 @@
 
 namespace PROfit {
     PROspec FillCVSpectrum(const PROconfig &inconfig, const PROpeller &inprop, bool binned){
-        PROspec myspectrum(inconfig.m_num_bins_total);
+        PROspec myspectrum(inconfig.m_num_variable_bins_total[inconfig.i_prime]);
 
         if(binned) {
             for(int i = 0; i < inprop.hist.rows(); ++i) {
@@ -31,7 +31,7 @@ namespace PROfit {
     }
 
     PROspec FillOtherCVSpectrum(const PROconfig &inconfig, const PROpeller &inprop, size_t other_index){
-        PROspec myspectrum(inconfig.m_num_other_bins_total[other_index]);
+        PROspec myspectrum(inconfig.m_num_variable_bins_total[other_index]);
         for(size_t i = 0; i<inprop.trueLE.size(); ++i){
             float add_w = inprop.added_weights[i]; 
             if(inprop.other_bin_indices[i][other_index] >= 0)
@@ -69,18 +69,18 @@ namespace PROfit {
     }
 
     PROspec FillRecoSpectra(const PROconfig &inconfig, const PROpeller &inprop, const PROsyst &insyst, const PROmodel &inmodel, const Eigen::VectorXf &params, bool binned){
-        PROspec myspectrum(inconfig.m_num_bins_total);
+        PROspec myspectrum(inconfig.m_num_variable_bins_total[inconfig.i_prime]);
         Eigen::VectorXf phys   = params.segment(0, inmodel.nparams);
         Eigen::VectorXf shifts = params.segment(inmodel.nparams, params.size() - inmodel.nparams);
 
         if(binned) {
-            Eigen::VectorXf systw = Eigen::VectorXf::Constant(inconfig.m_num_bins_total, 1);
+            Eigen::VectorXf systw = Eigen::VectorXf::Constant(inconfig.m_num_variable_bins_total[inconfig.i_prime], 1);
             for(int i = 0; i < shifts.size(); ++i) {
                 int binning = insyst.spline_binnings[i];
                 const Eigen::MatrixXf &hist =
                     binning == -2 || binning == -1 ? inprop.hist 
                                                    : inprop.other_hists[binning];
-                for(size_t k = 0; k < inconfig.m_num_bins_total; ++k) {
+                for(size_t k = 0; k < inconfig.m_num_variable_bins_total[inconfig.i_prime]; ++k) {
                     if(binning == -1) systw(k) *= insyst.GetSplineShift(i, shifts(i), k);
                     else {
                         float val = 0, unweighted = 0;
@@ -127,7 +127,7 @@ namespace PROfit {
     }
 
     PROspec FillOtherRecoSpectra(const PROconfig &inconfig, const PROpeller &inprop, const PROsyst &insyst, const PROmodel &inmodel, const Eigen::VectorXf &params, size_t other_index){
-        PROspec myspectrum(inconfig.m_num_other_bins_total[other_index]);
+        PROspec myspectrum(inconfig.m_num_variable_bins_total[other_index]);
         Eigen::VectorXf phys   = params.segment(0, inmodel.nparams);
         Eigen::VectorXf shifts = params.segment(inmodel.nparams, params.size() - inmodel.nparams);
 
@@ -153,7 +153,7 @@ namespace PROfit {
     }
 
     PROspec FillWeightedSpectrumFromHist(const PROconfig &inconfig, const PROpeller &inprop, std::vector<TH2D*> inweighthists, const PROmodel &inmodel, const Eigen::VectorXf &params, bool binned){
-        PROspec myspectrum(inconfig.m_num_bins_total);
+        PROspec myspectrum(inconfig.m_num_variable_bins_total[inconfig.i_prime]);
         Eigen::VectorXf phys   = params.segment(0, inmodel.nparams);
         Eigen::VectorXf shifts = params.segment(inmodel.nparams, params.size() - inmodel.nparams);
 
@@ -219,8 +219,8 @@ namespace PROfit {
     }
 
     PROspec FillSystRandomThrow(const PROconfig &inconfig, const PROpeller &inprop, const PROsyst &insyst, uint32_t seed, int other_index) {
-        int nbins = other_index < 0 ? inconfig.m_num_bins_total : inconfig.m_num_other_bins_total[other_index],
-            nbins_collapsed = other_index < 0 ? inconfig.m_num_bins_total_collapsed : inconfig.m_num_other_bins_total_collapsed[other_index];
+        int nbins = other_index < 0 ? inconfig.m_num_variable_bins_total[inconfig.i_prime] : inconfig.m_num_variable_bins_total[other_index],
+            nbins_collapsed = other_index < 0 ? inconfig.m_num_variable_bins_total[inconfig.i_prime]_collapsed : inconfig.m_num_variable_bins_total_collapsed[other_index];
         Eigen::VectorXf spec = Eigen::VectorXf::Constant(nbins, 0);
         Eigen::VectorXf cvspec = Eigen::VectorXf::Constant(nbins, 0);
 
@@ -228,7 +228,7 @@ namespace PROfit {
         static std::mt19937 rng{seed};
         std::normal_distribution<float> d;
         std::vector<float> throws;
-        //Eigen::VectorXf throwC = Eigen::VectorXf::Constant(inconfig.m_num_bins_total, 0);
+        //Eigen::VectorXf throwC = Eigen::VectorXf::Constant(inconfig.m_num_variable_bins_total[inconfig.i_prime], 0);
         Eigen::VectorXf throwC = Eigen::VectorXf::Constant(nbins_collapsed, 0);
         for(size_t i = 0; i < insyst.GetNSplines(); i++)
             throws.push_back(d(rng));
@@ -299,7 +299,7 @@ namespace PROfit {
     }
 
     PROspec FillSplineRandomThrow(const PROconfig &inconfig, const PROpeller &inprop, const PROsyst &insyst, int spline, uint32_t seed, int other_index) {
-        int nbins = other_index < 0 ? inconfig.m_num_bins_total : inconfig.m_num_other_bins_total[other_index];
+        int nbins = other_index < 0 ? inconfig.m_num_variable_bins_total[inconfig.i_prime] : inconfig.m_num_variable_bins_total[other_index];
         Eigen::VectorXf spec = Eigen::VectorXf::Constant(nbins, 0);
 
         // TODO: We should think about centralizing rng in a thread-safe/thread-aware way

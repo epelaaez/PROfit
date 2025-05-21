@@ -142,7 +142,7 @@ namespace PROfit {
             specs.push_back(FillSplineRandomThrow(config, prop, *this, spline, seed, other_index).Spec());
         }
 
-        int nbins = other_index < 0 ? config.m_num_bins_total : config.m_num_other_bins_total[other_index];
+        int nbins = other_index < 0 ? config.m_num_variable_bins_total[config.i_prime] : config.m_num_variable_bins_total[other_index];
         Eigen::MatrixXf mat(nbins, nbins);
         mat.setZero();
         for(const auto &spec: specs){
@@ -225,7 +225,7 @@ namespace PROfit {
     void PROsyst::CreateFlatMatrix(const PROconfig &config, const SystStruct& syst){
         std::string sysname = syst.GetSysName();
         log<LOG_INFO>(L"%1% || Generating a FLAT norm covariance matrix.") % __func__ ;
-        int nbins = other_index < 0 ? config.m_num_bins_total : config.m_num_other_bins_total[other_index];
+        int nbins = other_index < 0 ? config.m_num_variable_bins_total[config.i_prime] : config.m_num_variable_bins_total[other_index];
         Eigen::MatrixXf fracM = Eigen::MatrixXf::Zero(nbins, nbins);
         Eigen::MatrixXf corrM = Eigen::MatrixXf::Identity(nbins, nbins);
 
@@ -262,7 +262,7 @@ namespace PROfit {
                 }
             } else {
                 size_t start = config.GetGlobalOtherBinStart(is, other_index);
-                for(size_t b = 0; b < config.m_channel_num_other_bins[ic][other_index] ; b++){
+                for(size_t b = 0; b < config.m_channel_variable_num_bins[ic][other_index] ; b++){
                     fracM(start+b,start+b)=flat_percent*flat_percent;
                     flatbins.push_back(start+b);
                 }
@@ -540,7 +540,7 @@ namespace PROfit {
     }
 
     PROspec PROsyst::GetSplineShiftedSpectrum(const PROconfig& config, const PROpeller& prop, std::string name, float shift) const {
-        int nbins = other_index < 0 ? config.m_num_bins_total : config.m_num_other_bins_total[other_index];
+        int nbins = other_index < 0 ? config.m_num_variable_bins_total[config.i_prime] : config.m_num_variable_bins_total[other_index];
         int binning = spline_binnings[syst_map.at(name).first];
         PROspec ret(nbins);
         for(size_t i = 0; i < prop.trueLE.size(); ++i) {
@@ -555,7 +555,7 @@ namespace PROfit {
     }
 
     PROspec PROsyst::GetSplineShiftedSpectrum(const PROconfig& config, const PROpeller& prop, int syst_num, float shift) const {
-        int nbins = other_index < 0 ? config.m_num_bins_total : config.m_num_other_bins_total[other_index];
+        int nbins = other_index < 0 ? config.m_num_variable_bins_total[config.i_prime] : config.m_num_variable_bins_total[other_index];
         int binning = spline_binnings[syst_num];
         PROspec ret(nbins);
         for(size_t i = 0; i < prop.trueLE.size(); ++i) {
@@ -571,7 +571,7 @@ namespace PROfit {
 
     PROspec PROsyst::GetSplineShiftedSpectrum(const PROconfig& config, const PROpeller& prop, std::vector<std::string> names, std::vector<float> shifts) const {
         assert(names.size() == shifts.size());
-        int nbins = other_index < 0 ? config.m_num_bins_total : config.m_num_other_bins_total[other_index];
+        int nbins = other_index < 0 ? config.m_num_variable_bins_total[config.i_prime] : config.m_num_variable_bins_total[other_index];
         PROspec ret(nbins);
         for(size_t i = 0; i < prop.trueLE.size(); ++i) {
             const int reco_bin = other_index < 0 ? prop.bin_indices[i] : prop.other_bin_indices[other_index][i];
@@ -591,7 +591,7 @@ namespace PROfit {
 
     PROspec PROsyst::GetSplineShiftedSpectrum(const PROconfig& config, const PROpeller& prop, std::vector<int> syst_nums, std::vector<float> shifts) const {
         assert(syst_nums.size() == shifts.size());
-        int nbins = other_index < 0 ? config.m_num_bins_total : config.m_num_other_bins_total[other_index];
+        int nbins = other_index < 0 ? config.m_num_variable_bins_total[config.i_prime] : config.m_num_variable_bins_total[other_index];
         PROspec ret(nbins);
         for(size_t i = 0; i < prop.trueLE.size(); ++i) {
             const int reco_bin = other_index < 0 ? prop.bin_indices[i] : prop.other_bin_indices[other_index][i];
@@ -611,7 +611,7 @@ namespace PROfit {
 
     PROspec PROsyst::GetSplineShiftedSpectrum(const PROconfig& config, const PROpeller& prop, std::vector<float> shifts) const {
         assert(shifts.size() == splines.size());
-        int nbins = other_index < 0 ? config.m_num_bins_total : config.m_num_other_bins_total[other_index];
+        int nbins = other_index < 0 ? config.m_num_variable_bins_total[config.i_prime] : config.m_num_variable_bins_total[other_index];
         PROspec ret(nbins);
         for(size_t i = 0; i < prop.trueLE.size(); ++i) {
             const int reco_bin = other_index < 0 ? prop.bin_indices[i] : prop.other_bin_indices[other_index][i];

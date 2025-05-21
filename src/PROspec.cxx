@@ -85,10 +85,10 @@ TH1D PROspec::toTH1D(PROconfig const & inconfig, int subchannel_index, int other
     int channel_index = inconfig.GetChannelIndex(subchannel_index);
 
     //set up hist specs
-    int nbins = other_index < 0 ? inconfig.m_channel_variable_num_bins[inconfig.i_prime][channel_index] : inconfig.m_channel_num_other_bins[channel_index][other_index];
+    int nbins = other_index < 0 ? inconfig.m_channel_variable_num_bins[inconfig.i_prime][channel_index] : inconfig.m_channel_variable_num_bins[channel_index][other_index];
     const std::vector<float>& bin_edges = other_index < 0 ? inconfig.GetChannelBinEdges(channel_index) : inconfig.GetChannelOtherBinEdges(channel_index, other_index);
     std::string hist_name = inconfig.m_fullnames[subchannel_index];
-    std::string xaxis_title = other_index < 0 ? inconfig.m_channel_units[channel_index] : inconfig.m_channel_other_units[channel_index][other_index];
+    std::string xaxis_title = other_index < 0 ? inconfig.m_channel_units[channel_index] : inconfig.m_channel_variable_units[channel_index][other_index];
 
     //fill 1D hist
     TH1D hSpec(hist_name.c_str(),hist_name.c_str(), nbins, &bin_edges[0]); 
@@ -274,7 +274,7 @@ Eigen::VectorXf PROspec::eigenvector_multiplication(const Eigen::VectorXf& a, co
 
 void PROspec::plotSpectrum(const PROconfig& inconfig, const std::string& output_name) const{
 
-    bool collapsed = spec.size() == (long)inconfig.m_num_bins_total_collapsed;
+    bool collapsed = spec.size() == (long)inconfig.m_num_variable_bins_total[inconfig.i_prime]_collapsed;
     bool div_bin = true;
     int n_subplots = inconfig.m_num_channels*inconfig.m_num_modes*inconfig.m_num_detectors;
     log<LOG_DEBUG>(L"%1% || Creatign canvas with  %2% subplots") % __func__ % n_subplots;

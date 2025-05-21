@@ -269,30 +269,12 @@ namespace PROfit{
             std::vector<size_t> m_num_subchannels; 
 
             size_t i_prime;
+            size_t i_osc;
 
             // New
             std::vector<std::vector<size_t>> m_channel_variable_num_bins;
             std::vector<std::vector<std::vector<float>>> m_channel_variable_bin_edges;
             std::vector<std::vector<std::vector<float>>> m_channel_variable_bin_widths;
-
-           
-            /* old reco  TBD*/ 
-            //std::vector<size_t> m_channel_num_bins;
-            std::vector<std::vector<float> > m_channel_bin_edges;
-            std::vector<std::vector<float> > m_channel_bin_widths;
-
-            /* New true bins to save the truth level variables in addition. TBD*/
-            std::vector<size_t> m_channel_num_truebins;
-            std::vector<std::vector<float> > m_channel_truebin_edges;
-            std::vector<std::vector<float> > m_channel_truebin_widths;
-
-            // Same but for "other" vars TBD
-            std::vector<std::vector<size_t>> m_channel_num_other_bins;
-            std::vector<std::vector<std::vector<float>>> m_channel_other_bin_edges;
-            std::vector<std::vector<std::vector<float>>> m_channel_other_bin_widths;
-
-
-            bool m_has_oscillation_patterns;
 
             //the xml names are the way we track which channels and subchannels we want to use later
             std::vector<std::string> m_mode_names; 			
@@ -304,7 +286,7 @@ namespace PROfit{
             std::vector<std::string> m_channel_names; 		
             std::vector<std::string> m_channel_plotnames; 		
             std::vector<std::string> m_channel_units; 		
-            std::vector<std::vector<std::string>> m_channel_other_units;
+
             std::vector<std::vector<std::string>> m_channel_variable_units;
 
             std::vector<std::vector<std::string >> m_subchannel_names; 
@@ -312,36 +294,38 @@ namespace PROfit{
             std::vector<std::vector<std::string >> m_subchannel_colors; 
             std::vector<std::vector<size_t >> m_subchannel_datas; 
 
-            size_t m_num_bins_detector_block; //TBD
-            size_t m_num_bins_mode_block; //TBD
-            size_t m_num_bins_total; //TBD
-
-            size_t m_num_truebins_detector_block; //TBD
-            size_t m_num_truebins_mode_block; //TBD
-            size_t m_num_truebins_total; //TBD
-
-            std::vector<size_t> m_num_other_bins_detector_block; //TBD
-            std::vector<size_t> m_num_other_bins_mode_block; //TBD
-            std::vector<size_t> m_num_other_bins_total; //TBD
 
             std::vector<size_t> m_num_variable_bins_detector_block;
             std::vector<size_t> m_num_variable_bins_mode_block;
             std::vector<size_t> m_num_variable_bins_total;
+            std::vector<size_t> m_num_variable_bins_detector_block_collapsed; 
+            std::vector<size_t> m_num_variable_bins_mode_block_collapsed; 
+            std::vector<size_t> m_num_variable_bins_total_collapsed; 
 
 
-            size_t m_num_bins_detector_block_collapsed; //TBD
-            size_t m_num_bins_mode_block_collapsed; //TBD
-            size_t m_num_bins_total_collapsed; //TBD
+            //size_t m_num_bins_detector_block; //TBD
+            //size_t m_num_bins_mode_block; //TBD
+            //size_t m_num_bins_total; //TBD
 
-            std::vector<size_t> m_num_other_bins_detector_block_collapsed;
-            std::vector<size_t> m_num_other_bins_mode_block_collapsed;
-            std::vector<size_t> m_num_other_bins_total_collapsed;
+            //size_t m_num_truebins_detector_block; //TBD
+            //size_t m_num_truebins_mode_block; //TBD
+            //size_t m_num_truebins_total; //TBD
 
-            std::vector<size_t> m_num_variable_bins_detector_block_collapsed; //TBD
-            std::vector<size_t> m_num_variable_bins_mode_block_collapsed; //TBD
-            std::vector<size_t> m_num_variable_bins_total_collapsed; //TBD
+            //std::vector<size_t> m_num_other_bins_detector_block; //TBD
+            //std::vector<size_t> m_num_other_bins_mode_block; //TBD
+            //std::vector<size_t> m_num_other_bins_total; //TBD
 
+            //size_t m_num_bins_detector_block_collapsed; //TBD
+            //size_t m_num_bins_mode_block_collapsed; //TBD
+            //size_t m_num_bins_total_collapsed; //TBD
 
+            //std::vector<size_t> m_num_other_bins_detector_block_collapsed;
+            //std::vector<size_t> m_num_other_bins_mode_block_collapsed;
+            //std::vector<size_t> m_num_other_bins_total_collapsed;
+
+            //till Here
+            // need a sed to switch m_num_variable_bins_total[config.i_prime]_collapsed to m_num_variable_bins_total_collapsed[config.i_prime] and same for mode_block, detector_block
+            
             /* Eigen Matrix for collapsing subchannels->channels*/
             Eigen::MatrixXf collapsing_matrix;//TBD
             std::vector<Eigen::MatrixXf> other_collapsing_matrices; //TBD

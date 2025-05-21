@@ -42,20 +42,20 @@ namespace PROfit{
         Eigen::MatrixXf collapsed_cv_inv_diag = collapsed_cv.asDiagonal().inverse();
         Eigen::MatrixXf collapsed_frac_cov = collapsed_cv_inv_diag * collapsed_full_covariance * collapsed_cv_inv_diag;
 
-        std::unique_ptr<TH2D> cov_hist = std::make_unique<TH2D>("cov", "Fractional Covariance Matrix;Bin # ;Bin #", config.m_num_bins_total, 0, config.m_num_bins_total, config.m_num_bins_total, 0, config.m_num_bins_total);
-        std::unique_ptr<TH2D> collapsed_cov_hist = std::make_unique<TH2D>("ccov", "Collapsed Fractional Covariance Matrix;Bin # ;Bin #", config.m_num_bins_total_collapsed, 0, config.m_num_bins_total_collapsed, config.m_num_bins_total_collapsed, 0, config.m_num_bins_total_collapsed);
+        std::unique_ptr<TH2D> cov_hist = std::make_unique<TH2D>("cov", "Fractional Covariance Matrix;Bin # ;Bin #", config.m_num_variable_bins_total[config.i_prime], 0, config.m_num_variable_bins_total[config.i_prime], config.m_num_variable_bins_total[config.i_prime], 0, config.m_num_variable_bins_total[config.i_prime]);
+        std::unique_ptr<TH2D> collapsed_cov_hist = std::make_unique<TH2D>("ccov", "Collapsed Fractional Covariance Matrix;Bin # ;Bin #", config.m_num_variable_bins_total[config.i_prime]_collapsed, 0, config.m_num_variable_bins_total[config.i_prime]_collapsed, config.m_num_variable_bins_total[config.i_prime]_collapsed, 0, config.m_num_variable_bins_total[config.i_prime]_collapsed);
 
-        std::unique_ptr<TH2D> cor_hist = std::make_unique<TH2D>("cor", "Correlation Matrix;Bin # ;Bin #", config.m_num_bins_total, 0, config.m_num_bins_total, config.m_num_bins_total, 0, config.m_num_bins_total);
-        std::unique_ptr<TH2D> collapsed_cor_hist = std::make_unique<TH2D>("ccor", "Collapsed Correlation Matrix;Bin # ;Bin #", config.m_num_bins_total_collapsed, 0, config.m_num_bins_total_collapsed, config.m_num_bins_total_collapsed, 0, config.m_num_bins_total_collapsed);
+        std::unique_ptr<TH2D> cor_hist = std::make_unique<TH2D>("cor", "Correlation Matrix;Bin # ;Bin #", config.m_num_variable_bins_total[config.i_prime], 0, config.m_num_variable_bins_total[config.i_prime], config.m_num_variable_bins_total[config.i_prime], 0, config.m_num_variable_bins_total[config.i_prime]);
+        std::unique_ptr<TH2D> collapsed_cor_hist = std::make_unique<TH2D>("ccor", "Collapsed Correlation Matrix;Bin # ;Bin #", config.m_num_variable_bins_total[config.i_prime]_collapsed, 0, config.m_num_variable_bins_total[config.i_prime]_collapsed, config.m_num_variable_bins_total[config.i_prime]_collapsed, 0, config.m_num_variable_bins_total[config.i_prime]_collapsed);
 
-        for(size_t i = 0; i < config.m_num_bins_total; ++i)
-            for(size_t j = 0; j < config.m_num_bins_total; ++j){
+        for(size_t i = 0; i < config.m_num_variable_bins_total[config.i_prime]; ++i)
+            for(size_t j = 0; j < config.m_num_variable_bins_total[config.i_prime]; ++j){
                 cov_hist->SetBinContent(i+1,j+1,fractional_cov(i,j));
                 cor_hist->SetBinContent(i+1,j+1,fractional_cov(i,j)/(sqrt(fractional_cov(i,i))*sqrt(fractional_cov(j,j))));
             }
 
-        for(size_t i = 0; i < config.m_num_bins_total_collapsed; ++i)
-            for(size_t j = 0; j < config.m_num_bins_total_collapsed; ++j){
+        for(size_t i = 0; i < config.m_num_variable_bins_total[config.i_prime]_collapsed; ++i)
+            for(size_t j = 0; j < config.m_num_variable_bins_total[config.i_prime]_collapsed; ++j){
                 collapsed_cov_hist->SetBinContent(i+1,j+1,collapsed_frac_cov(i,j));
                 collapsed_cor_hist->SetBinContent(i+1,j+1,collapsed_frac_cov(i,j)/(sqrt(collapsed_frac_cov(i,i))*sqrt(collapsed_frac_cov(j,j))));
             }
@@ -69,10 +69,10 @@ namespace PROfit{
             const Eigen::MatrixXf &covar = syst.GrabMatrix(name);
             const Eigen::MatrixXf &corr = syst.GrabCorrMatrix(name);
 
-            std::unique_ptr<TH2D> cov_h = std::make_unique<TH2D>(("cov"+name).c_str(), (name+" Fractional Covariance;Bin # ;Bin #").c_str(), config.m_num_bins_total, 0, config.m_num_bins_total, config.m_num_bins_total, 0, config.m_num_bins_total);
-            std::unique_ptr<TH2D> corr_h = std::make_unique<TH2D>(("cor"+name).c_str(), (name+" Correlation;Bin # ;Bin #").c_str(), config.m_num_bins_total, 0, config.m_num_bins_total, config.m_num_bins_total, 0, config.m_num_bins_total);
-            for(size_t i = 0; i < config.m_num_bins_total; ++i){
-                for(size_t j = 0; j < config.m_num_bins_total; ++j){
+            std::unique_ptr<TH2D> cov_h = std::make_unique<TH2D>(("cov"+name).c_str(), (name+" Fractional Covariance;Bin # ;Bin #").c_str(), config.m_num_variable_bins_total[config.i_prime], 0, config.m_num_variable_bins_total[config.i_prime], config.m_num_variable_bins_total[config.i_prime], 0, config.m_num_variable_bins_total[config.i_prime]);
+            std::unique_ptr<TH2D> corr_h = std::make_unique<TH2D>(("cor"+name).c_str(), (name+" Correlation;Bin # ;Bin #").c_str(), config.m_num_variable_bins_total[config.i_prime], 0, config.m_num_variable_bins_total[config.i_prime], config.m_num_variable_bins_total[config.i_prime], 0, config.m_num_variable_bins_total[config.i_prime]);
+            for(size_t i = 0; i < config.m_num_variable_bins_total[config.i_prime]; ++i){
+                for(size_t j = 0; j < config.m_num_variable_bins_total[config.i_prime]; ++j){
                     cov_h->SetBinContent(i+1,j+1,covar(i,j));
                     corr_h->SetBinContent(i+1,j+1,corr(i,j));
                 }
@@ -95,9 +95,9 @@ namespace PROfit{
                 //using Spline = std::vector<std::vector<std::pair<float, std::array<float, 4>>>>;
                 std::vector<std::pair<std::unique_ptr<TGraph>,std::unique_ptr<TGraph>>> bin_graphs;
                 size_t nbins = 
-                    systs.spline_binnings[i] == -2 ? config.m_num_truebins_total :
-                    systs.spline_binnings[i] == -1 ? config.m_num_bins_total
-                    : config.m_num_other_bins_total[systs.spline_binnings[i]];
+                    systs.spline_binnings[i] == -2 ? config.m_num_variable_bins_total[config.i_osc] :
+                    systs.spline_binnings[i] == -1 ? config.m_num_variable_bins_total[config.i_prime]
+                    : config.m_num_variable_bins_total[systs.spline_binnings[i]];
                 bin_graphs.reserve(nbins);
 
                 for(size_t j = 0; j < nbins; ++j) {
@@ -191,9 +191,9 @@ namespace PROfit{
         for(size_t mode = 0; mode < config.m_num_modes; ++mode) {
             for(size_t det = 0; det < config.m_num_detectors; ++det) {
                 for(size_t channel = 0; channel < config.m_num_channels; ++channel) {
-                    size_t channel_nbins = other_index < 0 ? config.m_channel_variable_num_bins[config.i_prime][channel] : config.m_channel_num_other_bins[channel][other_index];
+                    size_t channel_nbins = other_index < 0 ? config.m_channel_variable_num_bins[config.i_prime][channel] : config.m_channel_variable_num_bins[channel][other_index];
                     std::vector<float> edges = other_index < 0 ? config.GetChannelBinEdges(0) : config.GetChannelOtherBinEdges(0, other_index);
-                    std::string xtitle = other_index < 0 ? config.m_channel_units[channel] : config.m_channel_other_units[channel][other_index];
+                    std::string xtitle = other_index < 0 ? config.m_channel_units[channel] : config.m_channel_variable_units[channel][other_index];
                     std::string hist_title = config.m_detector_plotnames[det]  + " "+ config.m_channel_plotnames[channel]+";"+xtitle+";"+ytitle;
                     std::unique_ptr<TLegend> leg = std::make_unique<TLegend>(0.59,0.89,0.59,0.89);
                     leg->SetFillStyle(0);

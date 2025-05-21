@@ -74,7 +74,7 @@ namespace PROfit{
             Eigen::VectorXf cv = FillRecoSpectra(config, prop, metric.GetSysts(), metric.GetModel(), best_fit, true).Spec();
             Eigen::MatrixXf L = metric.GetSysts().DecomposeFractionalCovariance(config, cv);
             std::normal_distribution<float> nd;
-            Eigen::VectorXf throws = Eigen::VectorXf::Constant(config.m_num_bins_total_collapsed, 0);
+            Eigen::VectorXf throws = Eigen::VectorXf::Constant(config.m_num_variable_bins_total_collapsed[config.i_prime], 0);
 
             int nspline = metric.GetSysts().GetNSplines();
             int nphys = metric.GetModel().nparams;
@@ -84,7 +84,7 @@ namespace PROfit{
             std::vector<Eigen::VectorXf> specs;
             const auto action = [&](const Eigen::VectorXf &value) {
                 accepted += 1;
-                for(size_t i = 0; i < config.m_num_bins_total_collapsed; ++i)
+                for(size_t i = 0; i < config.m_num_variable_bins_total_collapsed[config.i_prime]; ++i)
                     throws(i) = nd(PROseed::global_rng);
                 specs.push_back(CollapseMatrix(config, FillRecoSpectra(config, prop, metric.GetSysts(), metric.GetModel(), value, true).Spec())+L*throws);
                 for(size_t i = 0; i < metric.GetSysts().GetNSplines(); ++i)
