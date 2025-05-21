@@ -60,14 +60,15 @@ namespace PROfit{
       std::string associated_systematic;
       bool central_value;
 
-      std::shared_ptr<TTreeFormula> branch_formula=nullptr;
+      std::shared_ptr<TTreeFormula> branch_formula=nullptr; //TBD
       std::shared_ptr<TTreeFormula> branch_monte_carlo_weight_formula = nullptr;
       std::shared_ptr<TTreeFormula> branch_true_value_formula=nullptr;
       std::shared_ptr<TTreeFormula> branch_true_L_formula=nullptr;
       std::shared_ptr<TTreeFormula> branch_true_pdg_formula=nullptr;
       std::shared_ptr<TTreeFormula> branch_true_proton_mom_formula=nullptr;
       std::shared_ptr<TTreeFormula> branch_true_proton_costh_formula=nullptr;
-      std::vector<std::shared_ptr<TTreeFormula>> branch_other_values_formulas;
+      std::vector<std::shared_ptr<TTreeFormula>> branch_other_values_formulas; //TBDD
+      std::vector<std::shared_ptr<TTreeFormula>> branch_variable_formulas;
 
       std::string true_param_name;
       std::string true_L_name;
@@ -76,6 +77,7 @@ namespace PROfit{
       int include_systematics;
 
       std::vector<std::string> other_param_names;
+      std::vector<std::string> vairable_names;
 
       bool hist_reweight;
       std::string true_proton_mom_name;
@@ -172,6 +174,10 @@ namespace PROfit{
       template<typename T=float>
     std::vector<T> GetOtherValues() const;
 
+      template<typename T=float>
+    std::vector<T> GetVariables() const;
+
+
     };
 
  
@@ -257,23 +263,34 @@ namespace PROfit{
             size_t m_num_detectors;
             size_t m_num_channels;
             size_t m_num_modes;
-            size_t m_num_other_vars;
+            size_t m_num_other_vars;//tbd
+            size_t m_num_variables;
 
-            /*Vectors of length num_channels. Unless specificed all refer to fittable (reco) variables*/
             std::vector<size_t> m_num_subchannels; 
+
+            size_t i_prime;
+
+            // New
+            std::vector<std::vector<size_t>> m_channel_variable_num_bins;
+            std::vector<std::vector<std::vector<float>>> m_channel_variable_bin_edges;
+            std::vector<std::vector<std::vector<float>>> m_channel_variable_bin_widths;
+
+           
+            /* old reco  TBD*/ 
             std::vector<size_t> m_channel_num_bins;
             std::vector<std::vector<float> > m_channel_bin_edges;
             std::vector<std::vector<float> > m_channel_bin_widths;
 
-            /* New true bins to save the truth level variables in addition.*/
+            /* New true bins to save the truth level variables in addition. TBD*/
             std::vector<size_t> m_channel_num_truebins;
             std::vector<std::vector<float> > m_channel_truebin_edges;
             std::vector<std::vector<float> > m_channel_truebin_widths;
 
-            // Same but for "other" vars
+            // Same but for "other" vars TBD
             std::vector<std::vector<size_t>> m_channel_num_other_bins;
             std::vector<std::vector<std::vector<float>>> m_channel_other_bin_edges;
             std::vector<std::vector<std::vector<float>>> m_channel_other_bin_widths;
+
 
             bool m_has_oscillation_patterns;
 
@@ -288,35 +305,47 @@ namespace PROfit{
             std::vector<std::string> m_channel_plotnames; 		
             std::vector<std::string> m_channel_units; 		
             std::vector<std::vector<std::string>> m_channel_other_units;
+            std::vector<std::vector<std::string>> m_channel_variable_units;
 
             std::vector<std::vector<std::string >> m_subchannel_names; 
             std::vector<std::vector<std::string >> m_subchannel_plotnames; 
             std::vector<std::vector<std::string >> m_subchannel_colors; 
             std::vector<std::vector<size_t >> m_subchannel_datas; 
 
-            size_t m_num_bins_detector_block;
-            size_t m_num_bins_mode_block;
-            size_t m_num_bins_total;
+            size_t m_num_bins_detector_block; //TBD
+            size_t m_num_bins_mode_block; //TBD
+            size_t m_num_bins_total; //TBD
 
-            size_t m_num_truebins_detector_block;
-            size_t m_num_truebins_mode_block;
-            size_t m_num_truebins_total;
+            size_t m_num_truebins_detector_block; //TBD
+            size_t m_num_truebins_mode_block; //TBD
+            size_t m_num_truebins_total; //TBD
 
-            std::vector<size_t> m_num_other_bins_detector_block;
-            std::vector<size_t> m_num_other_bins_mode_block;
-            std::vector<size_t> m_num_other_bins_total;
+            std::vector<size_t> m_num_other_bins_detector_block; //TBD
+            std::vector<size_t> m_num_other_bins_mode_block; //TBD
+            std::vector<size_t> m_num_other_bins_total; //TBD
 
-            size_t m_num_bins_detector_block_collapsed;
-            size_t m_num_bins_mode_block_collapsed;
-            size_t m_num_bins_total_collapsed;
+            std::vector<size_t> m_num_variable_bins_detector_block;
+            std::vector<size_t> m_num_variable_bins_mode_block;
+            std::vector<size_t> m_num_variable_bins_total;
+
+
+            size_t m_num_bins_detector_block_collapsed; //TBD
+            size_t m_num_bins_mode_block_collapsed; //TBD
+            size_t m_num_bins_total_collapsed; //TBD
 
             std::vector<size_t> m_num_other_bins_detector_block_collapsed;
             std::vector<size_t> m_num_other_bins_mode_block_collapsed;
             std::vector<size_t> m_num_other_bins_total_collapsed;
 
+            std::vector<size_t> m_num_variable_bins_detector_block_collapsed; //TBD
+            std::vector<size_t> m_num_variable_bins_mode_block_collapsed; //TBD
+            std::vector<size_t> m_num_variable_bins_total_collapsed; //TBD
+
+
             /* Eigen Matrix for collapsing subchannels->channels*/
-            Eigen::MatrixXf collapsing_matrix;
-            std::vector<Eigen::MatrixXf> other_collapsing_matrices;
+            Eigen::MatrixXf collapsing_matrix;//TBD
+            std::vector<Eigen::MatrixXf> other_collapsing_matrices; //TBD
+            std::vector<Eigen::MatrixXf> variable_collapsing_matrices; 
 
             //This section entirely for montecarlo generation of a covariance matrix or PROspec 
             bool m_write_out_variation;
@@ -513,6 +542,15 @@ namespace PROfit{
             }
             return ret;
         }
+    template <typename T>
+        std::vector<T> BranchVariable::GetVariables() const {
+            std::vector<T> ret;
+            for(const auto &formula: branch_variable_formulas) {
+                ret.push_back(formula->EvalInstance());
+            }
+            return ret;
+        }
+
 
     //----------- ABOVE: Definition of BranchVariable templated member function. END ---------------
 

@@ -693,7 +693,7 @@ namespace PROfit {
                         size_t ic = inconfig.GetChannelIndex(is);     
 
                         size_t start = inconfig.GetGlobalBinStart(is); 
-                        for(size_t b = 0; b < inconfig.m_channel_num_bins[ic] ; b++){
+                        for(size_t b = 0; b < inconfig.m_channel_variable_num_bins[inconfig.i_prime][ic] ; b++){
                             flatbins.push_back((int)(start+b));
                         }
                     }

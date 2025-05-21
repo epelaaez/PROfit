@@ -73,12 +73,12 @@ bool PROconfig::SameChannels(const PROconfig &one, const PROconfig &two) {
                 % __func__ % one.m_channel_names[i].c_str() % two.m_channel_names[i].c_str();
             return false;
         }
-        if(one.m_channel_num_bins[i] != two.m_channel_num_bins[i]) {
+        if(one.m_channel_variable_num_bins[one.i_prime][i] != two.m_channel_variable_num_bins[two.i_prime][i]) {
             log<LOG_WARNING>(L"%1% || Found different number of channel bins %2% vs %3%")
-                % __func__ % one.m_channel_num_bins[i] % two.m_channel_num_bins[i];
+                % __func__ % one.m_channel_variable_num_bins[one.i_prime][i] % two.m_channel_variable_num_bins[two.i_prime][i];
             return false;
         }
-        for(size_t j = 0; j < one.m_channel_num_bins[i]+1; ++j) {
+        for(size_t j = 0; j < one.m_channel_variable_num_bins[one.i_prime][i]+1; ++j) {
             if(one.m_channel_bin_edges[i][j] != two.m_channel_bin_edges[i][j]) {
                 log<LOG_WARNING>(L"%1% || Found different bin edge for bin %2% in channel %3%. %4% vs %5%")
                     % __func__ % j % one.m_channel_names[i].c_str() % one.m_channel_bin_edges[i][j] % two.m_channel_bin_edges[i][j];
@@ -288,13 +288,13 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 log<LOG_DEBUG>(L"%1% || This variable has a Reco Binning with  %2% bins, Edges defined as %3%    ") % __func__ % nbinsp % binedge ;
 
                 if(m_bool_rate_only){
-                    m_channel_num_bins.push_back(1);
+                    m_channel_variable_num_bins[i_prime].push_back(1);
                     std::vector<float> counting_exp_bin = {binedge.front(), binedge.back()};
                     m_channel_bin_edges.push_back(counting_exp_bin);
                     std::vector<float> counting_exp_width = {binedge.front()-binedge.back()};
                     m_channel_bin_widths.push_back(counting_exp_width);
                 }else{
-                    m_channel_num_bins.push_back(nbinsp);
+                    m_channel_variable_num_bins[i_prime].push_back(nbinsp);
                     m_channel_bin_edges.push_back(binedge);
                     m_channel_bin_widths.push_back(binwidth);
                 }
@@ -314,13 +314,13 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 log<LOG_DEBUG>(L"%1% || Which corresponds to edges %2%   ") % __func__ % binedge ;
 
                 if(m_bool_rate_only){
-                    m_channel_num_bins.push_back(1);
+                    m_channel_variable_num_bins[i_prime].push_back(1);
                     std::vector<float> counting_exp_bin = {binedge.front(), binedge.back()};
                     m_channel_bin_edges.push_back(counting_exp_bin);
                     std::vector<float> counting_exp_width = {binedge.front()-binedge.back()};
                     m_channel_bin_widths.push_back(counting_exp_width);
                 }else{
-                    m_channel_num_bins.push_back(nbinsp);
+                    m_channel_variable_num_bins[i_prime].push_back(nbinsp);
                     m_channel_bin_edges.push_back(binedge);
                     m_channel_bin_widths.push_back(binwidth);
                 }
@@ -1053,7 +1053,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
     log<LOG_INFO>(L"%1% || num_channels: %2% ") % __func__ % m_num_channels;
     for(size_t i = 0 ; i!=m_num_channels; ++i){
         log<LOG_INFO>(L"%1% || num of subchannels: %2% ") % __func__ % m_num_subchannels[i];
-        log<LOG_INFO>(L"%1% || num of bins: %2% ") % __func__ % m_channel_num_bins[i];
+        log<LOG_INFO>(L"%1% || num of bins: %2% ") % __func__ % m_channel_variable_num_bins[i_prime][i];
 
     }
     log<LOG_INFO>(L"%1% || num_bins_detector_block: %2%") % __func__ % m_num_bins_detector_block;
@@ -1077,9 +1077,9 @@ void PROconfig::CalcTotalBins(){
 
     log<LOG_INFO>(L"%1% || Calculating number of bins involved") % __func__;
     for(size_t i = 0; i != m_num_channels; ++i){
-        m_num_bins_detector_block += m_num_subchannels[i]*m_channel_num_bins[i];
+        m_num_bins_detector_block += m_num_subchannels[i]*m_channel_variable_num_bins[i_prime][i];
         m_num_truebins_detector_block += m_num_subchannels[i]*m_channel_num_truebins[i];
-        m_num_bins_detector_block_collapsed += m_channel_num_bins[i];
+        m_num_bins_detector_block_collapsed += m_channel_variable_num_bins[i_prime][i];
         for(size_t io = 0; io < m_num_other_vars; ++io) {
             m_num_other_bins_detector_block[io] += m_num_subchannels[i]*m_channel_num_other_bins[i][io];
             m_num_other_bins_detector_block_collapsed[io] += m_channel_num_other_bins[i][io];
@@ -1134,7 +1134,7 @@ size_t PROconfig::GetCollapsedGlobalBinStart(size_t channel_index) const{
         exit(EXIT_FAILURE);
     }
     size_t index = 0;
-    for(size_t i = 0; i < channel_index; ++i) index += m_channel_num_bins[i];
+    for(size_t i = 0; i < channel_index; ++i) index += m_channel_variable_num_bins[i_prime][i];
     return index;
 }
 
@@ -1296,7 +1296,7 @@ void PROconfig::remove_unused_channel(){
         std::vector<std::vector<std::string>> temp_channel_other_units(m_num_channels);
         for(size_t i=0, chan_index = 0; i< m_channel_bool.size(); ++i){
             if(m_channel_bool[i]){
-                temp_channel_num_bins[chan_index] = m_channel_num_bins[i];
+                temp_channel_num_bins[chan_index] = m_channel_variable_num_bins[i_prime][i];
                 temp_channel_bin_edges[chan_index] = m_channel_bin_edges[i];
                 temp_channel_bin_widths[chan_index] = m_channel_bin_widths[i];
 
@@ -1317,7 +1317,7 @@ void PROconfig::remove_unused_channel(){
             }
         }
 
-        m_channel_num_bins = temp_channel_num_bins;
+        m_channel_variable_num_bins[i_prime] = temp_channel_num_bins;
         m_channel_bin_edges = temp_channel_bin_edges;
         m_channel_bin_widths = temp_channel_bin_widths;
         m_channel_num_truebins = temp_channel_num_truebins;
@@ -1546,7 +1546,7 @@ void PROconfig::generate_index_map(){
                 for(size_t sc = 0; sc < m_num_subchannels[ic]; sc++){
 
                     std::string temp_name  = m_mode_names[im] +"_" +m_detector_names[id]+"_"+m_channel_names[ic]+"_"+m_subchannel_names[ic][sc];
-                    size_t global_bin_index = mode_bin_start + detector_bin_start + channel_bin_start + sc*m_channel_num_bins[ic];
+                    size_t global_bin_index = mode_bin_start + detector_bin_start + channel_bin_start + sc*m_channel_variable_num_bins[i_prime][ic];
                     size_t global_truebin_index = mode_truebin_start + detector_truebin_start + channel_truebin_start + sc*m_channel_num_truebins[ic];
 
                     m_map_fullname_subchannel_index[temp_name] = global_subchannel_index;
@@ -1562,7 +1562,7 @@ void PROconfig::generate_index_map(){
 
                     ++global_subchannel_index;
                 }
-                channel_bin_start += m_channel_num_bins[ic]*m_num_subchannels[ic];
+                channel_bin_start += m_channel_variable_num_bins[i_prime][ic]*m_num_subchannels[ic];
                 channel_truebin_start += m_channel_num_truebins[ic]*m_num_subchannels[ic];
                 for(size_t io = 0; io < m_num_other_vars; ++io) {
                     channel_other_start[io] += m_channel_num_other_bins[ic][io]*m_num_subchannels[ic];
@@ -1626,20 +1626,20 @@ void PROconfig::construct_collapsing_matrix(){
     for(size_t ic =0; ic != m_num_channels; ++ic){
 
         //first, build matrix for each channel block
-        size_t total_num_bins_channel = m_num_subchannels[ic] * m_channel_num_bins[ic];
+        size_t total_num_bins_channel = m_num_subchannels[ic] * m_channel_variable_num_bins[i_prime][ic];
 
-        Eigen::MatrixXf channel_collapser = Eigen::MatrixXf::Zero(total_num_bins_channel, m_channel_num_bins[ic]);
-        for(size_t col = 0; col != m_channel_num_bins[ic]; ++col){
+        Eigen::MatrixXf channel_collapser = Eigen::MatrixXf::Zero(total_num_bins_channel, m_channel_variable_num_bins[i_prime][ic]);
+        for(size_t col = 0; col != m_channel_variable_num_bins[i_prime][ic]; ++col){
             for(size_t subch = 0; subch != m_num_subchannels[ic]; ++subch){
-                size_t row = subch * m_channel_num_bins[ic] + col;
+                size_t row = subch * m_channel_variable_num_bins[i_prime][ic] + col;
                 channel_collapser(row, col) = 1.0;
             }
         }
 
         // now, copy this matrix to detector block
-        block_collapser(Eigen::seqN(channel_row_start, total_num_bins_channel), Eigen::seqN(channel_col_start, m_channel_num_bins[ic])) = channel_collapser;
+        block_collapser(Eigen::seqN(channel_row_start, total_num_bins_channel), Eigen::seqN(channel_col_start, m_channel_variable_num_bins[i_prime][ic])) = channel_collapser;
         channel_row_start += total_num_bins_channel;
-        channel_col_start += m_channel_num_bins[ic];
+        channel_col_start += m_channel_variable_num_bins[i_prime][ic];
     }
 
     //okay! now stuff every detector block size_to the final collapse matrix

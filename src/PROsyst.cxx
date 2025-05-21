@@ -256,7 +256,7 @@ namespace PROfit {
 
             if(other_index < 0) {
                 size_t start = config.GetGlobalBinStart(is); 
-                for(size_t b = 0; b < config.m_channel_num_bins[ic] ; b++){
+                for(size_t b = 0; b < config.m_channel_variable_num_bins[config.i_prime][ic] ; b++){
                     fracM(start+b,start+b)=flat_percent*flat_percent;
                     flatbins.push_back(start+b);
                 }
