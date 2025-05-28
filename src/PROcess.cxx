@@ -220,7 +220,7 @@ namespace PROfit {
 
     PROspec FillSystRandomThrow(const PROconfig &inconfig, const PROpeller &inprop, const PROsyst &insyst, uint32_t seed, int other_index) {
         int nbins = other_index < 0 ? inconfig.m_num_variable_bins_total[inconfig.i_prime] : inconfig.m_num_variable_bins_total[other_index],
-            nbins_collapsed = other_index < 0 ? inconfig.m_num_variable_bins_total[inconfig.i_prime]_collapsed : inconfig.m_num_variable_bins_total_collapsed[other_index];
+            nbins_collapsed = other_index < 0 ? inconfig.m_num_variable_bins_total_collapsed[inconfig.i_prime] : inconfig.m_num_variable_bins_total_collapsed[other_index];
         Eigen::VectorXf spec = Eigen::VectorXf::Constant(nbins, 0);
         Eigen::VectorXf cvspec = Eigen::VectorXf::Constant(nbins, 0);
 

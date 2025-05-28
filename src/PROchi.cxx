@@ -69,7 +69,7 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
     
     PROspec result = FillRecoSpectra(config, peller, *syst, model, param, strat == BinnedChi2);
 
-    Eigen::MatrixXf inverted_collapsed_full_covariance(config.m_num_variable_bins_total[config.i_prime]_collapsed,config.m_num_variable_bins_total[config.i_prime]_collapsed);
+    Eigen::MatrixXf inverted_collapsed_full_covariance(config.m_num_variable_bins_total_collapsed[config.i_prime],config.m_num_variable_bins_total_collapsed[config.i_prime]);
 
     Eigen::MatrixXf diag = result.Spec().array().matrix().asDiagonal(); 
     Eigen::MatrixXf full_covariance = diag*(syst->fractional_covariance)*diag;
@@ -97,7 +97,7 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
             Eigen::VectorXf subvector2 = tmpParams.segment(nparams - nsyst, nsyst);
             PROspec result = FillRecoSpectra(config, peller, *syst, model, tmpParams, strat != EventByEvent);
             // Calcuate Full Covariance matrix
-            Eigen::MatrixXf inverted_collapsed_full_covariance(config.m_num_variable_bins_total[config.i_prime]_collapsed,config.m_num_variable_bins_total[config.i_prime]_collapsed);
+            Eigen::MatrixXf inverted_collapsed_full_covariance(config.m_num_variable_bins_total_collapsed[config.i_prime],config.m_num_variable_bins_total_collapsed[config.i_prime]);
 
             Eigen::MatrixXf diag = result.Spec().array().matrix().asDiagonal(); 
             Eigen::MatrixXf full_covariance = diag*(syst->fractional_covariance)*diag;

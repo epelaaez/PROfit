@@ -57,7 +57,7 @@ namespace PROfit{
             /*Function: Primary Constructor from raw std::vectors of MC values */ 
             PROpeller(const PROconfig &config, std::vector<float> &intruth, std::vector<float> &inpmom, std::vector<float> &inpcosth, std::vector<float> &inadded_weights, std::vector<int> &inbin_indices, std::vector<int> &inmodel_rule, std::vector<int> &intrue_bin_indices) : trueLE(intruth), added_weights(inadded_weights), bin_indices(inbin_indices), model_rule(inmodel_rule), true_bin_indices(intrue_bin_indices), pmom(inpmom), pcosth(inpcosth) {
                 nevents = trueLE.size();
-                hist = Eigen::MatrixXf::Constant(config.m_num_truebins_total, config.m_num_bins_total, 0);
+                hist = Eigen::MatrixXf::Constant(config.m_num_variable_bins_total[config.i_osc], config.m_num_variable_bins_total[config.i_prime], 0);
                 for(size_t i = 0; i < bin_indices.size(); ++i)
                     hist(true_bin_indices[i], bin_indices[i]) += added_weights[i];
                 hash = config.hash;

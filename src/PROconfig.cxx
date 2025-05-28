@@ -13,16 +13,13 @@ PROconfig::PROconfig(const std::string &xml, bool rate_only):
     m_num_detectors(0),
     m_num_channels(0),
     m_num_modes(0),
-    m_num_other_vars(0),
-    m_num_variable_bins_detector_block[i_prime](0),
-    m_num_variable_bins_mode_block[i_prime](0),
-    m_num_variable_bins_total[i_prime](0),
-    m_num_variable_truebins_detector_block[i_osc](0),
-    m_num_variable_truebins_mode_block[i_osc](0),
-    m_num_variable_bins_total[i_osc](0),
-    m_num_variable_bins_detector_block[i_prime]_collapsed(0),
-    m_num_variable_bins_mode_block[i_prime]_collapsed(0),
-    m_num_variable_bins_total[i_prime]_collapsed(0),
+    m_num_variables(0),
+    m_num_variable_bins_detector_block(0),
+    m_num_variable_bins_mode_block(0),
+    m_num_variable_bins_total(0),
+    m_num_variable_bins_detector_block_collapsed(0),
+    m_num_variable_bins_mode_block_collapsed(0),
+    m_num_variable_bins_total_collapsed(0),
     m_write_out_variation(false), 
     m_form_covariance(true),
     m_write_out_tag("UNSET_DEFAULT"),
@@ -33,7 +30,7 @@ PROconfig::PROconfig(const std::string &xml, bool rate_only):
     LoadFromXML(m_xmlname);
 
     hash = PROconfig::CalcHash();
-    construct_collapsing_matrix();
+    construct_variable_collapsing_matrices();
 
 }
 
@@ -507,13 +504,13 @@ int PROconfig::LoadFromXML(const std::string &filename){
         }
     }//end channel loop
     // Assume all channels have the same number of "other" vars
-    m_num_other_vars = m_channel_variable_bin_edges[0].size();
-    m_num_variable_bins_total = std::vector<size_t>(m_num_other_vars, 0);
-    m_num_variable_bins_total_collapsed = std::vector<size_t>(m_num_other_vars, 0);
-    m_num_variable_bins_mode_block = std::vector<size_t>(m_num_other_vars, 0);
-    m_num_variable_bins_mode_block_collapsed = std::vector<size_t>(m_num_other_vars, 0);
-    m_num_variable_bins_detector_block = std::vector<size_t>(m_num_other_vars, 0);
-    m_num_variable_bins_detector_block_collapsed = std::vector<size_t>(m_num_other_vars, 0);
+    m_num_variables = m_channel_variable_bin_edges[0].size();
+    m_num_variable_bins_total = std::vector<size_t>(m_num_variables, 0);
+    m_num_variable_bins_total_collapsed = std::vector<size_t>(m_num_variables, 0);
+    m_num_variable_bins_mode_block = std::vector<size_t>(m_num_variables, 0);
+    m_num_variable_bins_mode_block_collapsed = std::vector<size_t>(m_num_variables, 0);
+    m_num_variable_bins_detector_block = std::vector<size_t>(m_num_variables, 0);
+    m_num_variable_bins_detector_block_collapsed = std::vector<size_t>(m_num_variables, 0);
 
     //Now onto mcgen, for CV specs or for covariance generation
     tinyxml2::XMLElement *pMC, *pWeiMaps, *pList, *pCorrelations, *pSpec, *pShapeOnlyMap;
@@ -1057,14 +1054,14 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
     }
     log<LOG_INFO>(L"%1% || num_bins_detector_block: %2%") % __func__ % m_num_variable_bins_detector_block[i_prime];
-    log<LOG_INFO>(L"%1% || num_truebins_detector_block: %2%") % __func__ % m_num_variable_truebins_detector_block[i_osc];
-    log<LOG_INFO>(L"%1% || num_bins_detector_block_collapsed: %2%") % __func__ % m_num_variable_bins_detector_block[i_prime]_collapsed;
+    log<LOG_INFO>(L"%1% || num_truebins_detector_block: %2%") % __func__ % m_num_variable_bins_detector_block[i_osc];
+    log<LOG_INFO>(L"%1% || num_bins_detector_block_collapsed: %2%") % __func__ % m_num_variable_bins_detector_block_collapsed[i_prime];
     log<LOG_INFO>(L"%1% || num_bins_mode_block: %2%") % __func__ % m_num_variable_bins_mode_block[i_prime];
-    log<LOG_INFO>(L"%1% || num_true_bins_mode_block: %2%") % __func__ % m_num_variable_truebins_mode_block[i_osc];
-    log<LOG_INFO>(L"%1% || num_bins_mode_block_collapsed: %2%") % __func__ % m_num_variable_bins_mode_block[i_prime]_collapsed;
+    log<LOG_INFO>(L"%1% || num_true_bins_mode_block: %2%") % __func__ % m_num_variable_bins_mode_block[i_osc];
+    log<LOG_INFO>(L"%1% || num_bins_mode_block_collapsed: %2%") % __func__ % m_num_variable_bins_mode_block_collapsed[i_prime];
     log<LOG_INFO>(L"%1% || num_bins_total: %2%") % __func__ % m_num_variable_bins_total[i_prime];
     log<LOG_INFO>(L"%1% || num_true_bins_total: %2%") % __func__ % m_num_variable_bins_total[i_osc];
-    log<LOG_INFO>(L"%1% || num_bins_total_collapsed: %2%") % __func__ % m_num_variable_bins_total[i_prime]_collapsed;
+    log<LOG_INFO>(L"%1% || num_bins_total_collapsed: %2%") % __func__ % m_num_variable_bins_total_collapsed[i_prime];
 
 
     log<LOG_INFO>(L"%1% || Done reading the xmls") % __func__;
@@ -1078,26 +1075,26 @@ void PROconfig::CalcTotalBins(){
     log<LOG_INFO>(L"%1% || Calculating number of bins involved") % __func__;
     for(size_t i = 0; i != m_num_channels; ++i){
         m_num_variable_bins_detector_block[i_prime] += m_num_subchannels[i]*m_channel_variable_num_bins[i_prime][i];
-        m_num_variable_truebins_detector_block[i_osc] += m_num_subchannels[i]*m_channel_variable_num_bins[i_osc][i];
-        m_num_variable_bins_detector_block[i_prime]_collapsed += m_channel_variable_num_bins[i_prime][i];
-        for(size_t io = 0; io < m_num_other_vars; ++io) {
+        m_num_variable_bins_detector_block[i_osc] += m_num_subchannels[i]*m_channel_variable_num_bins[i_osc][i];
+        m_num_variable_bins_detector_block_collapsed[i_prime] += m_channel_variable_num_bins[i_prime][i];
+        for(size_t io = 0; io < m_num_variables; ++io) {
             m_num_variable_bins_detector_block[io] += m_num_subchannels[i]*m_channel_variable_num_bins[i][io];
             m_num_variable_bins_detector_block_collapsed[io] += m_channel_variable_num_bins[i][io];
         }
     }
 
     m_num_variable_bins_mode_block[i_prime] = m_num_variable_bins_detector_block[i_prime] *  m_num_detectors;
-    m_num_variable_truebins_mode_block[i_osc] = m_num_variable_truebins_detector_block[i_osc] *  m_num_detectors;
-    m_num_variable_bins_mode_block[i_prime]_collapsed = m_num_variable_bins_detector_block[i_prime]_collapsed * m_num_detectors;
-    for(size_t io = 0; io < m_num_other_vars; ++io) {
+    m_num_variable_bins_mode_block[i_osc] = m_num_variable_bins_detector_block[i_osc] *  m_num_detectors;
+    m_num_variable_bins_mode_block_collapsed[i_prime] = m_num_variable_bins_detector_block_collapsed[i_prime] * m_num_detectors;
+    for(size_t io = 0; io < m_num_variables; ++io) {
         m_num_variable_bins_mode_block[io] = m_num_variable_bins_detector_block[io] * m_num_detectors;
         m_num_variable_bins_mode_block_collapsed[io] = m_num_variable_bins_detector_block_collapsed[io] * m_num_detectors;
     }
 
     m_num_variable_bins_total[i_prime] = m_num_variable_bins_mode_block[i_prime] * m_num_modes;
-    m_num_variable_bins_total[i_osc] = m_num_variable_truebins_mode_block[i_osc] * m_num_modes;
-    m_num_variable_bins_total[i_prime]_collapsed = m_num_variable_bins_mode_block[i_prime]_collapsed * m_num_modes;
-    for(size_t io = 0; io < m_num_other_vars; ++io) {
+    m_num_variable_bins_total[i_osc] = m_num_variable_bins_mode_block[i_osc] * m_num_modes;
+    m_num_variable_bins_total_collapsed[i_prime] = m_num_variable_bins_mode_block_collapsed[i_prime] * m_num_modes;
+    for(size_t io = 0; io < m_num_variables; ++io) {
         m_num_variable_bins_total[io] = m_num_variable_bins_mode_block[io] * m_num_modes;
         m_num_variable_bins_total_collapsed[io] = m_num_variable_bins_mode_block_collapsed[io] * m_num_modes;
     }
@@ -1513,7 +1510,7 @@ void PROconfig::generate_index_map(){
     m_vec_global_true_index_start.clear();
     m_vec_global_other_index_start.clear();
 
-    for(size_t io = 0; io < m_num_other_vars; ++io) {
+    for(size_t io = 0; io < m_num_variables; ++io) {
         m_vec_global_other_index_start.emplace_back();
     }
 
@@ -1521,9 +1518,9 @@ void PROconfig::generate_index_map(){
     for(size_t im = 0; im < m_num_modes; im++){
 
         size_t mode_bin_start = im*m_num_variable_bins_mode_block[i_prime];
-        size_t mode_truebin_start = im*m_num_variable_truebins_mode_block[i_osc];
+        size_t mode_truebin_start = im*m_num_variable_bins_mode_block[i_osc];
         std::vector<size_t> mode_other_start;
-        for(size_t io = 0; io < m_num_other_vars; ++io) {
+        for(size_t io = 0; io < m_num_variables; ++io) {
             mode_other_start.push_back(im*m_num_variable_bins_mode_block[io]);
         }
 
@@ -1532,12 +1529,12 @@ void PROconfig::generate_index_map(){
             size_t detector_bin_start = id*m_num_variable_bins_detector_block[i_prime];
             size_t channel_bin_start = 0;
 
-            size_t detector_truebin_start = id*m_num_variable_truebins_detector_block[i_osc];
+            size_t detector_truebin_start = id*m_num_variable_bins_detector_block[i_osc];
             size_t channel_truebin_start = 0;
 
             std::vector<size_t> detector_other_start;
             std::vector<size_t> channel_other_start;
-            for(size_t io = 0; io < m_num_other_vars; ++io) {
+            for(size_t io = 0; io < m_num_variables; ++io) {
                 detector_other_start.push_back(im*m_num_variable_bins_detector_block[io]);
                 channel_other_start.push_back(0);
             }
@@ -1555,7 +1552,7 @@ void PROconfig::generate_index_map(){
                     m_vec_global_reco_index_start.push_back(global_bin_index);
                     m_vec_global_true_index_start.push_back(global_truebin_index);
 
-                    for(size_t io = 0; io < m_num_other_vars; ++io) {
+                    for(size_t io = 0; io < m_num_variables; ++io) {
                         size_t global_other_index = mode_other_start[io] + detector_other_start[io] + channel_other_start[io] + sc*m_channel_variable_num_bins[ic][io];
                         m_vec_global_other_index_start[io].push_back(global_other_index);
                     }
@@ -1564,7 +1561,7 @@ void PROconfig::generate_index_map(){
                 }
                 channel_bin_start += m_channel_variable_num_bins[i_prime][ic]*m_num_subchannels[ic];
                 channel_truebin_start += m_channel_variable_num_bins[i_osc][ic]*m_num_subchannels[ic];
-                for(size_t io = 0; io < m_num_other_vars; ++io) {
+                for(size_t io = 0; io < m_num_variables; ++io) {
                     channel_other_start[io] += m_channel_variable_num_bins[ic][io]*m_num_subchannels[ic];
                 }
             }
@@ -1614,13 +1611,13 @@ size_t PROconfig::find_global_subchannel_index_from_global_bin(size_t global_ind
     return subchannel_index;
 }
 
-void PROconfig::construct_collapsing_matrix(){
+void PROconfig::construct_variable_collapsing_matrices(){
 
-    collapsing_matrix = Eigen::MatrixXf::Zero(m_num_variable_bins_total[i_prime], m_num_variable_bins_total[i_prime]_collapsed);
-    log<LOG_INFO>(L"%1% || Creating Collapsing Matrix. m_num_variable_bins_total[i_prime], m_num_variable_bins_total[i_prime]_collapsed:  %2%  %3%") % __func__ % m_num_variable_bins_total[i_prime] % m_num_variable_bins_total[i_prime]_collapsed;
+    variable_collapsing_matrices[i_prime] = Eigen::MatrixXf::Zero(m_num_variable_bins_total[i_prime], m_num_variable_bins_total_collapsed[i_prime]);
+    log<LOG_INFO>(L"%1% || Creating Collapsing Matrix. m_num_variable_bins_total[i_prime], m_num_variable_bins_total[i_prime]_collapsed:  %2%  %3%") % __func__ % m_num_variable_bins_total[i_prime] % m_num_variable_bins_total_collapsed[i_prime];
 
     //construct the matrix by detector block
-    Eigen::MatrixXf block_collapser = Eigen::MatrixXf::Zero(m_num_variable_bins_detector_block[i_prime], m_num_variable_bins_detector_block[i_prime]_collapsed);
+    Eigen::MatrixXf block_collapser = Eigen::MatrixXf::Zero(m_num_variable_bins_detector_block[i_prime], m_num_variable_bins_detector_block_collapsed[i_prime]);
 
     size_t channel_row_start = 0, channel_col_start = 0;
     for(size_t ic =0; ic != m_num_channels; ++ic){
@@ -1646,12 +1643,12 @@ void PROconfig::construct_collapsing_matrix(){
     for(size_t im = 0; im != m_num_modes; ++im){
         for(size_t id =0; id != m_num_detectors; ++id){
             size_t row_block_start = im * m_num_variable_bins_mode_block[i_prime] + id * m_num_variable_bins_detector_block[i_prime];
-            size_t col_block_start = im * m_num_variable_bins_mode_block[i_prime]_collapsed + id * m_num_variable_bins_detector_block[i_prime]_collapsed;
-            collapsing_matrix(Eigen::seqN(row_block_start, m_num_variable_bins_detector_block[i_prime]), Eigen::seqN(col_block_start, m_num_variable_bins_detector_block[i_prime]_collapsed)) = block_collapser;
+            size_t col_block_start = im * m_num_variable_bins_mode_block_collapsed[i_prime] + id * m_num_variable_bins_detector_block_collapsed[i_prime];
+            variable_collapsing_matrices[i_prime](Eigen::seqN(row_block_start, m_num_variable_bins_detector_block[i_prime]), Eigen::seqN(col_block_start, m_num_variable_bins_detector_block_collapsed[i_prime])) = block_collapser;
         }
     }
-    for(size_t io = 0; io < m_num_other_vars; ++io) {
-        other_collapsing_matrices.push_back(Eigen::MatrixXf::Zero(m_num_variable_bins_total[io], m_num_variable_bins_total_collapsed[io]));
+    for(size_t io = 0; io < m_num_variables; ++io) {
+        variable_collapsing_matrices.push_back(Eigen::MatrixXf::Zero(m_num_variable_bins_total[io], m_num_variable_bins_total_collapsed[io]));
         log<LOG_INFO>(L"%1% || Creating Other %2% Collapsing Matrix. m_num_variable_bins_total[i_prime], m_num_variable_bins_total[i_prime]_collapsed:  %3%  %4%") % __func__ % io % m_num_variable_bins_total[io] % m_num_variable_bins_total_collapsed[io];
 
         //construct the matrix by detector block
@@ -1682,7 +1679,7 @@ void PROconfig::construct_collapsing_matrix(){
             for(size_t id =0; id != m_num_detectors; ++id){
                 size_t row_block_start = im * m_num_variable_bins_mode_block[io] + id * m_num_variable_bins_detector_block[io];
                 size_t col_block_start = im * m_num_variable_bins_mode_block_collapsed[io] + id * m_num_variable_bins_detector_block_collapsed[io];
-                other_collapsing_matrices.back()(Eigen::seqN(row_block_start, m_num_variable_bins_detector_block[io]), Eigen::seqN(col_block_start, m_num_variable_bins_detector_block_collapsed[io])) = block_collapser;
+                variable_collapsing_matrices.back()(Eigen::seqN(row_block_start, m_num_variable_bins_detector_block[io]), Eigen::seqN(col_block_start, m_num_variable_bins_detector_block_collapsed[io])) = block_collapser;
             }
         }
 

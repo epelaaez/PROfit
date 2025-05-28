@@ -72,7 +72,7 @@ float PROCNP::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
     PROspec result = FillRecoSpectra(config, peller, *syst, model, param, strat == BinnedChi2);
 
 
-    Eigen::MatrixXf inverted_collapsed_full_covariance(config.m_num_variable_bins_total[config.i_prime]_collapsed,config.m_num_variable_bins_total[config.i_prime]_collapsed);
+    Eigen::MatrixXf inverted_collapsed_full_covariance(config.m_num_variable_bins_total_collapsed[config.i_prime],config.m_num_variable_bins_total_collapsed[config.i_prime]);
     PROspec cv = FillRecoSpectra(config, peller, *syst, model, subvector1, strat != EventByEvent);
     Eigen::MatrixXf collapsed_data_stat_covariance = data.Spec().array().matrix().asDiagonal();
     Eigen::MatrixXf mc_stat_covariance = cv.Spec().array().matrix().asDiagonal();
@@ -111,7 +111,7 @@ float PROCNP::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
             log<LOG_DEBUG>(L"%1% || Created spline subvector with size %2%") % __func__ % subvector2.size();
             PROspec result = FillRecoSpectra(config, peller, *syst, model, tmpParams, strat != EventByEvent);
             // Calcuate Full Covariance matrix
-            Eigen::MatrixXf inverted_collapsed_full_covariance(config.m_num_variable_bins_total[config.i_prime]_collapsed,config.m_num_variable_bins_total[config.i_prime]_collapsed);
+            Eigen::MatrixXf inverted_collapsed_full_covariance(config.m_num_variable_bins_total_collapsed[config.i_prime],config.m_num_variable_bins_total_collapsed[config.i_prime]);
 
             Eigen::MatrixXf new_collapsed_stat_covariance = collapsed_stat_covariance;
             if(i < model.nparams) {

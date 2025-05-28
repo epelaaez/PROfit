@@ -622,7 +622,7 @@ namespace PROfit {
         }
 
         syst_vector.emplace_back();
-        for(size_t io = 0; io < inconfig.m_num_other_vars; ++io)
+        for(size_t io = 0; io < inconfig.m_num_variables; ++io)
             syst_vector.emplace_back();
 
         //constuct object for each systematic variation, and grab weight maps
@@ -745,12 +745,12 @@ namespace PROfit {
         }
 
         inprop.mcStatErr = Eigen::VectorXf::Constant(inconfig.m_num_variable_bins_total[inconfig.i_prime], 0);
-        inprop.hist = Eigen::MatrixXf::Constant(inconfig.m_num_variable_bins_total[i_osc], inconfig.m_num_variable_bins_total[inconfig.i_prime], 0);
-        for(size_t i = 0; i < inconfig.m_num_other_vars; ++i) {
+        inprop.hist = Eigen::MatrixXf::Constant(inconfig.m_num_variable_bins_total[inconfig.i_osc], inconfig.m_num_variable_bins_total[inconfig.i_prime], 0);
+        for(size_t i = 0; i < inconfig.m_num_variables; ++i) {
             inprop.otherMCStatErr.push_back(Eigen::VectorXf::Constant(inconfig.m_num_variable_bins_total[i], 0));
             inprop.other_hists.push_back(Eigen::MatrixXf::Constant(inconfig.m_num_variable_bins_total[i], inconfig.m_num_variable_bins_total[inconfig.i_prime], 0));
         }
-        inprop.histLE = Eigen::VectorXf::Constant(inconfig.m_num_variable_bins_total[i_osc], 0);
+        inprop.histLE = Eigen::VectorXf::Constant(inconfig.m_num_variable_bins_total[inconfig.i_osc], 0);
         size_t LE_bin = 0;
         for(size_t im = 0; im < inconfig.m_num_modes; im++){
             for(size_t id =0; id < inconfig.m_num_detectors; id++){
@@ -1000,7 +1000,7 @@ namespace PROfit {
         time_t start_time = time(nullptr);
         std::vector<PROdata> data;
         data.emplace_back(inconfig.m_num_variable_bins_total[inconfig.i_prime]);
-        for(size_t io = 0; io < inconfig.m_num_other_vars; ++io)
+        for(size_t io = 0; io < inconfig.m_num_variables; ++io)
             data.emplace_back(inconfig.m_num_variable_bins_total[io]);
         log<LOG_INFO>(L"%1% || Start reading the files..") % __func__;
         for(int fid=0; fid < num_files; ++fid) {
@@ -1050,7 +1050,7 @@ namespace PROfit {
                         log<LOG_DEBUG>(L"%1% || Subchannel %2% -- Reco variable value: %3%, MC event weight: %4%, correponds to global bin: %5%") % __func__ %  channel_index[ib] % reco_value % additional_weight % global_bin;
 
                     data[0].Fill(global_bin, additional_weight);
-                    for(size_t io = 0; io < inconfig.m_num_other_vars; ++io)
+                    for(size_t io = 0; io < inconfig.m_num_variables; ++io)
                         if(other_bin_indices[io] >= 0)
                             data[io+1].Fill(other_bin_indices[io], additional_weight);
                 }  //end of branch loop
@@ -1271,7 +1271,7 @@ namespace PROfit {
         inprop.pcosth.push_back((float)pcosth);
         inprop.mcStatErr(global_bin) += 1;
         inprop.other_bin_indices.push_back(other_bin_indices);
-        for(size_t io = 0; io < inconfig.m_num_other_vars; ++io) {
+        for(size_t io = 0; io < inconfig.m_num_variables; ++io) {
             if(other_bin_indices[io] >= 0) {
                 inprop.otherMCStatErr[io](other_bin_indices[io]) += 1;
                 inprop.other_hists[io](other_bin_indices[io], global_bin) += mc_weight;
@@ -1283,7 +1283,7 @@ namespace PROfit {
         for(int i = 0; i != total_num_sys; ++i){
             SystStruct& syst_obj = syst_vector[0][i];
             std::vector<SystStruct*> other_syst_objs;
-            for(size_t io = 0; io < inconfig.m_num_other_vars; ++io)
+            for(size_t io = 0; io < inconfig.m_num_variables; ++io)
                 other_syst_objs.push_back(&syst_vector[io+1][i]);
             float additional_weight = syst_additional_weight.at(i);
             auto map_iter = eventweight_map.find(syst_obj.GetSysName());
@@ -1316,14 +1316,14 @@ namespace PROfit {
 
             }else if(syst_obj.mode == "covariance"){
                 syst_obj.FillCV(global_bin, mc_weight);
-                for(size_t io = 0; io < inconfig.m_num_other_vars; ++io) {
+                for(size_t io = 0; io < inconfig.m_num_variables; ++io) {
                     if(other_bin_indices[io] >= 0)
                         other_syst_objs[io]->FillCV(other_bin_indices[io], mc_weight);
                 }
                 for(int iuni = 0; iuni < syst_obj.GetNUniverse(); ++iuni){
                     float sys_wei = run_syst ? additional_weight * static_cast<float>(map_iter->second->at(iuni) ) :  1.0;
                     syst_obj.FillUniverse(iuni, global_bin, mc_weight *sys_wei );
-                    for(size_t io = 0; io < inconfig.m_num_other_vars; ++io) {
+                    for(size_t io = 0; io < inconfig.m_num_variables; ++io) {
                         if(other_bin_indices[io] >= 0)
                             other_syst_objs[io]->FillUniverse(iuni, other_bin_indices[io], mc_weight * sys_wei);
                     }

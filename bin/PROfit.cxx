@@ -245,7 +245,7 @@ int main(int argc, char* argv[])
     //Build a PROsyst to sort and analyze all systematics
     PROsyst systs(prop, config, systsstructs.front(), shapeonly);
     std::vector<PROsyst> other_systs;
-    for(size_t i = 0; i < config.m_num_other_vars; ++i)
+    for(size_t i = 0; i < config.m_num_variables; ++i)
         other_systs.emplace_back(prop, config, systsstructs.at(i+1), shapeonly, i);
     std::unique_ptr<PROmodel> model = get_model_from_string(config.m_model_tag, prop);
     std::unique_ptr<PROmodel> null_model = std::make_unique<NullModel>(prop);
@@ -328,7 +328,7 @@ int main(int argc, char* argv[])
             PROdata::saveVector(dataconfig, alldata, dataBinName);
             data = alldata[0];
             //data.save(dataconfig,dataBinName);
-            for(size_t io = 0; io < dataconfig.m_num_other_vars; ++io)
+            for(size_t io = 0; io < dataconfig.m_num_variables; ++io)
                 other_data.push_back(alldata[io+1]);
 
             log<LOG_INFO>(L"%1% || Done processing Data from XML defined root files, and saving to binary output also: %2%") % __func__ % dataBinName.c_str();
@@ -339,7 +339,7 @@ int main(int argc, char* argv[])
             PROdata::loadVector(alldata, dataBinName);
             data = alldata[0];
             //data.save(dataconfig,dataBinName);
-            for(size_t io = 0; io < dataconfig.m_num_other_vars; ++io)
+            for(size_t io = 0; io < dataconfig.m_num_variables; ++io)
                 other_data.push_back(alldata[io+1]);
 
             log<LOG_INFO>(L"%1% || Done loading. Config hash (%2%) and binary loaded Data (%3%) hash are here. ") % __func__ %  dataconfig.hash % data.hash;
@@ -388,7 +388,7 @@ int main(int argc, char* argv[])
         //data = PROdata(data_vec, err_vec);
         data = PROdata(data_vec, data_vec.array().sqrt());
 
-        for(size_t io = 0; io < config.m_num_other_vars; ++io) {
+        for(size_t io = 0; io < config.m_num_variables; ++io) {
             PROspec data_spec = osc_params.size() || injected_systs.size() 
                 ? FillOtherRecoSpectra(config, prop, systs, *model, allparams, io)
                 : FillOtherCVSpectrum(config, prop, io);
@@ -526,12 +526,12 @@ int main(int argc, char* argv[])
         c1.Print("phys_cov.pdf");
         log<LOG_INFO>(L"%1% || MCMC acceptance is  %2%. ") % __func__% ((double)count /fitconfig.MCMCiter);
 
-        std::string hname = "#chi^{2}/ndf = " + to_string(chi2) + "/" + to_string(config.m_num_variable_bins_total[config.i_prime]_collapsed);
+        std::string hname = "#chi^{2}/ndf = " + to_string(chi2) + "/" + to_string(config.m_num_variable_bins_total_collapsed[config.i_prime]);
         PROspec cv = FillCVSpectrum(config, prop, true);
         PROspec bf = FillRecoSpectra(config, prop, metric_to_use->GetSysts(), metric_to_use->GetModel(), best_fit, true);
-        TH1D post_hist("ph", hname.c_str(), config.m_num_variable_bins_total[config.i_prime]_collapsed, config.m_channel_variable_bin_edges[config.i_prime][0].data());
-        TH1D pre_hist("prh", hname.c_str(), config.m_num_variable_bins_total[config.i_prime]_collapsed, config.m_channel_variable_bin_edges[config.i_prime][0].data());
-        for(size_t i = 0; i < config.m_num_variable_bins_total[config.i_prime]_collapsed; ++i) {
+        TH1D post_hist("ph", hname.c_str(), config.m_num_variable_bins_total_collapsed[config.i_prime], config.m_channel_variable_bin_edges[config.i_prime][0].data());
+        TH1D pre_hist("prh", hname.c_str(), config.m_num_variable_bins_total_collapsed[config.i_prime], config.m_channel_variable_bin_edges[config.i_prime][0].data());
+        for(size_t i = 0; i < config.m_num_variable_bins_total_collapsed[config.i_prime]; ++i) {
             post_hist.SetBinContent(i+1, bf.Spec()(i));
             pre_hist.SetBinContent(i+1, cv.Spec()(i));
         }
@@ -710,10 +710,10 @@ int main(int argc, char* argv[])
             Eigen::MatrixXf L = metric->GetSysts().DecomposeFractionalCovariance(config, cv.Spec());
             for(size_t i = 0; i < 1000; ++i) {
                 Eigen::VectorXf throwp = pparams;
-                Eigen::VectorXf throwC = Eigen::VectorXf::Constant(config.m_num_variable_bins_total[config.i_prime]_collapsed, 0);
+                Eigen::VectorXf throwC = Eigen::VectorXf::Constant(config.m_num_variable_bins_total_collapsed[config.i_prime], 0);
                 for(size_t i = 0; i < metric->GetSysts().GetNSplines(); i++)
                     throwp(i+nphys) = d(PROseed::global_rng);
-                for(size_t i = 0; i < config.m_num_variable_bins_total[config.i_prime]_collapsed; i++)
+                for(size_t i = 0; i < config.m_num_variable_bins_total[config.i_prime]; i++)
                     throwC(i) = d(PROseed::global_rng);
                 PROspec shifted = FillRecoSpectra(config, prop, metric->GetSysts(), metric->GetModel(), throwp, eventbyevent ? PROmetric::EventByEvent : PROmetric::BinnedChi2);
                 PROspec newSpec = statonly_brazil ? PROspec::PoissonVariation(collapsed_cv, dseed(myseed.global_rng)) :
@@ -816,14 +816,14 @@ int main(int argc, char* argv[])
         if(area_normalized) opt |= PlotOptions::AreaNormalized;
         plot_channels(final_output_tag+"_PROplot_CV.pdf", config, spec, {}, {}, {}, {}, NULL, opt);
         std::vector<PROspec> other_cvs;
-        for(size_t io = 0; io < config.m_num_other_vars; ++io) {
+        for(size_t io = 0; io < config.m_num_variables; ++io) {
             other_cvs.push_back(FillOtherCVSpectrum(config, prop, io));
             plot_channels(final_output_tag+"_other_"+std::to_string(io)+"_PROplot_CV.pdf", config, other_cvs.back(), {}, {}, {}, {}, NULL, opt, io);
         }
 
         std::map<std::string, std::unique_ptr<TH1D>> cv_hists = getCVHists(spec, config, binwidth_scale);
         std::vector<std::map<std::string, std::unique_ptr<TH1D>>> other_hists;
-        for(size_t io = 0; io < config.m_num_other_vars; ++io) {
+        for(size_t io = 0; io < config.m_num_variables; ++io) {
             other_hists.push_back(getCVHists(other_cvs[io], config, binwidth_scale, io));
         }
 
@@ -955,7 +955,7 @@ int main(int argc, char* argv[])
         std::unique_ptr<TGraphAsymmErrors> err_band = getErrorBand(config, prop, systs, binwidth_scale);
         plot_channels(final_output_tag+"_PROplot_ErrorBand.pdf", config, spec, {}, data, err_band.get(), {}, &chi2text, opt | PlotOptions::DataMCRatio);
         std::vector<std::unique_ptr<TGraphAsymmErrors>> other_err_bands;
-        for(size_t io = 0; io < config.m_num_other_vars; ++io) {
+        for(size_t io = 0; io < config.m_num_variables; ++io) {
             other_err_bands.push_back(getErrorBand(config, prop, other_systs[io], binwidth_scale, io));
             plot_channels(final_output_tag+"_PROplot_other_"+std::to_string(io)+"_ErrorBand.pdf", config, other_cvs[io], {}, other_data[io], 
                     other_err_bands.back().get(), {}, NULL, opt | PlotOptions::DataMCRatio, io);

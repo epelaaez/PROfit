@@ -43,10 +43,10 @@ namespace PROfit{
         Eigen::MatrixXf collapsed_frac_cov = collapsed_cv_inv_diag * collapsed_full_covariance * collapsed_cv_inv_diag;
 
         std::unique_ptr<TH2D> cov_hist = std::make_unique<TH2D>("cov", "Fractional Covariance Matrix;Bin # ;Bin #", config.m_num_variable_bins_total[config.i_prime], 0, config.m_num_variable_bins_total[config.i_prime], config.m_num_variable_bins_total[config.i_prime], 0, config.m_num_variable_bins_total[config.i_prime]);
-        std::unique_ptr<TH2D> collapsed_cov_hist = std::make_unique<TH2D>("ccov", "Collapsed Fractional Covariance Matrix;Bin # ;Bin #", config.m_num_variable_bins_total[config.i_prime]_collapsed, 0, config.m_num_variable_bins_total[config.i_prime]_collapsed, config.m_num_variable_bins_total[config.i_prime]_collapsed, 0, config.m_num_variable_bins_total[config.i_prime]_collapsed);
+        std::unique_ptr<TH2D> collapsed_cov_hist = std::make_unique<TH2D>("ccov", "Collapsed Fractional Covariance Matrix;Bin # ;Bin #", config.m_num_variable_bins_total_collapsed[config.i_prime], 0, config.m_num_variable_bins_total_collapsed[config.i_prime], config.m_num_variable_bins_total_collapsed[config.i_prime], 0, config.m_num_variable_bins_total_collapsed[config.i_prime]);
 
         std::unique_ptr<TH2D> cor_hist = std::make_unique<TH2D>("cor", "Correlation Matrix;Bin # ;Bin #", config.m_num_variable_bins_total[config.i_prime], 0, config.m_num_variable_bins_total[config.i_prime], config.m_num_variable_bins_total[config.i_prime], 0, config.m_num_variable_bins_total[config.i_prime]);
-        std::unique_ptr<TH2D> collapsed_cor_hist = std::make_unique<TH2D>("ccor", "Collapsed Correlation Matrix;Bin # ;Bin #", config.m_num_variable_bins_total[config.i_prime]_collapsed, 0, config.m_num_variable_bins_total[config.i_prime]_collapsed, config.m_num_variable_bins_total[config.i_prime]_collapsed, 0, config.m_num_variable_bins_total[config.i_prime]_collapsed);
+        std::unique_ptr<TH2D> collapsed_cor_hist = std::make_unique<TH2D>("ccor", "Collapsed Correlation Matrix;Bin # ;Bin #", config.m_num_variable_bins_total[config.i_prime], 0, config.m_num_variable_bins_total_collapsed[config.i_prime], config.m_num_variable_bins_total_collapsed[config.i_prime], 0, config.m_num_variable_bins_total_collapsed[config.i_prime]);
 
         for(size_t i = 0; i < config.m_num_variable_bins_total[config.i_prime]; ++i)
             for(size_t j = 0; j < config.m_num_variable_bins_total[config.i_prime]; ++j){
@@ -54,8 +54,8 @@ namespace PROfit{
                 cor_hist->SetBinContent(i+1,j+1,fractional_cov(i,j)/(sqrt(fractional_cov(i,i))*sqrt(fractional_cov(j,j))));
             }
 
-        for(size_t i = 0; i < config.m_num_variable_bins_total[config.i_prime]_collapsed; ++i)
-            for(size_t j = 0; j < config.m_num_variable_bins_total[config.i_prime]_collapsed; ++j){
+        for(size_t i = 0; i < config.m_num_variable_bins_total_collapsed[config.i_prime]; ++i)
+            for(size_t j = 0; j < config.m_num_variable_bins_total_collapsed[config.i_prime]; ++j){
                 collapsed_cov_hist->SetBinContent(i+1,j+1,collapsed_frac_cov(i,j));
                 collapsed_cor_hist->SetBinContent(i+1,j+1,collapsed_frac_cov(i,j)/(sqrt(collapsed_frac_cov(i,i))*sqrt(collapsed_frac_cov(j,j))));
             }

@@ -212,7 +212,7 @@ namespace PROfit{
             //---- PRIVATE FUNCTION ------
 
             /* Function: construct a matrix T, which will be used to collapse matrix and vectors */
-            void construct_collapsing_matrix();
+            void construct_variable_collapsing_matrices();
 
             /* Function: remove any mode/detector/channel/subchannels in the configuration xml that are not used from consideration
             */
@@ -263,7 +263,6 @@ namespace PROfit{
             size_t m_num_detectors;
             size_t m_num_channels;
             size_t m_num_modes;
-            size_t m_num_other_vars;//tbd
             size_t m_num_variables;
 
             std::vector<size_t> m_num_subchannels; 
@@ -295,6 +294,7 @@ namespace PROfit{
             std::vector<std::vector<size_t >> m_subchannel_datas; 
 
 
+
             std::vector<size_t> m_num_variable_bins_detector_block;
             std::vector<size_t> m_num_variable_bins_mode_block;
             std::vector<size_t> m_num_variable_bins_total;
@@ -302,33 +302,6 @@ namespace PROfit{
             std::vector<size_t> m_num_variable_bins_mode_block_collapsed; 
             std::vector<size_t> m_num_variable_bins_total_collapsed; 
 
-
-            //size_t m_num_bins_detector_block; //TBD
-            //size_t m_num_bins_mode_block; //TBD
-            //size_t m_num_bins_total; //TBD
-
-            //size_t m_num_truebins_detector_block; //TBD
-            //size_t m_num_truebins_mode_block; //TBD
-            //size_t m_num_truebins_total; //TBD
-
-            //std::vector<size_t> m_num_other_bins_detector_block; //TBD
-            //std::vector<size_t> m_num_other_bins_mode_block; //TBD
-            //std::vector<size_t> m_num_other_bins_total; //TBD
-
-            //size_t m_num_bins_detector_block_collapsed; //TBD
-            //size_t m_num_bins_mode_block_collapsed; //TBD
-            //size_t m_num_bins_total_collapsed; //TBD
-
-            //std::vector<size_t> m_num_other_bins_detector_block_collapsed;
-            //std::vector<size_t> m_num_other_bins_mode_block_collapsed;
-            //std::vector<size_t> m_num_other_bins_total_collapsed;
-
-            //till Here
-            // need a sed to switch m_num_variable_bins_total[config.i_prime]_collapsed to m_num_variable_bins_total_collapsed[config.i_prime] and same for mode_block, detector_block
-            
-            /* Eigen Matrix for collapsing subchannels->channels*/
-            Eigen::MatrixXf collapsing_matrix;//TBD
-            std::vector<Eigen::MatrixXf> other_collapsing_matrices; //TBD
             std::vector<Eigen::MatrixXf> variable_collapsing_matrices; 
 
             //This section entirely for montecarlo generation of a covariance matrix or PROspec 
@@ -390,9 +363,9 @@ namespace PROfit{
              * 	     To collapse a full vector V, please do T.transpose() * V
              */
             inline 
-                Eigen::MatrixXf GetCollapsingMatrix() const {return collapsing_matrix; }
+                Eigen::MatrixXf GetCollapsingMatrix() const {return variable_collapsing_matrices[i_prime]; }
             inline
-                Eigen::MatrixXf GetCollapsingMatrix(int other_index) const {return other_collapsing_matrices[other_index]; }
+                Eigen::MatrixXf GetCollapsingMatrix(int other_index) const {return variable_collapsing_matrices[other_index]; }
 
             /* Function: Calculate how big each mode block and decector block are, for any given number of channels/subchannels, before and after the collapse
              * Note: only consider mode/detector/channel/subchannels that are actually used 
