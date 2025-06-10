@@ -809,18 +809,19 @@ int main(int argc, char* argv[])
     }
     if(*proplot_command){
         //PROspec spec = FillCVSpectrum(config, prop, !eventbyevent);
-        PROspec spec = FillRecoSpectra(config, prop, other_systs[config.i_prime], *model, CVpparams, !eventbyevent);
+        //PROspec spec = FillRecoSpectra(config, prop, other_systs[config.i_prime], *model, CVpparams, !eventbyevent); TBD
+
         PlotOptions opt = PlotOptions::CVasStack;
         if(binwidth_scale) opt |= PlotOptions::BinWidthScaled;
         if(area_normalized) opt |= PlotOptions::AreaNormalized;
-        plot_channels(final_output_tag+"_PROplot_CV.pdf", config, spec, {}, {}, {}, {}, NULL, opt);
+        //plot_channels(final_output_tag+"_PROplot_CV.pdf", config, spec, {}, {}, {}, {}, NULL, opt);
         std::vector<PROspec> other_cvs;
         for(size_t io = 0; io < config.m_num_variables; ++io) {
             other_cvs.push_back(FillOtherCVSpectrum(config, prop, io));
             plot_channels(final_output_tag+"_other_"+std::to_string(io)+"_PROplot_CV.pdf", config, other_cvs.back(), {}, {}, {}, {}, NULL, opt, io);
         }
 
-        std::map<std::string, std::unique_ptr<TH1D>> cv_hists = getCVHists(spec, config, binwidth_scale);
+        //std::map<std::string, std::unique_ptr<TH1D>> cv_hists = getCVHists(spec, config, binwidth_scale);
         std::vector<std::map<std::string, std::unique_ptr<TH1D>>> other_hists;
         for(size_t io = 0; io < config.m_num_variables; ++io) {
             other_hists.push_back(getCVHists(other_cvs[io], config, binwidth_scale, io));
@@ -828,7 +829,7 @@ int main(int argc, char* argv[])
 
         TCanvas c;
         if(osc_params.size()) {
-
+            /*
             c.Print((final_output_tag +"_PROplot_Osc.pdf"+ "[").c_str(), "pdf");
 
             PROspec osc_spec = FillRecoSpectra(config, prop, other_systs[config.i_prime], *model, pparams, !eventbyevent);
@@ -920,15 +921,14 @@ int main(int argc, char* argv[])
                 }
             }
             c.Print((final_output_tag+"_PROplot_Osc.pdf" + "]").c_str(), "pdf");
+        */
         }
-
-
 
         //Now some covariances
         std::map<std::string, std::unique_ptr<TH2D>> matrices;
 
         if(other_systs[config.i_prime].GetNCovar()>0){
-            matrices = covarianceTH2D(other_systs[config.i_prime], config, spec);
+            matrices = covarianceTH2D(other_systs[config.i_prime], config, other_cvs[config.i_prime]);
             c.Print((final_output_tag+"_PROplot_Covar.pdf" + "[").c_str(), "pdf");
             for(const auto &[name, mat]: matrices) {
                 mat->Draw("colz");
@@ -938,21 +938,22 @@ int main(int argc, char* argv[])
         }
 
         //errorband
-        //
-        //TODO: Multiple channels
         int global_channel_index = 0;
-        std::unique_ptr<PROmetric> allcov_metric(metric->Clone());
-        allcov_metric->override_systs(allcovsyst);
-        double chival = allcov_metric->getSingleChannelChi(global_channel_index);
-        int ndf = config.m_channel_variable_num_bins[config.i_prime][global_channel_index] - bool(opt&PlotOptions::AreaNormalized);
-        log<LOG_INFO>(L"%1% || On channel %2% the datamc chi^2/ndof is %3%/%4% .") % __func__ % global_channel_index % chival % ndf;
-        TPaveText chi2text(0.59, 0.50, 0.89, 0.59, "NDC");
-        chi2text.AddText(("#chi^{2}/ndf = "+to_string_prec(chival,2)+"/"+std::to_string(ndf)).c_str());
-        chi2text.SetFillColor(0);
-        chi2text.SetBorderSize(0);
-        chi2text.SetTextAlign(12);
-        std::unique_ptr<TGraphAsymmErrors> err_band = getErrorBand(config, prop, other_systs[config.i_prime], binwidth_scale);
-        plot_channels(final_output_tag+"_PROplot_ErrorBand.pdf", config, spec, {}, data, err_band.get(), {}, &chi2text, opt | PlotOptions::DataMCRatio);
+        //std::unique_ptr<PROmetric> allcov_metric(metric->Clone());
+        //allcov_metric->override_systs(allcovsyst);
+        //double chival = allcov_metric->getSingleChannelChi(global_channel_index);
+        //int ndf = config.m_channel_variable_num_bins[config.i_prime][global_channel_index] - bool(opt&PlotOptions::AreaNormalized);
+        //log<LOG_INFO>(L"%1% || On channel %2% the datamc chi^2/ndof is %3%/%4% .") % __func__ % global_channel_index % chival % ndf;
+        //TPaveText chi2text(0.59, 0.50, 0.89, 0.59, "NDC");
+        //chi2text.AddText(("#chi^{2}/ndf = "+to_string_prec(chival,2)+"/"+std::to_string(ndf)).c_str());
+        //chi2text.SetFillColor(0);
+        //chi2text.SetBorderSize(0);
+        //chi2text.SetTextAlign(12);
+        
+
+        //std::unique_ptr<TGraphAsymmErrors> err_band = getErrorBand(config, prop, other_systs[config.i_prime], binwidth_scale);
+        //plot_channels(final_output_tag+"_PROplot_ErrorBand.pdf", config, spec, {}, data, err_band.get(), {}, &chi2text, opt | PlotOptions::DataMCRatio);
+        
         std::vector<std::unique_ptr<TGraphAsymmErrors>> other_err_bands;
         for(size_t io = 0; io < config.m_num_variables; ++io) {
             other_err_bands.push_back(getErrorBand(config, prop, other_systs[io], binwidth_scale, io));
@@ -983,7 +984,7 @@ int main(int argc, char* argv[])
                 xi = 3;
             }
 
-            TH1D hcv = spec.toTH1D_Collapsed(config,0);
+            TH1D hcv = other_cvs[config.i_prime].toTH1D_Collapsed(config,0);
             TH1D hmock = data.toTH1D(config,0);
             if(binwidth_scale){
                 hcv.Scale(1, "width");
@@ -1069,11 +1070,6 @@ int main(int argc, char* argv[])
         //now onto root files
         TFile fout((final_output_tag+"_PROplot.root").c_str(), "RECREATE");
 
-        fout.mkdir("CV_hists");
-        fout.cd("CV_hists");
-        for(const auto &[name, hist]: cv_hists) {
-            hist->Write(name.c_str());
-        }
         int io = 0;
         for(const auto &other: other_hists) {
             for(const auto &[name, hist]: other) {
@@ -1097,9 +1093,9 @@ int main(int argc, char* argv[])
         for(const auto &[name, mat]: matrices)
             mat->Write(name.c_str());
 
-        fout.mkdir("ErrorBand");
-        fout.cd("ErrorBand");
-        err_band->Write("err_band");
+        //fout.mkdir("ErrorBand");
+        //fout.cd("ErrorBand");
+        //err_band->Write("err_band");
         io = 0;
         for(const auto &band: other_err_bands)
             band->Write(("other_"+std::to_string(io++)+"_err_band").c_str());

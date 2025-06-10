@@ -830,6 +830,7 @@ namespace PROfit {
         inprop.variable_bin_indices.push_back(variable_bin_indices);
         //inprop.bin_indices.push_back(global_bin);
         //inprop.true_indices.push_back(global_true_bin);
+        inprop.trueLE.push_back(vars[inconfig.i_osc]);
 
         for(size_t io = 0; io < inconfig.m_num_variables; ++io) {
             if(variable_bin_indices[io] >= 0) {

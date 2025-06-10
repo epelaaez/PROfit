@@ -213,10 +213,11 @@ namespace PROfit {
     }
 
     PROspec FillSystRandomThrow(const PROconfig &inconfig, const PROpeller &inprop, const PROsyst &insyst, uint32_t seed, int other_index) {
-        int nbins = other_index < 0 ? inconfig.m_num_variable_bins_total[inconfig.i_prime] : inconfig.m_num_variable_bins_total[other_index],
-            nbins_collapsed = other_index < 0 ? inconfig.m_num_variable_bins_total_collapsed[inconfig.i_prime] : inconfig.m_num_variable_bins_total_collapsed[other_index];
+        int nbins = inconfig.m_num_variable_bins_total[other_index],
+            nbins_collapsed = inconfig.m_num_variable_bins_total_collapsed[other_index];
         Eigen::VectorXf spec = Eigen::VectorXf::Constant(nbins, 0);
         Eigen::VectorXf cvspec = Eigen::VectorXf::Constant(nbins, 0);
+
 
         // TODO: We should think about centralizing rng in a thread-safe/thread-aware way
         static std::mt19937 rng{seed};
@@ -272,12 +273,12 @@ namespace PROfit {
         }
 
         if(insyst.GetNCovar() == 0) {
-            Eigen::VectorXf final_spec = other_index < 0 ? CollapseMatrix(inconfig, spec) : CollapseMatrix(inconfig, spec, other_index);
+            Eigen::VectorXf final_spec = CollapseMatrix(inconfig, spec, other_index);
             return PROspec(final_spec, final_spec.array().sqrt());
         }
 
         Eigen::MatrixXf decomp_cov = insyst.DecomposeFractionalCovariance(inconfig, cvspec);
-        Eigen::VectorXf collapsed_spec = other_index < 0 ? CollapseMatrix(inconfig, spec) : CollapseMatrix(inconfig, spec, other_index);
+        Eigen::VectorXf collapsed_spec = CollapseMatrix(inconfig, spec, other_index);
         Eigen::VectorXf final_spec = collapsed_spec + decomp_cov * throwC;
 
         //std::vector<float> stdVec(final_spec.data(), final_spec.data() + final_spec.size());
