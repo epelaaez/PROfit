@@ -54,75 +54,35 @@ namespace PROfit{
      */
 
     struct BranchVariable{
-      std::string name;
-      std::string type;
       std::string associated_hist;
       std::string associated_systematic;
       bool central_value;
 
-      std::shared_ptr<TTreeFormula> branch_formula=nullptr; //TBD
       std::shared_ptr<TTreeFormula> branch_monte_carlo_weight_formula = nullptr;
-      std::shared_ptr<TTreeFormula> branch_true_value_formula=nullptr;
-      std::shared_ptr<TTreeFormula> branch_true_L_formula=nullptr;
-      std::shared_ptr<TTreeFormula> branch_true_pdg_formula=nullptr;
-      std::shared_ptr<TTreeFormula> branch_true_proton_mom_formula=nullptr;
-      std::shared_ptr<TTreeFormula> branch_true_proton_costh_formula=nullptr;
-      std::vector<std::shared_ptr<TTreeFormula>> branch_other_values_formulas; //TBDD
       std::vector<std::shared_ptr<TTreeFormula>> branch_variable_formulas;
 
-      std::string true_param_name;
-      std::string true_L_name;
-      std::string pdg_name;
       int model_rule;
       int include_systematics;
 
-      std::vector<std::string> other_param_names;
-      std::vector<std::string> vairable_names;
+      std::vector<std::string> variable_names;
 
       bool hist_reweight;
-      std::string true_proton_mom_name;
-      std::string true_proton_costh_name;
 
       //constructor
-      BranchVariable(std::string n, std::string t, std::string a) : name(n), type(t), associated_hist(a), central_value(false), model_rule(-9), include_systematics(1), hist_reweight(false){}
-      BranchVariable(std::string n, std::string t, std::string a_hist, std::string a_syst, bool cv) : name(n), type(t), associated_hist(a_hist), associated_systematic(a_syst), central_value(cv), model_rule(-9), include_systematics(1), hist_reweight(false){}
+      BranchVariable(std::string a) : associated_hist(a), central_value(false), model_rule(-9), include_systematics(1), hist_reweight(false){}
+      BranchVariable(std::string a_hist, std::string a_syst, bool cv) :  associated_hist(a_hist), associated_systematic(a_syst), central_value(cv), model_rule(-9), include_systematics(1), hist_reweight(false){}
  
-      /* Function: Return the TTreeformula for branch 'name', usually it's the reconstructed variable */
-      std::shared_ptr<TTreeFormula> GetFormula(){
-	return branch_formula;
-      }
 
-      void SetTrueParam(const std::string& true_parameter_def){ true_param_name = true_parameter_def; return;}
-      void SetPDG(const std::string& pdg_def){ pdg_name = pdg_def; return;}
-      void SetTrueL(const std::string& true_L_def){true_L_name = true_L_def; return;}
       void SetModelRule(const std::string & model_rule_def){model_rule = std::stoi(model_rule_def); return;}
       void SetIncludeSystematics(int insyst){include_systematics = insyst; return;} 
 
-      void SetOtherParams(const std::string &other_parameter_def) { 
-          size_t start = 0;
-          while(start < other_parameter_def.size()) {
-              size_t semicolon = other_parameter_def.find_first_of(';', start);
-              if(semicolon == std::string::npos) {
-                  other_param_names.push_back(other_parameter_def.substr(start, other_parameter_def.size()-start));
-                  start = other_parameter_def.size();
-              } else {
-                  other_param_names.push_back(other_parameter_def.substr(start, semicolon - start));
-                  start = semicolon + 1;
-              }
-          }
-      }
-      
+      //main loader for all variables
+      void AddVariable(const std::string& var_in){ variable_names.push_back(var_in); return;}
+     
       void SetReweight(bool inbool){ hist_reweight = inbool; return;}
       bool GetReweight() const {return hist_reweight;}
-      void SetTrueLeadingProtonP(const std::string& true_protonp_def){ true_proton_mom_name = true_protonp_def; return;}
-      void SetTrueLeadingProtonCosth(const std::string& true_protoncosth_def){ true_proton_costh_name = true_protoncosth_def; return;}
 
-      //Function: evaluate branch "pdg", and return the value. Usually it's the pdg value of the particle
-      //Note: when called, if the corresponding TreeFormula is not linked to a TTree, value of ZERO (0) will be returned.
-      template <typename T = int>
-	T GetTruePDG() const;
-
-      int GetModelRule() const{
+       int GetModelRule() const{
 	return model_rule;
       };
 
@@ -141,38 +101,6 @@ namespace PROfit{
 	}
 	return 1.0;
       }
-
-      
-      //Function: evaluate branch 'name' and return the value. Usually its reconstructed quantity
-      //Note: when called, if the corresponding TreeFormula is not linked to a TTree, value of ZERO (0) will be returned.
-      template <typename T=float>
-	T GetValue() const;
-
-
-      //Function: evaluate formula 'true_L_name' and return the value. Usually it's true baseline.
-      //Note: when called, if the corresponding TreeFormula is not linked to a TTree, value of ZERO (0) will be returned.
-      template <typename T=float>
-	T GetTrueL() const;
-      
-
-      //Function: evaluate formula 'true_param_name' and return the value. Usually it's true energy  
-      //Note: when called, if the corresponding TreeFormula is not linked to a TTree, value of ZERO (0) will be returned.
-      template <typename T=float>
-	T GetTrueValue() const;
-
-      //Function: evaluate formula 'true_proton_mom_name' and return the value. Used for reweighting
-      //Note: when called, if the corresponding TreeFormula is not linked to a TTree, value of ZERO (0) will be returned.
-      template <typename T=float>
-	T GetTrueLeadProtonMom() const;
-
-
-      //Function: evaluate formula 'true_proton_costh_name' and return the value. Used for reweighting
-      //Note: when called, if the corresponding TreeFormula is not linked to a TTree, value of ZERO (0) will be returned.
-      template <typename T=float>
-	T GetTrueLeadProtonCosth() const;
-
-      template<typename T=float>
-    std::vector<T> GetOtherValues() const;
 
       template<typename T=float>
     std::vector<T> GetVariables() const;
@@ -207,7 +135,6 @@ namespace PROfit{
             std::vector<size_t> m_vec_global_reco_index_start;  //vector of global reco bin index, in increasing order
             std::vector<size_t> m_vec_global_true_index_start;  //vector of global true bin index, in increasing order
             std::vector<std::vector<size_t>> m_vec_global_other_index_start;  //vector of global true bin index, in increasing order
-
 
             //---- PRIVATE FUNCTION ------
 
@@ -292,8 +219,6 @@ namespace PROfit{
             std::vector<std::vector<std::string >> m_subchannel_plotnames; 
             std::vector<std::vector<std::string >> m_subchannel_colors; 
             std::vector<std::vector<size_t >> m_subchannel_datas; 
-
-
 
             std::vector<size_t> m_num_variable_bins_detector_block;
             std::vector<size_t> m_num_variable_bins_mode_block;
@@ -442,63 +367,6 @@ namespace PROfit{
     //----------- BELOW: Definition of BranchVariable templated member function. Please don't move it elsewhere !! ---------------
     //----------- BELOW: Definition of BranchVariable templated member function. Please don't move it elsewhere !! ---------------
 
-    template <typename T>
-        T BranchVariable::GetTruePDG() const{
-            if(branch_true_pdg_formula == NULL) return static_cast<T>(0);
-            else{
-                return static_cast<T>(branch_true_pdg_formula->EvalInstance());
-            }
-        }
-
-
-    template <typename T>
-        T BranchVariable::GetValue() const{
-            if(branch_formula == NULL) return static_cast<T>(0);
-            else{
-                return static_cast<T>(branch_formula->EvalInstance());
-            }
-        }
-
-    template <typename T>
-        T BranchVariable::GetTrueL() const{
-            if(branch_true_L_formula == NULL) return static_cast<T>(0);
-            else{
-                return static_cast<T>(branch_true_L_formula->EvalInstance());
-            }
-        }
-
-    template <typename T>
-        T BranchVariable::GetTrueValue() const{
-            if(branch_true_value_formula == NULL) return static_cast<T>(0);
-            else{
-                return static_cast<T>(branch_true_value_formula->EvalInstance());
-            }
-        }
-
-    template <typename T>
-        T BranchVariable::GetTrueLeadProtonMom() const{
-            if(branch_true_proton_mom_formula == NULL) return static_cast<T>(0);
-            else{
-                return static_cast<T>(branch_true_proton_mom_formula->EvalInstance());
-            }
-        }
-
-    template <typename T>
-        T BranchVariable::GetTrueLeadProtonCosth() const{
-            if(branch_true_proton_costh_formula == NULL) return static_cast<T>(0);
-            else{
-                            return static_cast<T>(branch_true_proton_costh_formula->EvalInstance());
-            }
-        }
-
-    template <typename T>
-        std::vector<T> BranchVariable::GetOtherValues() const {
-            std::vector<T> ret;
-            for(const auto &formula: branch_other_values_formulas) {
-                ret.push_back(formula->EvalInstance());
-            }
-            return ret;
-        }
     template <typename T>
         std::vector<T> BranchVariable::GetVariables() const {
             std::vector<T> ret;

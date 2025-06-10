@@ -18,6 +18,7 @@ namespace PROfit {
 class PROmodel {
 public:
     size_t nparams;
+    int ivar;
     std::vector<std::string> param_names;
     std::vector<std::string> pretty_param_names;
     Eigen::VectorXf lb, ub, default_val;
@@ -29,12 +30,13 @@ class NullModel : public PROmodel {
 public:
     NullModel(const PROpeller &prop) {
         nparams = 0;
+        ivar = 1;
         model_functions.push_back([](const Eigen::VectorXf &, float){ return 1.0f; });
 
         hists.emplace_back(Eigen::MatrixXf::Constant(prop.hist.rows(), prop.hist.cols(),0.0));
         Eigen::MatrixXf &h = hists.back();
-        for(size_t i = 0; i < prop.bin_indices.size(); ++i) {
-            int tbin = prop.true_bin_indices[i], rbin = prop.bin_indices[i];
+        for(size_t i = 0; i < prop.variable_bin_indices[0].size(); ++i) {
+            int tbin = prop.variable_bin_indices[ivar][i], rbin = prop.variable_bin_indices[0][i];
             h(tbin, rbin) += prop.added_weights[i];
         }
     }
@@ -45,13 +47,13 @@ public:
     PROnumudis(const PROpeller &prop) {
         model_functions.push_back([this]([[maybe_unused]] const Eigen::VectorXf &v, float) {(void)this; return 1.0;});
         model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pmumu(v(0),v(1),le);});
-
+        ivar = 1;
         for(size_t m = 0; m < model_functions.size(); ++m) {
             hists.emplace_back(Eigen::MatrixXf::Constant(prop.hist.rows(), prop.hist.cols(),0.0));
             Eigen::MatrixXf &h = hists.back();
-            for(size_t i = 0; i < prop.bin_indices.size(); ++i) {
+            for(size_t i = 0; i < prop.variable_bin_indices[0].size(); ++i) {
                 if(prop.model_rule[i] != (int)m) continue;
-                int tbin = prop.true_bin_indices[i], rbin = prop.bin_indices[i];
+                int tbin = prop.variable_bin_indices[ivar][i], rbin = prop.variable_bin_indices[0][i];
                 h(tbin, rbin) += prop.added_weights[i];
             }
         }
@@ -103,13 +105,14 @@ public:
     PROnueapp(const PROpeller &prop) {
         model_functions.push_back([this]([[maybe_unused]] const Eigen::VectorXf &v, float) {(void)this; return 1.0;});
         model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pmue(v(0),v(1),le);});
+        ivar = 1;
 
         for(size_t m = 0; m < model_functions.size(); ++m) {
             hists.emplace_back(Eigen::MatrixXf::Constant(prop.hist.rows(), prop.hist.cols(),0.0));
             Eigen::MatrixXf &h = hists.back();
-            for(size_t i = 0; i < prop.bin_indices.size(); ++i) {
+            for(size_t i = 0; i < prop.variable_bin_indices[0].size(); ++i) {
                 if(prop.model_rule[i] != (int)m) continue;
-                int tbin = prop.true_bin_indices[i], rbin = prop.bin_indices[i];
+                int tbin = prop.variable_bin_indices[ivar][i], rbin = prop.variable_bin_indices[0][i];
                 h(tbin, rbin) += prop.added_weights[i];
             }
         }
@@ -125,7 +128,7 @@ public:
         default_val << -std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity();
     
         log<LOG_INFO>(L"%1% || setting up a model nueapp, with  %2% params.")     % __func__ % nparams;
-        for(int i=0; i< nparams;i++){
+        for(size_t i=0; i< nparams;i++){
             log<LOG_INFO>(L"%1% || Param %2% is %3% with lower bound/upper bound of %4%/%5% and default %6%")     % __func__ % i % param_names[i].c_str() % lb[i] % ub[i] % default_val[i];
         }
 
@@ -168,13 +171,14 @@ public:
         model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pmumu(v(0),v(1),v(2),le); });
         model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pmue(v(0),v(1),v(2),le); });
         model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pee(v(0),v(1),v(2),le); });
+        ivar = 1;
 
         for(size_t m = 0; m < model_functions.size(); ++m) {
             hists.emplace_back(Eigen::MatrixXf::Constant(prop.hist.rows(), prop.hist.cols(),0.0));
             Eigen::MatrixXf &h = hists.back();
-            for(size_t i = 0; i < prop.bin_indices.size(); ++i) {
+            for(size_t i = 0; i < prop.variable_bin_indices[0].size(); ++i) {
                 if(prop.model_rule[i] != (int)m) continue;
-                int tbin = prop.true_bin_indices[i], rbin = prop.bin_indices[i];
+                int tbin = prop.variable_bin_indices[ivar][i], rbin = prop.variable_bin_indices[0][i];
                 h(tbin, rbin) += prop.added_weights[i];
             }
         }

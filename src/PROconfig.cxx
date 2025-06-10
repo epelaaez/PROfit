@@ -615,7 +615,6 @@ int PROconfig::LoadFromXML(const std::string &filename){
             std::vector<std::shared_ptr<BranchVariable>> TEMP_branch_variables;
             while(pBranch){
 
-                const char* bnam = pBranch->Attribute("name");
                 const char* bincsyst = pBranch->Attribute("incl_systematics");
                 const char* bhist = pBranch->Attribute("associated_subchannel");
                 const char* bsyst = pBranch->Attribute("associated_systematic");
@@ -627,17 +626,9 @@ int PROconfig::LoadFromXML(const std::string &filename){
                     //log<LOG_WARNING>(L"%1% || WARNING: No eventweight branch name passed, defaulting to 'weights' @ line %2% in %3% ") % __func__ % __LINE__  % __FILE__;
                     TEMP_eventweight_branch_names.push_back("weights");
                 }else{
-                    log<LOG_DEBUG>(L"%1% || Setting eventweight branch name %2%") %__func__ % bnam;
+                    log<LOG_DEBUG>(L"%1% || Setting eventweight branch name %2%") %__func__ % bwname;
                     TEMP_eventweight_branch_names.push_back(std::string(bwname));
                 }
-
-                if(bnam == NULL){
-                    log<LOG_ERROR>(L"%1% || ERROR!: Each branch must include the name of the branch to use. @ line %2% in %3% ") % __func__ % __LINE__  % __FILE__;
-                    log<LOG_ERROR>(L"%1% || ERROR!: e.g name = 'ereco' @ line %2% in %3% ") % __func__ % __LINE__  % __FILE__;
-                    log<LOG_ERROR>(L"Terminating.");
-                    exit(EXIT_FAILURE);
-                }
-                log<LOG_DEBUG>(L"%1% || Branch name %2%") %__func__ % bnam;		
 
                 if(bincsyst== NULL || strcmp(bincsyst, "true") == 0){
                     log<LOG_DEBUG>(L"%1% ||Apply systemtics to this file (default) ' @ line %2% in %3% ") % __func__ % __LINE__  % __FILE__;
@@ -648,7 +639,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 }
 
                 if(bhist == NULL){
-                    log<LOG_ERROR>(L"%1% || Each branch must have an associated_subchannel to fill! On branch %4% : @ line %2% in %3% ") % __func__ % __LINE__  % __FILE__ % bnam;
+                    log<LOG_ERROR>(L"%1% || Each branch must have an associated_subchannel to fill! On branch : @ line %2% in %3% ") % __func__ % __LINE__  % __FILE__ ;
                     log<LOG_ERROR>(L"%1% || e.g associated_subchannel='mode_det_chan_subchannel ") % __func__ % __LINE__  % __FILE__;
                     log<LOG_ERROR>(L"Terminating.");
                     exit(EXIT_FAILURE);
@@ -668,57 +659,57 @@ int PROconfig::LoadFromXML(const std::string &filename){
                     systematic_name.push_back(bsyst);	
 
                 }
-                //log<LOG_DEBUG>(L"%1% || Branch syst %2%") %__func__ % bsyst;						
 
                 //std::string chk_wei = badditional_weight;
                 if(badditional_weight == NULL || strcmp(badditional_weight, "") == 0){ 
                     TEMP_additional_weight_bool.push_back(0);
                     TEMP_additional_weight_name.push_back("1");
-                    log<LOG_DEBUG>(L"%1% || Setting NO additional weight for branch %2% (1)") % __func__ % bnam ;
+                    log<LOG_DEBUG>(L"%1% || Setting NO additional weight for branch ") % __func__  ;
                 }else{
                     TEMP_additional_weight_name.push_back(badditional_weight);
                     TEMP_additional_weight_bool.push_back(1);
-                    log<LOG_DEBUG>(L"%1% || Setting an additional weight for branch %2% using the branch %3% as a reweighting.") % __func__ % bnam %badditional_weight;
+                    log<LOG_DEBUG>(L"%1% || Setting an additional weight for branch using the branch %3% as a reweighting.") % __func__ % badditional_weight;
 
                 }
 
 
                 if(use_universe){
-                    TEMP_branch_variables.push_back( std::make_shared<BranchVariable>(bnam, "float", bhist ) );
+                    TEMP_branch_variables.push_back( std::make_shared<BranchVariable>( bhist ) );
                 } else  if((std::string)bcentral == "true"){
-                    TEMP_branch_variables.push_back( std::make_shared<BranchVariable>(bnam, "float", bhist,bsyst, true) );
+                    TEMP_branch_variables.push_back( std::make_shared<BranchVariable>( bhist,bsyst, true) );
                     log<LOG_DEBUG>(L"%1% || Setting as  CV for det sys.") % __func__ ;
                 } else {
-                    TEMP_branch_variables.push_back( std::make_shared<BranchVariable>(bnam, "float", bhist,bsyst, false) );
+                    TEMP_branch_variables.push_back( std::make_shared<BranchVariable>( bhist,bsyst, false) );
                     log<LOG_DEBUG>(L"%1% || Setting as individual (not CV) for det sys.") % __func__ ;
                 }
 
+
+                //Load all variables
+                tinyxml2::XMLElement *pVariable;
+                pVariable = pBranch->FirstChildElement("variable");
+                int  nvar = 0;
+                while(pVariable){
+                    std::string var_text = std::string(pVariable->GetText());
+                    log<LOG_DEBUG>(L"%1% || Setting branch Variable num %2%, Formula: %3%") %__func__ % nvar % var_text.c_str();
+                    TEMP_branch_variables.back()->AddVariable(var_text);
+                    nvar++;
+                    pVariable = pVariable->NextSiblingElement("variable");
+                }
+                if(nvar == 0){
+                        log<LOG_ERROR>(L"%1% || ERROR: Need at least 1 variable passed in. You passed zero ") % __func__;
+                        log<LOG_ERROR>(L"Terminating.");
+                        exit(EXIT_FAILURE);
+                }
+                 
+
+
                 TEMP_branch_variables.back()->SetIncludeSystematics(TEMP_eventweight_branch_syst.back());
 
-                if(pBranch->Attribute("true_param_name")) {
-                    TEMP_branch_variables.back()->SetTrueParam(pBranch->Attribute("true_param_name"));
-                }
-                if(pBranch->Attribute("other_param_names")) {
-                    log<LOG_DEBUG>(L"%1% || Found other_param_names %2%") % __func__ % pBranch->Attribute("other_param_names");
-                    TEMP_branch_variables.back()->SetOtherParams(pBranch->Attribute("other_param_names"));
-                }
-                if(pBranch->Attribute("pdg_name")) {
-                    TEMP_branch_variables.back()->SetPDG(pBranch->Attribute("pdg_name"));
-                }
                 if(pBranch->Attribute("model_rule")) {
                     TEMP_branch_variables.back()->SetModelRule(pBranch->Attribute("model_rule"));
                 }
                 if(pBranch->Attribute("model_rule")) {
                     log<LOG_DEBUG>(L"%1% || Branch has Model Rule  %2% ") % __func__ % pBranch->Attribute("model_rule") ;
-                }
-
-                if(pBranch->Attribute("true_L_name") != NULL){
-                    //for oscillation that needs both E and L
-                    TEMP_branch_variables.back()->SetTrueL(pBranch->Attribute("true_L_name"));
-                    log<LOG_DEBUG>(L"%1% || Oscillations using true param name:   %2% and baseline %3% ") % __func__ % pBranch->Attribute("true_param_name") % pBranch->Attribute("true_L_name") ;
-                }else if(pBranch->Attribute("true_param_name")){
-                    //for oscillations that only needs E, such as an energy-dependent scaling for single photon NCpi0!
-                    log<LOG_DEBUG>(L"%1% || Oscillations using  Energy only dependent oscillation ( or shift/normalization)  %2% ") % __func__ % pBranch->Attribute("true_param_name") ;
                 }
 
                 std::string hist_reweight = "false";
@@ -734,9 +725,9 @@ int PROconfig::LoadFromXML(const std::string &filename){
                     log<LOG_DEBUG>(L"%1% || Histogram reweighting is ON ") % __func__;
                     TEMP_branch_variables.back()->SetReweight(true);
                     log<LOG_DEBUG>(L"%1% || Successfully setreweight ") % __func__;
-                    TEMP_branch_variables.back()->SetTrueLeadingProtonP(pBranch->Attribute("true_proton_mom_name"));
-                    log<LOG_DEBUG>(L"%1% || Successfully set trueleadingp: %2% ") % __func__ % pBranch->Attribute("true_proton_mom_name");				 TEMP_branch_variables.back()->SetTrueLeadingProtonCosth(pBranch->Attribute("true_proton_costh_name"));
-                    log<LOG_DEBUG>(L"%1% || Successfully set trueleadingcosth: %2% ") % __func__ % pBranch->Attribute("true_proton_costh_name");				  				   
+                    //TEMP_branch_variables.back()->SetTrueLeadingProtonP(pBranch->Attribute("true_proton_mom_name"));
+                    //log<LOG_DEBUG>(L"%1% || Successfully set trueleadingp: %2% ") % __func__ % pBranch->Attribute("true_proton_mom_name");				 TEMP_branch_variables.back()->SetTrueLeadingProtonCosth(pBranch->Attribute("true_proton_costh_name"));
+                    //log<LOG_DEBUG>(L"%1% || Successfully set trueleadingcosth: %2% ") % __func__ % pBranch->Attribute("true_proton_costh_name");				  				   
                 }
 
                 log<LOG_DEBUG>(L"%1% || Associated subchannel: %2% ") % __func__ % bhist;
@@ -1735,7 +1726,10 @@ uint32_t PROconfig::CalcHash() const{
 
     for(const auto& vec: m_branch_variables){
         for(const auto& br: vec){
-            unique_string << br->name << br->associated_hist << br->associated_systematic << br->true_param_name<< br->true_L_name << br->model_rule;
+            unique_string << br->associated_hist << br->associated_systematic << br->model_rule;
+            for(const auto& v: br->variable_names){
+                unique_string << v;
+            }
         }
     }
    

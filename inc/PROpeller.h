@@ -17,25 +17,19 @@ namespace PROfit{
 
         private:
             friend class boost::serialization::access;
-            int nevents;
 
             // Serialization function for boost that will allow for save state of propeller
             template <class Archive>
                 void serialize(Archive& ar, [[maybe_unused]] const unsigned int version) {
-                    ar & nevents;
-                    ar & pcosth;
-                    ar & pmom;
                     ar & trueLE;
                     ar & added_weights;
-                    ar & bin_indices;
                     ar & model_rule;
-                    ar & true_bin_indices;
-                    ar & other_bin_indices;
+                    ar & variable_bin_indices;
                     ar & hist;
-                    ar & other_hists;
+                    ar & variable_hists;
                     ar & histLE;
                     ar & mcStatErr;
-                    ar & otherMCStatErr;
+                    ar & variableMCStatErr;
                     ar & hash;
                 }
 
@@ -43,41 +37,32 @@ namespace PROfit{
 
             //Empty Constructor
             PROpeller(){
-                nevents = -1;
-                pmom.clear();
-                pcosth.clear();
                 trueLE.clear();
                 added_weights.clear();
-                bin_indices.clear();
                 model_rule.clear();
-                true_bin_indices.clear();
                 hash = -1;
             };
 
             /*Function: Primary Constructor from raw std::vectors of MC values */ 
-            PROpeller(const PROconfig &config, std::vector<float> &intruth, std::vector<float> &inpmom, std::vector<float> &inpcosth, std::vector<float> &inadded_weights, std::vector<int> &inbin_indices, std::vector<int> &inmodel_rule, std::vector<int> &intrue_bin_indices) : trueLE(intruth), added_weights(inadded_weights), bin_indices(inbin_indices), model_rule(inmodel_rule), true_bin_indices(intrue_bin_indices), pmom(inpmom), pcosth(inpcosth) {
-                nevents = trueLE.size();
-                hist = Eigen::MatrixXf::Constant(config.m_num_variable_bins_total[config.i_osc], config.m_num_variable_bins_total[config.i_prime], 0);
-                for(size_t i = 0; i < bin_indices.size(); ++i)
-                    hist(true_bin_indices[i], bin_indices[i]) += added_weights[i];
-                hash = config.hash;
+            PROpeller( std::vector<float> &intruth, std::vector<float> &inadded_weights,  std::vector<int> &inmodel_rule) : trueLE(intruth), added_weights(inadded_weights),  model_rule(inmodel_rule) {
+                //size_t nevents = trueLE.size();
+                //hist = Eigen::MatrixXf::Constant(config.m_num_variable_bins_total[config.i_osc], config.m_num_variable_bins_total[config.i_prime], 0);
+                //for(size_t i = 0; i < bin_indices.size(); ++i)
+                //    hist(true_bin_indices[i], bin_indices[i]) += added_weights[i];
+                //hash = config.hash;
             };
 
             /* the Core MC is saved in these vectors.*/
 
             std::vector<float> trueLE;
             std::vector<float> added_weights;
-            std::vector<int>   bin_indices;        /*Precalculated Bin index*/
             std::vector<int>   model_rule;
-            std::vector<int>   true_bin_indices;
-            std::vector<float> pmom;
-            std::vector<float> pcosth;
-            std::vector<std::vector<int>> other_bin_indices;
+            std::vector<std::vector<int>> variable_bin_indices;
             Eigen::MatrixXf    hist;
-            std::vector<Eigen::MatrixXf> other_hists;
+            std::vector<Eigen::MatrixXf> variable_hists;
             Eigen::VectorXf    histLE;
             Eigen::VectorXf    mcStatErr;
-            std::vector<Eigen::VectorXf> otherMCStatErr;
+            std::vector<Eigen::VectorXf> variableMCStatErr;
             uint32_t           hash;
 
             // boost serialize save to file
