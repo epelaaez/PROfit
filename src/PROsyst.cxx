@@ -36,8 +36,11 @@ namespace PROfit {
         syst_map["mcstat"] = {covmat.size(), SystType::Covariance};
         covmat.push_back(fractional_mcstat_cov);
         corrmat.push_back(mcstat_corr);
+        covar_names.push_back("mcstat");
 
+        log<LOG_INFO>(L"%1% || SumMatrix for index %2% ") % __func__ % other_index;
         fractional_covariance = this->SumMatrices();
+        log<LOG_INFO>(L"%1% || SumMatrix for index %2% DONE ") % __func__ % other_index;
     }
 
     PROsyst PROsyst::subset(const std::vector<std::string> &systs) const {
@@ -164,14 +167,19 @@ namespace PROfit {
     Eigen::MatrixXf PROsyst::SumMatrices() const{
 
         Eigen::MatrixXf sum_matrix;
+
+
         if(covmat.size()){
             int nbins = (covmat.begin())->rows();
-            log<LOG_DEBUG>(L"%1% || NBINS:    %2%") % __func__ % nbins;
 
             sum_matrix = Eigen::MatrixXf::Zero(nbins, nbins);
+        
+            int ii=0;
             for(auto& p : covmat){
                 sum_matrix += p;
+                ii++;
             }
+            
         }else{
             log<LOG_ERROR>(L"%1% || There is no covariance available!") % __func__;
             log<LOG_ERROR>(L"%1% || Returning empty matrix") % __func__;
@@ -184,7 +192,6 @@ namespace PROfit {
         Eigen::MatrixXf sum_matrix;
         if(covmat.size()){
             int nbins = (covmat.begin())->rows();
-            log<LOG_DEBUG>(L"%1% || NBINS:    %2%") % __func__ % nbins;
 
             sum_matrix = Eigen::MatrixXf::Zero(nbins, nbins);
         }
@@ -213,6 +220,8 @@ namespace PROfit {
         //generate matrix only if it's not already in the map 
         if(syst_map.find(sysname) == syst_map.end()){
             std::pair<Eigen::MatrixXf, Eigen::MatrixXf> matrices = PROsyst::GenerateCovarMatrices(syst);
+
+
             syst_map[sysname] = {covmat.size(), SystType::Covariance};
             covmat.push_back(matrices.first);
             corrmat.push_back(matrices.second);
@@ -296,7 +305,6 @@ namespace PROfit {
         const PROspec& cv_spec = sys_obj.CV();
         int nbins = cv_spec.GetNbins();
         float cv_integral = cv_spec.Spec().sum(); 
-        log<LOG_INFO>(L"%1% || Generating covariance matrix.. size: %2% x %3%") % __func__ % nbins % nbins;
 
         //build full covariance matrix 
         Eigen::MatrixXf full_covar_matrix = Eigen::MatrixXf::Zero(nbins, nbins);
@@ -544,8 +552,8 @@ namespace PROfit {
         int binning = spline_binnings[syst_map.at(name).first];
         PROspec ret(nbins);
         for(size_t i = 0; i < prop.trueLE.size(); ++i) {
-            const int spline_bin = prop.variable_bin_indices[binning][i];
-            const int reco_bin =  prop.variable_bin_indices[other_index][i];
+            const int spline_bin = prop.variable_bin_indices[i][binning];
+            const int reco_bin =  prop.variable_bin_indices[i][other_index];
             ret.Fill(reco_bin, GetSplineShift(name, shift, spline_bin) * prop.added_weights[i]);
         }
         return ret;
@@ -556,8 +564,8 @@ namespace PROfit {
         int binning = spline_binnings[syst_num];
         PROspec ret(nbins);
         for(size_t i = 0; i < prop.trueLE.size(); ++i) {
-            const int spline_bin = prop.variable_bin_indices[binning][i];
-            const int reco_bin = prop.variable_bin_indices[other_index][i];
+            const int spline_bin = prop.variable_bin_indices[i][binning];
+            const int reco_bin = prop.variable_bin_indices[i][other_index];
             ret.Fill(reco_bin, GetSplineShift(syst_num, shift, spline_bin) * prop.added_weights[i]);
         }
         return ret;
@@ -568,11 +576,11 @@ namespace PROfit {
         int nbins = config.m_num_variable_bins_total[other_index];
         PROspec ret(nbins);
         for(size_t i = 0; i < prop.trueLE.size(); ++i) {
-            const int reco_bin = prop.variable_bin_indices[other_index][i];
+            const int reco_bin = prop.variable_bin_indices[i][other_index];
             float weight = 1;
             for(size_t j = 0; j < names.size(); ++j) {
                 int binning = spline_binnings[syst_map.at(names[j]).first];
-                const int spline_bin = prop.variable_bin_indices[binning][i];
+                const int spline_bin = prop.variable_bin_indices[i][binning];
                 weight *= GetSplineShift(names[j], shifts[j], spline_bin);
             }
             ret.Fill(reco_bin, weight * prop.added_weights[i]);
@@ -585,11 +593,11 @@ namespace PROfit {
         int nbins = config.m_num_variable_bins_total[other_index];
         PROspec ret(nbins);
         for(size_t i = 0; i < prop.trueLE.size(); ++i) {
-            const int reco_bin = prop.variable_bin_indices[other_index][i];
+            const int reco_bin = prop.variable_bin_indices[i][other_index];
             float weight = 1;
             for(size_t j = 0; j < syst_nums.size(); ++j) {
                 int binning = spline_binnings[syst_nums[j]];
-                const int spline_bin = prop.variable_bin_indices[binning][i];
+                const int spline_bin = prop.variable_bin_indices[i][binning];
                 weight *= GetSplineShift(syst_nums[j], shifts[j], spline_bin);
             }
             ret.Fill(reco_bin, weight * prop.added_weights[i]);
@@ -602,11 +610,11 @@ namespace PROfit {
         int nbins = config.m_num_variable_bins_total[other_index];
         PROspec ret(nbins);
         for(size_t i = 0; i < prop.trueLE.size(); ++i) {
-            const int reco_bin = prop.variable_bin_indices[other_index][i];
+            const int reco_bin = prop.variable_bin_indices[i][other_index];
             float weight = 1;
             for(size_t j = 0; j < shifts.size(); ++j) {
                 int binning = spline_binnings[j];
-                const int spline_bin = prop.variable_bin_indices[binning][i];
+                const int spline_bin = prop.variable_bin_indices[i][binning];
                 weight *= GetSplineShift(j, shifts[j], spline_bin);
             }
             ret.Fill(reco_bin, weight * prop.added_weights[i]);

@@ -24,7 +24,7 @@ namespace PROfit {
         } else {
             for(size_t i = 0; i<inprop.variable_bin_indices.size(); ++i){
                 float add_w = inprop.added_weights[i]; 
-                myspectrum.Fill(inprop.variable_bin_indices[inconfig.i_prime][i], add_w);
+                myspectrum.Fill(inprop.variable_bin_indices[i][inconfig.i_prime], add_w);
             }
         }
         return myspectrum;
@@ -104,7 +104,7 @@ namespace PROfit {
             for(size_t i = 0; i<inprop.trueLE.size(); ++i){
                 float oscw  =  inmodel.model_functions[inprop.model_rule[i]](phys, inprop.trueLE[i]);
                 float add_w = inprop.added_weights[i]; 
-                const int reco_bin = inprop.variable_bin_indices[inconfig.i_prime][i];
+                const int reco_bin = inprop.variable_bin_indices[i][inconfig.i_prime];
 
                 float systw = 1;
                 for(int j = 0; j < shifts.size(); ++j) {
@@ -155,7 +155,7 @@ namespace PROfit {
                 float hist_w = 1.0 ;
 
                 //Figure out what subchannel the event is in
-                size_t subchan = inconfig.GetSubchannelIndexFromGlobalTrueBin(inprop.variable_bin_indices[inconfig.i_osc][i]);
+                size_t subchan = inconfig.GetSubchannelIndexFromGlobalTrueBin(inprop.variable_bin_indices[i][inconfig.i_osc]);
                 std::string name = inconfig.m_fullnames[subchan];
 
                 //Put name for ICARUS study here. How to handle more generically?
@@ -190,7 +190,7 @@ namespace PROfit {
                 float hist_w = 1.0 ;
 
                 //Figure out what subchannel the event is in
-                size_t subchan = inconfig.GetSubchannelIndexFromGlobalTrueBin(inprop.variable_bin_indices[inconfig.i_osc][i]);
+                size_t subchan = inconfig.GetSubchannelIndexFromGlobalTrueBin(inprop.variable_bin_indices[i][inconfig.i_osc]);
                 std::string name = inconfig.m_fullnames[subchan];
 
                 //Put name for ICARUS study here. How to handle more generically?
@@ -206,7 +206,7 @@ namespace PROfit {
                 }
 
                 float finalw = oscw * add_w * hist_w;
-                myspectrum.Fill(inprop.variable_bin_indices[inconfig.i_prime][i], finalw);
+                myspectrum.Fill(inprop.variable_bin_indices[i][inconfig.i_prime], finalw);
             }
         }
         return myspectrum;

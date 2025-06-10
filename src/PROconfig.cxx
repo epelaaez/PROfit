@@ -112,6 +112,9 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
     tinyxml2::XMLElement *pMode, *pDet, *pChan, *pPOT;
 
+    //Temp usage
+    i_prime=0;
+    i_osc=1;
 
 
     //max subchannels 100? Can we avoid this
@@ -255,143 +258,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
             log<LOG_DEBUG>(L"%1% || Loading Channel %2% with   ") % __func__ % m_channel_names.back().c_str() ;
 
-
-            // What are the bin edges and bin widths (bin widths just calculated from edges now)
-            tinyxml2::XMLElement *pBin = pChan->FirstChildElement("bins");
-
-            log<LOG_DEBUG>(L"%1% || This variable has a Reco Binning.   ") % __func__  ;
-            const char* rmin = pBin->Attribute("min");
-            const char* rmax = pBin->Attribute("max");
-            const char* rnbins = pBin->Attribute("nbins");
-            const char* redges =pBin->Attribute("edges");
-
-            int nbinsp;
-            std::vector<float> binedge, binwidth;
-
-            // use edges if defined, otherwise use min-max-nbins 
-            if(redges != NULL){
-
-                std::stringstream reco_iss(redges);
-                float number;
-                while ( reco_iss >> number ){
-                    binedge.push_back(number);
-                }
-
-                nbinsp = binedge.size() - 1;
-                for(int i = 0; i != nbinsp; ++i){
-                    binwidth.push_back(binedge[i+1] - binedge[i]);
-                }
-
-                log<LOG_DEBUG>(L"%1% || This variable has a Reco Binning with  %2% bins, Edges defined as %3%    ") % __func__ % nbinsp % binedge ;
-
-                if(m_bool_rate_only){
-                    m_channel_variable_num_bins[i_prime].push_back(1);
-                    std::vector<float> counting_exp_bin = {binedge.front(), binedge.back()};
-                    m_channel_variable_bin_edges[i_prime].push_back(counting_exp_bin);
-                    std::vector<float> counting_exp_width = {binedge.front()-binedge.back()};
-                    m_channel_variable_bin_widths[i_prime].push_back(counting_exp_width);
-                }else{
-                    m_channel_variable_num_bins[i_prime].push_back(nbinsp);
-                    m_channel_variable_bin_edges[i_prime].push_back(binedge);
-                    m_channel_variable_bin_widths[i_prime].push_back(binwidth);
-                }
-
-            }else if (rmin!=NULL && rmax!=NULL && rnbins!=NULL ){
-
-                float minp = strtod(rmin, &end);
-                float maxp = strtod(rmax, &end);
-                nbinsp = (int)strtod(rnbins, &end);
-                float step = (maxp-minp)/(float)nbinsp;
-                for(int i=0; i<nbinsp; i++){
-                    binedge.push_back(minp+i*step);
-                }
-                binedge.push_back(maxp);
-                binwidth.resize(nbinsp, step);
-                log<LOG_DEBUG>(L"%1% || This variable has a Reco Binning with min %2%, max %3% and nbins %4%   ") % __func__ % minp % maxp % nbinsp ;
-                log<LOG_DEBUG>(L"%1% || Which corresponds to edges %2%   ") % __func__ % binedge ;
-
-                if(m_bool_rate_only){
-                    m_channel_variable_num_bins[i_prime].push_back(1);
-                    std::vector<float> counting_exp_bin = {binedge.front(), binedge.back()};
-                    m_channel_variable_bin_edges[i_prime].push_back(counting_exp_bin);
-                    std::vector<float> counting_exp_width = {binedge.front()-binedge.back()};
-                    m_channel_variable_bin_widths[i_prime].push_back(counting_exp_width);
-                }else{
-                    m_channel_variable_num_bins[i_prime].push_back(nbinsp);
-                    m_channel_variable_bin_edges[i_prime].push_back(binedge);
-                    m_channel_variable_bin_widths[i_prime].push_back(binwidth);
-                }
-            }else{
-                log<LOG_ERROR>(L"%1% || ERROR: You need to define a reco binning using either edges or min/max/nsteps @ line %2% in %3% ") % __func__ % __LINE__  % __FILE__;
-                log<LOG_ERROR>(L"Terminating.");
-                exit(EXIT_FAILURE);
-            }
-
-
-            tinyxml2::XMLElement *pBinT = pChan->FirstChildElement("truebins");
-            if(pBinT){
-                const char* tmin = pBinT->Attribute("min");
-                const char* tmax = pBinT->Attribute("max");
-                const char* tnbins = pBinT->Attribute("nbins");
-                const char* tedges =pBinT->Attribute("edges");
-                if(tmin==NULL && tmax==NULL && tnbins==NULL && tedges == NULL)
-                {
-                    log<LOG_DEBUG>(L"%1% || This variable has a NO truth binning (or attribute min,max,nbins)  ") % __func__ ;
-                    m_channel_variable_num_bins[i_osc].push_back(0);
-                    m_channel_variable_bin_edges[i_osc].push_back(std::vector<float>());
-                    m_channel_variable_bin_widths[i_osc].push_back(std::vector<float>());
-                }else{
-
-                    log<LOG_DEBUG>(L"%1% || This variable has a Truth Binning.   ") % __func__  ;
-
-                    int nbinsp;
-                    std::vector<float> binedge, binwidth;
-
-                    // use edges if defined, otherwise use min-max-nbins 
-                    if(tedges != NULL){
-
-                        std::stringstream true_iss(tedges);
-                        float number;
-                        while ( true_iss >> number ){
-                            binedge.push_back(number );
-                        }
-
-                        nbinsp = binedge.size() - 1;
-                        for(int i = 0; i != nbinsp; ++i){
-                            binwidth.push_back(binedge[i+1] - binedge[i]);
-                        }
-
-                        log<LOG_DEBUG>(L"%1% || This variable has a Truth Binning with  %2% bins, Edges defined as %3%    ") % __func__ % nbinsp % binedge ;
-
-
-                    }else{
-                        float minp = strtod(tmin, &end);
-                        float maxp = strtod(tmax, &end);
-                        nbinsp = (int)strtod(tnbins, &end);
-                        float step = (maxp-minp)/(float)nbinsp;
-                        for(int i=0; i<nbinsp; i++){
-                            binedge.push_back(minp+i*step);
-                        }
-                        binedge.push_back(maxp);
-                        binwidth.resize(nbinsp, step);
-                        log<LOG_DEBUG>(L"%1% || This variable has a Truth Binning with min %2%, max %3% and nbins %4%   ") % __func__ % minp % maxp % nbinsp ;
-                        log<LOG_DEBUG>(L"%1% || Which corresponds to edges %2%   ") % __func__ % binedge ;
-
-                    }
-
-                    m_channel_variable_num_bins[i_osc].push_back(nbinsp);
-                    m_channel_variable_bin_edges[i_osc].push_back(binedge);
-                    m_channel_variable_bin_widths[i_osc].push_back(binwidth);
-
-
-                }
-            }else{
-                m_channel_variable_num_bins[i_osc].push_back(0);
-                m_channel_variable_bin_edges[i_osc].push_back(std::vector<float>());
-                m_channel_variable_bin_widths[i_osc].push_back(std::vector<float>());
-            }
-
-            tinyxml2::XMLElement *pBinO = pChan->FirstChildElement("otherbins");
+            tinyxml2::XMLElement *pBinO = pChan->FirstChildElement("variablebins");
             m_channel_variable_num_bins.push_back({});
             m_channel_variable_bin_edges.push_back({});
             m_channel_variable_bin_widths.push_back({});
@@ -409,7 +276,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                     m_channel_variable_bin_widths.back().push_back(std::vector<float>());
                     m_channel_variable_units.back().push_back("");
                 }else{
-                    log<LOG_DEBUG>(L"%1% || This variable has an Other Binning.   ") % __func__  ;
+                    log<LOG_DEBUG>(L"%1% || This variable has an Variable Binning.   ") % __func__  ;
 
                     int nbinsp;
                     std::vector<float> binedge, binwidth;
@@ -427,7 +294,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                             binwidth.push_back(binedge[i+1] - binedge[i]);
                         }
 
-                        log<LOG_DEBUG>(L"%1% || This variable has a Truth Binning with  %2% bins, Edges defined as %3%    ") % __func__ % nbinsp % binedge ;
+                        log<LOG_DEBUG>(L"%1% || This variable has a Variable Binning with  %2% bins, Edges defined as %3%    ") % __func__ % nbinsp % binedge ;
                     }else{
                         float minp = strtod(omin, &end);
                         float maxp = strtod(omax, &end);
@@ -438,7 +305,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                         }
                         binedge.push_back(maxp);
                         binwidth.resize(nbinsp, step);
-                        log<LOG_DEBUG>(L"%1% || This variable has a Truth Binning with min %2%, max %3% and nbins %4%   ") % __func__ % minp % maxp % nbinsp ;
+                        log<LOG_DEBUG>(L"%1% || This variable has a Variable Binning with min %2%, max %3% and nbins %4%   ") % __func__ % minp % maxp % nbinsp ;
                         log<LOG_DEBUG>(L"%1% || Which corresponds to edges %2%   ") % __func__ % binedge ;
                     }
 
@@ -447,7 +314,15 @@ int PROconfig::LoadFromXML(const std::string &filename){
                     m_channel_variable_bin_widths.back().push_back(binwidth);
                     m_channel_variable_units.back().push_back(ounits ? ounits : "");
                 }
-                pBinO = pBinO->NextSiblingElement("otherbins");
+                pBinO = pBinO->NextSiblingElement("variablebins");
+            }
+            if(m_bool_rate_only ){
+                    m_channel_variable_num_bins[i_prime] = {1};
+                    std::vector<float> binedges = m_channel_variable_bin_edges.back()[i_prime];
+                    std::vector<float> counting_exp_bin = {binedges.front(), binedges.back()};
+                    m_channel_variable_bin_edges.back()[i_prime] = {counting_exp_bin};
+                    std::vector<float> counting_exp_width = {binedges.front()-binedges.back()};
+                    m_channel_variable_bin_widths.back()[i_prime] = {counting_exp_width};
             }
 
             // Now loop over all this channels subchanels. Not the names must be UNIQUE!!
@@ -668,7 +543,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 }else{
                     TEMP_additional_weight_name.push_back(badditional_weight);
                     TEMP_additional_weight_bool.push_back(1);
-                    log<LOG_DEBUG>(L"%1% || Setting an additional weight for branch using the branch %3% as a reweighting.") % __func__ % badditional_weight;
+                    log<LOG_DEBUG>(L"%1% || Setting an additional weight for branch using the branch %2% as a reweighting.") % __func__ % badditional_weight;
 
                 }
 
@@ -762,9 +637,9 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 m_mcgen_variation_allowlist.push_back(wt);
                 m_mcgen_variation_plotname_map[wt] = plot_name ? plot_name : wt;
                 if(!binning || strcmp(binning, "reco") == 0) {
-                    m_mcgen_variation_binning_map[wt] = -1;
+                    m_mcgen_variation_binning_map[wt] = i_prime;
                 } else if(strcmp(binning, "truth") == 0) {
-                    m_mcgen_variation_binning_map[wt] = -2;
+                    m_mcgen_variation_binning_map[wt] = i_osc;
                 } else if(strncmp(binning, "other", 5) == 0) {
                     size_t l = strlen(binning);
                     bool all_numbers = true;
@@ -781,12 +656,12 @@ int PROconfig::LoadFromXML(const std::string &filename){
                     } else {
                         log<LOG_WARNING>(L"%1% || Unrecognized binning '%2%' for systematic %3%. Defaulting to reco bins.") 
                             % __func__ % binning % wt.c_str();
-                        m_mcgen_variation_binning_map[wt] = -1;
+                        m_mcgen_variation_binning_map[wt] = i_prime;
                     }
                 } else {
                     log<LOG_WARNING>(L"%1% || Unrecognized binning '%2%' for systematic %3%. Defaulting to reco bins.") 
                         % __func__ % binning % wt.c_str();
-                    m_mcgen_variation_binning_map[wt] = -1;
+                    m_mcgen_variation_binning_map[wt] = i_prime;
                 }
                 if(knobs) {
                     std::vector<double> knobs_vec;
@@ -1063,33 +938,25 @@ int PROconfig::LoadFromXML(const std::string &filename){
 void PROconfig::CalcTotalBins(){
     this->remove_unused_channel();
 
-    log<LOG_INFO>(L"%1% || Calculating number of bins involved") % __func__;
+    log<LOG_INFO>(L"%1% || calculating number of bins involved") % __func__;
     for(size_t i = 0; i != m_num_channels; ++i){
-        m_num_variable_bins_detector_block[i_prime] += m_num_subchannels[i]*m_channel_variable_num_bins[i_prime][i];
-        m_num_variable_bins_detector_block[i_osc] += m_num_subchannels[i]*m_channel_variable_num_bins[i_osc][i];
-        m_num_variable_bins_detector_block_collapsed[i_prime] += m_channel_variable_num_bins[i_prime][i];
         for(size_t io = 0; io < m_num_variables; ++io) {
             m_num_variable_bins_detector_block[io] += m_num_subchannels[i]*m_channel_variable_num_bins[i][io];
             m_num_variable_bins_detector_block_collapsed[io] += m_channel_variable_num_bins[i][io];
         }
     }
 
-    m_num_variable_bins_mode_block[i_prime] = m_num_variable_bins_detector_block[i_prime] *  m_num_detectors;
-    m_num_variable_bins_mode_block[i_osc] = m_num_variable_bins_detector_block[i_osc] *  m_num_detectors;
-    m_num_variable_bins_mode_block_collapsed[i_prime] = m_num_variable_bins_detector_block_collapsed[i_prime] * m_num_detectors;
     for(size_t io = 0; io < m_num_variables; ++io) {
         m_num_variable_bins_mode_block[io] = m_num_variable_bins_detector_block[io] * m_num_detectors;
         m_num_variable_bins_mode_block_collapsed[io] = m_num_variable_bins_detector_block_collapsed[io] * m_num_detectors;
     }
 
-    m_num_variable_bins_total[i_prime] = m_num_variable_bins_mode_block[i_prime] * m_num_modes;
-    m_num_variable_bins_total[i_osc] = m_num_variable_bins_mode_block[i_osc] * m_num_modes;
-    m_num_variable_bins_total_collapsed[i_prime] = m_num_variable_bins_mode_block_collapsed[i_prime] * m_num_modes;
-    for(size_t io = 0; io < m_num_variables; ++io) {
+     for(size_t io = 0; io < m_num_variables; ++io) {
         m_num_variable_bins_total[io] = m_num_variable_bins_mode_block[io] * m_num_modes;
         m_num_variable_bins_total_collapsed[io] = m_num_variable_bins_mode_block_collapsed[io] * m_num_modes;
     }
 
+    log<LOG_INFO>(L"%1% || Generating Index maps for convienance") % __func__;
     this->generate_index_map();
     return;
 }
@@ -1111,7 +978,7 @@ size_t PROconfig::GetChannelIndex(size_t subchannel_index) const{
 
 size_t PROconfig::GetGlobalBinStart(size_t subchannel_index) const{
     size_t index = this->find_equal_index(m_vec_subchannel_index, subchannel_index);
-    return m_vec_global_reco_index_start[index];
+    return m_vec_global_variable_index_start[i_prime][index];
 }
 
 size_t PROconfig::GetCollapsedGlobalBinStart(size_t channel_index) const{
@@ -1128,12 +995,12 @@ size_t PROconfig::GetCollapsedGlobalBinStart(size_t channel_index) const{
 
 size_t PROconfig::GetGlobalTrueBinStart(size_t subchannel_index) const{
     size_t index = this->find_equal_index(m_vec_subchannel_index, subchannel_index);
-    return m_vec_global_true_index_start[index];
+    return m_vec_global_variable_index_start[i_osc][index];
 }
 
 size_t PROconfig::GetGlobalOtherBinStart(size_t subchannel_index, size_t other_index) const{
     size_t index = this->find_equal_index(m_vec_subchannel_index, subchannel_index);
-    return m_vec_global_other_index_start[other_index][index];
+    return m_vec_global_variable_index_start[other_index][index];
 }
 
 size_t PROconfig::GetCollapsedGlobalOtherBinStart(size_t channel_index, size_t other_index) const{
@@ -1149,12 +1016,12 @@ size_t PROconfig::GetCollapsedGlobalOtherBinStart(size_t channel_index, size_t o
 }
 
 size_t PROconfig::GetSubchannelIndexFromGlobalBin(size_t global_reco_index) const {
-    size_t index = this->find_less_or_equal_index(m_vec_global_reco_index_start, global_reco_index); 
+    size_t index = this->find_less_or_equal_index(m_vec_global_variable_index_start[i_prime], global_reco_index); 
     return m_vec_subchannel_index[index];
 }
 
 size_t PROconfig::GetSubchannelIndexFromGlobalTrueBin(size_t global_trueindex) const{
-    size_t index = this->find_less_or_equal_index(m_vec_global_true_index_start, global_trueindex);
+    size_t index = this->find_less_or_equal_index(m_vec_global_variable_index_start[i_osc], global_trueindex);
     return m_vec_subchannel_index[index];
 }
 
@@ -1497,63 +1364,48 @@ void PROconfig::generate_index_map(){
     m_map_fullname_subchannel_index.clear();
     m_vec_subchannel_index.clear();
     m_vec_channel_index.clear();
-    m_vec_global_reco_index_start.clear();
-    m_vec_global_true_index_start.clear();
-    m_vec_global_other_index_start.clear();
+    m_vec_global_variable_index_start.clear();
 
     for(size_t io = 0; io < m_num_variables; ++io) {
-        m_vec_global_other_index_start.emplace_back();
+        m_vec_global_variable_index_start.emplace_back();
     }
 
     size_t global_subchannel_index = 0;
     for(size_t im = 0; im < m_num_modes; im++){
 
-        size_t mode_bin_start = im*m_num_variable_bins_mode_block[i_prime];
-        size_t mode_truebin_start = im*m_num_variable_bins_mode_block[i_osc];
-        std::vector<size_t> mode_other_start;
+        std::vector<size_t> mode_variable_start;
         for(size_t io = 0; io < m_num_variables; ++io) {
-            mode_other_start.push_back(im*m_num_variable_bins_mode_block[io]);
+            mode_variable_start.push_back(im*m_num_variable_bins_mode_block[io]);
         }
 
         for(size_t id =0; id < m_num_detectors; id++){
 
-            size_t detector_bin_start = id*m_num_variable_bins_detector_block[i_prime];
-            size_t channel_bin_start = 0;
 
-            size_t detector_truebin_start = id*m_num_variable_bins_detector_block[i_osc];
-            size_t channel_truebin_start = 0;
-
-            std::vector<size_t> detector_other_start;
-            std::vector<size_t> channel_other_start;
+            std::vector<size_t> detector_variable_start;
+            std::vector<size_t> channel_variable_start;
             for(size_t io = 0; io < m_num_variables; ++io) {
-                detector_other_start.push_back(im*m_num_variable_bins_detector_block[io]);
-                channel_other_start.push_back(0);
+                detector_variable_start.push_back(im*m_num_variable_bins_detector_block[io]);
+                channel_variable_start.push_back(0);
             }
 
             for(size_t ic = 0; ic < m_num_channels; ic++){
                 for(size_t sc = 0; sc < m_num_subchannels[ic]; sc++){
 
                     std::string temp_name  = m_mode_names[im] +"_" +m_detector_names[id]+"_"+m_channel_names[ic]+"_"+m_subchannel_names[ic][sc];
-                    size_t global_bin_index = mode_bin_start + detector_bin_start + channel_bin_start + sc*m_channel_variable_num_bins[i_prime][ic];
-                    size_t global_truebin_index = mode_truebin_start + detector_truebin_start + channel_truebin_start + sc*m_channel_variable_num_bins[i_osc][ic];
 
                     m_map_fullname_subchannel_index[temp_name] = global_subchannel_index;
                     m_vec_subchannel_index.push_back(global_subchannel_index);
                     m_vec_channel_index.push_back(ic);
-                    m_vec_global_reco_index_start.push_back(global_bin_index);
-                    m_vec_global_true_index_start.push_back(global_truebin_index);
 
                     for(size_t io = 0; io < m_num_variables; ++io) {
-                        size_t global_other_index = mode_other_start[io] + detector_other_start[io] + channel_other_start[io] + sc*m_channel_variable_num_bins[ic][io];
-                        m_vec_global_other_index_start[io].push_back(global_other_index);
+                        size_t global_variable_index = mode_variable_start[io] + detector_variable_start[io] + channel_variable_start[io] + sc*m_channel_variable_num_bins[ic][io];
+                        m_vec_global_variable_index_start[io].push_back(global_variable_index);
                     }
 
                     ++global_subchannel_index;
                 }
-                channel_bin_start += m_channel_variable_num_bins[i_prime][ic]*m_num_subchannels[ic];
-                channel_truebin_start += m_channel_variable_num_bins[i_osc][ic]*m_num_subchannels[ic];
                 for(size_t io = 0; io < m_num_variables; ++io) {
-                    channel_other_start[io] += m_channel_variable_num_bins[ic][io]*m_num_subchannels[ic];
+                    channel_variable_start[io] += m_channel_variable_num_bins[ic][io]*m_num_subchannels[ic];
                 }
             }
         }
@@ -1604,43 +1456,11 @@ size_t PROconfig::find_global_subchannel_index_from_global_bin(size_t global_ind
 
 void PROconfig::construct_variable_collapsing_matrices(){
 
-    variable_collapsing_matrices[i_prime] = Eigen::MatrixXf::Zero(m_num_variable_bins_total[i_prime], m_num_variable_bins_total_collapsed[i_prime]);
-    log<LOG_INFO>(L"%1% || Creating Collapsing Matrix. m_num_variable_bins_total[i_prime], m_num_variable_bins_total[i_prime]_collapsed:  %2%  %3%") % __func__ % m_num_variable_bins_total[i_prime] % m_num_variable_bins_total_collapsed[i_prime];
+    log<LOG_INFO>(L"%1% || Creating Collapsing Matrices ") % __func__; 
 
-    //construct the matrix by detector block
-    Eigen::MatrixXf block_collapser = Eigen::MatrixXf::Zero(m_num_variable_bins_detector_block[i_prime], m_num_variable_bins_detector_block_collapsed[i_prime]);
-
-    size_t channel_row_start = 0, channel_col_start = 0;
-    for(size_t ic =0; ic != m_num_channels; ++ic){
-
-        //first, build matrix for each channel block
-        size_t total_num_bins_channel = m_num_subchannels[ic] * m_channel_variable_num_bins[i_prime][ic];
-
-        Eigen::MatrixXf channel_collapser = Eigen::MatrixXf::Zero(total_num_bins_channel, m_channel_variable_num_bins[i_prime][ic]);
-        for(size_t col = 0; col != m_channel_variable_num_bins[i_prime][ic]; ++col){
-            for(size_t subch = 0; subch != m_num_subchannels[ic]; ++subch){
-                size_t row = subch * m_channel_variable_num_bins[i_prime][ic] + col;
-                channel_collapser(row, col) = 1.0;
-            }
-        }
-
-        // now, copy this matrix to detector block
-        block_collapser(Eigen::seqN(channel_row_start, total_num_bins_channel), Eigen::seqN(channel_col_start, m_channel_variable_num_bins[i_prime][ic])) = channel_collapser;
-        channel_row_start += total_num_bins_channel;
-        channel_col_start += m_channel_variable_num_bins[i_prime][ic];
-    }
-
-    //okay! now stuff every detector block size_to the final collapse matrix
-    for(size_t im = 0; im != m_num_modes; ++im){
-        for(size_t id =0; id != m_num_detectors; ++id){
-            size_t row_block_start = im * m_num_variable_bins_mode_block[i_prime] + id * m_num_variable_bins_detector_block[i_prime];
-            size_t col_block_start = im * m_num_variable_bins_mode_block_collapsed[i_prime] + id * m_num_variable_bins_detector_block_collapsed[i_prime];
-            variable_collapsing_matrices[i_prime](Eigen::seqN(row_block_start, m_num_variable_bins_detector_block[i_prime]), Eigen::seqN(col_block_start, m_num_variable_bins_detector_block_collapsed[i_prime])) = block_collapser;
-        }
-    }
     for(size_t io = 0; io < m_num_variables; ++io) {
         variable_collapsing_matrices.push_back(Eigen::MatrixXf::Zero(m_num_variable_bins_total[io], m_num_variable_bins_total_collapsed[io]));
-        log<LOG_INFO>(L"%1% || Creating Other %2% Collapsing Matrix. m_num_variable_bins_total[i_prime], m_num_variable_bins_total[i_prime]_collapsed:  %3%  %4%") % __func__ % io % m_num_variable_bins_total[io] % m_num_variable_bins_total_collapsed[io];
+        log<LOG_INFO>(L"%1% || Creating Other %2% Collapsing Matrix. m_num_variable_bins_total[io], m_num_variable_bins_total[io]_collapsed:  %3%  %4%") % __func__ % io % m_num_variable_bins_total[io] % m_num_variable_bins_total_collapsed[io];
 
         //construct the matrix by detector block
         Eigen::MatrixXf block_collapser = Eigen::MatrixXf::Zero(m_num_variable_bins_detector_block[io], m_num_variable_bins_detector_block_collapsed[io]);
@@ -1710,12 +1530,11 @@ uint32_t PROconfig::CalcHash() const{
     };
 
     unique_string << vecToString(m_fullnames);
-    for (const auto& vec : m_channel_variable_bin_edges[i_prime]) 
-        unique_string << vecToString(vec);
-
-    for (const auto& vec : m_channel_variable_bin_edges[i_osc]) 
-        unique_string << vecToString(vec);
-
+    for (const auto& vec1 : m_channel_variable_bin_edges){
+        for (const auto& vec2 : vec1){ 
+            unique_string << vecToString(vec2);
+        }
+    }
     for (const auto& vec : m_mcgen_additional_weight_name) 
         unique_string << vecToString(vec);
 

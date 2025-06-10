@@ -54,15 +54,19 @@ namespace PROfit{
 
             /* the Core MC is saved in these vectors.*/
 
-            std::vector<float> trueLE;
             std::vector<float> added_weights;
             std::vector<int>   model_rule;
-            std::vector<std::vector<int>> variable_bin_indices;
+            
             Eigen::MatrixXf    hist;
-            std::vector<Eigen::MatrixXf> variable_hists;
             Eigen::VectorXf    histLE;
             Eigen::VectorXf    mcStatErr;
+
+            std::vector<float> trueLE;
+
+            std::vector<std::vector<int>> variable_bin_indices;
+            std::vector<Eigen::MatrixXf> variable_hists;
             std::vector<Eigen::VectorXf> variableMCStatErr;
+
             uint32_t           hash;
 
             // boost serialize save to file

@@ -23,7 +23,7 @@ public:
     std::vector<std::string> pretty_param_names;
     Eigen::VectorXf lb, ub, default_val;
     std::vector<std::function<float(const Eigen::VectorXf&, float)>> model_functions;
-    std::vector<Eigen::MatrixXf> hists; //2D hists for binned oscilattions
+    std::vector<Eigen::MatrixXf> hists; //2D hists for binned oscilattion, one for each model function
 };
 
 class NullModel : public PROmodel {
@@ -35,8 +35,8 @@ public:
 
         hists.emplace_back(Eigen::MatrixXf::Constant(prop.hist.rows(), prop.hist.cols(),0.0));
         Eigen::MatrixXf &h = hists.back();
-        for(size_t i = 0; i < prop.variable_bin_indices[0].size(); ++i) {
-            int tbin = prop.variable_bin_indices[ivar][i], rbin = prop.variable_bin_indices[0][i];
+        for(size_t i = 0; i < prop.variable_bin_indices.size(); ++i) {
+            int tbin = prop.variable_bin_indices[i][ivar], rbin = prop.variable_bin_indices[i][0];
             h(tbin, rbin) += prop.added_weights[i];
         }
     }
@@ -49,11 +49,13 @@ public:
         model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pmumu(v(0),v(1),le);});
         ivar = 1;
         for(size_t m = 0; m < model_functions.size(); ++m) {
+
+
             hists.emplace_back(Eigen::MatrixXf::Constant(prop.hist.rows(), prop.hist.cols(),0.0));
             Eigen::MatrixXf &h = hists.back();
-            for(size_t i = 0; i < prop.variable_bin_indices[0].size(); ++i) {
+            for(size_t i = 0; i < prop.added_weights.size(); ++i) {
                 if(prop.model_rule[i] != (int)m) continue;
-                int tbin = prop.variable_bin_indices[ivar][i], rbin = prop.variable_bin_indices[0][i];
+                int tbin = prop.variable_bin_indices[i][ivar], rbin = prop.variable_bin_indices[i][0];
                 h(tbin, rbin) += prop.added_weights[i];
             }
         }
@@ -110,9 +112,9 @@ public:
         for(size_t m = 0; m < model_functions.size(); ++m) {
             hists.emplace_back(Eigen::MatrixXf::Constant(prop.hist.rows(), prop.hist.cols(),0.0));
             Eigen::MatrixXf &h = hists.back();
-            for(size_t i = 0; i < prop.variable_bin_indices[0].size(); ++i) {
+            for(size_t i = 0; i < prop.variable_bin_indices.size(); ++i) {
                 if(prop.model_rule[i] != (int)m) continue;
-                int tbin = prop.variable_bin_indices[ivar][i], rbin = prop.variable_bin_indices[0][i];
+                int tbin = prop.variable_bin_indices[i][ivar], rbin = prop.variable_bin_indices[i][0];
                 h(tbin, rbin) += prop.added_weights[i];
             }
         }
@@ -176,9 +178,9 @@ public:
         for(size_t m = 0; m < model_functions.size(); ++m) {
             hists.emplace_back(Eigen::MatrixXf::Constant(prop.hist.rows(), prop.hist.cols(),0.0));
             Eigen::MatrixXf &h = hists.back();
-            for(size_t i = 0; i < prop.variable_bin_indices[0].size(); ++i) {
+            for(size_t i = 0; i < prop.variable_bin_indices.size(); ++i) {
                 if(prop.model_rule[i] != (int)m) continue;
-                int tbin = prop.variable_bin_indices[ivar][i], rbin = prop.variable_bin_indices[0][i];
+                int tbin = prop.variable_bin_indices[i][ivar] , rbin= prop.variable_bin_indices[i][0];
                 h(tbin, rbin) += prop.added_weights[i];
             }
         }

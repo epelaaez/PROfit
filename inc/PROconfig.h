@@ -132,9 +132,9 @@ namespace PROfit{
             std::unordered_map<std::string, size_t> m_map_fullname_subchannel_index;
             std::vector<size_t> m_vec_subchannel_index; //vector of global subchannel index, in increasing order
             std::vector<size_t> m_vec_channel_index;    //vector of corresponding channel index
-            std::vector<size_t> m_vec_global_reco_index_start;  //vector of global reco bin index, in increasing order
-            std::vector<size_t> m_vec_global_true_index_start;  //vector of global true bin index, in increasing order
-            std::vector<std::vector<size_t>> m_vec_global_other_index_start;  //vector of global true bin index, in increasing order
+            //std::vector<size_t> m_vec_global_reco_index_start;  //vector of global reco bin index, in increasing order TBD
+            //std::vector<size_t> m_vec_global_true_index_start;  //vector of global true bin index, in increasing order TBD
+            std::vector<std::vector<size_t>> m_vec_global_variable_index_start;  //vector of global true bin index, in increasing order
 
             //---- PRIVATE FUNCTION ------
 

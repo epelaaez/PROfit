@@ -371,7 +371,7 @@ namespace PROfit {
             log<LOG_DEBUG>(L"%1% || Variation: %2% --> %3% universes") % __func__ % sys_pair.first.c_str() % sys_pair.second;
         }
 
-        syst_vector.emplace_back();
+        //syst_vector.emplace_back();// One for each variable. "reco" is no longer special
         for(size_t io = 0; io < inconfig.m_num_variables; ++io)
             syst_vector.emplace_back();
 
@@ -382,7 +382,7 @@ namespace PROfit {
             const std::string& sys_name = sys_pair.first;
             std::string sys_weight_formula = "1";
             std::string sys_mode = inconfig.m_mcgen_variation_type_map.at(sys_name);
-            int binning = inconfig.m_mcgen_variation_binning_map.at(sys_name);
+            int binningindex = inconfig.m_mcgen_variation_binning_map.at(sys_name);
             for(auto &sv: syst_vector) {
                 sv.emplace_back(sys_name, sys_pair.second);
 
@@ -401,7 +401,7 @@ namespace PROfit {
                     sv.back().knob_index = override_knobs ? inconfig.m_mcgen_variation_knobval_override.at(sys_name) : map_systematic_knob_vals[sys_name];
                     sv.back().knobval = sv.back().knob_index;
                     std::sort(sv.back().knobval.begin(), sv.back().knobval.end());
-                    sv.back().binning = binning;
+                    sv.back().binning = binningindex;
                 }
                 if(sys_mode == "flat"){
                     log<LOG_INFO>(L"%1% || Systematic variation %2% is a match for a flat covariance systematic. Processing a such. ") % __func__ % sys_name.c_str();
@@ -451,7 +451,7 @@ namespace PROfit {
 
                     sv.back().norm_bins=flatbins;
                     sv.back().norm_value = flat_percent;
-                    sv.back().binning = binning;
+                    sv.back().binning = binningindex;
 
                 }
 
@@ -484,15 +484,13 @@ namespace PROfit {
             auto &sv = syst_vector[i];
             for(auto &s: sv) {
                 if(s.mode=="flat")
-                    continue;	
-                s.CreateSpecs(
-                        s.mode == "covariance" && i == 0 ? inconfig.m_num_variable_bins_total[inconfig.i_prime] :
-                        s.mode == "covariance" ? inconfig.m_num_variable_bins_total[i-1] :
-                        s.binning == -2 ? inconfig.m_num_variable_bins_total[inconfig.i_osc] : 
-                        s.binning == -1 ? inconfig.m_num_variable_bins_total[inconfig.i_prime]  
-                                        : inconfig.m_num_variable_bins_total[s.binning]); 
+                    continue;
+                //Get these binnings right
+                s.CreateSpecs( s.mode == "covariance" ? inconfig.m_num_variable_bins_total[i] : inconfig.m_num_variable_bins_total[s.binning]);
+                // use the binnign from the variable if covariance, otherise use the binning fdefined for the spline
             }
         }
+
 
         inprop.mcStatErr = Eigen::VectorXf::Constant(inconfig.m_num_variable_bins_total[inconfig.i_prime], 0);
         inprop.hist = Eigen::MatrixXf::Constant(inconfig.m_num_variable_bins_total[inconfig.i_osc], inconfig.m_num_variable_bins_total[inconfig.i_prime], 0);
@@ -500,12 +498,13 @@ namespace PROfit {
             inprop.variableMCStatErr.push_back(Eigen::VectorXf::Constant(inconfig.m_num_variable_bins_total[i], 0));
             inprop.variable_hists.push_back(Eigen::MatrixXf::Constant(inconfig.m_num_variable_bins_total[i], inconfig.m_num_variable_bins_total[inconfig.i_prime], 0));
         }
+
         inprop.histLE = Eigen::VectorXf::Constant(inconfig.m_num_variable_bins_total[inconfig.i_osc], 0);
         size_t LE_bin = 0;
         for(size_t im = 0; im < inconfig.m_num_modes; im++){
             for(size_t id =0; id < inconfig.m_num_detectors; id++){
                 for(size_t ic = 0; ic < inconfig.m_num_channels; ic++){
-                    const std::vector<float> &edges = inconfig.m_channel_variable_bin_edges[inconfig.i_osc][ic];
+                    const std::vector<float> &edges = inconfig.m_channel_variable_bin_edges.at(ic)[inconfig.i_osc];
                     for(size_t sc = 0; sc < inconfig.m_num_subchannels.at(ic); sc++){
                         for(size_t j = 0; j < edges.size() - 1; ++j){
                             inprop.histLE(LE_bin++) = (edges[j+1] + edges[j])/2;
@@ -799,6 +798,7 @@ namespace PROfit {
     void process_cafana_event(const PROconfig &inconfig, const std::shared_ptr<BranchVariable>& branch, const std::map<std::string, std::vector<eweight_type>*>& eventweight_map, float mcpot, int subchannel_index, std::vector<std::vector<SystStruct>> &syst_vector, const std::vector<float>& syst_additional_weight, PROpeller& inprop){
 
 
+
         int total_num_sys = syst_vector[0].size(); 
         std::vector<float> vars = branch->GetVariables();
         
@@ -807,8 +807,8 @@ namespace PROfit {
         mc_weight *= inconfig.m_plot_pot / mcpot;
 
 
-        int global_bin = FindGlobalBin(inconfig, vars[inconfig.i_prime], subchannel_index);
-        int global_true_bin = run_syst ? FindGlobalTrueBin(inconfig, vars[inconfig.i_osc], subchannel_index) : 0 ;//seems werid, but restricts ALL cosmics to one bin. 
+        int global_bin = FindGlobalOtherBin(inconfig, vars[inconfig.i_prime], subchannel_index, inconfig.i_prime);
+        int global_true_bin = run_syst ? FindGlobalOtherBin(inconfig, vars[inconfig.i_osc], subchannel_index, inconfig.i_osc) : 0 ;//seems werid, but restricts ALL cosmics to one bin. 
         int model_rule = branch->GetModelRule();
 
         std::vector<int> variable_bin_indices;
@@ -843,7 +843,8 @@ namespace PROfit {
         for(int i = 0; i != total_num_sys; ++i){
             std::vector<SystStruct*> var_syst_objs;
             for(size_t io = 0; io < inconfig.m_num_variables; ++io)
-                var_syst_objs.push_back(&syst_vector[io+1][i]);
+                var_syst_objs.push_back(&syst_vector[io][i]);
+            
             float additional_weight = syst_additional_weight.at(i);
             auto map_iter = eventweight_map.find(var_syst_objs.front()->GetSysName());
             int spline_bin =  variable_bin_indices[var_syst_objs.front()->binning];
@@ -864,15 +865,19 @@ namespace PROfit {
                 continue;
 
             }else if(var_syst_objs.front()->mode == "covariance"){
+
                 for(size_t io = 0; io < inconfig.m_num_variables; ++io) {
-                    if(variable_bin_indices[io] >= 0)
+                    if(variable_bin_indices[io] >= 0){
+                      
                         var_syst_objs[io]->FillCV(variable_bin_indices[io], mc_weight);
+                    }
                 }
                 for(int iuni = 0; iuni < var_syst_objs.front()->GetNUniverse(); ++iuni){
                     float sys_wei = run_syst ? additional_weight * static_cast<float>(map_iter->second->at(iuni) ) :  1.0;
                     for(size_t io = 0; io < inconfig.m_num_variables; ++io) {
-                        if(variable_bin_indices[io] >= 0)
+                        if(variable_bin_indices[io] >= 0){
                             var_syst_objs[io]->FillUniverse(iuni, variable_bin_indices[io], mc_weight * sys_wei);
+                        }
                     }
                 }
             } else  if( var_syst_objs.front()->mode == "norm") {
@@ -891,6 +896,7 @@ namespace PROfit {
                 continue;
             }
         }
+
     }
 
 
