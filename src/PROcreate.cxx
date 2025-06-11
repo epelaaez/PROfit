@@ -499,7 +499,15 @@ namespace PROfit {
             inprop.variable_hists.push_back(Eigen::MatrixXf::Constant(inconfig.m_num_variable_bins_total[i], inconfig.m_num_variable_bins_total[inconfig.i_prime], 0));
         }
 
-        inprop.histLE = Eigen::VectorXf::Constant(inconfig.m_num_variable_bins_total[inconfig.i_osc], 0);
+        //setup and initilizte the hists
+        inprop.variable_hist_storage.init(inconfig.m_num_variables);
+        for(size_t i = 0; i < inconfig.m_num_variables; ++i) {
+            for(size_t j = i+1; j < inconfig.m_num_variables; ++j) {
+                inprop.variable_hist_storage.set(i,j)= Eigen::MatrixXf::Zero(inconfig.m_num_variable_bins_total[i],inconfig.m_num_variable_bins_total[j]);
+            }
+        }
+
+              inprop.histLE = Eigen::VectorXf::Constant(inconfig.m_num_variable_bins_total[inconfig.i_osc], 0);
         size_t LE_bin = 0;
         for(size_t im = 0; im < inconfig.m_num_modes; im++){
             for(size_t id =0; id < inconfig.m_num_detectors; id++){
@@ -835,8 +843,13 @@ namespace PROfit {
         for(size_t io = 0; io < inconfig.m_num_variables; ++io) {
             if(variable_bin_indices[io] >= 0) {
                 inprop.variableMCStatErr[io](variable_bin_indices[io]) += 1;
-                inprop.variable_hists[io](variable_bin_indices[io], variable_bin_indices[inconfig.i_prime]) += mc_weight; //TODO TODO
+                inprop.variable_hists[io](variable_bin_indices[io], variable_bin_indices[inconfig.i_prime]) += mc_weight; //TBD
+                for(size_t jo = jo; jo < inconfig.m_num_variables; ++jo) {
+                    if(io==jo || variable_bin_indices[jo]<0)continue;
+                    inprop.variable_hist_storage.set(io,jo)(variable_bin_indices[io], variable_bin_indices[jo]) += mc_weight; 
+                }
             }
+            
         }
 
         if(!run_syst) return;

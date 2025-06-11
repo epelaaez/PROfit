@@ -9,7 +9,63 @@
 #include <vector>
 #include <chrono>
 namespace PROfit{
+    class PROhistStorage {
+        private:
+            size_t n_vars = 0;
+            std::vector<Eigen::MatrixXf> data;
 
+            // Only stores when i <= j
+            size_t compute_index(size_t i, size_t j) const {
+                return (i * n_vars) - (i * (i + 1)) / 2 + j - i - 1;
+            }
+
+            friend class boost::serialization::access;
+
+            template<class Archive>
+                void serialize(Archive& ar, const unsigned int version) {
+                    (void)version;
+                    ar & n_vars;
+
+                    if (Archive::is_loading::value) {
+                        if (n_vars > 0) {
+                            data.resize(n_vars * (n_vars - 1) / 2);
+                        } else {
+                            data.clear();
+                        }
+                    }
+
+                    if (n_vars > 0) {
+                        for (auto& mat : data) {
+                            ar & mat;
+                        }
+                    }
+                }
+        public:
+            PROhistStorage() {}  
+            PROhistStorage(size_t n) {init(n);}
+
+            void init(size_t n) { n_vars = n;data.resize(n * (n - 1) / 2);}
+
+            Eigen::MatrixXf operator()(size_t i, size_t j) const {
+                if (i < j) {
+                    return data[compute_index(i, j)];
+                } else {
+                    return data[compute_index(j, i)].transpose();
+                }
+            }
+
+            // Direct access for setting (must use i <= j)
+            Eigen::MatrixXf& set(size_t i, size_t j) {
+                if (i >= j){
+                    log<LOG_ERROR>(L"%1% || If your seeing this, something went wrong. dont access PROhistStorage out of order.") % __func__;
+                        exit(EXIT_FAILURE);
+                }
+                return data[compute_index(i, j)];
+            }
+
+
+            size_t size() const { return n_vars; }
+    };
 
     /*Class: The PROpeller, which moves the analysis forward. A class to keep all MC events for oscllation event-by-event.
     */
@@ -21,15 +77,16 @@ namespace PROfit{
             // Serialization function for boost that will allow for save state of propeller
             template <class Archive>
                 void serialize(Archive& ar, [[maybe_unused]] const unsigned int version) {
-                    ar & trueLE;
                     ar & added_weights;
                     ar & model_rule;
+                    ar & variableMCStatErr;
                     ar & variable_bin_indices;
+                    ar & variable_hist_storage;
                     ar & hist;
-                    ar & variable_hists;
                     ar & histLE;
                     ar & mcStatErr;
-                    ar & variableMCStatErr;
+                    ar & trueLE;
+                    ar & variable_hists;
                     ar & hash;
                 }
 
@@ -56,16 +113,17 @@ namespace PROfit{
 
             std::vector<float> added_weights;
             std::vector<int>   model_rule;
-            
+            std::vector<std::vector<int>> variable_bin_indices;
+            std::vector<Eigen::VectorXf> variableMCStatErr;
+            PROhistStorage variable_hist_storage;
+
+
             Eigen::MatrixXf    hist;
             Eigen::VectorXf    histLE;
             Eigen::VectorXf    mcStatErr;
 
             std::vector<float> trueLE;
-
-            std::vector<std::vector<int>> variable_bin_indices;
             std::vector<Eigen::MatrixXf> variable_hists;
-            std::vector<Eigen::VectorXf> variableMCStatErr;
 
             uint32_t           hash;
 

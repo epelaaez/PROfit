@@ -126,7 +126,6 @@ namespace PROfit{
 
     std::unique_ptr<TGraphAsymmErrors> getErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, bool scale, int other_index) {
         //TODO: Only works with 1 mode/detector/channel
-            log<LOG_DEBUG>(L"%1% || BLORG Line %2%") % __func__ % __LINE__;
         Eigen::VectorXf cv =  CollapseMatrix(config, FillOtherCVSpectrum(config, prop, other_index).Spec(), other_index);
         std::vector<float> edges = config.GetChannelOtherBinEdges(0, other_index);
         log<LOG_DEBUG>(L"%1% || For other var %2% the cv is %3% and the edges are %4%") % __func__ % other_index % cv % edges;
@@ -137,9 +136,7 @@ namespace PROfit{
         std::vector<Eigen::VectorXf> specs;
         std::uniform_int_distribution<uint32_t> dseed(0, std::numeric_limits<uint32_t>::max());
         for(size_t i = 0; i < nerrorsample; ++i){
-            log<LOG_DEBUG>(L"%1% || BLORG Line %2%") % __func__ % __LINE__;
             specs.push_back(FillSystRandomThrow(config, prop, syst, dseed(PROseed::global_rng), other_index).Spec());
-            log<LOG_DEBUG>(L"%1% || BLORG Line %2%") % __func__ % __LINE__;
 
         }
         //specs.push_back(CollapseMatrix(config, FillSystRandomThrow(config, prop, syst).Spec()));
@@ -148,14 +145,12 @@ namespace PROfit{
             tmphist.SetBinContent(i+1, cv(i));
         if(scale) tmphist.Scale(1, "width");
         //std::unique_ptr<TGraphAsymmErrors> ret = std::make_unique<TGraphAsymmErrors>(cv.size(), centers.data(), cv.data());
-            log<LOG_DEBUG>(L"%1% || BLORG Line %2%") % __func__ % __LINE__;
         std::unique_ptr<TGraphAsymmErrors> ret = std::make_unique<TGraphAsymmErrors>(&tmphist);
         for(int i = 0; i < cv.size(); ++i) {
             std::vector<float> binconts(nerrorsample);
             for(size_t j = 0; j < nerrorsample; ++j) {
                 binconts[j] = specs[j](i);
             }
-            log<LOG_DEBUG>(L"%1% || BLORG Line %2%") % __func__ % __LINE__;
             float scale_factor = tmphist.GetBinContent(i+1)/cv(i);
             if(std::isnan(scale_factor)) scale_factor = 1;
             std::sort(binconts.begin(), binconts.end());

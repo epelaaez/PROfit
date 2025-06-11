@@ -121,6 +121,51 @@ namespace PROfit {
         return myspectrum;
     }
 
+    PROspec FillNewRecoSpectra(const PROconfig &inconfig, const PROpeller &inprop, const PROsyst &insyst, const PROmodel &inmodel, const Eigen::VectorXf &params, bool binned, size_t var_index){
+        PROspec myspectrum(inconfig.m_num_variable_bins_total[var_index]);
+        Eigen::VectorXf phys   = params.segment(0, inmodel.nparams);
+        Eigen::VectorXf shifts = params.segment(inmodel.nparams, params.size() - inmodel.nparams);
+
+        if(binned) {
+            Eigen::VectorXf systw = Eigen::VectorXf::Constant(inconfig.m_num_variable_bins_total[var_index], 1);
+            for(int i = 0; i < shifts.size(); ++i) {
+                int binning = insyst.spline_binnings[i];
+                const Eigen::MatrixXf &hist = inprop.variable_hist_storage(var_index,binning);
+                for(size_t k = 0; k < inconfig.m_num_variable_bins_total[var_index]; ++k) {
+                    systw(k) *= insyst.GetSplineShift(i, shifts(i), k);
+                }
+            }
+            for(long int i = 0; i < inprop.variable_hist_storage(inconfig.i_osc,var_index).rows(); ++i) {
+                float le = inprop.histLE[i];
+                for(size_t j = 0; j < inmodel.model_functions.size(); ++j) {
+                    float oscw = inmodel.model_functions[j](phys, le);
+                    for(size_t k = 0; k < myspectrum.GetNbins(); ++k) {
+                        myspectrum.Fill(k, systw(k) * oscw * inmodel.hists[j](i, k));
+                    }
+                }
+            }
+        } else {
+            for(size_t i = 0; i<inprop.trueLE.size(); ++i){
+                float oscw  =  inmodel.model_functions[inprop.model_rule[i]](phys, inprop.trueLE[i]);
+                float add_w = inprop.added_weights[i]; 
+                const int reco_bin = inprop.variable_bin_indices[i][var_index];
+
+                float systw = 1;
+                for(int j = 0; j < shifts.size(); ++j) {
+                    int binning = insyst.spline_binnings[j];
+                    const int spline_bin = inprop.variable_bin_indices[i][binning];
+                    systw *= insyst.GetSplineShift(j, shifts[j], spline_bin);
+                }
+
+                float finalw = oscw * systw * add_w;
+
+                myspectrum.Fill(reco_bin, finalw);
+            }
+        }
+        return myspectrum;
+    }
+
+
     PROspec FillOtherRecoSpectra(const PROconfig &inconfig, const PROpeller &inprop, const PROsyst &insyst, const PROmodel &inmodel, const Eigen::VectorXf &params, size_t other_index){
         PROspec myspectrum(inconfig.m_num_variable_bins_total[other_index]);
         Eigen::VectorXf phys   = params.segment(0, inmodel.nparams);
@@ -298,7 +343,7 @@ namespace PROfit {
         float spline_throw = d(rng);
         int binning = insyst.spline_binnings[spline];
 
-        if(other_index < 0) {
+        if(other_index == inconfig.i_prime) {
             const Eigen::MatrixXf &hist = inprop.variable_hists[binning];
             for(long int i = 0; i < hist.rows(); ++i) {
                 float systw = 1.0;
