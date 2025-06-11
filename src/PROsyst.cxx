@@ -136,8 +136,7 @@ namespace PROfit {
     }
 
     Eigen::MatrixXf PROsyst::spline2cov(int spline, const PROconfig &config, const PROpeller &prop, uint32_t seed) const {
-        Eigen::VectorXf cv = other_index < 0 ? FillCVSpectrum(config, prop, true).Spec()
-            : FillOtherCVSpectrum(config, prop, other_index).Spec();
+        Eigen::VectorXf cv = FillCVSpectrum(config, prop, true, other_index).Spec();
 
         std::vector<Eigen::VectorXf> specs;
         for(size_t i = 0; i < 1000; ++i){

@@ -392,7 +392,7 @@ int main(int argc, char* argv[])
         for(size_t io = 0; io < config.m_num_variables; ++io) {
             PROspec data_spec = osc_params.size() || injected_systs.size() 
                 ? FillOtherRecoSpectra(config, prop, other_systs[config.i_prime], *model, allparams, io)
-                : FillOtherCVSpectrum(config, prop, io);
+                : FillCVSpectrum(config, prop, !eventbyevent,io);
 
             Eigen::VectorXf data_vec = CollapseMatrix(config, data_spec.Spec(), io);
             Eigen::VectorXf err_vec_sq = data_spec.Error().array().square();
@@ -817,7 +817,7 @@ int main(int argc, char* argv[])
         //plot_channels(final_output_tag+"_PROplot_CV.pdf", config, spec, {}, {}, {}, {}, NULL, opt);
         std::vector<PROspec> other_cvs;
         for(size_t io = 0; io < config.m_num_variables; ++io) {
-            other_cvs.push_back(FillOtherCVSpectrum(config, prop, io));
+            other_cvs.push_back(FillCVSpectrum(config, prop, !eventbyevent, io));
             plot_channels(final_output_tag+"_other_"+std::to_string(io)+"_PROplot_CV.pdf", config, other_cvs.back(), {}, {}, {}, {}, NULL, opt, io);
         }
 
