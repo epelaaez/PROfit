@@ -1011,7 +1011,8 @@ namespace PROfit {
             // grab the subchannel index
             int num_branch = inconfig.m_branch_variables[fid].size();
             auto& branches = inconfig.m_branch_variables[fid];
-            std::vector<std::string> branch_fullname(num_branch,0);
+            std::vector<std::string> branch_fullname;
+            branch_fullname.reserve(num_branch);
             log<LOG_INFO>(L"%1% || This file includes %2% branch/channels") % __func__ % num_branch;
             for(int ib = 0; ib != num_branch; ++ib) {
                 const std::string& hist_name = inconfig.m_branch_variables[fid][ib]->associated_hist;
