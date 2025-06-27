@@ -37,11 +37,13 @@ public:
         size_t nvar = prop.variableMCStatErr.size();
         hists.resize(nvar);
         for(size_t v = 0; v <nvar ;v++){
+            if(v==ivar)continue; 
             for(size_t m = 0; m < model_functions.size(); ++m) {
                 hists.at(v).emplace_back(Eigen::MatrixXf::Constant(prop.variable_hist_storage(ivar,v).rows(), prop.variable_hist_storage(ivar,v).cols(),0.0));
                 Eigen::MatrixXf &h = hists.at(v).back();
                 for(size_t i = 0; i < prop.variable_bin_indices.size(); ++i) {
-                    int tbin = prop.variable_bin_indices[i][ivar], rbin = prop.variable_bin_indices[i][0];
+                    int tbin = prop.variable_bin_indices[i][ivar], rbin = prop.variable_bin_indices[i][v];
+                    if(tbin<0 || rbin<0)continue;
                     h(tbin, rbin) += prop.added_weights[i];
                 }
             }
@@ -56,15 +58,20 @@ public:
         model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pmumu(v(0),v(1),le);});
         ivar = 1;
 
+
         size_t nvar = prop.variableMCStatErr.size();
+        log<LOG_ERROR>(L"%1% , %2% || GARP nvar %3% .") % __func__ % __LINE__ % nvar;
         hists.resize(nvar);
         for(size_t v = 0; v <nvar ;v++){
+            if(v==ivar)continue; 
             for(size_t m = 0; m < model_functions.size(); ++m) {
                 hists.at(v).emplace_back(Eigen::MatrixXf::Constant(prop.variable_hist_storage(ivar,v).rows(), prop.variable_hist_storage(ivar,v).cols(),0.0));
                 Eigen::MatrixXf &h = hists.at(v).back();
                 for(size_t i = 0; i < prop.added_weights.size(); ++i) {
                     if(prop.model_rule[i] != (int)m) continue;
                     int tbin = prop.variable_bin_indices[i][ivar], rbin = prop.variable_bin_indices[i][v];
+                    log<LOG_ERROR>(L"%1% , %2% || GARP tbin %3% rin %4%  h has (r,c) (%5%,%6%) | [ivar,var] [%7%,%8%]") % __func__ % __LINE__% tbin % rbin % prop.variable_hist_storage(ivar,v).rows() % prop.variable_hist_storage(ivar,v).cols() % ivar % v;
+                    if(tbin<0 || rbin<0) continue;
                     h(tbin, rbin) += prop.added_weights[i];
                 }
             }
@@ -121,12 +128,14 @@ public:
         size_t nvar = prop.variableMCStatErr.size();
         hists.resize(nvar);
         for(size_t v = 0; v <nvar ;v++){
+            if(v==ivar)continue; 
             for(size_t m = 0; m < model_functions.size(); ++m) {
                 hists.at(v).emplace_back(Eigen::MatrixXf::Constant(prop.variable_hist_storage(ivar,v).rows(), prop.variable_hist_storage(ivar,v).cols(),0.0));
                 Eigen::MatrixXf &h = hists.at(v).back();
                 for(size_t i = 0; i < prop.added_weights.size(); ++i) {
                     if(prop.model_rule[i] != (int)m) continue;
                     int tbin = prop.variable_bin_indices[i][ivar], rbin = prop.variable_bin_indices[i][v];
+                    if(tbin<0 || rbin<0)continue;
                     h(tbin, rbin) += prop.added_weights[i];
                 }
             }
@@ -190,6 +199,7 @@ public:
          size_t nvar = prop.variableMCStatErr.size();
         hists.resize(nvar);
         for(size_t v = 0; v <nvar ;v++){
+            if(v==ivar)continue; 
             for(size_t m = 0; m < model_functions.size(); ++m) {
                 hists.at(v).emplace_back(Eigen::MatrixXf::Constant(prop.variable_hist_storage(ivar,v).rows(), prop.variable_hist_storage(ivar,v).cols(),0.0));
                 Eigen::MatrixXf &h = hists.at(v).back();
@@ -197,6 +207,7 @@ public:
                     if(prop.model_rule[i] != (int)m) continue;
                     int tbin = prop.variable_bin_indices[i][ivar], rbin = prop.variable_bin_indices[i][v];
                     h(tbin, rbin) += prop.added_weights[i];
+                    if(tbin<0 || rbin<0)continue;
                 }
             }
         }

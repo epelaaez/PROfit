@@ -16,7 +16,7 @@ namespace PROfit{
 
             // Only stores when i <= j
             size_t compute_index(size_t i, size_t j) const {
-                return (i * n_vars) - (i * (i + 1)) / 2 + j - i - 1;
+                return (i * n_vars) - (i * (i - 1)) / 2 + (j - i);
             }
 
             friend class boost::serialization::access;
@@ -28,7 +28,7 @@ namespace PROfit{
 
                     if (Archive::is_loading::value) {
                         if (n_vars > 0) {
-                            data.resize(n_vars * (n_vars - 1) / 2);
+                            data.resize(n_vars * (n_vars + 1) / 2);
                         } else {
                             data.clear();
                         }
@@ -44,10 +44,10 @@ namespace PROfit{
             PROhistStorage() {}  
             PROhistStorage(size_t n) {init(n);}
 
-            void init(size_t n) { n_vars = n;data.resize(n * (n - 1) / 2);}
+            void init(size_t n) { n_vars = n;data.resize(n * (n + 1) / 2);}
 
             Eigen::MatrixXf operator()(size_t i, size_t j) const {
-                if (i < j) {
+                if (i <= j) {
                     return data[compute_index(i, j)];
                 } else {
                     return data[compute_index(j, i)].transpose();
@@ -56,7 +56,7 @@ namespace PROfit{
 
             // Direct access for setting (must use i <= j)
             Eigen::MatrixXf& set(size_t i, size_t j) {
-                if (i >= j){
+                if (i > j){
                     log<LOG_ERROR>(L"%1% || If your seeing this, something went wrong. dont access PROhistStorage out of order.") % __func__;
                         exit(EXIT_FAILURE);
                 }

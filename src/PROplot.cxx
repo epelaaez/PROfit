@@ -126,7 +126,7 @@ namespace PROfit{
 
     std::unique_ptr<TGraphAsymmErrors> getErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, bool scale, int other_index) {
         //TODO: Only works with 1 mode/detector/channel
-        Eigen::VectorXf cv =  CollapseMatrix(config, FillCVSpectrum(config, prop, true, other_index).Spec(), other_index);
+        Eigen::VectorXf cv =  CollapseMatrix(config, FillCVSpectra(config, prop, true, other_index).Spec(), other_index);
         std::vector<float> edges = config.GetChannelOtherBinEdges(0, other_index);
         log<LOG_DEBUG>(L"%1% || For other var %2% the cv is %3% and the edges are %4%") % __func__ % other_index % cv % edges;
         std::vector<float> centers;

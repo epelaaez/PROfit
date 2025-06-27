@@ -502,8 +502,9 @@ namespace PROfit {
         //setup and initilizte the hists
         inprop.variable_hist_storage.init(inconfig.m_num_variables);
         for(size_t i = 0; i < inconfig.m_num_variables; ++i) {
-            for(size_t j = i+1; j < inconfig.m_num_variables; ++j) {
-                inprop.variable_hist_storage.set(i,j)= Eigen::MatrixXf::Zero(inconfig.m_num_variable_bins_total[i],inconfig.m_num_variable_bins_total[j]);
+            for(size_t j = i; j < inconfig.m_num_variables; ++j) {
+                log<LOG_DEBUG>(L"%1% || Init Storage hists (i,j): (%2%,%3%) of size (%4%,%5%).") % __func__ % i % j %  inconfig.m_num_variable_bins_total[i] % inconfig.m_num_variable_bins_total[j]; 
+                inprop.variable_hist_storage.set(i,j)= Eigen::MatrixXf::Constant(inconfig.m_num_variable_bins_total[i],inconfig.m_num_variable_bins_total[j],0.0);
             }
         }
 
@@ -844,8 +845,11 @@ namespace PROfit {
             if(variable_bin_indices[io] >= 0) {
                 inprop.variableMCStatErr[io](variable_bin_indices[io]) += 1;
                 inprop.variable_hists[io](variable_bin_indices[io], variable_bin_indices[inconfig.i_prime]) += mc_weight; //TBD
-                for(size_t jo = jo; jo < inconfig.m_num_variables; ++jo) {
-                    if(io==jo || variable_bin_indices[jo]<0)continue;
+                for(size_t jo = io; jo < inconfig.m_num_variables; ++jo) {
+
+       //              log<LOG_ERROR>(L"%1% , %2% || GARP io %3% jo %4% (%5%,%6%) inside (%7%,%8%) ") % __func__ % __LINE__ % io % jo% variable_bin_indices[io]  % variable_bin_indices[jo] % inprop.variable_hist_storage(io,jo).rows() %  inprop.variable_hist_storage(io,jo).cols() ; 
+ 
+                    if(variable_bin_indices[jo]<0)continue;
                     inprop.variable_hist_storage.set(io,jo)(variable_bin_indices[io], variable_bin_indices[jo]) += mc_weight; 
                 }
             }

@@ -249,11 +249,17 @@ int main(int argc, char* argv[])
         other_systs.emplace_back(prop, config, systsstructs.at(i), shapeonly, i);
 
 
+
+    log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
     std::unique_ptr<PROmodel> model = get_model_from_string(config.m_model_tag, prop);
+    log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
     std::unique_ptr<PROmodel> null_model = std::make_unique<NullModel>(prop);
+    log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
     //Pysics parameter input
     Eigen::VectorXf pparams = Eigen::VectorXf::Constant(model->nparams + other_systs[config.i_prime].GetNSplines(), 0);
+    log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
     Eigen::VectorXf CVpparams = Eigen::VectorXf::Constant(model->nparams + other_systs[config.i_prime].GetNSplines(), 0);
+    log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
     if(osc_params.size()) {
         if(osc_params.size() != model->nparams) {
             log<LOG_ERROR>(L"%1% || Incorrect number of physics parameters provided. Expected %2%, found %3%.")
@@ -272,6 +278,7 @@ int main(int argc, char* argv[])
         }
     }
 
+    log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
     //Spline injection studies
     Eigen::VectorXf allparams = Eigen::VectorXf::Constant(model->nparams + other_systs[config.i_prime].GetNSplines(), 0);
     Eigen::VectorXf systparams = Eigen::VectorXf::Constant(other_systs[config.i_prime].GetNSplines(), 0);
@@ -288,10 +295,12 @@ int main(int argc, char* argv[])
         systparams(idx) = shift;
     }
 
+    log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
     //Seed time
     PROseed myseed(nthread, global_seed);
     std::uniform_int_distribution<uint32_t> dseed(0, std::numeric_limits<uint32_t>::max());
 
+    log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
     //Some logic for EITHER injecting fake/mock data of oscillated signal/syst shifts OR using real data
     PROdata data;
     std::vector<PROdata> other_data;
@@ -360,13 +369,16 @@ int main(int argc, char* argv[])
             return 1;
         }
 
+    log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
 
     }//if no data, use injected or fake data;
     else{
+    log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
         //Create CV or injected data spectrum for all subsequent steps
         //this now will inject osc param, splines and reweight all at once
-        PROspec data_spec = osc_params.size() || injected_systs.size() ? FillRecoSpectra(config, prop, other_systs[config.i_prime], *model, allparams, !eventbyevent) :  FillCVSpectrum(config, prop, !eventbyevent);
+        PROspec data_spec = osc_params.size() || injected_systs.size() ? FillSpectra(config, prop, other_systs[config.i_prime], *model, allparams, !eventbyevent) :  FillCVSpectra(config, prop, !eventbyevent);
 
+    log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
         //Only for reweighting tests
         if (!mockreweights.empty()) {
             log<LOG_INFO>(L"%1% || Will use reweighted MC (with any requested oscillations) as data for this study") % __func__  ;
@@ -382,6 +394,7 @@ int main(int argc, char* argv[])
             }
             data_spec = FillWeightedSpectrumFromHist(config, prop, weighthists, *model, allparams, !eventbyevent);
         }
+    log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
         if(poisson_throw) data_spec = PROspec::PoissonVariation(data_spec, dseed(myseed.global_rng));
         Eigen::VectorXf data_vec = CollapseMatrix(config, data_spec.Spec());
         Eigen::VectorXf err_vec_sq = data_spec.Error().array().square();
@@ -389,18 +402,25 @@ int main(int argc, char* argv[])
         //data = PROdata(data_vec, err_vec);
         data = PROdata(data_vec, data_vec.array().sqrt());
 
+    log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
         for(size_t io = 0; io < config.m_num_variables; ++io) {
+            log<LOG_ERROR>(L"%1% , %2% || GARP io %3% .") % __func__ % __LINE__ % io;
             PROspec data_spec = osc_params.size() || injected_systs.size() 
-                ? FillOtherRecoSpectra(config, prop, other_systs[config.i_prime], *model, allparams, io)
-                : FillCVSpectrum(config, prop, !eventbyevent,io);
+                ? FillSpectra(config, prop, other_systs[io], *model, allparams, !eventbyevent, io)
+                : FillCVSpectra(config, prop, !eventbyevent, io);
 
+            log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
             Eigen::VectorXf data_vec = CollapseMatrix(config, data_spec.Spec(), io);
+            log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
             Eigen::VectorXf err_vec_sq = data_spec.Error().array().square();
+            log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
             Eigen::VectorXf err_vec = CollapseMatrix(config, err_vec_sq, io).array().sqrt();
+            log<LOG_ERROR>(L"%1% , %2% || GARP ds %3% es %4%.") % __func__ % __LINE__ % data_vec.size() % err_vec.size();
             other_data.push_back(PROdata(data_vec, err_vec));
         }
     }
 
+    log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
     // Leave this after creating fake data so we can make fake data using systs that aren't
     // included in the fit.
     if(syst_list.size()) {
@@ -411,6 +431,7 @@ int main(int argc, char* argv[])
             syst = syst.excluding(systs_excluded);
     }
 
+    log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
 
     PROsyst allcovsyst = other_systs[config.i_prime].allsplines2cov(config, prop, dseed(PROseed::global_rng));
 
@@ -419,10 +440,12 @@ int main(int argc, char* argv[])
         log<LOG_ERROR>(L"%1% || ERROR allowed fit_presets are good, fast or overkill. You entred : %2%.")% __func__ % fit_preset.c_str();
         return 1;
     }
+    log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
     //Some global minimizer params
     // This runs for the single best gobal fit
     PROfitterConfig fitconfig(global_fit_options, fit_preset, false);
 
+    log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
 
 
     //Some Scan minimizer params.
@@ -450,6 +473,7 @@ int main(int argc, char* argv[])
         abort();
     }
 
+    log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
 
     //***********************************************************************
     //***********************************************************************
@@ -526,8 +550,8 @@ int main(int argc, char* argv[])
         log<LOG_INFO>(L"%1% || MCMC acceptance is  %2%. ") % __func__% ((double)count /fitconfig.MCMCiter);
 
         std::string hname = "#chi^{2}/ndf = " + to_string(chi2) + "/" + to_string(config.m_num_variable_bins_total_collapsed[config.i_prime]);
-        PROspec cv = FillCVSpectrum(config, prop, true);
-        PROspec bf = FillRecoSpectra(config, prop, metric_to_use->GetSysts(), metric_to_use->GetModel(), best_fit, true);
+        PROspec cv = FillCVSpectra(config, prop, true);
+        PROspec bf = FillSpectra(config, prop, metric_to_use->GetSysts(), metric_to_use->GetModel(), best_fit, true);
         TH1D post_hist("ph", hname.c_str(), config.m_num_variable_bins_total_collapsed[config.i_prime], config.m_channel_variable_bin_edges[config.i_prime][0].data());
         TH1D pre_hist("prh", hname.c_str(), config.m_num_variable_bins_total_collapsed[config.i_prime], config.m_channel_variable_bin_edges[config.i_prime][0].data());
         for(size_t i = 0; i < config.m_num_variable_bins_total_collapsed[config.i_prime]; ++i) {
@@ -704,7 +728,7 @@ int main(int argc, char* argv[])
         if(run_brazil && brazil_throws.size() == 0) {
             std::normal_distribution<float> d;
             size_t nphys = metric->GetModel().nparams;
-            PROspec cv = FillCVSpectrum(config, prop, true);
+            PROspec cv = FillCVSpectra(config, prop, true);
             PROspec collapsed_cv = PROspec(CollapseMatrix(config, cv.Spec()), CollapseMatrix(config, cv.Error()));
             Eigen::MatrixXf L = metric->GetSysts().DecomposeFractionalCovariance(config, cv.Spec());
             for(size_t i = 0; i < 1000; ++i) {
@@ -714,7 +738,7 @@ int main(int argc, char* argv[])
                     throwp(i+nphys) = d(PROseed::global_rng);
                 for(size_t i = 0; i < config.m_num_variable_bins_total[config.i_prime]; i++)
                     throwC(i) = d(PROseed::global_rng);
-                PROspec shifted = FillRecoSpectra(config, prop, metric->GetSysts(), metric->GetModel(), throwp, eventbyevent ? PROmetric::EventByEvent : PROmetric::BinnedChi2);
+                PROspec shifted = FillSpectra(config, prop, metric->GetSysts(), metric->GetModel(), throwp, eventbyevent ? PROmetric::EventByEvent : PROmetric::BinnedChi2);
                 PROspec newSpec = statonly_brazil ? PROspec::PoissonVariation(collapsed_cv, dseed(myseed.global_rng)) :
                     PROspec::PoissonVariation(PROspec(CollapseMatrix(config, shifted.Spec()) + L * throwC, CollapseMatrix(config, shifted.Error())), dseed(myseed.global_rng));
                 PROdata data(newSpec.Spec(), newSpec.Error());
@@ -808,8 +832,6 @@ int main(int argc, char* argv[])
         //***********************************************************************
     }
     if(*proplot_command){
-        //PROspec spec = FillCVSpectrum(config, prop, !eventbyevent);
-        //PROspec spec = FillRecoSpectra(config, prop, other_systs[config.i_prime], *model, CVpparams, !eventbyevent); TBD
 
         PlotOptions opt = PlotOptions::CVasStack;
         if(binwidth_scale) opt |= PlotOptions::BinWidthScaled;
@@ -817,11 +839,10 @@ int main(int argc, char* argv[])
         //plot_channels(final_output_tag+"_PROplot_CV.pdf", config, spec, {}, {}, {}, {}, NULL, opt);
         std::vector<PROspec> other_cvs;
         for(size_t io = 0; io < config.m_num_variables; ++io) {
-            other_cvs.push_back(FillCVSpectrum(config, prop, !eventbyevent, io));
+            other_cvs.push_back(FillCVSpectra(config, prop, !eventbyevent, io));
             plot_channels(final_output_tag+"_other_"+std::to_string(io)+"_PROplot_CV.pdf", config, other_cvs.back(), {}, {}, {}, {}, NULL, opt, io);
         }
 
-        //std::map<std::string, std::unique_ptr<TH1D>> cv_hists = getCVHists(spec, config, binwidth_scale);
         std::vector<std::map<std::string, std::unique_ptr<TH1D>>> other_hists;
         for(size_t io = 0; io < config.m_num_variables; ++io) {
             other_hists.push_back(getCVHists(other_cvs[io], config, binwidth_scale, io));
@@ -829,10 +850,10 @@ int main(int argc, char* argv[])
 
         TCanvas c;
         if(osc_params.size()) {
-            /*
+            
             c.Print((final_output_tag +"_PROplot_Osc.pdf"+ "[").c_str(), "pdf");
 
-            PROspec osc_spec = FillRecoSpectra(config, prop, other_systs[config.i_prime], *model, pparams, !eventbyevent);
+            PROspec osc_spec = FillSpectra(config, prop, other_systs[config.i_prime], *model, pparams, !eventbyevent,config.i_prime );
             std::map<std::string, std::unique_ptr<TH1D>> osc_hists = getCVHists(osc_spec, config, binwidth_scale);
             size_t global_subchannel_index = 0;
             for(size_t im = 0; im < config.m_num_modes; im++){
@@ -842,7 +863,7 @@ int main(int argc, char* argv[])
                         TH1D* cv_hist = NULL;
                         for(size_t sc = 0; sc < config.m_num_subchannels[ic]; sc++){
                             const std::string& subchannel_name  = config.m_fullnames[global_subchannel_index];
-                            const auto &h = cv_hists[subchannel_name];
+                            const auto &h = other_hists[config.i_prime][subchannel_name];
                             const auto &o = osc_hists[subchannel_name];
                             if(sc == 0) {
                                 cv_hist = (TH1D*)h->Clone();
@@ -921,7 +942,7 @@ int main(int argc, char* argv[])
                 }
             }
             c.Print((final_output_tag+"_PROplot_Osc.pdf" + "]").c_str(), "pdf");
-        */
+        
         }
 
         //Now some covariances
@@ -1079,7 +1100,7 @@ int main(int argc, char* argv[])
         }
 
         if((osc_params.size())) {
-            PROspec osc_spec = FillRecoSpectra(config, prop, other_systs[config.i_prime], *model, pparams, !eventbyevent);
+            PROspec osc_spec = FillSpectra(config, prop, other_systs[config.i_prime], *model, pparams, !eventbyevent,config.i_prime);
             std::map<std::string, std::unique_ptr<TH1D>> osc_hists = getCVHists(osc_spec, config, binwidth_scale);
             fout.mkdir("Osc_hists");
             fout.cd("Osc_hists");
@@ -1126,7 +1147,7 @@ int main(int argc, char* argv[])
 
     if(*profc_command) {
         size_t FCthreads = nthread > nuniv ? nuniv : nthread;
-        Eigen::MatrixXf cv_vec = FillCVSpectrum(config, prop, !eventbyevent).Spec();
+        Eigen::MatrixXf cv_vec = FillCVSpectra(config, prop, !eventbyevent).Spec();
         Eigen::MatrixXf L = other_systs[config.i_prime].DecomposeFractionalCovariance(config, cv_vec);
 
         std::vector<std::vector<float>> dchi2s;

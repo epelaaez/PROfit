@@ -39,7 +39,7 @@ void fc_worker(fc_args args) {
             throws(i+nphys) = d(rng);
         for(size_t i = 0; i < args.config.m_num_variable_bins_total_collapsed[args.config.i_prime]; i++)
             throwC(i) = d(rng);
-        PROspec shifted = FillRecoSpectra(args.config, args.prop, args.systs, *model, throws, strat);
+        PROspec shifted = FillSpectra(args.config, args.prop, args.systs, *model, throws, strat);
         PROspec newSpec = PROspec::PoissonVariation(PROspec(CollapseMatrix(args.config, shifted.Spec()) + args.L * throwC, CollapseMatrix(args.config, shifted.Error())), dseed(rng));
         PROdata data(newSpec.Spec(), newSpec.Error());
         //Metric Time

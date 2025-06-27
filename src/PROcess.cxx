@@ -12,11 +12,17 @@
 #include <vector>
 
 namespace PROfit {
-    PROspec FillCVSpectrum(const PROconfig &inconfig, const PROpeller &inprop, bool binned, size_t var_index){
+    PROspec FillCVSpectra(const PROconfig &inconfig, const PROpeller &inprop, bool binned, size_t var_index){
         PROspec myspectrum(inconfig.m_num_variable_bins_total[var_index]);
+           // log<LOG_ERROR>(L"%1% , %2% || GARP ") % __func__ % __LINE__ ;
         if(binned) {
             for(int i = 0; i < inprop.variable_hist_storage(inconfig.i_osc,var_index).rows(); ++i) {
                 for(size_t k = 0; k < myspectrum.GetNbins(); ++k) {
+                   if(myspectrum.GetNbins()!=inprop.variable_hist_storage(inconfig.i_osc,var_index).cols()){
+                        log<LOG_ERROR>(L"%1% , %2% || fail: %3% is not %4% ") % __func__ % __LINE__ % myspectrum.GetNbins() % inprop.variable_hist_storage(inconfig.i_osc,var_index).cols();
+                        exit(EXIT_FAILURE);
+                   }
+             //      log<LOG_ERROR>(L"%1% , %2% || GARP i %3% k %4% bounds %5%,%6% ") % __func__ % __LINE__ % i % k % inprop.variable_hist_storage(inconfig.i_osc,var_index).rows() % inprop.variable_hist_storage(inconfig.i_osc,var_index).cols();
                     myspectrum.Fill(k, inprop.variable_hist_storage(inconfig.i_osc,var_index)(i, k));
                 }
             }
@@ -29,6 +35,34 @@ namespace PROfit {
         return myspectrum;
     }
 
+
+    PROspec FillSpectra(const PROconfig &inconfig, const PROpeller &inprop, const PROsyst &insyst, const PROmodel &inmodel, const std::map<std::string, float> &inparams, bool binned, size_t var_index) {
+      // default parameters
+      Eigen::VectorXf params = Eigen::VectorXf::Zero(inmodel.nparams + insyst.GetNSplines());
+
+      // default pulls are all 0. Set the default model parameters
+      for (size_t ind = 0; ind < inmodel.nparams; ind++) params[ind] = inmodel.default_val[ind];
+
+      // set parameters configured by user
+      for (auto const &pair: inparams) {
+        auto it1 = std::find(insyst.spline_names.begin(), insyst.spline_names.end(), pair.first);
+        auto it2 = std::find(inmodel.param_names.begin(), inmodel.param_names.end(), pair.first);
+        if (it1 != insyst.spline_names.end()) {
+          int ind = std::distance(insyst.spline_names.begin(), it1);
+          params[ind + inmodel.nparams] = pair.second;
+        }
+        else if (it2 != inmodel.param_names.end()) {
+          int ind = std::distance(inmodel.param_names.begin(), it2);
+          params[ind] = pair.second;
+        }
+        else {
+          log<LOG_WARNING>(L"%1% | unable to find parameters %2% . Skipping.") % __func__ % pair.first.c_str();
+        }
+      }
+      
+
+      return FillSpectra(inconfig, inprop, insyst, inmodel, params, binned, var_index);
+    }
 
 
     PROspec FillSpectra(const PROconfig &inconfig, const PROpeller &inprop, const PROsyst &insyst, const PROmodel &inmodel, const Eigen::VectorXf &params, bool binned, size_t var_index){
@@ -85,89 +119,7 @@ namespace PROfit {
 
 
     
-
-    PROspec FillRecoSpectra(const PROconfig &inconfig, const PROpeller &inprop, const PROsyst &insyst, const PROmodel &inmodel, const std::map<std::string, float> &inparams, bool binned) {
-      // default parameters
-      Eigen::VectorXf params = Eigen::VectorXf::Zero(inmodel.nparams + insyst.GetNSplines());
-
-      // default pulls are all 0. Set the default model parameters
-      for (size_t ind = 0; ind < inmodel.nparams; ind++) params[ind] = inmodel.default_val[ind];
-
-      // set parameters configured by user
-      for (auto const &pair: inparams) {
-        auto it1 = std::find(insyst.spline_names.begin(), insyst.spline_names.end(), pair.first);
-        auto it2 = std::find(inmodel.param_names.begin(), inmodel.param_names.end(), pair.first);
-        if (it1 != insyst.spline_names.end()) {
-          int ind = std::distance(insyst.spline_names.begin(), it1);
-          params[ind + inmodel.nparams] = pair.second;
-        }
-        else if (it2 != inmodel.param_names.end()) {
-          int ind = std::distance(inmodel.param_names.begin(), it2);
-          params[ind] = pair.second;
-        }
-        else {
-          log<LOG_WARNING>(L"%1% | unable to find parameters %2% . Skipping.") % __func__ % pair.first.c_str();
-        }
-      }
-      
-
-      return FillRecoSpectra(inconfig, inprop, insyst, inmodel, params, binned);
-    }
-
-    PROspec FillRecoSpectra(const PROconfig &inconfig, const PROpeller &inprop, const PROsyst &insyst, const PROmodel &inmodel, const Eigen::VectorXf &params, bool binned){
-        PROspec myspectrum(inconfig.m_num_variable_bins_total[inconfig.i_prime]);
-        Eigen::VectorXf phys   = params.segment(0, inmodel.nparams);
-        Eigen::VectorXf shifts = params.segment(inmodel.nparams, params.size() - inmodel.nparams);
-
-        if(binned) {
-            Eigen::VectorXf systw = Eigen::VectorXf::Constant(inconfig.m_num_variable_bins_total[inconfig.i_prime], 1);
-            for(int i = 0; i < shifts.size(); ++i) {
-                int binning = insyst.spline_binnings[i];
-                const Eigen::MatrixXf &hist = inprop.variable_hists[binning];
-                for(size_t k = 0; k < inconfig.m_num_variable_bins_total[inconfig.i_prime]; ++k) {
-                    if(binning == -1) systw(k) *= insyst.GetSplineShift(i, shifts(i), k);
-                    else {
-                        float val = 0, unweighted = 0;
-                        for(long int j = 0; j < hist.rows(); ++j) {
-                            float binsystw = insyst.GetSplineShift(i, shifts(i), j);
-                            val += binsystw * hist(j, k);
-                            unweighted += hist(j,k);
-                        }
-                        if(unweighted > 0) systw(k) *= val/unweighted;
-                    }
-                }
-            }
-            for(long int i = 0; i < inprop.hist.rows(); ++i) {
-                float le = inprop.histLE[i];
-                for(size_t j = 0; j < inmodel.model_functions.size(); ++j) {
-                    float oscw = inmodel.model_functions[j](phys, le);
-                    for(size_t k = 0; k < myspectrum.GetNbins(); ++k) {
-                        myspectrum.Fill(k, systw(k) * oscw * inmodel.hists[inconfig.i_prime][j](i, k));
-                    }
-                }
-            }
-        } else {
-            for(size_t i = 0; i<inprop.trueLE.size(); ++i){
-                float oscw  =  inmodel.model_functions[inprop.model_rule[i]](phys, inprop.trueLE[i]);
-                float add_w = inprop.added_weights[i]; 
-                const int reco_bin = inprop.variable_bin_indices[i][inconfig.i_prime];
-
-                float systw = 1;
-                for(int j = 0; j < shifts.size(); ++j) {
-                    int binning = insyst.spline_binnings[j];
-                    const int spline_bin = inprop.variable_bin_indices[i][binning];
-                    systw *= insyst.GetSplineShift(j, shifts[j], spline_bin);
-                }
-
-                float finalw = oscw * systw * add_w;
-
-                myspectrum.Fill(reco_bin, finalw);
-            }
-        }
-        return myspectrum;
-    }
-
-
+   //*********************************************************************************************
 
       PROspec FillWeightedSpectrumFromHist(const PROconfig &inconfig, const PROpeller &inprop, std::vector<TH2D*> inweighthists, const PROmodel &inmodel, const Eigen::VectorXf &params, bool binned){
         PROspec myspectrum(inconfig.m_num_variable_bins_total[inconfig.i_prime]);
