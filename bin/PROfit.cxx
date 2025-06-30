@@ -561,6 +561,10 @@ int main(int argc, char* argv[])
     }
 
 
+    // Need a second one for case where we do syst_only profile and surface in same command
+    Eigen::VectorXf global_fit_result, global_fit_result_surf;
+    float global_fit_chi2 = -1, global_fit_chi2_surf = -1;
+
     //***********************************************************************
     //***********************************************************************
     //******************** PROfile PROfile PROfile **************************
@@ -590,7 +594,9 @@ int main(int argc, char* argv[])
 
 
         float chi2 = fitter.Fit(*metric_to_use); 
+        global_fit_chi2 = chi2;
         Eigen::VectorXf best_fit = fitter.best_fit;
+        if(global_fit_result.size() == 0) global_fit_result = best_fit;
         Eigen::MatrixXf post_covar = fitter.Covariance();
 
 
@@ -728,6 +734,48 @@ int main(int argc, char* argv[])
     }
     if(*surface_command){
 
+        size_t nparams = metric->GetModel().nparams + metric->GetSysts().GetNSplines();
+        if(global_fit_result.size() == 0 || global_fit_result.size() != (int)nparams) {
+            size_t nphys = metric->GetModel().nparams;
+            Eigen::VectorXf lb = Eigen::VectorXf::Constant(nparams, -3.0);
+            Eigen::VectorXf ub = Eigen::VectorXf::Constant(nparams, 3.0);
+            for(size_t i = 0; i < nphys; ++i) {
+                lb(i) = metric->GetModel().lb(i);
+                ub(i) = metric->GetModel().ub(i);
+            }
+            for(size_t i = nphys; i < nparams; ++i) {
+                lb(i) = metric->GetSysts().spline_lo[i-nphys];
+                ub(i) = metric->GetSysts().spline_hi[i-nphys];
+
+
+            }
+            PROfitter fitter(ub, lb, fitconfig);
+
+            log<LOG_INFO>(L"%1% || ########### Starting Global Best Fit Minimizing ############") % __func__;
+
+
+            float fit_chi2 = fitter.Fit(*metric); 
+            global_fit_chi2_surf = fit_chi2;
+            Eigen::VectorXf best_fit = fitter.best_fit;
+            if(global_fit_result.size() == 0) global_fit_result = best_fit;
+            else if(global_fit_result.size() != best_fit.size()) global_fit_result_surf = best_fit;
+
+            log<LOG_INFO>(L"%1% || ################################################") % __func__;
+            log<LOG_INFO>(L"%1% || ########### Global Best Fit Results ############") % __func__;
+            log<LOG_INFO>(L"%1% || ################################################") % __func__;
+            log<LOG_INFO>(L"%1% || Global Best Fit chi^2: %2%") %__func__ % fit_chi2;
+            log<LOG_INFO>(L"%1% || at paramters: ") % __func__;
+
+            for(size_t i = 0; i< nparams; i++){
+
+                if(i<nphys){
+                    log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % metric->GetModel().pretty_param_names[i].c_str() % best_fit(i);
+                }else{
+                    log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % metric->GetSysts().spline_names[i-nphys].c_str() % best_fit(i);
+                }
+            }
+            log<LOG_INFO>(L"%1% || ################################################") % __func__;
+        }
         if (grid_size.empty()) {
             grid_size = {40, 40};
         }
@@ -1305,6 +1353,62 @@ int main(int argc, char* argv[])
 
         //***************************** END *********************************
     }
+
+    std::ofstream global_fit_out;
+    if(global_fit_result.size() > 0) {
+        global_fit_out.open(final_output_tag+"_global_fit.txt");
+        float chi2 = global_fit_chi2 >= 0 ? global_fit_chi2 : global_fit_chi2_surf;
+        log<LOG_INFO>(L"%1% || ################################################") % __func__;
+        log<LOG_INFO>(L"%1% || ########### Global Best Fit Results ############") % __func__;
+        log<LOG_INFO>(L"%1% || ################################################") % __func__;
+        log<LOG_INFO>(L"%1% || Global Best Fit chi^2: %2%") %__func__ % chi2;
+        log<LOG_INFO>(L"%1% || at paramters: ") % __func__;
+
+        global_fit_out << "Global best fit:\n";
+
+        bool use_phys = (size_t)global_fit_result.size() == metric->GetModel().nparams + metric->GetSysts().GetNSplines();
+        for(long i = 0; i < global_fit_result.size(); i++){
+
+            if(use_phys && i < (long)metric->GetModel().nparams){
+                log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % metric->GetModel().pretty_param_names[i].c_str() % global_fit_result(i);
+                global_fit_out << metric->GetModel().param_names[i]
+                               << " : " << global_fit_result(i) << "\n";
+            }else{
+                long idx = use_phys ? i - metric->GetModel().nparams : i;
+                log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % metric->GetSysts().spline_names[idx].c_str() % global_fit_result(i);
+                global_fit_out << metric->GetSysts().spline_names[idx]
+                               << " : " << global_fit_result(i) << "\n";
+            }
+        }
+        log<LOG_INFO>(L"%1% || ################################################") % __func__;
+    }
+    if(global_fit_result_surf.size() > 0) {
+        if(!global_fit_out.is_open()) {
+            global_fit_out.open(final_output_tag+"_global_fit.txt");
+            global_fit_out << "Global best fit:\n";
+        } else {
+            global_fit_out << "\nSurface global best fit:\n";
+        }
+        log<LOG_INFO>(L"%1% || ########################################################") % __func__;
+        log<LOG_INFO>(L"%1% || ########### Surface Global Best Fit Results ############") % __func__;
+        log<LOG_INFO>(L"%1% || ########################################################") % __func__;
+        log<LOG_INFO>(L"%1% || Global Best Fit chi^2: %2%") %__func__ % global_fit_chi2_surf;
+        log<LOG_INFO>(L"%1% || at paramters: ") % __func__;
+
+        for(long i = 0; i < global_fit_result.size(); i++){
+            if(i < (long)metric->GetModel().nparams){
+                log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % metric->GetModel().pretty_param_names[i].c_str() % global_fit_result(i);
+                global_fit_out << metric->GetModel().param_names[i]
+                               << " : " << global_fit_result(i) << "\n";
+            }else{
+                log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % metric->GetSysts().spline_names[i - metric->GetModel().nparams].c_str() % global_fit_result(i);
+                global_fit_out << metric->GetSysts().spline_names[i - metric->GetModel().nparams]
+                               << " : " << global_fit_result(i) << "\n";
+            }
+        }
+        log<LOG_INFO>(L"%1% || ########################################################") % __func__;
+    }
+    if(global_fit_out.is_open()) global_fit_out.close();
 
     delete metric;
 
