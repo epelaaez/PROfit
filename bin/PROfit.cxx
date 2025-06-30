@@ -75,7 +75,7 @@ int main(int argc, char* argv[])
     std::string fit_preset = "good";
     static const std::unordered_set<std::string> allowed_preset = {"good","fast","overkill"};
     bool with_splines = false, binwidth_scale = false, area_normalized = false;
-    std::vector<float> osc_params;
+    std::map<std::string, float> osc_params;
     std::map<std::string, float> injected_systs;
     std::vector<std::string> syst_list, systs_excluded;
     bool MCMC_prefit_errors = false;
@@ -264,25 +264,26 @@ int main(int argc, char* argv[])
     std::unique_ptr<PROmodel> model = get_model_from_string(config.m_model_tag, prop);
     std::unique_ptr<PROmodel> null_model = std::make_unique<NullModel>(prop);
 
+    Eigen::VectorXf osc_param_vector = model->default_val;
+    for(const auto &[name, value]: osc_params) {
+        const auto it = std::find(model->param_names.begin(), model->param_names.end(), name);
+        if(it == std::end(model->param_names)) {
+            log<LOG_ERROR>(L"%1% || Unrecognized model parameter name %2%.\n"
+                           L"Valid names for model %3% are %4%") %
+                           __func__% name.c_str()% config.m_model_tag.c_str()%
+                           model->param_names;
+            return 1;
+        }
+        int loc = std::distance(model->param_names.begin(), it);
+        osc_param_vector(loc) = std::log10(value);
+    }
+
     //Pysics parameter input
     Eigen::VectorXf pparams = Eigen::VectorXf::Constant(model->nparams + systs.GetNSplines(), 0);
     Eigen::VectorXf CVpparams = Eigen::VectorXf::Constant(model->nparams + systs.GetNSplines(), 0);
-    if(osc_params.size()) {
-        if(osc_params.size() != model->nparams) {
-            log<LOG_ERROR>(L"%1% || Incorrect number of physics parameters provided. Expected %2%, found %3%.")
-                % __func__ % model->nparams % osc_params.size();
-            exit(EXIT_FAILURE);
-        }
-        for(size_t i = 0; i < osc_params.size(); ++i) {
-            pparams(i) = std::log10(osc_params[i]);
-            CVpparams(i) = model->default_val(i); 
-            //if(std::isinf(pparams(i))) pparams(i) = -10;
-        }
-    } else {
-        for(size_t i = 0; i < model->nparams; ++i) {
-            pparams(i) = model->default_val(i); 
-            CVpparams(i) = model->default_val(i); 
-        }
+    for(long i = 0; i < osc_param_vector.size(); ++i) {
+        pparams(i) = osc_param_vector(i);
+        CVpparams(i) = model->default_val(i);
     }
 
     //Spline injection studies
@@ -480,22 +481,9 @@ int main(int argc, char* argv[])
     //Pysics parameter input
     pparams = Eigen::VectorXf::Constant(model->nparams + systs.GetNSplines(), 0);
     CVpparams = Eigen::VectorXf::Constant(model->nparams + systs.GetNSplines(), 0);
-    if(osc_params.size()) {
-        if(osc_params.size() != model->nparams) {
-            log<LOG_ERROR>(L"%1% || Incorrect number of physics parameters provided. Expected %2%, found %3%.")
-                % __func__ % model->nparams % osc_params.size();
-            exit(EXIT_FAILURE);
-        }
-        for(size_t i = 0; i < osc_params.size(); ++i) {
-            pparams(i) = std::log10(osc_params[i]);
-            CVpparams(i) = model->default_val(i); 
-            //if(std::isinf(pparams(i))) pparams(i) = -10;
-        }
-    } else {
-        for(size_t i = 0; i < model->nparams; ++i) {
-            pparams(i) = model->default_val(i); 
-            CVpparams(i) = model->default_val(i); 
-        }
+    for(long i = 0; i < osc_param_vector.size(); ++i) {
+        pparams(i) = osc_param_vector(i);
+        CVpparams(i) = model->default_val(i);
     }
 
     //Spline injection studies
@@ -1078,7 +1066,7 @@ int main(int argc, char* argv[])
                         leg->AddEntry(cv_hist, "No Oscillations", "l");
                         std::string oscstr = "";//"#splitline{Oscilations:}{";
                         for(size_t j=0;j<model->nparams;j++){
-                            oscstr+=model->pretty_param_names[j]+ " : "+ to_string_prec(osc_params[j],2) + (j==0 ? ", " : "" );
+                            oscstr+=model->pretty_param_names[j]+ " : "+ to_string_prec(osc_param_vector(j),2) + (j==0 ? ", " : "" );
                         }
                         //oscstr+="}";
 
