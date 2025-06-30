@@ -206,6 +206,8 @@ namespace PROfit{
                     for(size_t bin = 0; bin < channel_nbins; ++bin) {
                         cv_hist.SetBinContent(bin+1, 0);
                     }
+                    if(bool(opt&PlotOptions::BinWidthScaled))
+                        cv_hist.Scale(1, "width");
 
                     // Set up TPads for ratios, unused if ratio option not chosen
                     TPad p1("p1", "p1", 0, 0.25, 1, 1);
@@ -218,14 +220,19 @@ namespace PROfit{
                     THStack *cvstack = NULL;
                     if(cv) {
                         if(bool(opt&PlotOptions::CVasStack)) cvstack = new THStack(std::to_string(global_channel_index).c_str(), hist_title.c_str());
+                        std::vector<std::pair<std::string, const char*>> subplots;
                         for(size_t subchannel = 0; subchannel < config.m_num_subchannels[channel]; ++subchannel){
                             const std::string& subchannel_name  = config.m_fullnames[global_subchannel_index];
                             if(bool(opt&PlotOptions::CVasStack)) {
                                 cvstack->Add(cvhists[subchannel_name].get());
-                                leg->AddEntry(cvhists[subchannel_name].get(), config.m_subchannel_plotnames[channel][subchannel].c_str() ,"f");
+                                subplots.push_back({subchannel_name, config.m_subchannel_plotnames[channel][subchannel].c_str()});
                             }
                             cv_hist.Add(cvhists[subchannel_name].get());
                             ++global_subchannel_index;
+                        }
+                        if(bool(opt&PlotOptions::CVasStack)) {
+                            for(size_t sc = subplots.size(); sc > 0; --sc)
+                                leg->AddEntry(cvhists[subplots[sc-1].first].get(), subplots[sc-1].second ,"f");
                         }
                         if(bool(opt&PlotOptions::AreaNormalized)) {
                             float integral = cv_hist.Integral();
@@ -269,6 +276,8 @@ namespace PROfit{
                         bf_hist.SetLineColor(kGreen);
                         bf_hist.SetLineWidth(3);
                         leg->AddEntry(&bf_hist, "Best Fit", "l");
+                        if(bool(opt&PlotOptions::BinWidthScaled))
+                            bf_hist.Scale(1, "width");
                         if(bool(opt&PlotOptions::AreaNormalized))
                             bf_hist.Scale(1.0/bf_hist.Integral());
                     }
