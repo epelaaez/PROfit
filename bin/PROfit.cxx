@@ -681,7 +681,10 @@ int main(int argc, char* argv[])
         chi2text.SetTextAlign(12);
         texts.push_back(chi2text);
 
-        plot_channels((final_output_tag+"_PROfile_hists.pdf"), config, cv, bf, data, err_band.get(), post_err_band.get(), texts, PlotOptions::DataPostfitRatio);
+        PlotOptions opt = PlotOptions::DataPostfitRatio;
+        if(binwidth_scale) opt |= PlotOptions::BinWidthScaled;
+        if(area_normalized) opt |= PlotOptions::AreaNormalized;
+        plot_channels((final_output_tag+"_PROfile_hists.pdf"), config, cv, bf, data, err_band.get(), post_err_band.get(), texts, opt);
 
         TCanvas c;
         c.Print((final_output_tag+"_postfit_posteriors.pdf[").c_str());
