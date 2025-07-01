@@ -257,7 +257,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
             log<LOG_DEBUG>(L"%1% || Loading Channel %2% with   ") % __func__ % m_channel_names.back().c_str() ;
 
-            tinyxml2::XMLElement *pBinO = pChan->FirstChildElement("variablebins");
+            tinyxml2::XMLElement *pBinO = pChan->FirstChildElement("bins");
             m_channel_variable_num_bins.push_back({});
             m_channel_variable_bin_edges.push_back({});
             m_channel_variable_bin_widths.push_back({});
@@ -313,7 +313,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                     m_channel_variable_bin_widths.back().push_back(binwidth);
                     m_channel_variable_units.back().push_back(ounits ? ounits : "");
                 }
-                pBinO = pBinO->NextSiblingElement("variablebins");
+                pBinO = pBinO->NextSiblingElement("bins");
             }
             if(m_bool_rate_only ){
                     m_channel_variable_num_bins[i_prime] = {1};
