@@ -132,8 +132,6 @@ namespace PROfit{
             std::unordered_map<std::string, size_t> m_map_fullname_subchannel_index;
             std::vector<size_t> m_vec_subchannel_index; //vector of global subchannel index, in increasing order
             std::vector<size_t> m_vec_channel_index;    //vector of corresponding channel index
-            //std::vector<size_t> m_vec_global_reco_index_start;  //vector of global reco bin index, in increasing order TBD
-            //std::vector<size_t> m_vec_global_true_index_start;  //vector of global true bin index, in increasing order TBD
             std::vector<std::vector<size_t>> m_vec_global_variable_index_start;  //vector of global true bin index, in increasing order
 
             //---- PRIVATE FUNCTION ------
@@ -306,39 +304,13 @@ namespace PROfit{
             /* Function: given global index (in the full vector), return global subchannel index of associated subchannel
              * Note: returns a 0-based index 
              */
-            size_t GetSubchannelIndexFromGlobalBin(size_t global_index) const;
-
-            /* Function: given global true index , return global subchannel index of associated subchannel
-             * Note: returns a 0-based index 
-             */
-            size_t GetSubchannelIndexFromGlobalTrueBin(size_t global_trueindex) const;
+            size_t GetSubchannelIndexFromVariableGlobalBin(size_t global_index, size_t var_index) const;
 
             /* Function: given subchannel global index, return corresponding channel index 
              * Note: index start from 0, not 1
              */
             size_t GetChannelIndex(size_t subchannel_index) const;
 
-
-            /* Function: given subchannel global index, return corresponding global bin start
-             * Note: global bin index start from 0, not 1
-             */
-            size_t GetGlobalBinStart(size_t subchannel_index) const;
-
-            size_t GetCollapsedGlobalBinStart(size_t channel_index) const;
-
-            /* Function: given channel index, return list of bin edges for this channel */
-            const std::vector<float>& GetChannelBinEdges(size_t channel_index) const;
-
-            /* Function: given channel index, return number of true bins for this channel */
-            size_t GetChannelNTrueBins(size_t channel_index) const;
-
-            /* Function: given subchannel global index, return corresponding global bin start
-             * Note: global bin index start from 0, not 1
-             */
-            size_t GetGlobalTrueBinStart(size_t subchannel_index) const;
-
-            /* Function: given channel index, return list of bin edges for this channel */
-            const std::vector<float>& GetChannelTrueBinEdges(size_t channel_index) const;
 
             /* Function: given channel index, return number of other bins for this channel and other var*/
             size_t GetChannelNOtherBins(size_t channel_index, size_t other_index) const;

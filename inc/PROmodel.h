@@ -18,7 +18,7 @@ namespace PROfit {
 class PROmodel {
 public:
     size_t nparams;
-    int ivar;
+    int ivar; //TODO, this should be a string like "true" and then in config we have a map to that variable. error if not found. 
     std::vector<std::string> param_names;
     std::vector<std::string> pretty_param_names;
     Eigen::VectorXf lb, ub, default_val;
@@ -37,7 +37,6 @@ public:
         size_t nvar = prop.variableMCStatErr.size();
         hists.resize(nvar);
         for(size_t v = 0; v <nvar ;v++){
-            if(v==ivar)continue; 
             for(size_t m = 0; m < model_functions.size(); ++m) {
                 hists.at(v).emplace_back(Eigen::MatrixXf::Constant(prop.variable_hist_storage(ivar,v).rows(), prop.variable_hist_storage(ivar,v).cols(),0.0));
                 Eigen::MatrixXf &h = hists.at(v).back();
@@ -60,17 +59,14 @@ public:
 
 
         size_t nvar = prop.variableMCStatErr.size();
-        log<LOG_ERROR>(L"%1% , %2% || GARP nvar %3% .") % __func__ % __LINE__ % nvar;
         hists.resize(nvar);
         for(size_t v = 0; v <nvar ;v++){
-            if(v==ivar)continue; 
             for(size_t m = 0; m < model_functions.size(); ++m) {
                 hists.at(v).emplace_back(Eigen::MatrixXf::Constant(prop.variable_hist_storage(ivar,v).rows(), prop.variable_hist_storage(ivar,v).cols(),0.0));
                 Eigen::MatrixXf &h = hists.at(v).back();
                 for(size_t i = 0; i < prop.added_weights.size(); ++i) {
                     if(prop.model_rule[i] != (int)m) continue;
                     int tbin = prop.variable_bin_indices[i][ivar], rbin = prop.variable_bin_indices[i][v];
-                    log<LOG_ERROR>(L"%1% , %2% || GARP tbin %3% rin %4%  h has (r,c) (%5%,%6%) | [ivar,var] [%7%,%8%]") % __func__ % __LINE__% tbin % rbin % prop.variable_hist_storage(ivar,v).rows() % prop.variable_hist_storage(ivar,v).cols() % ivar % v;
                     if(tbin<0 || rbin<0) continue;
                     h(tbin, rbin) += prop.added_weights[i];
                 }
@@ -128,7 +124,6 @@ public:
         size_t nvar = prop.variableMCStatErr.size();
         hists.resize(nvar);
         for(size_t v = 0; v <nvar ;v++){
-            if(v==ivar)continue; 
             for(size_t m = 0; m < model_functions.size(); ++m) {
                 hists.at(v).emplace_back(Eigen::MatrixXf::Constant(prop.variable_hist_storage(ivar,v).rows(), prop.variable_hist_storage(ivar,v).cols(),0.0));
                 Eigen::MatrixXf &h = hists.at(v).back();
@@ -199,15 +194,14 @@ public:
          size_t nvar = prop.variableMCStatErr.size();
         hists.resize(nvar);
         for(size_t v = 0; v <nvar ;v++){
-            if(v==ivar)continue; 
             for(size_t m = 0; m < model_functions.size(); ++m) {
                 hists.at(v).emplace_back(Eigen::MatrixXf::Constant(prop.variable_hist_storage(ivar,v).rows(), prop.variable_hist_storage(ivar,v).cols(),0.0));
                 Eigen::MatrixXf &h = hists.at(v).back();
                 for(size_t i = 0; i < prop.added_weights.size(); ++i) {
                     if(prop.model_rule[i] != (int)m) continue;
                     int tbin = prop.variable_bin_indices[i][ivar], rbin = prop.variable_bin_indices[i][v];
-                    h(tbin, rbin) += prop.added_weights[i];
                     if(tbin<0 || rbin<0)continue;
+                    h(tbin, rbin) += prop.added_weights[i];
                 }
             }
         }

@@ -442,7 +442,7 @@ namespace PROfit {
                         size_t is = inconfig.GetSubchannelIndex(name);     
                         size_t ic = inconfig.GetChannelIndex(is);     
 
-                        size_t start = inconfig.GetGlobalBinStart(is); 
+                        size_t start = inconfig.GetGlobalOtherBinStart(is,inconfig.i_prime); //TBfixed 
                         for(size_t b = 0; b < inconfig.m_channel_variable_num_bins[inconfig.i_prime][ic] ; b++){
                             flatbins.push_back((int)(start+b));
                         }
@@ -778,10 +778,6 @@ namespace PROfit {
                     if(additional_weight == 0) //skip on event failing cuts
                         continue;
 
-                    //find bins
-                    int global_bin = FindGlobalBin(inconfig, reco_value, channel_index[ib]);
-                    if(global_bin < 0 )  //out of range
-                        continue;
 
                     std::vector<int> variable_bin_indices;
                     for(size_t i = 0; i < vars.size(); ++i) {
@@ -789,9 +785,8 @@ namespace PROfit {
                     }
 
                     if(i%100==0)	
-                        log<LOG_DEBUG>(L"%1% || Subchannel %2% -- Reco variable value: %3%, MC event weight: %4%, correponds to global bin: %5%") % __func__ %  channel_index[ib] % reco_value % additional_weight % global_bin;
+                        //log<LOG_DEBUG>(L"%1% || Subchannel %2% -- Reco variable value: %3%, MC event weight: %4%, correponds to global bin: %5%") % __func__ %  channel_index[ib] % reco_value % additional_weight % global_bin;
 
-                    //data[0].Fill(global_bin, additional_weight);
                     for(size_t io = 0; io < inconfig.m_num_variables; ++io)
                         if(variable_bin_indices[io] >= 0)
                             data[io].Fill(variable_bin_indices[io], additional_weight);//from io+1

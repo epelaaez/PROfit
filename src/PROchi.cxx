@@ -130,11 +130,11 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
     return value;
 }
 
-float PROchi::getSingleChannelChi(size_t channel_index) {
+float PROchi::getSingleChannelChi(size_t channel_index, size_t var_index) {
     PROspec cv = FillCVSpectra(config, peller,strat == BinnedChi2);
 
     size_t nbin =  config.m_channel_variable_num_bins[config.i_prime][channel_index];
-    size_t startBin = config.GetCollapsedGlobalBinStart(channel_index);
+    size_t startBin = config.GetCollapsedGlobalOtherBinStart(channel_index, var_index);
 
     Eigen::MatrixXf inverted_collapsed_full_covariance(nbin,nbin);
     //only calculate a syst covariance if we have any covariance parameters as defined in the xml

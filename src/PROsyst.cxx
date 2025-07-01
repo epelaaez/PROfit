@@ -171,13 +171,13 @@ namespace PROfit {
             int nbins = (covmat.begin())->rows();
 
             sum_matrix = Eigen::MatrixXf::Zero(nbins, nbins);
-        
+
             int ii=0;
             for(auto& p : covmat){
                 sum_matrix += p;
                 ii++;
             }
-            
+
         }else{
             log<LOG_ERROR>(L"%1% || There is no covariance available!") % __func__;
             log<LOG_ERROR>(L"%1% || Returning empty matrix") % __func__;
@@ -261,18 +261,11 @@ namespace PROfit {
             size_t is = config.GetSubchannelIndex(name);     
             size_t ic = config.GetChannelIndex(is);     
 
-            if(other_index < 0) {
-                size_t start = config.GetGlobalBinStart(is); 
-                for(size_t b = 0; b < config.m_channel_variable_num_bins[config.i_prime][ic] ; b++){
-                    fracM(start+b,start+b)=flat_percent*flat_percent;
-                    flatbins.push_back(start+b);
-                }
-            } else {
-                size_t start = config.GetGlobalOtherBinStart(is, other_index);
-                for(size_t b = 0; b < config.m_channel_variable_num_bins[ic][other_index] ; b++){
-                    fracM(start+b,start+b)=flat_percent*flat_percent;
-                    flatbins.push_back(start+b);
-                }
+
+            size_t start = config.GetGlobalOtherBinStart(is, other_index);
+            for(size_t b = 0; b < config.m_channel_variable_num_bins[ic][other_index] ; b++){
+                fracM(start+b,start+b)=flat_percent*flat_percent;
+                flatbins.push_back(start+b);
             }
         }
         log<LOG_INFO>(L"%1% || and fills bins  %2%  .") % __func__  %  flatbins;
@@ -691,9 +684,9 @@ namespace PROfit {
         log<LOG_DEBUG>(L"%1% | Singular values: %2% ") % __func__ % svd.singularValues();
 
         Eigen::FullPivLU<Eigen::MatrixXf> lu_decomp(coll);
-          int rank = lu_decomp.rank();
-          int size = coll.rows();
-          log<LOG_DEBUG>(L"%1% | Matrix is Rank %2% and size %3%") % __func__ % rank % size ;
+        int rank = lu_decomp.rank();
+        int size = coll.rows();
+        log<LOG_DEBUG>(L"%1% | Matrix is Rank %2% and size %3%") % __func__ % rank % size ;
 
         float tol = 1e-8f * S.maxCoeff(); // Some cutoff? is this value impactful on out matricies? need to test
         std::vector<int> keep;
@@ -709,7 +702,7 @@ namespace PROfit {
         //going to keep only the singular values that give meaningful variance
         Eigen::MatrixXf fallback_sampler = Eigen::MatrixXf::Zero(coll.rows(), coll.cols());
         for (size_t i = 0; i < keep.size(); ++i) {
-                fallback_sampler.col(i) = U.col(keep[i]) * std::sqrt(S(keep[i]));
+            fallback_sampler.col(i) = U.col(keep[i]) * std::sqrt(S(keep[i]));
         }
 
         return fallback_sampler;

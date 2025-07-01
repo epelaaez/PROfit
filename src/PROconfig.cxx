@@ -638,12 +638,10 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 m_mcgen_variation_plotname_map[wt] = plot_name ? plot_name : wt;
                 if(!binning || strcmp(binning, "reco") == 0) {
                     m_mcgen_variation_binning_map[wt] = i_prime;
-                } else if(strcmp(binning, "truth") == 0) {
-                    m_mcgen_variation_binning_map[wt] = i_osc;
-                } else if(strncmp(binning, "other", 5) == 0) {
+                } else if(strncmp(binning, "var", 3) == 0) {
                     size_t l = strlen(binning);
                     bool all_numbers = true;
-                    for(size_t i = 5; i < l; ++i) {
+                    for(size_t i = 3; i < l; ++i) {
                         if(!isdigit(binning[i])) {
                             all_numbers = false;
                             break;
@@ -651,7 +649,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                     }
                     if(all_numbers) {
                         int binning_num;
-                        sscanf(binning, "other%i", &binning_num);
+                        sscanf(binning, "var%i", &binning_num);
                         m_mcgen_variation_binning_map[wt] = binning_num;
                     } else {
                         log<LOG_WARNING>(L"%1% || Unrecognized binning '%2%' for systematic %3%. Defaulting to reco bins.") 
@@ -919,16 +917,10 @@ int PROconfig::LoadFromXML(const std::string &filename){
         log<LOG_INFO>(L"%1% || num of bins: %2% ") % __func__ % m_channel_variable_num_bins[i_prime][i];
 
     }
-    log<LOG_INFO>(L"%1% || num_bins_detector_block: %2%") % __func__ % m_num_variable_bins_detector_block[i_prime];
-    log<LOG_INFO>(L"%1% || num_truebins_detector_block: %2%") % __func__ % m_num_variable_bins_detector_block[i_osc];
-    log<LOG_INFO>(L"%1% || num_bins_detector_block_collapsed: %2%") % __func__ % m_num_variable_bins_detector_block_collapsed[i_prime];
-    log<LOG_INFO>(L"%1% || num_bins_mode_block: %2%") % __func__ % m_num_variable_bins_mode_block[i_prime];
-    log<LOG_INFO>(L"%1% || num_true_bins_mode_block: %2%") % __func__ % m_num_variable_bins_mode_block[i_osc];
-    log<LOG_INFO>(L"%1% || num_bins_mode_block_collapsed: %2%") % __func__ % m_num_variable_bins_mode_block_collapsed[i_prime];
-    log<LOG_INFO>(L"%1% || num_bins_total: %2%") % __func__ % m_num_variable_bins_total[i_prime];
-    log<LOG_INFO>(L"%1% || num_true_bins_total: %2%") % __func__ % m_num_variable_bins_total[i_osc];
-    log<LOG_INFO>(L"%1% || num_bins_total_collapsed: %2%") % __func__ % m_num_variable_bins_total_collapsed[i_prime];
-
+    for(size_t io = 0; io < m_num_variables; ++io) {
+        log<LOG_INFO>(L"%1% || variable %2% num_bins_total: %3%") % __func__ % m_num_variable_bins_total[io];
+        log<LOG_INFO>(L"%1% || num_bins_total_collapsed: %2%") % __func__ % m_num_variable_bins_total_collapsed[io];
+    }
 
     log<LOG_INFO>(L"%1% || Done reading the xmls") % __func__;
     return 0;
@@ -976,27 +968,9 @@ size_t PROconfig::GetChannelIndex(size_t subchannel_index) const{
     return m_vec_channel_index[index];
 }
 
-size_t PROconfig::GetGlobalBinStart(size_t subchannel_index) const{
-    size_t index = this->find_equal_index(m_vec_subchannel_index, subchannel_index);
-    return m_vec_global_variable_index_start[i_prime][index];
-}
 
-size_t PROconfig::GetCollapsedGlobalBinStart(size_t channel_index) const{
-    if(channel_index >= m_num_channels) {
-        log<LOG_ERROR>(L"%1% || Requested bin start of channel %2%, but only %3% channels are known.")
-            % __func__ % channel_index % m_num_channels;
-        log<LOG_ERROR>(L"Terminating.");
-        exit(EXIT_FAILURE);
-    }
-    size_t index = 0;
-    for(size_t i = 0; i < channel_index; ++i) index += m_channel_variable_num_bins[i_prime][i];
-    return index;
-}
 
-size_t PROconfig::GetGlobalTrueBinStart(size_t subchannel_index) const{
-    size_t index = this->find_equal_index(m_vec_subchannel_index, subchannel_index);
-    return m_vec_global_variable_index_start[i_osc][index];
-}
+
 
 size_t PROconfig::GetGlobalOtherBinStart(size_t subchannel_index, size_t other_index) const{
     size_t index = this->find_equal_index(m_vec_subchannel_index, subchannel_index);
@@ -1015,50 +989,16 @@ size_t PROconfig::GetCollapsedGlobalOtherBinStart(size_t channel_index, size_t o
     return index;
 }
 
-size_t PROconfig::GetSubchannelIndexFromGlobalBin(size_t global_reco_index) const {
-    size_t index = this->find_less_or_equal_index(m_vec_global_variable_index_start[i_prime], global_reco_index); 
+
+size_t PROconfig::GetSubchannelIndexFromVariableGlobalBin(size_t global_reco_index, size_t var_index) const {
+    size_t index = this->find_less_or_equal_index(m_vec_global_variable_index_start[var_index], global_reco_index); 
     return m_vec_subchannel_index[index];
 }
 
-size_t PROconfig::GetSubchannelIndexFromGlobalTrueBin(size_t global_trueindex) const{
-    size_t index = this->find_less_or_equal_index(m_vec_global_variable_index_start[i_osc], global_trueindex);
-    return m_vec_subchannel_index[index];
-}
 
-const std::vector<float>& PROconfig::GetChannelBinEdges(size_t channel_index) const{
 
-    if( channel_index >= m_num_channels){
-        log<LOG_ERROR>(L"%1% || Given channel index: %2% is out of bound") % __func__ % channel_index;
-        log<LOG_ERROR>(L"%1% || Total number of channels : %2%") % __func__ % m_num_channels;
-        log<LOG_ERROR>(L"Terminating.");
-        exit(EXIT_FAILURE);
-    }
 
-    return m_channel_variable_bin_edges[i_prime][channel_index];
-}
 
-size_t PROconfig::GetChannelNTrueBins(size_t channel_index) const{
-    if(channel_index >= m_num_channels){
-        log<LOG_ERROR>(L"%1% || Given channel index: %2% is out of bound") % __func__ % channel_index;
-        log<LOG_ERROR>(L"%1% || Total number of channels : %2%") % __func__ % m_num_channels;
-        log<LOG_ERROR>(L"Terminating.");
-        exit(EXIT_FAILURE);
-    }
-    return m_channel_variable_num_bins[i_osc][channel_index];
-}
-
-const std::vector<float>& PROconfig::GetChannelTrueBinEdges(size_t channel_index) const{
-
-    //check for out of bound
-    if(channel_index >= m_num_channels){
-        log<LOG_ERROR>(L"%1% || Given channel index: %2% is out of bound") % __func__ % channel_index;
-        log<LOG_ERROR>(L"%1% || Total number of channels : %2%") % __func__ % m_num_channels;
-        log<LOG_ERROR>(L"Terminating.");
-        exit(EXIT_FAILURE);
-    }
-
-    return m_channel_variable_bin_edges[i_osc][channel_index];
-}
 
 size_t PROconfig::GetChannelNOtherBins(size_t channel_index, size_t other_index) const{
     if(channel_index >= m_num_channels){

@@ -23,7 +23,7 @@ public:
     virtual PROmetric *Clone() const = 0;
     virtual const PROmodel &GetModel() const = 0;
     virtual const PROsyst  &GetSysts() const = 0;
-    virtual float getSingleChannelChi(size_t channel_index) = 0;
+    virtual float getSingleChannelChi(size_t channel_index, size_t var_index) = 0;
     virtual ~PROmetric() {}
     virtual void fixSpline(int,float)  = 0;
     virtual float Pull(const Eigen::VectorXf &systs) = 0;

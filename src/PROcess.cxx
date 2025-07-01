@@ -14,12 +14,12 @@
 namespace PROfit {
     PROspec FillCVSpectra(const PROconfig &inconfig, const PROpeller &inprop, bool binned, size_t var_index){
         PROspec myspectrum(inconfig.m_num_variable_bins_total[var_index]);
-           // log<LOG_ERROR>(L"%1% , %2% || GARP ") % __func__ % __LINE__ ;
+//        log<LOG_ERROR>(L"%1% , %2% || GARP ") % __func__ % __LINE__  ;
         if(binned) {
-            for(int i = 0; i < inprop.variable_hist_storage(inconfig.i_osc,var_index).rows(); ++i) {
+            for(int i = 0; i < inprop.variable_hist_storage(inconfig.i_osc, var_index).rows(); ++i) {
                 for(size_t k = 0; k < myspectrum.GetNbins(); ++k) {
                    if(myspectrum.GetNbins()!=inprop.variable_hist_storage(inconfig.i_osc,var_index).cols()){
-                        log<LOG_ERROR>(L"%1% , %2% || fail: %3% is not %4% ") % __func__ % __LINE__ % myspectrum.GetNbins() % inprop.variable_hist_storage(inconfig.i_osc,var_index).cols();
+                        log<LOG_ERROR>(L"%1% , %2% || fail: %3% is not (rows,cols) : (%4%,%5%). should also be %6% ") % __func__ % __LINE__ % myspectrum.GetNbins() % inprop.variable_hist_storage(inconfig.i_osc,var_index).rows() %inprop.variable_hist_storage(inconfig.i_osc,var_index).cols() % inconfig.m_num_variable_bins_total[var_index];
                         exit(EXIT_FAILURE);
                    }
              //      log<LOG_ERROR>(L"%1% , %2% || GARP i %3% k %4% bounds %5%,%6% ") % __func__ % __LINE__ % i % k % inprop.variable_hist_storage(inconfig.i_osc,var_index).rows() % inprop.variable_hist_storage(inconfig.i_osc,var_index).cols();
@@ -74,12 +74,16 @@ namespace PROfit {
             Eigen::VectorXf systw = Eigen::VectorXf::Constant(inconfig.m_num_variable_bins_total[var_index], 1);
             for(int i = 0; i < shifts.size(); ++i) {
                 int binning = insyst.spline_binnings[i];
-                const Eigen::MatrixXf &hist = inprop.variable_hist_storage(var_index,binning);
-                for(size_t k = 0; k < inconfig.m_num_variable_bins_total[inconfig.i_prime]; ++k) {
-                    if(binning == var_index) systw(k) *= insyst.GetSplineShift(i, shifts(i), k);
+                const Eigen::MatrixXf &hist = inprop.variable_hist_storage(binning,var_index);
+                for(size_t k = 0; k < inconfig.m_num_variable_bins_total[var_index]; ++k) {
+                    if(binning == var_index){
+                        //log<LOG_ERROR>(L"%1% , %2% || GARP binning %3% %4% %5%") % __func__ % __LINE__  % i % shifts(i) % k;
+                        systw(k) *= insyst.GetSplineShift(i, shifts(i), k);
+                    }
                     else {
                         float val = 0, unweighted = 0;
                         for(long int j = 0; j < hist.rows(); ++j) {
+                      //log<LOG_ERROR>(L"%1%, %2% || GARP hist stor size (%3%,%4%) and were at (%5%,%6%) of var index %7% binning %8% (which should be (%9%,%10%) size)") % __func__ % __LINE__ % hist.rows() % hist.cols() %j % k % var_index % binning % inconfig.m_num_variable_bins_total[var_index] % inconfig.m_num_variable_bins_total[binning];
                             float binsystw = insyst.GetSplineShift(i, shifts(i), j);
                             val += binsystw * hist(j, k);
                             unweighted += hist(j,k);
@@ -88,12 +92,19 @@ namespace PROfit {
                     }
                 }
             }
+            //log<LOG_ERROR>(L"%1%, %2% || GARP hist stor size (%3%,%4%)") % __func__ % __LINE__ % inprop.variable_hist_storage(inconfig.i_osc, var_index).rows() % inprop.variable_hist_storage(inconfig.i_osc, var_index).cols();
             for(long int i = 0; i < inprop.variable_hist_storage(inconfig.i_osc, var_index).rows(); ++i) {
                 float le = inprop.histLE[i];
                 for(size_t j = 0; j < inmodel.model_functions.size(); ++j) {
                     float oscw = inmodel.model_functions[j](phys, le);
+        if (inmodel.hists[var_index][j].data() == nullptr) {
+            log<LOG_ERROR>(L"Null matrix at var_index=%1%, j=%2%") % var_index % j;
+                continue;
+    }
+
                     for(size_t k = 0; k < myspectrum.GetNbins(); ++k) {
-                        myspectrum.Fill(k, systw(k) * oscw * inmodel.hists[var_index][j](i, k));
+                        //log<LOG_ERROR>(L"%1% , %2% || GARP Spec: i(bin):%3% j(model fun):%4% k(specbin):%5% . size for (i,k): hists(%6%,%7%) ") % __func__ % __LINE__  % i % j % k % inmodel.hists[var_index][j].rows() % inmodel.hists[var_index][j].cols() ;
+myspectrum.Fill(k, systw(k) * oscw * inmodel.hists[var_index][j](i, k));
                     }
                 }
             }
@@ -126,13 +137,14 @@ namespace PROfit {
         Eigen::VectorXf phys   = params.segment(0, inmodel.nparams);
         Eigen::VectorXf shifts = params.segment(inmodel.nparams, params.size() - inmodel.nparams);
 
+        int i_osc_tmp =1;
         if (binned) {
             for(long int i = 0; i < inprop.hist.rows(); ++i) {
                 float le = inprop.histLE[i];
                 float hist_w = 1.0 ;
 
                 //Figure out what subchannel the event is in
-                size_t subchan = inconfig.GetSubchannelIndexFromGlobalTrueBin(inprop.variable_bin_indices[i][inconfig.i_osc]);
+                size_t subchan = inconfig.GetSubchannelIndexFromVariableGlobalBin(inprop.variable_bin_indices[i][i_osc_tmp],i_osc_tmp);
                 std::string name = inconfig.m_fullnames[subchan];
 
                 //Put name for ICARUS study here. How to handle more generically?
@@ -167,7 +179,7 @@ namespace PROfit {
                 float hist_w = 1.0 ;
 
                 //Figure out what subchannel the event is in
-                size_t subchan = inconfig.GetSubchannelIndexFromGlobalTrueBin(inprop.variable_bin_indices[i][inconfig.i_osc]);
+                size_t subchan = inconfig.GetSubchannelIndexFromVariableGlobalBin(inprop.variable_bin_indices[i][i_osc_tmp],i_osc_tmp);
                 std::string name = inconfig.m_fullnames[subchan];
 
                 //Put name for ICARUS study here. How to handle more generically?
@@ -266,7 +278,7 @@ namespace PROfit {
     }
 
     PROspec FillSplineRandomThrow(const PROconfig &inconfig, const PROpeller &inprop, const PROsyst &insyst, int spline, uint32_t seed, int other_index) {
-        int nbins = other_index < 0 ? inconfig.m_num_variable_bins_total[inconfig.i_prime] : inconfig.m_num_variable_bins_total[other_index];
+        int nbins =  inconfig.m_num_variable_bins_total[other_index];
         Eigen::VectorXf spec = Eigen::VectorXf::Constant(nbins, 0);
 
         // TODO: We should think about centralizing rng in a thread-safe/thread-aware way
