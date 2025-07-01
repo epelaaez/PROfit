@@ -42,14 +42,18 @@ void PROdata::QuickFill(int bin_index, float weight){
     return;
 }
 
-TH1D PROdata::toTH1D(const PROconfig &inconfig, int channel_index, int other_index) const {
-    int global_bin_start =  inconfig.GetCollapsedGlobalVariableBinStart(channel_index, other_index);
-    //set up hist specs
-    int nbins =  inconfig.m_channel_variable_num_bins[channel_index][other_index];
-    const std::vector<float>& bin_edges =  inconfig.GetChannelVariableBinEdges(channel_index, other_index);
-    std::string hist_name = inconfig.m_channel_names[channel_index] + " Data";
-    std::string xaxis_title = other_index < 0 ? inconfig.m_channel_units[channel_index] : inconfig.m_channel_variable_units[channel_index][other_index];
+TH1D PROdata::toTH1D(const PROconfig &inconfig, int global_channel_index, int other_index) const {
+    int local_channel_index = inconfig.GetLocalChannelIndex(global_channel_index);
 
+    int global_bin_start =  inconfig.GetCollapsedGlobalVariableBinStart(global_channel_index, other_index);
+    //set up hist specs
+    int nbins =  inconfig.m_channel_variable_num_bins[local_channel_index][other_index];
+    const std::vector<float>& bin_edges =  inconfig.GetChannelVariableBinEdges(local_channel_index, other_index);
+    std::string hist_name = inconfig.m_channel_names[local_channel_index] + " Data";
+    std::string xaxis_title =  inconfig.m_channel_variable_units[local_channel_index][other_index];
+
+
+    log<LOG_DEBUG>(L"%1% || in F ") % __func__ ;
     //fill 1D hist
     TH1D hSpec(hist_name.c_str(),hist_name.c_str(), nbins, &bin_edges[0]); 
     hSpec.GetXaxis()->SetTitle(xaxis_title.c_str());

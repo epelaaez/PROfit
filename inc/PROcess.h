@@ -12,6 +12,7 @@
 #include "PROsyst.h"
 
 #include "TH2D.h"
+#include <vector>
 
 namespace PROfit{
 
@@ -25,7 +26,7 @@ namespace PROfit{
 
 
     //Below are depreciated, slightly
-  //ETW 1/22/2025 Add function to fill spectrum using weights from input histogram
+   //ETW 1/22/2025 Add function to fill spectrum using weights from input histogram
     PROspec FillWeightedSpectrumFromHist(const PROconfig &inconfig, const PROpeller &inprop, std::vector<TH2D*> inweighthists, const PROmodel &inmodel, const Eigen::VectorXf &params, bool binned = false);
     PROspec FillSystRandomThrow(const PROconfig &inconfig, const PROpeller &inprop, const PROsyst &insyst, uint32_t seed, int other_index = 0);
     PROspec FillSplineRandomThrow(const PROconfig &inconfig, const PROpeller &inprop, const PROsyst &insyst, int spline, uint32_t seed, int other_index = 0);

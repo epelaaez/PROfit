@@ -121,6 +121,7 @@ float PROpoisson::getSingleChannelChi(size_t channel_index,size_t var_index) {
     size_t nbin =  config.m_channel_variable_num_bins[config.i_prime][channel_index];
     size_t startBin = config.GetCollapsedGlobalVariableBinStart(channel_index,var_index);
 
+
     const Eigen::VectorXf &vdata = data.Spec().segment(startBin, nbin);
     const Eigen::VectorXf vmc = CollapseMatrix(config, cv.Spec()).segment(startBin, nbin);
     float poisson = 2 * (vmc.array() - vdata.array() + vdata.array() * (vdata.array() / vmc.array()).log()).sum();

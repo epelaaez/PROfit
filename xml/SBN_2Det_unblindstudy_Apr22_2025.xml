@@ -25,6 +25,9 @@
 
 
 <variation_list>
+    <!-- INlcude MC stats, uncomment out to remove -->
+    <allowlist type="mcstat" plotname="MC Stats" ></allowlist>
+
     <!--systs from multisigmaTree should have type spline-->
     <!--systs from multisimTree should have type covariance-->
     <!--systs from detsystTree should have type spline-->

@@ -9,7 +9,7 @@
 
 #include <algorithm>
 #include <random>
-#include <vector>
+
 
 namespace PROfit {
     PROspec FillCVSpectra(const PROconfig &inconfig, const PROpeller &inprop, bool binned, size_t var_index){
@@ -86,6 +86,7 @@ namespace PROfit {
             }
             for(long int i = 0; i < inprop.variable_hist_storage(inmodel.ivar, var_index).rows(); ++i) {
                 float le = inprop.variable_midbin[inmodel.ivar][i];
+
                 for(size_t j = 0; j < inmodel.model_functions.size(); ++j) {
                     float oscw = inmodel.model_functions[j](phys, le);
                     if (inmodel.hists[var_index][j].data() == nullptr) {
@@ -158,6 +159,26 @@ namespace PROfit {
                     }
                 }
             }
+        } else {
+	  for(size_t i = 0; i<inprop.trueLE.size(); ++i){
+	    float oscw  =  inmodel.model_functions[inprop.model_rule[i]](phys, inprop.trueLE[i]);
+	    float add_w = inprop.added_weights[i];
+	    const int reco_bin = inprop.bin_indices[i];
+
+	    float systw = 1;
+	    for(int j = 0; j < shifts.size(); ++j) {
+	      int binning = insyst.spline_binnings[j];
+	      const int spline_bin =
+		binning == -2 ? inprop.true_bin_indices[i] :
+		binning == -1 ? inprop.bin_indices[i]
+		: inprop.other_bin_indices[i][binning];
+	      systw *= insyst.GetSplineShift(j, shifts[j], spline_bin);
+	    }
+
+	    float finalw = oscw * systw * add_w;
+
+	    myspectrum.Fill(reco_bin, finalw);
+	  }
         }
         else {
             for(size_t i = 0; i<inprop.variable_values.size(); ++i){
@@ -189,7 +210,7 @@ namespace PROfit {
             }
         }
         return myspectrum;
-    }
+}
 
     PROspec FillSystRandomThrow(const PROconfig &inconfig, const PROpeller &inprop, const PROsyst &insyst, uint32_t seed, int other_index) {
         int nbins = inconfig.m_num_variable_bins_total[other_index],

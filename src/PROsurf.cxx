@@ -91,9 +91,6 @@ void PROsurf::FillSurfaceStat(const PROconfig &config, const PROfitterConfig &fi
             float fx = (*local_metric)(physics_params, empty_vec, false);
             if(fx < min_chi) min_chi = fx;
             surface(i, j) = fx;
-            if(!filename.empty()){
-                chi_file<<"\n"<<edges_x(i)<<" "<<edges_y(j)<<" "<<fx<<std::flush;
-            }
         }
     }
     for(size_t i = 0; i < nbinsx; ++i) {

@@ -242,7 +242,7 @@ struct adaptive_proposal {
         return last_proposed;
     }
 
-    float P(const Eigen::VectorXf &value, const Eigen::VectorXf &given) {
+    float P(const Eigen::VectorXf &, const Eigen::VectorXf &) {
         return 1;
     }
 

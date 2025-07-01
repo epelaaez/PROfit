@@ -64,6 +64,8 @@ int main(int argc, char* argv[])
     bool force = false;
     bool noxrootd = false;
     bool poisson_throw = false;
+    std::vector<std::string> scale_arg;
+    std::map<std::string, float> scale;
     size_t nthread = 1;
     std::map<std::string, float> scan_fit_options;
     std::map<std::string, float> global_fit_options;
@@ -73,7 +75,7 @@ int main(int argc, char* argv[])
     std::string fit_preset = "good";
     static const std::unordered_set<std::string> allowed_preset = {"good","fast","overkill"};
     bool with_splines = false, binwidth_scale = false, area_normalized = false;
-    std::vector<float> osc_params;
+    std::map<std::string, float> osc_params;
     std::map<std::string, float> injected_systs;
     std::vector<std::string> syst_list, systs_excluded;
     bool MCMC_prefit_errors = false;
@@ -111,6 +113,7 @@ int main(int argc, char* argv[])
     app.add_option("-s, --seed", global_seed, "A global seed for PROseed rng. Default to -1 for hardware rng seed.")->default_val(-1);
     app.add_option("--inject-systs", injected_systs, "Systematic shifts to inject. Map of name and shift value in sigmas. Only spline systs are supported right now.");
     app.add_flag("--poisson-throw", poisson_throw, "Do a Poisson stats throw of fake data.");
+    app.add_option("--scale", scale_arg, "Scale detector POT by a given value.");
     app.add_option("--syst-list", syst_list, "Override list of systematics to use (note: all systs must be in the xml).");
     app.add_option("--exclude-systs", systs_excluded, "List of systematics to exclude.")->excludes("--syst-list"); 
     app.add_option("--fit-options", global_fit_options, "Parameters for single, detailed global best fit LBFGSB.");
@@ -241,6 +244,17 @@ int main(int argc, char* argv[])
 
     }
 
+    //Scale events by some percentage of total detector POT
+    if(scale_arg.size()) {
+        if (scale_arg.size() % 2 != 0) {
+            log<LOG_ERROR>(L"%1% || Expected pairs of detector and scaling values (e.g., ICARUS 0.5)") % __func__;
+            exit(EXIT_FAILURE);
+        }
+        for (size_t i = 0; i < scale_arg.size(); i += 2) {
+            scale[scale_arg[i]] = std::stof(scale_arg[i + 1]);
+        }
+        prop.scale(config, scale);
+    }
 
     //Build a PROsyst to sort and analyze all systematics
     //PROsyst systs(prop, config, systsstructs.front(), shapeonly);
@@ -252,42 +266,22 @@ int main(int argc, char* argv[])
 
     std::unique_ptr<PROmodel> model = get_model_from_string(config.m_model_tag, prop);
     std::unique_ptr<PROmodel> null_model = std::make_unique<NullModel>(prop);
-    //Pysics parameter input
-    Eigen::VectorXf pparams = Eigen::VectorXf::Constant(model->nparams + other_systs[config.i_prime].GetNSplines(), 0);
-    Eigen::VectorXf CVpparams = Eigen::VectorXf::Constant(model->nparams + other_systs[config.i_prime].GetNSplines(), 0);
-    if(osc_params.size()) {
-        if(osc_params.size() != model->nparams) {
-            log<LOG_ERROR>(L"%1% || Incorrect number of physics parameters provided. Expected %2%, found %3%.")
-                % __func__ % model->nparams % osc_params.size();
-            exit(EXIT_FAILURE);
+
+    Eigen::VectorXf osc_param_vector = model->default_val;
+    for(const auto &[name, value]: osc_params) {
+        const auto it = std::find(model->param_names.begin(), model->param_names.end(), name);
+        if(it == std::end(model->param_names)) {
+            log<LOG_ERROR>(L"%1% || Unrecognized model parameter name %2%.\n"
+                           L"Valid names for model %3% are %4%") %
+                           __func__% name.c_str()% config.m_model_tag.c_str()%
+                           model->param_names;
+            return 1;
         }
-        for(size_t i = 0; i < osc_params.size(); ++i) {
-            pparams(i) = std::log10(osc_params[i]);
-            CVpparams(i) = model->default_val(i); 
-            //if(std::isinf(pparams(i))) pparams(i) = -10;
-        }
-    } else {
-        for(size_t i = 0; i < model->nparams; ++i) {
-            pparams(i) = model->default_val(i); 
-            CVpparams(i) = model->default_val(i); 
-        }
+        int loc = std::distance(model->param_names.begin(), it);
+        osc_param_vector(loc) = std::log10(value);
     }
 
-    //Spline injection studies
-    Eigen::VectorXf allparams = Eigen::VectorXf::Constant(model->nparams + other_systs[config.i_prime].GetNSplines(), 0);
-    Eigen::VectorXf systparams = Eigen::VectorXf::Constant(other_systs[config.i_prime].GetNSplines(), 0);
-    for(size_t i = 0; i < model->nparams; ++i) allparams(i) = pparams(i);
-    for(const auto& [name, shift]: injected_systs) {
-        log<LOG_INFO>(L"%1% || Injected syst: %2% shifted by %3%") % __func__ % name.c_str() % shift;
-        auto it = std::find(other_systs[config.i_prime].spline_names.begin(), other_systs[config.i_prime].spline_names.end(), name);
-        if(it == other_systs[config.i_prime].spline_names.end()) {
-            log<LOG_ERROR>(L"%1% || Error: Unrecognized spline %2%. Ignoring this injected shift.") % __func__ % name.c_str();
-            continue;
-        }
-        int idx = std::distance(other_systs[config.i_prime].spline_names.begin(), it);
-        allparams(idx+model->nparams) = shift;
-        systparams(idx) = shift;
-    }
+
 
     //Seed time
     PROseed myseed(nthread, global_seed);
@@ -364,31 +358,16 @@ int main(int argc, char* argv[])
 
     }//if no data, use injected or fake data;
     else{
-        //Create CV or injected data spectrum for all subsequent steps
-        //this now will inject osc param, splines and reweight all at once
-        PROspec data_spec = osc_params.size() || injected_systs.size() ? FillSpectra(config, prop, other_systs[config.i_prime], *model, allparams, !eventbyevent) :  FillCVSpectra(config, prop, !eventbyevent);
 
-        //Only for reweighting tests
-        if (!mockreweights.empty()) {
-            log<LOG_INFO>(L"%1% || Will use reweighted MC (with any requested oscillations) as data for this study") % __func__  ;
-            log<LOG_INFO>(L"%1% || Any parameter shifts requested will be ignored (fix later?)") % __func__  ;
-            auto file = std::make_unique<TFile>(reweights_file.c_str());
-            log<LOG_DEBUG>(L"%1% || Set file to : %2% ") % __func__ % reweights_file.c_str();
-            log<LOG_DEBUG>(L"%1% || Size of reweights vector : %2% ") % __func__ % mockreweights.size() ;
-            for (size_t i=0; i < mockreweights.size(); ++i) {
-                log<LOG_DEBUG>(L"%1% || Mock reweight i : %2% ") % __func__ % mockreweights[i].c_str() ;
-                TH2D* rwhist = (TH2D*)file->Get(mockreweights[i].c_str());
-                weighthists.push_back(rwhist);
-                log<LOG_DEBUG>(L"%1% || Read in weight hist ") % __func__ ;      
-            }
-            data_spec = FillWeightedSpectrumFromHist(config, prop, weighthists, *model, allparams, !eventbyevent);
-        }
-        if(poisson_throw) data_spec = PROspec::PoissonVariation(data_spec, dseed(myseed.global_rng));
-        Eigen::VectorXf data_vec = CollapseMatrix(config, data_spec.Spec());
-        Eigen::VectorXf err_vec_sq = data_spec.Error().array().square();
-        Eigen::VectorXf err_vec = CollapseMatrix(config, err_vec_sq).array().sqrt();
-        //data = PROdata(data_vec, err_vec);
-        data = PROdata(data_vec, data_vec.array().sqrt());
+      //PROspec data_spec = osc_params.size() || injected_systs.size() || weighthists.size() ? FillRecoSpectra(config, prop, systs, *model, allparams, weighthists, !eventbyevent) :  FillCVSpectrum(config, prop, !eventbyevent);
+      PROspec data_spec = osc_params.size() || injected_systs.size() ? FillSpectra(config, prop, other_systs[config.i_prime], *model, allparams, !eventbyevent) :  FillCVSpectra(config, prop, !eventbyevent);
+
+      if(poisson_throw) data_spec = PROspec::PoissonVariation(data_spec, dseed(myseed.global_rng));
+      Eigen::VectorXf data_vec = CollapseMatrix(config, data_spec.Spec());
+      Eigen::VectorXf err_vec_sq = data_spec.Error().array().square();
+      Eigen::VectorXf err_vec = CollapseMatrix(config, err_vec_sq).array().sqrt();
+      //data = PROdata(data_vec, err_vec);
+      data = PROdata(data_vec, data_vec.array().sqrt());
 
         for(size_t io = 0; io < config.m_num_variables; ++io) {
             PROspec data_spec = osc_params.size() || injected_systs.size() 
@@ -399,20 +378,94 @@ int main(int argc, char* argv[])
             Eigen::VectorXf err_vec_sq = data_spec.Error().array().square();
             Eigen::VectorXf err_vec = CollapseMatrix(config, err_vec_sq, io).array().sqrt();
             other_data.push_back(PROdata(data_vec, err_vec));
-        }
+
+      }
     }
 
     // Leave this after creating fake data so we can make fake data using systs that aren't
     // included in the fit.
     if(syst_list.size()) {
+
+        std::vector<std::string> systs_to_include;
+        for(const auto &s: syst_list) {
+            bool istag = false;
+            for(const auto &[syst, tags]: config.m_mcgen_variation_tags) {
+                if(std::find(tags.begin(), tags.end(), s) != std::end(tags)) {
+                    istag = true;
+                    systs_to_include.push_back(syst);
+                }
+            }
+            if(!istag) systs_to_include.push_back(s);
+        }
+        for(std::string &name: systs_to_include) {
+            for(const auto &[xml_name, plot_name]: config.m_mcgen_variation_plotname_map) {
+                if(name == plot_name) {
+                    name = xml_name;
+                }
+            }
+        }
+        systs = systs.subset(systs_to_include);
         for(PROsyst &syst: other_systs)
-            syst = syst.subset(syst_list);
+            syst = syst.subset(systs_to_include);
     } else if(systs_excluded.size()) {
+
+        std::vector<std::string> systs_to_exclude;
+        for(const auto &s: systs_excluded) {
+            bool istag = false;
+            for(const auto &[syst, tags]: config.m_mcgen_variation_tags) {
+                if(std::find(tags.begin(), tags.end(), s) != std::end(tags)) {
+                    istag = true;
+                    systs_to_exclude.push_back(syst);
+                }
+            }
+            if(!istag) systs_to_exclude.push_back(s);
+        }
+        for(std::string &name: systs_to_exclude) {
+            for(const auto &[xml_name, plot_name]: config.m_mcgen_variation_plotname_map) {
+                if(name == plot_name) {
+                    name = xml_name;
+                }
+            }
+        }
+        systs = systs.excluding(systs_to_exclude);
         for(PROsyst &syst: other_systs)
-            syst = syst.excluding(systs_excluded);
+            syst = syst.excluding(systs_to_exclude);
     }
 
 
+    //Pysics parameter input
+    Eigen::VectorXf pparams = Eigen::VectorXf::Constant(model->nparams + other_systs[config.i_prime].GetNSplines(), 0);
+    Eigen::VectorXf CVpparams = Eigen::VectorXf::Constant(model->nparams + other_systs[config.i_prime].GetNSplines(), 0);
+    for(long i = 0; i < osc_param_vector.size(); ++i) {
+        pparams(i) = osc_param_vector(i);
+        CVpparams(i) = model->default_val(i);
+    }
+
+    //Spline injection studies
+    Eigen::VectorXf allparams = Eigen::VectorXf::Constant(model->nparams + other_systs[config.i_prime].GetNSplines(), 0);
+    Eigen::VectorXf systparams = Eigen::VectorXf::Constant(other_systs[config.i_prime].GetNSplines(), 0);
+    for(size_t i = 0; i < model->nparams; ++i) allparams(i) = pparams(i);
+    for(const auto& [name, shift]: injected_systs) {
+        log<LOG_INFO>(L"%1% || Injected syst: %2% shifted by %3%") % __func__ % name.c_str() % shift;
+
+        auto it = std::find(other_systs[config.i_prime].spline_names.begin(), other_systs[config.i_prime].spline_names.end(), name);
+        if(it == other_systs[config.i_prime].spline_names.end()) {
+            for(const auto &[xml_name, plot_name]: config.m_mcgen_variation_plotname_map) {
+                if(name == plot_name) {
+                    it = std::find(other_systs[config.i_prime].spline_names.begin(), other_systs[config.i_prime].spline_names.end(), xml_name);
+                    break;
+                }
+            }
+            if(it == other_systs[config.i_prime].spline_names.end()) {
+                log<LOG_ERROR>(L"%1% || Error: Unrecognized spline %2%. Ignoring this injected shift.") % __func__ % name.c_str();
+                continue;
+            }
+
+        }
+        int idx = std::distance(other_systs[config.i_prime].spline_names.begin(), it);
+        allparams(idx+model->nparams) = shift;
+        systparams(idx) = shift;
+    }
     PROsyst allcovsyst = other_systs[config.i_prime].allsplines2cov(config, prop, dseed(PROseed::global_rng));
 
     log<LOG_INFO>(L"%1% || Starting from fit preset :  %2%.")% __func__ % fit_preset.c_str();
@@ -429,9 +482,6 @@ int main(int argc, char* argv[])
     //Some Scan minimizer params.
     // This runs lots during PROfile and surface. 
     PROfitterConfig scanFitConfig(scan_fit_options, fit_preset, true);
-
-
-
 
 
 
@@ -452,6 +502,10 @@ int main(int argc, char* argv[])
     }
 
 
+    // Need a second one for case where we do syst_only profile and surface in same command
+    Eigen::VectorXf global_fit_result, global_fit_result_surf;
+    float global_fit_chi2 = -1, global_fit_chi2_surf = -1;
+
     //***********************************************************************
     //***********************************************************************
     //******************** PROfile PROfile PROfile **************************
@@ -469,7 +523,9 @@ int main(int argc, char* argv[])
 
 
         float chi2 = fitter.Fit(*metric_to_use); 
+        global_fit_chi2 = chi2;
         Eigen::VectorXf best_fit = fitter.best_fit;
+        if(global_fit_result.size() == 0) global_fit_result = best_fit;
         Eigen::MatrixXf post_covar = fitter.Covariance();
 
 
@@ -502,14 +558,15 @@ int main(int argc, char* argv[])
         mh.run(fitconfig.MCMCburn,fitconfig.MCMCiter, action);
 
         TH2D covhist("ch", "", nparams, 0, nparams, nparams, 0, nparams);
-        TH2D physhist("ph","", nparams, 0, nparams, nphys, 0, nphys);
+        TH2D physhist;
+        if(nphys > 0) physhist = TH2D("ph","", nparams, 0, nparams, nphys, 0, nphys);
         for(size_t i = 0; i < nparams; ++i) {
             std::string label = i < metric_to_use->GetModel().nparams 
                 ? metric_to_use->GetModel().pretty_param_names[i]
                 : config.m_mcgen_variation_plotname_map[metric_to_use->GetSysts().spline_names[i-metric_to_use->GetModel().nparams]].c_str();
             covhist.GetXaxis()->SetBinLabel(i+1, label.c_str());
             covhist.GetYaxis()->SetBinLabel(i+1, label.c_str());
-            physhist.GetXaxis()->SetBinLabel(i+1, label.c_str());
+            if(nphys > 0) physhist.GetXaxis()->SetBinLabel(i+1, label.c_str());
             if(i < metric_to_use->GetModel().nparams) physhist.GetYaxis()->SetBinLabel(i+1, label.c_str());
             for(size_t j = 0; j < nparams; ++j) {
                 covhist.SetBinContent(i+1, j+1, covmat(i,j)/count);
@@ -522,8 +579,10 @@ int main(int argc, char* argv[])
         covhist.SetMinimum(-1);
         covhist.Draw("colz");
         c1.Print((final_output_tag+"_postfit_cov.pdf").c_str());
-        physhist.Draw("colz");
-        c1.Print("phys_cov.pdf");
+        if(nphys > 0) {
+            physhist.Draw("colz");
+            c1.Print("phys_cov.pdf");
+        }
         log<LOG_INFO>(L"%1% || MCMC acceptance is  %2%. ") % __func__% ((double)count /fitconfig.MCMCiter);
 
         std::string hname = "#chi^{2}/ndf = " + to_string(chi2) + "/" + to_string(config.m_num_variable_bins_total_collapsed[config.i_prime]);
@@ -559,12 +618,18 @@ int main(int argc, char* argv[])
         log<LOG_INFO>(L"%1% || Starting global getPostFitErrorBand() ") % __func__;
         std::unique_ptr<TGraphAsymmErrors> post_err_band = getMCMCErrorBand(mh_post, fitconfig.MCMCburn, fitconfig.MCMCiter, config, prop, *metric_to_use, best_fit, posteriors, spline_covariance, binwidth_scale);
 
+        std::vector<TPaveText> texts;
         TPaveText chi2text(0.59, 0.50, 0.89, 0.59, "NDC");
         chi2text.AddText(hname.c_str());
         chi2text.SetFillColor(0);
         chi2text.SetBorderSize(0);
         chi2text.SetTextAlign(12);
-        plot_channels((final_output_tag+"_PROfile_hists.pdf"), config, cv, bf, data, err_band.get(), post_err_band.get(), &chi2text, PlotOptions::DataPostfitRatio);
+        texts.push_back(chi2text);
+
+        PlotOptions opt = PlotOptions::DataPostfitRatio;
+        if(binwidth_scale) opt |= PlotOptions::BinWidthScaled;
+        if(area_normalized) opt |= PlotOptions::AreaNormalized;
+        plot_channels((final_output_tag+"_PROfile_hists.pdf"), config, cv, bf, data, err_band.get(), post_err_band.get(), texts, opt);
 
         TCanvas c;
         c.Print((final_output_tag+"_postfit_posteriors.pdf[").c_str());
@@ -605,6 +670,48 @@ int main(int argc, char* argv[])
     }
     if(*surface_command){
 
+        size_t nparams = metric->GetModel().nparams + metric->GetSysts().GetNSplines();
+        if(global_fit_result.size() == 0 || global_fit_result.size() != (int)nparams) {
+            size_t nphys = metric->GetModel().nparams;
+            Eigen::VectorXf lb = Eigen::VectorXf::Constant(nparams, -3.0);
+            Eigen::VectorXf ub = Eigen::VectorXf::Constant(nparams, 3.0);
+            for(size_t i = 0; i < nphys; ++i) {
+                lb(i) = metric->GetModel().lb(i);
+                ub(i) = metric->GetModel().ub(i);
+            }
+            for(size_t i = nphys; i < nparams; ++i) {
+                lb(i) = metric->GetSysts().spline_lo[i-nphys];
+                ub(i) = metric->GetSysts().spline_hi[i-nphys];
+
+
+            }
+            PROfitter fitter(ub, lb, fitconfig);
+
+            log<LOG_INFO>(L"%1% || ########### Starting Global Best Fit Minimizing ############") % __func__;
+
+
+            float fit_chi2 = fitter.Fit(*metric); 
+            global_fit_chi2_surf = fit_chi2;
+            Eigen::VectorXf best_fit = fitter.best_fit;
+            if(global_fit_result.size() == 0) global_fit_result = best_fit;
+            else if(global_fit_result.size() != best_fit.size()) global_fit_result_surf = best_fit;
+
+            log<LOG_INFO>(L"%1% || ################################################") % __func__;
+            log<LOG_INFO>(L"%1% || ########### Global Best Fit Results ############") % __func__;
+            log<LOG_INFO>(L"%1% || ################################################") % __func__;
+            log<LOG_INFO>(L"%1% || Global Best Fit chi^2: %2%") %__func__ % fit_chi2;
+            log<LOG_INFO>(L"%1% || at paramters: ") % __func__;
+
+            for(size_t i = 0; i< nparams; i++){
+
+                if(i<nphys){
+                    log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % metric->GetModel().pretty_param_names[i].c_str() % best_fit(i);
+                }else{
+                    log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % metric->GetSysts().spline_names[i-nphys].c_str() % best_fit(i);
+                }
+            }
+            log<LOG_INFO>(L"%1% || ################################################") % __func__;
+        }
         if (grid_size.empty()) {
             grid_size = {40, 40};
         }
@@ -625,13 +732,35 @@ int main(int argc, char* argv[])
         size_t xaxis_idx = 1, yaxis_idx = 0;
         if(const auto loc = std::find(model->param_names.begin(), model->param_names.end(), xvar); loc != model->param_names.end()) {
             xaxis_idx = std::distance(model->param_names.begin(), loc);
+
         } else if(const auto loc = std::find(other_systs[config.i_prime].spline_names.begin(), other_systs[config.i_prime].spline_names.end(), xvar); loc != other_systs[config.i_prime].spline_names.end()) {
             xaxis_idx = std::distance(other_systs[config.i_prime].spline_names.begin(), loc);
+        } else {
+            for(const auto &[xml_name, plot_name]: config.m_mcgen_variation_plotname_map) {
+                if(xvar == plot_name) {
+                    const auto loc = std::find(other_systs[config.i_prime].spline_names.begin(), other_systs[config.i_prime].spline_names.end(), xml_name);
+                    if(loc != other_systs[config.i_prime].spline_names.end()) {
+                        xaxis_idx = std::distance(other_systs[config.i_prime].spline_names.begin(), loc);
+                    }
+                    break;
+                }
+            }
         }
         if(const auto loc = std::find(model->param_names.begin(), model->param_names.end(), yvar); loc != model->param_names.end()) {
             yaxis_idx = std::distance(model->param_names.begin(), loc);
-        } else if(const auto loc = std::find(other_systs[config.i_prime].spline_names.begin(), other_systs[config.i_prime].spline_names.end(), yvar); loc != other_systs[config.i_prime].spline_names.end()) {
+        } else if(const auto loc = std::find(other_systs[config.i_prime].spline_names.begin(),other_systs[config.i_prime].spline_names.end(), yvar); loc != other_systs[config.i_prime].spline_names.end()) {
             yaxis_idx = std::distance(other_systs[config.i_prime].spline_names.begin(), loc);
+        } else {
+            for(const auto &[xml_name, plot_name]: config.m_mcgen_variation_plotname_map) {
+                if(yvar == plot_name) {
+                    const auto loc = std::find(other_systs[config.i_prime].spline_names.begin(), other_systs[config.i_prime].spline_names.end(), xml_name);
+                    if(loc != other_systs[config.i_prime].spline_names.end()) {
+                        yaxis_idx = std::distance(other_systs[config.i_prime].spline_names.begin(), loc);
+                    }
+                    break;
+                }
+            }
+
         }
         size_t nbinsx = grid_size[0], nbinsy = grid_size[1];
         PROsurf surface(*metric, xaxis_idx, yaxis_idx, nbinsx, logx ? PROsurf::LogAxis : PROsurf::LinAxis, xlo, xhi,
@@ -815,13 +944,13 @@ int main(int argc, char* argv[])
     if(*proplot_command){
 
         PlotOptions opt = PlotOptions::CVasStack;
+        std::vector<TPaveText> notext;
         if(binwidth_scale) opt |= PlotOptions::BinWidthScaled;
         if(area_normalized) opt |= PlotOptions::AreaNormalized;
-        //plot_channels(final_output_tag+"_PROplot_CV.pdf", config, spec, {}, {}, {}, {}, NULL, opt);
         std::vector<PROspec> other_cvs;
         for(size_t io = 0; io < config.m_num_variables; ++io) {
             other_cvs.push_back(FillCVSpectra(config, prop, !eventbyevent, io));
-            plot_channels(final_output_tag+"_other_"+std::to_string(io)+"_PROplot_CV.pdf", config, other_cvs.back(), {}, {}, {}, {}, NULL, opt, io);
+            plot_channels(final_output_tag+"_other_"+std::to_string(io)+"_PROplot_CV.pdf", config, other_cvs.back(), {}, {}, {}, {}, notext, opt, io);
         }
 
         std::vector<std::map<std::string, std::unique_ptr<TH1D>>> other_hists;
@@ -884,7 +1013,7 @@ int main(int argc, char* argv[])
                         leg->AddEntry(cv_hist, "No Oscillations", "l");
                         std::string oscstr = "";//"#splitline{Oscilations:}{";
                         for(size_t j=0;j<model->nparams;j++){
-                            oscstr+=model->pretty_param_names[j]+ " : "+ to_string_prec(osc_params[j],2) + (j==0 ? ", " : "" );
+                            oscstr+=model->pretty_param_names[j]+ " : "+ to_string_prec(osc_param_vector(j),2) + (j==0 ? ", " : "" );
                         }
                         //oscstr+="}";
 
@@ -940,102 +1069,43 @@ int main(int argc, char* argv[])
         }
 
         //errorband
+        std::unique_ptr<PROmetric> allcov_metric(metric->Clone());
+        allcov_metric->override_systs(allcovsyst);
+        std::vector<std::vector<TPaveText>> other_channel_chitexts; 
+             
+        for(size_t io = 0; io < config.m_num_variables; ++io) {
         int global_channel_index = 0;
-        //std::unique_ptr<PROmetric> allcov_metric(metric->Clone());
-        //allcov_metric->override_systs(allcovsyst);
-        //double chival = allcov_metric->getSingleChannelChi(global_channel_index);
-        //int ndf = config.m_channel_variable_num_bins[config.i_prime][global_channel_index] - bool(opt&PlotOptions::AreaNormalized);
-        //log<LOG_INFO>(L"%1% || On channel %2% the datamc chi^2/ndof is %3%/%4% .") % __func__ % global_channel_index % chival % ndf;
-        //TPaveText chi2text(0.59, 0.50, 0.89, 0.59, "NDC");
-        //chi2text.AddText(("#chi^{2}/ndf = "+to_string_prec(chival,2)+"/"+std::to_string(ndf)).c_str());
-        //chi2text.SetFillColor(0);
-        //chi2text.SetBorderSize(0);
-        //chi2text.SetTextAlign(12);
-        
+          std::vector<TPaveText> channel_chitexts;
 
-        //std::unique_ptr<TGraphAsymmErrors> err_band = getErrorBand(config, prop, other_systs[config.i_prime], binwidth_scale);
-        //plot_channels(final_output_tag+"_PROplot_ErrorBand.pdf", config, spec, {}, data, err_band.get(), {}, &chi2text, opt | PlotOptions::DataMCRatio);
-        
+          for(size_t im = 0; im < config.m_num_modes; im++){
+                  for(size_t id =0; id < config.m_num_detectors; id++){
+                      for(size_t ic = 0; ic < config.m_num_channels; ic++){
+                          log<LOG_INFO>(L"%1% || On channel %2%:") % __func__ % global_channel_index ;
+                          double chival = allcov_metric->getSingleChannelChi(global_channel_index,io);
+                          int ndf = config.m_channel_variable_num_bins[io][ic] - bool(opt&PlotOptions::AreaNormalized);
+                          log<LOG_INFO>(L"%1% || -- the datamc chi^2/ndof is %2%/%3% .") % __func__ % chival % ndf;
+                          TPaveText chi2text(0.59, 0.50, 0.89, 0.59, "NDC");
+                          chi2text.AddText(("#chi^{2}/ndf = "+to_string_prec(chival,2)+"/"+std::to_string(ndf)).c_str());
+                          chi2text.SetFillColor(0);
+                          chi2text.SetBorderSize(0);
+                          chi2text.SetTextAlign(12);
+                          channel_chitexts.push_back(chi2text);
+                          global_channel_index++;
+                      }
+                  }
+          }
+          other_channel_chitexts.push_back(channel_chitexts);
+        }
+
+
         std::vector<std::unique_ptr<TGraphAsymmErrors>> other_err_bands;
         for(size_t io = 0; io < config.m_num_variables; ++io) {
             other_err_bands.push_back(getErrorBand(config, prop, other_systs[io], binwidth_scale, io));
             plot_channels(final_output_tag+"_PROplot_other_"+std::to_string(io)+"_ErrorBand.pdf", config, other_cvs[io], {}, other_data[io], 
-                    other_err_bands.back().get(), {}, NULL, opt | PlotOptions::DataMCRatio, io);
+                    other_err_bands.back().get(), {}, other_channel_chitexts[io], opt | PlotOptions::DataMCRatio, io);
         }
 
-        if (!mockreweights.empty()) {
-
-            //stupid hack, must be a better way to do this
-            //Set up options:
-            std::vector<const char*> xlabel(4);
-            xlabel[0] = "Reconstructed Neutrino Energy";
-            xlabel[1] = "True Leading Proton Momentum";
-            xlabel[2] = "True Leading Proton Cos(Theta)";
-            xlabel[3] = "Check what variable you are plotting!";
-            int xi;
-            if (xmlname.find("standard") != std::string::npos) {
-                xi = 0;
-            }
-            else if (xmlname.find("pmom") != std::string::npos) {
-                xi = 1;
-            }
-            else if (xmlname.find("costh") != std::string::npos) {  
-                xi = 2;
-            }
-            else {
-                xi = 3;
-            }
-
-            TH1D hcv = other_cvs[config.i_prime].toTH1D_Collapsed(config,0);
-            TH1D hmock = data.toTH1D(config,0);
-            if(binwidth_scale){
-                hcv.Scale(1, "width");
-                hmock.Scale(1, "width");
-            }
-            hcv.GetYaxis()->SetTitle("Events/GeV");
-            hmock.GetYaxis()->SetTitle("Events/GeV");
-            hcv.GetXaxis()->SetTitle(xlabel[xi]);
-            hmock.GetXaxis()->SetTitle(xlabel[xi]);
-            hcv.SetTitle("");
-            hmock.SetTitle("");
-
-            TCanvas *c2 = new TCanvas((final_output_tag+"_spec_cv").c_str(), (final_output_tag+"_spec_cv").c_str(), 800, 800);
-            hmock.SetLineColor(kBlack);
-            hcv.SetLineColor(5);
-            hcv.SetFillColor(5);
-            TRatioPlot * rp = new TRatioPlot(&hcv,&hmock);
-            rp->Draw();
-            rp->GetLowerRefGraph()->SetMarkerStyle(21);
-            TGraphAsymmErrors *lowerGraph = dynamic_cast<TGraphAsymmErrors*>(rp->GetLowerRefGraph());
-            if (lowerGraph) {
-                int nPoints = lowerGraph->GetN();
-                for (int i = 0; i < nPoints; i++) {
-                    lowerGraph->SetPointError(i, 0, 0, 0, 0); // Set both x and y errors to zero
-                }
-            }
-            std::unique_ptr<TLegend> leg = std::make_unique<TLegend>(0.35,0.7,0.89,0.89);
-            leg->SetFillStyle(0);
-            leg->SetLineWidth(0);
-            leg->AddEntry(&hcv,"CV","f");
-            leg->AddEntry(&hmock,"Mock data: ", "l");
-            TObject *null = new TObject(); 
-
-            for(const auto& [name, shift]: injected_systs) {
-                char ns[6];
-                snprintf(ns, sizeof(ns),"%.2f", shift);
-                leg->AddEntry(null, (name+": "+ns+ " sigma").c_str(),"");
-            }
-
-            for (const auto& m : mockreweights) {
-                leg->AddEntry(null, m.c_str(),"");
-            }
-            for (const auto& m : osc_params) {
-                leg->AddEntry(null, ("param: "+std::to_string(m)).c_str(),"");
-            }
-
-            leg->Draw();
-            c2->SaveAs((final_output_tag+"_ReWeight_spec.pdf").c_str());
-        }
+      
 
         if(with_splines) {
             c.Print((final_output_tag+"_PROplot_Spline.pdf" + "[").c_str(), "pdf");
@@ -1218,6 +1288,62 @@ int main(int argc, char* argv[])
 
         //***************************** END *********************************
     }
+
+    std::ofstream global_fit_out;
+    if(global_fit_result.size() > 0) {
+        global_fit_out.open(final_output_tag+"_global_fit.txt");
+        float chi2 = global_fit_chi2 >= 0 ? global_fit_chi2 : global_fit_chi2_surf;
+        log<LOG_INFO>(L"%1% || ################################################") % __func__;
+        log<LOG_INFO>(L"%1% || ########### Global Best Fit Results ############") % __func__;
+        log<LOG_INFO>(L"%1% || ################################################") % __func__;
+        log<LOG_INFO>(L"%1% || Global Best Fit chi^2: %2%") %__func__ % chi2;
+        log<LOG_INFO>(L"%1% || at paramters: ") % __func__;
+
+        global_fit_out << "Global best fit:\n";
+
+        bool use_phys = (size_t)global_fit_result.size() == metric->GetModel().nparams + metric->GetSysts().GetNSplines();
+        for(long i = 0; i < global_fit_result.size(); i++){
+
+            if(use_phys && i < (long)metric->GetModel().nparams){
+                log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % metric->GetModel().pretty_param_names[i].c_str() % global_fit_result(i);
+                global_fit_out << metric->GetModel().param_names[i]
+                               << " : " << global_fit_result(i) << "\n";
+            }else{
+                long idx = use_phys ? i - metric->GetModel().nparams : i;
+                log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % metric->GetSysts().spline_names[idx].c_str() % global_fit_result(i);
+                global_fit_out << metric->GetSysts().spline_names[idx]
+                               << " : " << global_fit_result(i) << "\n";
+            }
+        }
+        log<LOG_INFO>(L"%1% || ################################################") % __func__;
+    }
+    if(global_fit_result_surf.size() > 0) {
+        if(!global_fit_out.is_open()) {
+            global_fit_out.open(final_output_tag+"_global_fit.txt");
+            global_fit_out << "Global best fit:\n";
+        } else {
+            global_fit_out << "\nSurface global best fit:\n";
+        }
+        log<LOG_INFO>(L"%1% || ########################################################") % __func__;
+        log<LOG_INFO>(L"%1% || ########### Surface Global Best Fit Results ############") % __func__;
+        log<LOG_INFO>(L"%1% || ########################################################") % __func__;
+        log<LOG_INFO>(L"%1% || Global Best Fit chi^2: %2%") %__func__ % global_fit_chi2_surf;
+        log<LOG_INFO>(L"%1% || at paramters: ") % __func__;
+
+        for(long i = 0; i < global_fit_result.size(); i++){
+            if(i < (long)metric->GetModel().nparams){
+                log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % metric->GetModel().pretty_param_names[i].c_str() % global_fit_result(i);
+                global_fit_out << metric->GetModel().param_names[i]
+                               << " : " << global_fit_result(i) << "\n";
+            }else{
+                log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % metric->GetSysts().spline_names[i - metric->GetModel().nparams].c_str() % global_fit_result(i);
+                global_fit_out << metric->GetSysts().spline_names[i - metric->GetModel().nparams]
+                               << " : " << global_fit_result(i) << "\n";
+            }
+        }
+        log<LOG_INFO>(L"%1% || ########################################################") % __func__;
+    }
+    if(global_fit_out.is_open()) global_fit_out.close();
 
     delete metric;
 

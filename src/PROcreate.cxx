@@ -752,14 +752,12 @@ namespace PROfit {
             // grab the subchannel index
             int num_branch = inconfig.m_branch_variables[fid].size();
             auto& branches = inconfig.m_branch_variables[fid];
-            std::vector<int> channel_index(num_branch, 0); 
+            std::vector<std::string> branch_fullname;
+            branch_fullname.reserve(num_branch);
             log<LOG_INFO>(L"%1% || This file includes %2% branch/channels") % __func__ % num_branch;
             for(int ib = 0; ib != num_branch; ++ib) {
-
-                const std::string& subchannel_name = inconfig.m_branch_variables[fid][ib]->associated_hist;
-                // Note: This will only work if there's only 1 subchannel per channel
-                channel_index[ib] = inconfig.GetSubchannelIndex(subchannel_name);
-                log<LOG_DEBUG>(L"%1% || Subchannel: %2% maps to index: %3%") % __func__ % subchannel_name.c_str() % channel_index[ib];
+                const std::string& hist_name = inconfig.m_branch_variables[fid][ib]->associated_hist;
+                branch_fullname.push_back(hist_name);
             }
 
             // loop over all entries
@@ -776,13 +774,14 @@ namespace PROfit {
                     if(additional_weight == 0) //skip on event failing cuts
                         continue;
 
-
                     std::vector<int> variable_bin_indices;
                     for(size_t i = 0; i < vars.size(); ++i) {
                         variable_bin_indices.push_back(FindGlobalVariableBin(inconfig, vars[i], channel_index[ib], i));
                     }
 
                     if(i%100==0)	
+                        log<LOG_DEBUG>(L"%1% || Subchannel %2% -- Reco variable value: %3%, MC event weight: %4%, correponds to global bin: %5%") % __func__ %  branch_fullname[ib].c_str() % reco_value % additional_weight % global_bin;
+
 
                         for(size_t io = 0; io < inconfig.m_num_variables; ++io)
                             if(variable_bin_indices[io] >= 0)
