@@ -915,8 +915,6 @@ int PROconfig::LoadFromXML(const std::string &filename){
     log<LOG_INFO>(L"%1% || num_channels: %2% ") % __func__ % m_num_channels;
     for(size_t i = 0 ; i!=m_num_channels; ++i){
         log<LOG_INFO>(L"%1% || num of subchannels: %2% ") % __func__ % m_num_subchannels[i];
-        log<LOG_INFO>(L"%1% || num of bins: %2% ") % __func__ % m_channel_variable_num_bins[i_prime][i];
-
     }
     for(size_t io = 0; io < m_num_variables; ++io) {
         log<LOG_INFO>(L"%1% || variable %2% num_bins_total: %3%") % __func__ % io % m_num_variable_bins_total[io];
