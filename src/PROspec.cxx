@@ -60,7 +60,7 @@ void PROspec::QuickFill(int bin_index, float weight){
 TH1D PROspec::toTH1D_Collapsed(const PROconfig &inconfig, int channel_index, size_t var_index) const {
     int global_bin_start = inconfig.GetCollapsedGlobalVariableBinStart(channel_index,var_index);
     //set up hist specs
-    int nbins = inconfig.m_channel_variable_num_bins[inconfig.i_prime][channel_index];
+    int nbins = inconfig.m_channel_variable_num_bins[channel_index][inconfig.i_prime];
     const std::vector<float>& bin_edges = inconfig.GetChannelVariableBinEdges(channel_index,var_index);
     std::string hist_name = inconfig.m_channel_names[channel_index];
     std::string xaxis_title = inconfig.m_channel_units[channel_index];
