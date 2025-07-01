@@ -109,8 +109,8 @@ myspectrum.Fill(k, systw(k) * oscw * inmodel.hists[var_index][j](i, k));
                 }
             }
         } else {
-            for(size_t i = 0; i<inprop.trueLE.size(); ++i){
-                float oscw  =  inmodel.model_functions[inprop.model_rule[i]](phys, inprop.trueLE[i]);
+            for(size_t i = 0; i<inprop.variable_values.size(); ++i){
+                float oscw  =  inmodel.model_functions[inprop.model_rule[i]](phys, inprop.variable_values[i][var_index]);
                 float add_w = inprop.added_weights[i]; 
                 const int reco_bin = inprop.variable_bin_indices[i][var_index];
 
@@ -170,10 +170,10 @@ myspectrum.Fill(k, systw(k) * oscw * inmodel.hists[var_index][j](i, k));
             }
         }
         else {
-            for(size_t i = 0; i<inprop.trueLE.size(); ++i){
+            for(size_t i = 0; i<inprop.variable_values.size(); ++i){
 
                 float oscw  = phys.size() != 0 ? 
-                    inmodel.model_functions[inprop.model_rule[i]](phys, inprop.trueLE[i]) :
+                    inmodel.model_functions[inprop.model_rule[i]](phys, inprop.variable_values[i][inconfig.i_prime]) :
                     1;	
                 float add_w = inprop.added_weights[i];
                 float hist_w = 1.0 ;
@@ -245,7 +245,7 @@ myspectrum.Fill(k, systw(k) * oscw * inmodel.hists[var_index][j](i, k));
                 }
             }
         } else {
-            for(size_t i = 0; i<inprop.trueLE.size(); ++i){
+            for(size_t i = 0; i<inprop.variable_values.size(); ++i){
                 float add_w = inprop.added_weights[i]; 
                 float systw = 1;
                 for(size_t j = 0; j < throws.size(); ++j) {
@@ -299,7 +299,7 @@ myspectrum.Fill(k, systw(k) * oscw * inmodel.hists[var_index][j](i, k));
                 }
             }
         } else {
-            for(size_t i = 0; i<inprop.trueLE.size(); ++i){
+            for(size_t i = 0; i<inprop.variable_values.size(); ++i){
                 float add_w = inprop.added_weights[i]; 
                 const int spline_bin = inprop.variable_bin_indices[i][binning];
                 float systw = insyst.GetSplineShift(spline, spline_throw, spline_bin);

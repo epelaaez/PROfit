@@ -85,7 +85,7 @@ namespace PROfit{
                     ar & hist;
                     ar & histLE;
                     ar & mcStatErr;
-                    ar & trueLE;
+                    ar & variable_values;
                     ar & variable_hists;
                     ar & hash;
                 }
@@ -94,15 +94,15 @@ namespace PROfit{
 
             //Empty Constructor
             PROpeller(){
-                trueLE.clear();
+                variable_values.clear();
                 added_weights.clear();
                 model_rule.clear();
                 hash = -1;
             };
 
             /*Function: Primary Constructor from raw std::vectors of MC values */ 
-            PROpeller( std::vector<float> &intruth, std::vector<float> &inadded_weights,  std::vector<int> &inmodel_rule) : trueLE(intruth), added_weights(inadded_weights),  model_rule(inmodel_rule) {
-                //size_t nevents = trueLE.size();
+            PROpeller( std::vector<std::vector<float>> &intruth, std::vector<float> &inadded_weights,  std::vector<int> &inmodel_rule) : variable_values(intruth), added_weights(inadded_weights),  model_rule(inmodel_rule) {
+                //size_t nevents = variable_values.size();
                 //hist = Eigen::MatrixXf::Constant(config.m_num_variable_bins_total[config.i_osc], config.m_num_variable_bins_total[config.i_prime], 0);
                 //for(size_t i = 0; i < bin_indices.size(); ++i)
                 //    hist(true_bin_indices[i], bin_indices[i]) += added_weights[i];
@@ -122,7 +122,7 @@ namespace PROfit{
             Eigen::VectorXf    histLE;
             Eigen::VectorXf    mcStatErr;
 
-            std::vector<float> trueLE;
+            std::vector<std::vector<float>> variable_values;
             std::vector<Eigen::MatrixXf> variable_hists;
 
             uint32_t           hash;

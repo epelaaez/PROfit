@@ -542,7 +542,7 @@ namespace PROfit {
         int nbins = config.m_num_variable_bins_total[other_index];
         int binning = spline_binnings[syst_map.at(name).first];
         PROspec ret(nbins);
-        for(size_t i = 0; i < prop.trueLE.size(); ++i) {
+        for(size_t i = 0; i < prop.variable_values.size(); ++i) {
             const int spline_bin = prop.variable_bin_indices[i][binning];
             const int reco_bin =  prop.variable_bin_indices[i][other_index];
             ret.Fill(reco_bin, GetSplineShift(name, shift, spline_bin) * prop.added_weights[i]);
@@ -554,7 +554,7 @@ namespace PROfit {
         int nbins = config.m_num_variable_bins_total[other_index];
         int binning = spline_binnings[syst_num];
         PROspec ret(nbins);
-        for(size_t i = 0; i < prop.trueLE.size(); ++i) {
+        for(size_t i = 0; i < prop.variable_values.size(); ++i) {
             const int spline_bin = prop.variable_bin_indices[i][binning];
             const int reco_bin = prop.variable_bin_indices[i][other_index];
             ret.Fill(reco_bin, GetSplineShift(syst_num, shift, spline_bin) * prop.added_weights[i]);
@@ -566,7 +566,7 @@ namespace PROfit {
         assert(names.size() == shifts.size());
         int nbins = config.m_num_variable_bins_total[other_index];
         PROspec ret(nbins);
-        for(size_t i = 0; i < prop.trueLE.size(); ++i) {
+        for(size_t i = 0; i < prop.variable_values.size(); ++i) {
             const int reco_bin = prop.variable_bin_indices[i][other_index];
             float weight = 1;
             for(size_t j = 0; j < names.size(); ++j) {
@@ -583,7 +583,7 @@ namespace PROfit {
         assert(syst_nums.size() == shifts.size());
         int nbins = config.m_num_variable_bins_total[other_index];
         PROspec ret(nbins);
-        for(size_t i = 0; i < prop.trueLE.size(); ++i) {
+        for(size_t i = 0; i < prop.variable_values.size(); ++i) {
             const int reco_bin = prop.variable_bin_indices[i][other_index];
             float weight = 1;
             for(size_t j = 0; j < syst_nums.size(); ++j) {
@@ -600,7 +600,7 @@ namespace PROfit {
         assert(shifts.size() == splines.size());
         int nbins = config.m_num_variable_bins_total[other_index];
         PROspec ret(nbins);
-        for(size_t i = 0; i < prop.trueLE.size(); ++i) {
+        for(size_t i = 0; i < prop.variable_values.size(); ++i) {
             const int reco_bin = prop.variable_bin_indices[i][other_index];
             float weight = 1;
             for(size_t j = 0; j < shifts.size(); ++j) {
