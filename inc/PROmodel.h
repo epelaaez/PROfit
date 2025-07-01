@@ -125,7 +125,7 @@ public:
         default_val << -std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity();
     
         log<LOG_INFO>(L"%1% || setting up a model nueapp, with  %2% params.")     % __func__ % nparams;
-        for(int i=0; i< nparams;i++){
+        for(size_t i=0; i< nparams;i++){
             log<LOG_INFO>(L"%1% || Param %2% is %3% with lower bound/upper bound of %4%/%5% and default %6%")     % __func__ % i % param_names[i].c_str() % lb[i] % ub[i] % default_val[i];
         }
 

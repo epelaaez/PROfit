@@ -168,7 +168,7 @@ namespace PROfit{
     }
 
 
-    void plot_channels(const std::string &filename, const PROconfig &config, std::optional<PROspec> cv, std::optional<PROspec> best_fit, std::optional<PROdata> data, std::optional<TGraphAsymmErrors*> errband, std::optional<TGraphAsymmErrors*> posterrband, TPaveText *text, PlotOptions opt, int other_index) {
+    void plot_channels(const std::string &filename, const PROconfig &config, std::optional<PROspec> cv, std::optional<PROspec> best_fit, std::optional<PROdata> data, std::optional<TGraphAsymmErrors*> errband, std::optional<TGraphAsymmErrors*> posterrband, std::vector<TPaveText> &texts, PlotOptions opt, int other_index) {
         TCanvas c;
         c.Print((filename+"[").c_str());
 
@@ -192,6 +192,7 @@ namespace PROfit{
             for(size_t det = 0; det < config.m_num_detectors; ++det) {
                 for(size_t channel = 0; channel < config.m_num_channels; ++channel) {
                     size_t channel_nbins = other_index < 0 ? config.m_channel_num_bins[channel] : config.m_channel_num_other_bins[channel][other_index];
+
                     std::vector<float> edges = other_index < 0 ? config.GetChannelBinEdges(0) : config.GetChannelOtherBinEdges(0, other_index);
                     std::string xtitle = other_index < 0 ? config.m_channel_units[channel] : config.m_channel_other_units[channel][other_index];
                     std::string hist_title = config.m_detector_plotnames[det]  + " "+ config.m_channel_plotnames[channel]+";"+xtitle+";"+ytitle;
@@ -205,6 +206,8 @@ namespace PROfit{
                     for(size_t bin = 0; bin < channel_nbins; ++bin) {
                         cv_hist.SetBinContent(bin+1, 0);
                     }
+                    if(bool(opt&PlotOptions::BinWidthScaled))
+                        cv_hist.Scale(1, "width");
 
                     // Set up TPads for ratios, unused if ratio option not chosen
                     TPad p1("p1", "p1", 0, 0.25, 1, 1);
@@ -217,14 +220,19 @@ namespace PROfit{
                     THStack *cvstack = NULL;
                     if(cv) {
                         if(bool(opt&PlotOptions::CVasStack)) cvstack = new THStack(std::to_string(global_channel_index).c_str(), hist_title.c_str());
+                        std::vector<std::pair<std::string, const char*>> subplots;
                         for(size_t subchannel = 0; subchannel < config.m_num_subchannels[channel]; ++subchannel){
                             const std::string& subchannel_name  = config.m_fullnames[global_subchannel_index];
                             if(bool(opt&PlotOptions::CVasStack)) {
                                 cvstack->Add(cvhists[subchannel_name].get());
-                                leg->AddEntry(cvhists[subchannel_name].get(), config.m_subchannel_plotnames[channel][subchannel].c_str() ,"f");
+                                subplots.push_back({subchannel_name, config.m_subchannel_plotnames[channel][subchannel].c_str()});
                             }
                             cv_hist.Add(cvhists[subchannel_name].get());
                             ++global_subchannel_index;
+                        }
+                        if(bool(opt&PlotOptions::CVasStack)) {
+                            for(size_t sc = subplots.size(); sc > 0; --sc)
+                                leg->AddEntry(cvhists[subplots[sc-1].first].get(), subplots[sc-1].second ,"f");
                         }
                         if(bool(opt&PlotOptions::AreaNormalized)) {
                             float integral = cv_hist.Integral();
@@ -242,6 +250,7 @@ namespace PROfit{
                     if(errband) {
                         channel_errband = new TGraphAsymmErrors(&cv_hist);
                         int channel_start = other_index < 0 ? config.GetCollapsedGlobalBinStart(global_channel_index) : config.GetCollapsedGlobalOtherBinStart(global_channel_index, other_index);
+
                         for(size_t bin = 0; bin < channel_nbins; ++bin) {
                             float scale = 1.0;
                             if(bool(opt&PlotOptions::AreaNormalized)) {
@@ -267,6 +276,8 @@ namespace PROfit{
                         bf_hist.SetLineColor(kGreen);
                         bf_hist.SetLineWidth(3);
                         leg->AddEntry(&bf_hist, "Best Fit", "l");
+                        if(bool(opt&PlotOptions::BinWidthScaled))
+                            bf_hist.Scale(1, "width");
                         if(bool(opt&PlotOptions::AreaNormalized))
                             bf_hist.Scale(1.0/bf_hist.Integral());
                     }
@@ -292,6 +303,7 @@ namespace PROfit{
 
                     TH1D data_hist;
                     if(data) {
+
                         data_hist = data->toTH1D(config, global_channel_index, other_index);
                         data_hist.SetLineColor(kBlack);
                         data_hist.SetLineWidth(2);
@@ -305,12 +317,14 @@ namespace PROfit{
                             data_hist.Scale(1.0/data_hist.Integral());
                     }
 
+
                     /*******************/
                     /* Draw everything */
                     /*******************/
 
                     if(bool(opt&PlotOptions::DataMCRatio) || bool(opt&PlotOptions::DataPostfitRatio))
                         p1.cd();
+
 
                     if(cv) {
                         if(bool(opt&PlotOptions::CVasStack)) {
@@ -337,8 +351,12 @@ namespace PROfit{
                         else data_hist.Draw("E1P");
                     }
 
-                    if(text) {
-                        text->Draw("same");
+                    if(texts.size()!=0) {
+                        if(texts.size()==1){
+                            texts.front().Draw("same");
+                        }else{
+                            texts[global_channel_index].Draw("same");
+                        }
                     }
 
                     leg->Draw("same");

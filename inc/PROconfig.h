@@ -343,7 +343,8 @@ namespace PROfit{
             std::vector<std::vector<std::string>> m_mcgen_eventweight_branch_names;
             std::vector<std::vector<int>> m_mcgen_eventweight_branch_syst;
 
-            //specific bits for covariancegeneration
+            //specific bits for covairiancegeneration
+            bool m_use_mcstats = false;
             std::vector<std::string> m_mcgen_weightmaps_formulas;
             std::vector<bool> m_mcgen_weightmaps_uses;
             std::vector<std::string> m_mcgen_weightmaps_patterns;
@@ -355,6 +356,7 @@ namespace PROfit{
             std::map<std::string, std::string> m_mcgen_variation_plotname_map;
             std::map<std::string, int> m_mcgen_variation_binning_map;
             std::map<std::string, std::vector<double>> m_mcgen_variation_knobval_override;
+            std::map<std::string, std::vector<std::string>> m_mcgen_variation_tags;
             std::map<std::string, std::vector<std::string>> m_mcgen_shapeonly_listmap; //a map of shape-only systematic and corresponding subchannels
             std::vector<std::tuple<std::string, std::string, float>> m_mcgen_correlations;
       
@@ -441,6 +443,9 @@ namespace PROfit{
 
             /* Function: given channel index, return list of bin edges for this channel */
             const std::vector<float>& GetChannelOtherBinEdges(size_t channel_index, size_t other_index) const;
+
+            /* Function: Given a global channel index return the local channel index */
+            size_t GetLocalChannelIndex(size_t global_channel_index) const; 
 
             /* Function: Hex to int*/
             int HexToROOTColor(const std::string& hexColor) const;

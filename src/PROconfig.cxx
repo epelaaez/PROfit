@@ -764,11 +764,14 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
             tinyxml2::XMLElement *pAllowList = pList->FirstChildElement("allowlist");
             while(pAllowList){
-                std::string wt = std::string(pAllowList->GetText());
+                const char *text = pAllowList->GetText();
+                std::string wt = "null";
+                if(text) wt = std::string(text);
                 const char *variation_type = pAllowList->Attribute("type");
                 const char *plot_name = pAllowList->Attribute("plotname");
                 const char *binning = pAllowList->Attribute("binning");
                 const char *knobs = pAllowList->Attribute("knobvals");
+                const char *tags = pAllowList->Attribute("tag");
                 m_mcgen_variation_type.push_back(variation_type);
                 m_mcgen_variation_type_map[wt] = variation_type;
                 m_mcgen_variation_allowlist.push_back(wt);
@@ -804,15 +807,27 @@ int PROconfig::LoadFromXML(const std::string &filename){
                     std::vector<double> knobs_vec;
                     const char *c = knobs, *begin = NULL;
                     while(*c) {
-                        if(!begin) begin = c;
-                        if(isspace(*c)) {
+                        if(begin && isspace(*c)) {
                             knobs_vec.push_back(strtod(begin, NULL));
                             begin = NULL;
-                        }
+                        } else if(!begin && !isspace(*c)) begin = c;
                         ++c;
                     }
                     knobs_vec.push_back(strtod(begin, NULL));
                     m_mcgen_variation_knobval_override[wt] = knobs_vec;
+                }
+                if(tags) {
+                    std::vector<std::string> tags_vec;
+                    const char *c = tags, *begin = NULL;
+                    while(*c) {
+                        if(begin && *c == ',') {
+                            tags_vec.push_back(std::string(begin, c));
+                            begin = NULL;
+                        } else if(!begin && !isspace(*c)) begin = c;
+                        ++c;
+                    }
+                    if(begin) tags_vec.push_back(std::string(begin, c));
+                    m_mcgen_variation_tags[wt] = tags_vec;
                 }
                 log<LOG_DEBUG>(L"%1% || Allowlisting variations: %2%") % __func__ % wt.c_str() ;
                 pAllowList = pAllowList->NextSiblingElement("allowlist");
@@ -1035,6 +1050,8 @@ int PROconfig::LoadFromXML(const std::string &filename){
         }
          else if(m_mcgen_variation_type[i] == "norm"){
             m_num_variation_type_norm+=1;
+        }else if(m_mcgen_variation_type[i] == "mcstat"){
+            m_use_mcstats = true;
         }
 
     }
@@ -1043,6 +1060,12 @@ int PROconfig::LoadFromXML(const std::string &filename){
     log<LOG_INFO>(L"%1% || num_variation_type_flat: %2% ") % __func__ % m_num_variation_type_flat;
     log<LOG_INFO>(L"%1% || num_variation_type_norm: %2% ") % __func__ % m_num_variation_type_norm;
     log<LOG_INFO>(L"%1% || num_variation_type_spline: %2% ") % __func__ % m_num_variation_type_spline; 
+    if(m_use_mcstats){
+        log<LOG_INFO>(L"%1% || Using MC intrinsic stat uncertainty. ") % __func__  ;
+    }else{
+        log<LOG_INFO>(L"%1% || Not using MC intrinsic stat uncertainty. Check this is what you want. ") % __func__ ; 
+    }
+
 
 
     this->CalcTotalBins();
@@ -1127,14 +1150,15 @@ size_t PROconfig::GetGlobalBinStart(size_t subchannel_index) const{
 }
 
 size_t PROconfig::GetCollapsedGlobalBinStart(size_t channel_index) const{
-    if(channel_index >= m_num_channels) {
-        log<LOG_ERROR>(L"%1% || Requested bin start of channel %2%, but only %3% channels are known.")
-            % __func__ % channel_index % m_num_channels;
+    if(channel_index >= m_num_channels*m_num_modes*m_num_detectors) {
+        size_t tot= m_num_channels*m_num_modes*m_num_detectors;
+        log<LOG_ERROR>(L"%1% || Requested bin start of channel %2%, but only %3% total channels are known (chat*mode*det).")
+            % __func__ % channel_index % tot;
         log<LOG_ERROR>(L"Terminating.");
         exit(EXIT_FAILURE);
     }
     size_t index = 0;
-    for(size_t i = 0; i < channel_index; ++i) index += m_channel_num_bins[i];
+    for(size_t i = 0; i < channel_index; ++i) index += m_channel_num_bins[GetLocalChannelIndex(i)];
     return index;
 }
 
@@ -1149,14 +1173,15 @@ size_t PROconfig::GetGlobalOtherBinStart(size_t subchannel_index, size_t other_i
 }
 
 size_t PROconfig::GetCollapsedGlobalOtherBinStart(size_t channel_index, size_t other_index) const{
-    if(channel_index >= m_num_channels) {
-        log<LOG_ERROR>(L"%1% || Requested bin start of channel %2%, but only %3% channels are known.")
-            % __func__ % channel_index % m_num_channels;
+    if(channel_index >= m_num_channels*m_num_modes*m_num_detectors) {
+        size_t tot= m_num_channels*m_num_modes*m_num_detectors;
+        log<LOG_ERROR>(L"%1% || Requested bin start of channel %2%, but only %3% total channels are known (chat*mode*det).")
+            % __func__ % channel_index % tot;
         log<LOG_ERROR>(L"Terminating.");
         exit(EXIT_FAILURE);
-    }
+    }    
     size_t index = 0;
-    for(size_t i = 0; i < channel_index; ++i) index += m_channel_num_other_bins[i][other_index];
+    for(size_t i = 0; i < channel_index; ++i) index += m_channel_num_other_bins[GetLocalChannelIndex(i)][other_index];
     return index;
 }
 
@@ -1170,62 +1195,68 @@ size_t PROconfig::GetSubchannelIndexFromGlobalTrueBin(size_t global_trueindex) c
     return m_vec_subchannel_index[index];
 }
 
+size_t PROconfig::GetLocalChannelIndex(size_t global_channel_index) const{
+    return global_channel_index%m_num_channels; 
+}
+
 const std::vector<float>& PROconfig::GetChannelBinEdges(size_t channel_index) const{
 
-    if( channel_index >= m_num_channels){
+    if(channel_index >= m_num_channels*m_num_modes*m_num_detectors) {
+        size_t tot= m_num_channels*m_num_modes*m_num_detectors;
         log<LOG_ERROR>(L"%1% || Given channel index: %2% is out of bound") % __func__ % channel_index;
-        log<LOG_ERROR>(L"%1% || Total number of channels : %2%") % __func__ % m_num_channels;
+        log<LOG_ERROR>(L"%1% || Total number of channels : %2%") % __func__ % tot;
         log<LOG_ERROR>(L"Terminating.");
         exit(EXIT_FAILURE);
     }
 
-    return m_channel_bin_edges[channel_index];
+    return m_channel_bin_edges[ GetLocalChannelIndex(channel_index)];
 }
 
 size_t PROconfig::GetChannelNTrueBins(size_t channel_index) const{
-    if(channel_index >= m_num_channels){
+    if(channel_index >= m_num_channels*m_num_modes*m_num_detectors) {
+        size_t tot= m_num_channels*m_num_modes*m_num_detectors;
         log<LOG_ERROR>(L"%1% || Given channel index: %2% is out of bound") % __func__ % channel_index;
-        log<LOG_ERROR>(L"%1% || Total number of channels : %2%") % __func__ % m_num_channels;
+        log<LOG_ERROR>(L"%1% || Total number of channels : %2%") % __func__ % tot;
         log<LOG_ERROR>(L"Terminating.");
         exit(EXIT_FAILURE);
     }
-    return m_channel_num_truebins[channel_index];
+    return m_channel_num_truebins[GetLocalChannelIndex(channel_index)];
 }
 
 const std::vector<float>& PROconfig::GetChannelTrueBinEdges(size_t channel_index) const{
 
-    //check for out of bound
-    if(channel_index >= m_num_channels){
+    if(channel_index >= m_num_channels*m_num_modes*m_num_detectors) {
+        size_t tot= m_num_channels*m_num_modes*m_num_detectors;
         log<LOG_ERROR>(L"%1% || Given channel index: %2% is out of bound") % __func__ % channel_index;
-        log<LOG_ERROR>(L"%1% || Total number of channels : %2%") % __func__ % m_num_channels;
+        log<LOG_ERROR>(L"%1% || Total number of channels : %2%") % __func__ % tot;
         log<LOG_ERROR>(L"Terminating.");
         exit(EXIT_FAILURE);
     }
-
-    return m_channel_truebin_edges[channel_index];
+ 
+    return m_channel_truebin_edges[GetLocalChannelIndex(channel_index)];
 }
 
 size_t PROconfig::GetChannelNOtherBins(size_t channel_index, size_t other_index) const{
-    if(channel_index >= m_num_channels){
+
+    if(channel_index >= m_num_channels*m_num_modes*m_num_detectors) {
+        size_t tot= m_num_channels*m_num_modes*m_num_detectors;
         log<LOG_ERROR>(L"%1% || Given channel index: %2% is out of bound") % __func__ % channel_index;
-        log<LOG_ERROR>(L"%1% || Total number of channels : %2%") % __func__ % m_num_channels;
+        log<LOG_ERROR>(L"%1% || Total number of channels : %2%") % __func__ % tot;
         log<LOG_ERROR>(L"Terminating.");
         exit(EXIT_FAILURE);
     }
-    return m_channel_num_other_bins[channel_index][other_index];
+    return m_channel_num_other_bins[GetLocalChannelIndex(channel_index)][other_index];
 }
 
 const std::vector<float>& PROconfig::GetChannelOtherBinEdges(size_t channel_index, size_t other_index) const{
 
-    //check for out of bound
-    if(channel_index >= m_num_channels){
+    if(channel_index >= m_num_channels*m_num_modes*m_num_detectors) {
+        size_t tot= m_num_channels*m_num_modes*m_num_detectors;
         log<LOG_ERROR>(L"%1% || Given channel index: %2% is out of bound") % __func__ % channel_index;
-        log<LOG_ERROR>(L"%1% || Total number of channels : %2%") % __func__ % m_num_channels;
+        log<LOG_ERROR>(L"%1% || Total number of channels : %2%") % __func__ % tot;
         log<LOG_ERROR>(L"Terminating.");
         exit(EXIT_FAILURE);
-    }
-
-    return m_channel_other_bin_edges[channel_index][other_index];
+    }    return m_channel_other_bin_edges[GetLocalChannelIndex(channel_index)][other_index];
 }
 
 
@@ -1538,7 +1569,7 @@ void PROconfig::generate_index_map(){
             std::vector<size_t> detector_other_start;
             std::vector<size_t> channel_other_start;
             for(size_t io = 0; io < m_num_other_vars; ++io) {
-                detector_other_start.push_back(im*m_num_other_bins_detector_block[io]);
+                detector_other_start.push_back(id*m_num_other_bins_detector_block[io]);
                 channel_other_start.push_back(0);
             }
 
@@ -1572,6 +1603,8 @@ void PROconfig::generate_index_map(){
     }
     return;
 }
+
+
 
 size_t PROconfig::find_global_subchannel_index_from_global_bin(size_t global_index, const std::vector<size_t>& num_subchannel_in_channel, const std::vector<size_t>& num_bins_in_channel, size_t num_channels, size_t num_bins_total) const{
 
