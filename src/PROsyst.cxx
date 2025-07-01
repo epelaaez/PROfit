@@ -45,7 +45,7 @@ namespace PROfit {
         }
 
         if(covmat.size()==0){
-            int nbins = other_index < 0 ? config.m_num_bins_total : config.m_num_other_bins_total[other_index];
+            int nbins =  config.m_num_variable_bins_total[other_index];
             Eigen::MatrixXf fracM = Eigen::MatrixXf::Zero(nbins, nbins);
             covmat.push_back(fracM);
         }

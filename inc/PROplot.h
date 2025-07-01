@@ -77,7 +77,7 @@ namespace PROfit{
             Eigen::VectorXf cv = FillSpectra(config, prop, metric.GetSysts(), metric.GetModel(), best_fit, true, config.i_prime).Spec();
             Eigen::MatrixXf L; 
             if(metric.GetSysts().GetNCovar() > 0) L = metric.GetSysts().DecomposeFractionalCovariance(config, cv);
-            else L = Eigen::MatrixXf::Zero(config.m_num_bins_total_collapsed, config.m_num_bins_total_collapsed);
+            else L = Eigen::MatrixXf::Zero(config.m_num_variable_bins_total_collapsed[config.i_prime], config.m_num_variable_bins_total_collapsed[config.i_prime]);
             std::normal_distribution<float> nd;
             Eigen::VectorXf throws = Eigen::VectorXf::Constant(config.m_num_variable_bins_total_collapsed[config.i_prime], 0);
 

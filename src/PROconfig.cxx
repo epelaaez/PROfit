@@ -1332,7 +1332,7 @@ void PROconfig::generate_index_map(){
             for(size_t io = 0; io < m_num_variables; ++io) {
                 detector_variable_start.push_back(im*m_num_variable_bins_detector_block[io]);
                 channel_variable_start.push_back(0);
-
+            }
 
             for(size_t ic = 0; ic < m_num_channels; ic++){
                 for(size_t sc = 0; sc < m_num_subchannels[ic]; sc++){

@@ -776,11 +776,8 @@ namespace PROfit {
 
                     std::vector<int> variable_bin_indices;
                     for(size_t i = 0; i < vars.size(); ++i) {
-                        variable_bin_indices.push_back(FindGlobalVariableBin(inconfig, vars[i], channel_index[ib], i));
+                        variable_bin_indices.push_back(FindGlobalVariableBin(inconfig, vars[i], branch_fullname[ib], i));
                     }
-
-                    if(i%100==0)	
-                        log<LOG_DEBUG>(L"%1% || Subchannel %2% -- Reco variable value: %3%, MC event weight: %4%, correponds to global bin: %5%") % __func__ %  branch_fullname[ib].c_str() % reco_value % additional_weight % global_bin;
 
 
                         for(size_t io = 0; io < inconfig.m_num_variables; ++io)

@@ -272,9 +272,9 @@ int main(int argc, char* argv[])
         const auto it = std::find(model->param_names.begin(), model->param_names.end(), name);
         if(it == std::end(model->param_names)) {
             log<LOG_ERROR>(L"%1% || Unrecognized model parameter name %2%.\n"
-                           L"Valid names for model %3% are %4%") %
-                           __func__% name.c_str()% config.m_model_tag.c_str()%
-                           model->param_names;
+                    L"Valid names for model %3% are %4%") %
+                __func__% name.c_str()% config.m_model_tag.c_str()%
+                model->param_names;
             return 1;
         }
         int loc = std::distance(model->param_names.begin(), it);
@@ -286,6 +286,17 @@ int main(int argc, char* argv[])
     //Seed time
     PROseed myseed(nthread, global_seed);
     std::uniform_int_distribution<uint32_t> dseed(0, std::numeric_limits<uint32_t>::max());
+
+    //Pysics parameter input
+    Eigen::VectorXf pparams = Eigen::VectorXf::Constant(model->nparams + other_systs[config.i_prime].GetNSplines(), 0);
+    Eigen::VectorXf CVpparams = Eigen::VectorXf::Constant(model->nparams + other_systs[config.i_prime].GetNSplines(), 0);
+    for(long i = 0; i < osc_param_vector.size(); ++i) {
+        pparams(i) = osc_param_vector(i);
+        CVpparams(i) = model->default_val(i);
+    }
+
+    //Spline injection studies
+    Eigen::VectorXf allparams = Eigen::VectorXf::Constant(model->nparams + other_systs[config.i_prime].GetNSplines(), 0);
 
     //Some logic for EITHER injecting fake/mock data of oscillated signal/syst shifts OR using real data
     PROdata data;
@@ -359,15 +370,15 @@ int main(int argc, char* argv[])
     }//if no data, use injected or fake data;
     else{
 
-      //PROspec data_spec = osc_params.size() || injected_systs.size() || weighthists.size() ? FillRecoSpectra(config, prop, systs, *model, allparams, weighthists, !eventbyevent) :  FillCVSpectrum(config, prop, !eventbyevent);
-      PROspec data_spec = osc_params.size() || injected_systs.size() ? FillSpectra(config, prop, other_systs[config.i_prime], *model, allparams, !eventbyevent) :  FillCVSpectra(config, prop, !eventbyevent);
+        //PROspec data_spec = osc_params.size() || injected_systs.size() || weighthists.size() ? FillRecoSpectra(config, prop, systs, *model, allparams, weighthists, !eventbyevent) :  FillCVSpectrum(config, prop, !eventbyevent);
+        PROspec data_spec = osc_params.size() || injected_systs.size() ? FillSpectra(config, prop, other_systs[config.i_prime], *model, allparams, !eventbyevent) :  FillCVSpectra(config, prop, !eventbyevent);
 
-      if(poisson_throw) data_spec = PROspec::PoissonVariation(data_spec, dseed(myseed.global_rng));
-      Eigen::VectorXf data_vec = CollapseMatrix(config, data_spec.Spec());
-      Eigen::VectorXf err_vec_sq = data_spec.Error().array().square();
-      Eigen::VectorXf err_vec = CollapseMatrix(config, err_vec_sq).array().sqrt();
-      //data = PROdata(data_vec, err_vec);
-      data = PROdata(data_vec, data_vec.array().sqrt());
+        if(poisson_throw) data_spec = PROspec::PoissonVariation(data_spec, dseed(myseed.global_rng));
+        Eigen::VectorXf data_vec = CollapseMatrix(config, data_spec.Spec());
+        Eigen::VectorXf err_vec_sq = data_spec.Error().array().square();
+        Eigen::VectorXf err_vec = CollapseMatrix(config, err_vec_sq).array().sqrt();
+        //data = PROdata(data_vec, err_vec);
+        data = PROdata(data_vec, data_vec.array().sqrt());
 
         for(size_t io = 0; io < config.m_num_variables; ++io) {
             PROspec data_spec = osc_params.size() || injected_systs.size() 
@@ -379,70 +390,62 @@ int main(int argc, char* argv[])
             Eigen::VectorXf err_vec = CollapseMatrix(config, err_vec_sq, io).array().sqrt();
             other_data.push_back(PROdata(data_vec, err_vec));
 
-      }
+        }
     }
 
     // Leave this after creating fake data so we can make fake data using systs that aren't
     // included in the fit.
-    if(syst_list.size()) {
 
-        std::vector<std::string> systs_to_include;
-        for(const auto &s: syst_list) {
-            bool istag = false;
-            for(const auto &[syst, tags]: config.m_mcgen_variation_tags) {
-                if(std::find(tags.begin(), tags.end(), s) != std::end(tags)) {
-                    istag = true;
-                    systs_to_include.push_back(syst);
-                }
-            }
-            if(!istag) systs_to_include.push_back(s);
-        }
-        for(std::string &name: systs_to_include) {
-            for(const auto &[xml_name, plot_name]: config.m_mcgen_variation_plotname_map) {
-                if(name == plot_name) {
-                    name = xml_name;
-                }
-            }
-        }
-        systs = systs.subset(systs_to_include);
-        for(PROsyst &syst: other_systs)
-            syst = syst.subset(systs_to_include);
-    } else if(systs_excluded.size()) {
+    for(auto & systs : other_systs){
+        if(syst_list.size()) {
 
-        std::vector<std::string> systs_to_exclude;
-        for(const auto &s: systs_excluded) {
-            bool istag = false;
-            for(const auto &[syst, tags]: config.m_mcgen_variation_tags) {
-                if(std::find(tags.begin(), tags.end(), s) != std::end(tags)) {
-                    istag = true;
-                    systs_to_exclude.push_back(syst);
+            std::vector<std::string> systs_to_include;
+            for(const auto &s: syst_list) {
+                bool istag = false;
+                for(const auto &[syst, tags]: config.m_mcgen_variation_tags) {
+                    if(std::find(tags.begin(), tags.end(), s) != std::end(tags)) {
+                        istag = true;
+                        systs_to_include.push_back(syst);
+                    }
+                }
+                if(!istag) systs_to_include.push_back(s);
+            }
+            for(std::string &name: systs_to_include) {
+                for(const auto &[xml_name, plot_name]: config.m_mcgen_variation_plotname_map) {
+                    if(name == plot_name) {
+                        name = xml_name;
+                    }
                 }
             }
-            if(!istag) systs_to_exclude.push_back(s);
-        }
-        for(std::string &name: systs_to_exclude) {
-            for(const auto &[xml_name, plot_name]: config.m_mcgen_variation_plotname_map) {
-                if(name == plot_name) {
-                    name = xml_name;
+            systs = systs.subset(systs_to_include);
+            for(PROsyst &syst: other_systs)
+                syst = syst.subset(systs_to_include);
+        } else if(systs_excluded.size()) {
+
+            std::vector<std::string> systs_to_exclude;
+            for(const auto &s: systs_excluded) {
+                bool istag = false;
+                for(const auto &[syst, tags]: config.m_mcgen_variation_tags) {
+                    if(std::find(tags.begin(), tags.end(), s) != std::end(tags)) {
+                        istag = true;
+                        systs_to_exclude.push_back(syst);
+                    }
+                }
+                if(!istag) systs_to_exclude.push_back(s);
+            }
+            for(std::string &name: systs_to_exclude) {
+                for(const auto &[xml_name, plot_name]: config.m_mcgen_variation_plotname_map) {
+                    if(name == plot_name) {
+                        name = xml_name;
+                    }
                 }
             }
+            systs = systs.excluding(systs_to_exclude);
+            for(PROsyst &syst: other_systs)
+                syst = syst.excluding(systs_to_exclude);
         }
-        systs = systs.excluding(systs_to_exclude);
-        for(PROsyst &syst: other_systs)
-            syst = syst.excluding(systs_to_exclude);
     }
 
-
-    //Pysics parameter input
-    Eigen::VectorXf pparams = Eigen::VectorXf::Constant(model->nparams + other_systs[config.i_prime].GetNSplines(), 0);
-    Eigen::VectorXf CVpparams = Eigen::VectorXf::Constant(model->nparams + other_systs[config.i_prime].GetNSplines(), 0);
-    for(long i = 0; i < osc_param_vector.size(); ++i) {
-        pparams(i) = osc_param_vector(i);
-        CVpparams(i) = model->default_val(i);
-    }
-
-    //Spline injection studies
-    Eigen::VectorXf allparams = Eigen::VectorXf::Constant(model->nparams + other_systs[config.i_prime].GetNSplines(), 0);
     Eigen::VectorXf systparams = Eigen::VectorXf::Constant(other_systs[config.i_prime].GetNSplines(), 0);
     for(size_t i = 0; i < model->nparams; ++i) allparams(i) = pparams(i);
     for(const auto& [name, shift]: injected_systs) {
@@ -960,7 +963,7 @@ int main(int argc, char* argv[])
 
         TCanvas c;
         if(osc_params.size()) {
-            
+
             c.Print((final_output_tag +"_PROplot_Osc.pdf"+ "[").c_str(), "pdf");
 
             PROspec osc_spec = FillSpectra(config, prop, other_systs[config.i_prime], *model, pparams, !eventbyevent,config.i_prime );
@@ -1052,7 +1055,7 @@ int main(int argc, char* argv[])
                 }
             }
             c.Print((final_output_tag+"_PROplot_Osc.pdf" + "]").c_str(), "pdf");
-        
+
         }
 
         //Now some covariances
@@ -1072,29 +1075,29 @@ int main(int argc, char* argv[])
         std::unique_ptr<PROmetric> allcov_metric(metric->Clone());
         allcov_metric->override_systs(allcovsyst);
         std::vector<std::vector<TPaveText>> other_channel_chitexts; 
-             
-        for(size_t io = 0; io < config.m_num_variables; ++io) {
-        int global_channel_index = 0;
-          std::vector<TPaveText> channel_chitexts;
 
-          for(size_t im = 0; im < config.m_num_modes; im++){
-                  for(size_t id =0; id < config.m_num_detectors; id++){
-                      for(size_t ic = 0; ic < config.m_num_channels; ic++){
-                          log<LOG_INFO>(L"%1% || On channel %2%:") % __func__ % global_channel_index ;
-                          double chival = allcov_metric->getSingleChannelChi(global_channel_index,io);
-                          int ndf = config.m_channel_variable_num_bins[io][ic] - bool(opt&PlotOptions::AreaNormalized);
-                          log<LOG_INFO>(L"%1% || -- the datamc chi^2/ndof is %2%/%3% .") % __func__ % chival % ndf;
-                          TPaveText chi2text(0.59, 0.50, 0.89, 0.59, "NDC");
-                          chi2text.AddText(("#chi^{2}/ndf = "+to_string_prec(chival,2)+"/"+std::to_string(ndf)).c_str());
-                          chi2text.SetFillColor(0);
-                          chi2text.SetBorderSize(0);
-                          chi2text.SetTextAlign(12);
-                          channel_chitexts.push_back(chi2text);
-                          global_channel_index++;
-                      }
-                  }
-          }
-          other_channel_chitexts.push_back(channel_chitexts);
+        for(size_t io = 0; io < config.m_num_variables; ++io) {
+            int global_channel_index = 0;
+            std::vector<TPaveText> channel_chitexts;
+
+            for(size_t im = 0; im < config.m_num_modes; im++){
+                for(size_t id =0; id < config.m_num_detectors; id++){
+                    for(size_t ic = 0; ic < config.m_num_channels; ic++){
+                        log<LOG_INFO>(L"%1% || On channel %2%:") % __func__ % global_channel_index ;
+                        double chival = allcov_metric->getSingleChannelChi(global_channel_index,io);
+                        int ndf = config.m_channel_variable_num_bins[io][ic] - bool(opt&PlotOptions::AreaNormalized);
+                        log<LOG_INFO>(L"%1% || -- the datamc chi^2/ndof is %2%/%3% .") % __func__ % chival % ndf;
+                        TPaveText chi2text(0.59, 0.50, 0.89, 0.59, "NDC");
+                        chi2text.AddText(("#chi^{2}/ndf = "+to_string_prec(chival,2)+"/"+std::to_string(ndf)).c_str());
+                        chi2text.SetFillColor(0);
+                        chi2text.SetBorderSize(0);
+                        chi2text.SetTextAlign(12);
+                        channel_chitexts.push_back(chi2text);
+                        global_channel_index++;
+                    }
+                }
+            }
+            other_channel_chitexts.push_back(channel_chitexts);
         }
 
 
@@ -1105,7 +1108,7 @@ int main(int argc, char* argv[])
                     other_err_bands.back().get(), {}, other_channel_chitexts[io], opt | PlotOptions::DataMCRatio, io);
         }
 
-      
+
 
         if(with_splines) {
             c.Print((final_output_tag+"_PROplot_Spline.pdf" + "[").c_str(), "pdf");
@@ -1307,12 +1310,12 @@ int main(int argc, char* argv[])
             if(use_phys && i < (long)metric->GetModel().nparams){
                 log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % metric->GetModel().pretty_param_names[i].c_str() % global_fit_result(i);
                 global_fit_out << metric->GetModel().param_names[i]
-                               << " : " << global_fit_result(i) << "\n";
+                    << " : " << global_fit_result(i) << "\n";
             }else{
                 long idx = use_phys ? i - metric->GetModel().nparams : i;
                 log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % metric->GetSysts().spline_names[idx].c_str() % global_fit_result(i);
                 global_fit_out << metric->GetSysts().spline_names[idx]
-                               << " : " << global_fit_result(i) << "\n";
+                    << " : " << global_fit_result(i) << "\n";
             }
         }
         log<LOG_INFO>(L"%1% || ################################################") % __func__;
@@ -1334,11 +1337,11 @@ int main(int argc, char* argv[])
             if(i < (long)metric->GetModel().nparams){
                 log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % metric->GetModel().pretty_param_names[i].c_str() % global_fit_result(i);
                 global_fit_out << metric->GetModel().param_names[i]
-                               << " : " << global_fit_result(i) << "\n";
+                    << " : " << global_fit_result(i) << "\n";
             }else{
                 log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % metric->GetSysts().spline_names[i - metric->GetModel().nparams].c_str() % global_fit_result(i);
                 global_fit_out << metric->GetSysts().spline_names[i - metric->GetModel().nparams]
-                               << " : " << global_fit_result(i) << "\n";
+                    << " : " << global_fit_result(i) << "\n";
             }
         }
         log<LOG_INFO>(L"%1% || ########################################################") % __func__;

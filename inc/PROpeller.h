@@ -161,36 +161,15 @@ namespace PROfit{
 
                     log<LOG_INFO>(L"%1% || %2% . ") % __func__  % scalenames;
 
-                    std::vector<int> scalerecobins;
-                    for(auto &name: scalenames){
-                        size_t is = inconfig.GetSubchannelIndex(name);     
-                        size_t ic = inconfig.GetChannelIndex(is); 
-
-                        size_t start = inconfig.GetGlobalBinStart(is); 
-                        for(size_t b = 0; b < inconfig.m_channel_num_bins[ic] ; b++){
-                            scalerecobins.push_back((int)(start+b));
-                        }
-                    }
-
-                    std::vector<int> scaletruebins;
-                    for(auto &name: scalenames){
-                        size_t is = inconfig.GetSubchannelIndex(name);     
-                        size_t ic = inconfig.GetChannelIndex(is); 
-                        size_t start = inconfig.GetGlobalTrueBinStart(is); 
-                        for(size_t b = 0; b < inconfig.m_channel_num_truebins[ic] ; b++){
-                            scaletruebins.push_back((int)(start+b));
-                        }
-                    }
-
-
+ 
                     std::vector<std::vector<int>> scaleotherbins;
-                    for(size_t io =0; io<inconfig.m_num_other_vars; io++){
+                    for(size_t io =0; io<inconfig.m_num_variables; io++){
                         std::vector<int> tmpbins;
                         for(auto &name: scalenames){
                             size_t is = inconfig.GetSubchannelIndex(name);     
                             size_t ic = inconfig.GetChannelIndex(is); 
-                            size_t start = inconfig.GetGlobalOtherBinStart(is,io); 
-                            for(size_t b = 0; b < inconfig.m_channel_num_other_bins[io][ic] ; b++){
+                            size_t start = inconfig.GetGlobalVariableBinStart(is,io); 
+                            for(size_t b = 0; b < inconfig.m_channel_variable_num_bins[io][ic] ; b++){
                                 tmpbins.push_back((int)(start+b));
                             }
                         }
@@ -199,31 +178,22 @@ namespace PROfit{
                     }
 
 
-                    log<LOG_INFO>(L"%1% || and scales reco bins  %2% and true bins %3%.") % __func__  %  scalerecobins %  scaletruebins;
 
-                    for (int r : scaletruebins) {
-                        for (int c : scalerecobins) {
-                            hist(r, c) *= value;
-                        }
-                    }
-
-
-                    for(size_t io =0; io<inconfig.m_num_other_vars; io++){
+                    for(size_t io =0; io<inconfig.m_num_variables; io++){
+                      log<LOG_INFO>(L"%1% || and scales other bins  %2% .") % __func__  %  scaleotherbins[io];
                         for (int o : scaleotherbins[io]) {
-                            for (int r : scalerecobins) {
-                                (other_hists[io])(o, r) *= value;
+                            for (int j : scaleotherbins[io]) {
+                                (variable_hist_storage(io,io))(o, j) *= value;//FIX FIX
                             }
                         }
                     }
-                    //mcStarErr is only used for calculating fractional error later. Fractional does not change. 
-                    //for (int c : scalerecobins) {
-                    //    mcStatErr(c) *= value;
-                    //}
-
                     for (size_t i = 0; i < added_weights.size(); ++i) {
-                        int bin = bin_indices[i];
-                        if (std::find(scalerecobins.begin(), scalerecobins.end(), bin) != scalerecobins.end()) {
+                         for(size_t io =0; io<inconfig.m_num_variables; io++){
+
+                        int bin = variable_bin_indices[i][io];
+                        if (std::find(scaleotherbins[io].begin(), scaleotherbins[io].end(), bin) != scaleotherbins[io].end()) {
                             added_weights[i] *= value;
+                        }
                         }
                     }
 

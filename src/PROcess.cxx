@@ -160,27 +160,6 @@ namespace PROfit {
                 }
             }
         } else {
-	  for(size_t i = 0; i<inprop.trueLE.size(); ++i){
-	    float oscw  =  inmodel.model_functions[inprop.model_rule[i]](phys, inprop.trueLE[i]);
-	    float add_w = inprop.added_weights[i];
-	    const int reco_bin = inprop.bin_indices[i];
-
-	    float systw = 1;
-	    for(int j = 0; j < shifts.size(); ++j) {
-	      int binning = insyst.spline_binnings[j];
-	      const int spline_bin =
-		binning == -2 ? inprop.true_bin_indices[i] :
-		binning == -1 ? inprop.bin_indices[i]
-		: inprop.other_bin_indices[i][binning];
-	      systw *= insyst.GetSplineShift(j, shifts[j], spline_bin);
-	    }
-
-	    float finalw = oscw * systw * add_w;
-
-	    myspectrum.Fill(reco_bin, finalw);
-	  }
-        }
-        else {
             for(size_t i = 0; i<inprop.variable_values.size(); ++i){
 
                 float oscw  = phys.size() != 0 ? 
