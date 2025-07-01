@@ -45,17 +45,13 @@ void PROdata::QuickFill(int bin_index, float weight){
 TH1D PROdata::toTH1D(const PROconfig &inconfig, int global_channel_index, int other_index) const {
     int local_channel_index = inconfig.GetLocalChannelIndex(global_channel_index);
 
-    log<LOG_DEBUG>(L"%1% || in A ") % __func__ ;
-    int global_bin_start = other_index < 0 ? inconfig.GetCollapsedGlobalBinStart(global_channel_index) : inconfig.GetCollapsedGlobalOtherBinStart(global_channel_index, other_index);
+    int global_bin_start =  inconfig.GetCollapsedGlobalVariableBinStart(global_channel_index, other_index);
     //set up hist specs
-    log<LOG_DEBUG>(L"%1% || in B ") % __func__ ;
-    int nbins = other_index < 0 ? inconfig.m_channel_num_bins[local_channel_index] : inconfig.m_channel_num_other_bins[local_channel_index][other_index];
-    log<LOG_DEBUG>(L"%1% || in C ") % __func__ ;
-    const std::vector<float>& bin_edges = other_index < 0 ? inconfig.GetChannelBinEdges(local_channel_index) : inconfig.GetChannelOtherBinEdges(local_channel_index, other_index);
-    log<LOG_DEBUG>(L"%1% || in D tt %2% of %3%  with chan in %4%") % __func__ % local_channel_index % inconfig.m_channel_names.size() % global_channel_index;
+    int nbins =  inconfig.m_channel_variable_num_bins[local_channel_index][other_index];
+    const std::vector<float>& bin_edges =  inconfig.GetChannelVariableBinEdges(local_channel_index, other_index);
     std::string hist_name = inconfig.m_channel_names[local_channel_index] + " Data";
-    log<LOG_DEBUG>(L"%1% || in E ") % __func__ ;
-    std::string xaxis_title = other_index < 0 ? inconfig.m_channel_units[local_channel_index] : inconfig.m_channel_other_units[local_channel_index][other_index];
+    std::string xaxis_title =  inconfig.m_channel_variable_units[local_channel_index][other_index];
+
 
     log<LOG_DEBUG>(L"%1% || in F ") % __func__ ;
     //fill 1D hist

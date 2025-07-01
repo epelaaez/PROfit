@@ -216,19 +216,12 @@ namespace PROfit{
     /*----------Function to load from files------------------*/
     /*----------One per FILE-tyle being loaded---------------*/
 
-    /* Function: Process covariance matrices from uboone style eventweight systematics in files
-    */
-    int PROcess_SBNfit(const PROconfig &inconfig, std::vector<SystStruct>& syst_vector);
 
     /* Function: Process spline weights and covariance matrices from uboone CAFAna output trees
     */
     int PROcess_CAFAna(const PROconfig &inconfig, std::vector<std::vector<SystStruct>> &syst_vector, PROpeller &inprop, bool noxrootd = false);
 
 
-    /* Function: given configuration, generate spectrum at central value. 
-     * Note: assume the input config has SBNfit-style files, TODO: check if compatible with CAF-style
-     */
-    PROspec CreatePROspecCV(const PROconfig& configin);
 
     std::vector<PROdata> CreatePROdata(const PROconfig& configin);
 
@@ -243,7 +236,6 @@ namespace PROfit{
      *		syst_vector: list of SystStruct TO BE UPDATED, each stores all variation spectra of one systematic
      *		syst_additional_weight: additional weight applied to systematic variation
      */
-    void process_sbnfit_event(const PROconfig &inconfig, const std::shared_ptr<BranchVariable>& branch, const std::map<std::string, std::vector<eweight_type>>& eventweight_map, int subchannel_index, std::vector<SystStruct>& syst_vector, const std::vector<float>& syst_additional_weight);
 
     void process_cafana_event(const PROconfig &inconfig, const std::shared_ptr<BranchVariable>& branch, const std::map<std::string, std::vector<eweight_type>*>& eventweight_map, float mcpot, int subchannel_index, std::vector<std::vector<SystStruct>> &syst_vector, const std::vector<float>& syst_additional_weight, PROpeller& inprop);
 

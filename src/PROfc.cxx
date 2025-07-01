@@ -35,18 +35,20 @@ void fc_worker(fc_args args) {
     for(size_t u = 0; u < args.todo; ++u) {
         log<LOG_INFO>(L"%1% | Thread #%2% Throw #%3%") % __func__ % args.thread % u;
         std::normal_distribution<float> d;
-        Eigen::VectorXf throwC = Eigen::VectorXf::Constant(args.config.m_num_bins_total_collapsed, 0);
+
+        Eigen::VectorXf throwC = Eigen::VectorXf::Constant(args.config.m_num_variable_bins_total_collapsed[args.config.i_prime], 0);
         for(size_t i = 0; i < args.systs.GetNSplines(); i++) {
             do {
                 throws(i+nphys) = d(rng);
             } while(throws(i+nphys) < args.systs.spline_lo[i]
                     || throws(i+nphys) > args.systs.spline_hi[i]);
         }
-        for(size_t i = 0; i < args.config.m_num_bins_total_collapsed; i++)
+        for(size_t i = 0; i < args.config.m_num_variable_bins_total_collapsed[args.config.i_prime]; i++)
             throwC(i) = d(rng);
-        PROspec shifted = FillRecoSpectra(args.config, args.prop, args.systs, *model, throws, strat);
+        PROspec shifted = FillSpectra(args.config, args.prop, args.systs, *model, throws, strat);
         log<LOG_DEBUG>(L"%1% || Shifted spectrum %2%\nfor throw %3%")
             % __func__ % shifted.Spec() % throws;
+
         PROspec newSpec = PROspec::PoissonVariation(PROspec(CollapseMatrix(args.config, shifted.Spec()) + args.L * throwC, CollapseMatrix(args.config, shifted.Error())), dseed(rng));
         PROdata data(newSpec.Spec(), newSpec.Error());
         //Metric Time

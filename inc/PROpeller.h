@@ -9,7 +9,63 @@
 #include <vector>
 #include <chrono>
 namespace PROfit{
+    class PROhistStorage {
+        private:
+            size_t n_vars = 0;
+            std::vector<Eigen::MatrixXf> data;
 
+            // Only stores when i <= j
+            size_t compute_index(size_t i, size_t j) const {
+                return (i * n_vars) - (i * (i - 1)) / 2 + (j - i);
+            }
+
+            friend class boost::serialization::access;
+
+            template<class Archive>
+                void serialize(Archive& ar, const unsigned int version) {
+                    (void)version;
+                    ar & n_vars;
+
+                    if (Archive::is_loading::value) {
+                        if (n_vars > 0) {
+                            data.resize(n_vars * (n_vars + 1) / 2);
+                        } else {
+                            data.clear();
+                        }
+                    }
+
+                    if (n_vars > 0) {
+                        for (auto& mat : data) {
+                            ar & mat;
+                        }
+                    }
+                }
+        public:
+            PROhistStorage() {}  
+            PROhistStorage(size_t n) {init(n);}
+
+            void init(size_t n) { n_vars = n;data.resize(n * (n + 1) / 2);}
+
+            Eigen::MatrixXf operator()(size_t i, size_t j) const {
+                if (i <= j) {
+                    return data[compute_index(i, j)];
+                } else {
+                    return data[compute_index(j, i)].transpose();
+                }
+            }
+
+            // Direct access for setting (must use i <= j)
+            Eigen::MatrixXf& set(size_t i, size_t j) {
+                if (i > j){
+                    log<LOG_ERROR>(L"%1% || If your seeing this, something went wrong. dont access PROhistStorage out of order.") % __func__;
+                        exit(EXIT_FAILURE);
+                }
+                return data[compute_index(i, j)];
+            }
+
+
+            size_t size() const { return n_vars; }
+    };
 
     /*Class: The PROpeller, which moves the analysis forward. A class to keep all MC events for oscllation event-by-event.
     */
@@ -17,25 +73,17 @@ namespace PROfit{
 
         private:
             friend class boost::serialization::access;
-            int nevents;
 
             // Serialization function for boost that will allow for save state of propeller
             template <class Archive>
                 void serialize(Archive& ar, [[maybe_unused]] const unsigned int version) {
-                    ar & nevents;
-                    ar & pcosth;
-                    ar & pmom;
-                    ar & trueLE;
                     ar & added_weights;
-                    ar & bin_indices;
                     ar & model_rule;
-                    ar & true_bin_indices;
-                    ar & other_bin_indices;
-                    ar & hist;
-                    ar & other_hists;
-                    ar & histLE;
-                    ar & mcStatErr;
-                    ar & otherMCStatErr;
+                    ar & variable_mc_stat_err;
+                    ar & variable_bin_indices;
+                    ar & variable_hist_storage;
+                    ar & variable_midbin;
+                    ar & variable_values;
                     ar & hash;
                 }
 
@@ -43,42 +91,31 @@ namespace PROfit{
 
             //Empty Constructor
             PROpeller(){
-                nevents = -1;
-                pmom.clear();
-                pcosth.clear();
-                trueLE.clear();
+                variable_values.clear();
                 added_weights.clear();
-                bin_indices.clear();
                 model_rule.clear();
-                true_bin_indices.clear();
                 hash = -1;
             };
 
             /*Function: Primary Constructor from raw std::vectors of MC values */ 
-            PROpeller(const PROconfig &config, std::vector<float> &intruth, std::vector<float> &inpmom, std::vector<float> &inpcosth, std::vector<float> &inadded_weights, std::vector<int> &inbin_indices, std::vector<int> &inmodel_rule, std::vector<int> &intrue_bin_indices) : trueLE(intruth), added_weights(inadded_weights), bin_indices(inbin_indices), model_rule(inmodel_rule), true_bin_indices(intrue_bin_indices), pmom(inpmom), pcosth(inpcosth) {
-                nevents = trueLE.size();
-                hist = Eigen::MatrixXf::Constant(config.m_num_truebins_total, config.m_num_bins_total, 0);
-                for(size_t i = 0; i < bin_indices.size(); ++i)
-                    hist(true_bin_indices[i], bin_indices[i]) += added_weights[i];
-                hash = config.hash;
+            PROpeller( std::vector<std::vector<float>> &intruth, std::vector<float> &inadded_weights,  std::vector<int> &inmodel_rule) : variable_values(intruth), added_weights(inadded_weights),  model_rule(inmodel_rule) {
+                //size_t nevents = variable_values.size();
+                //for(size_t i = 0; i < bin_indices.size(); ++i)
+                //hash = config.hash;
             };
 
             /* the Core MC is saved in these vectors.*/
 
-            std::vector<float> trueLE;
             std::vector<float> added_weights;
-            std::vector<int>   bin_indices;        /*Precalculated Bin index*/
             std::vector<int>   model_rule;
-            std::vector<int>   true_bin_indices;
-            std::vector<float> pmom;
-            std::vector<float> pcosth;
-            std::vector<std::vector<int>> other_bin_indices;
-            Eigen::MatrixXf    hist;
-            std::vector<Eigen::MatrixXf> other_hists;
-            Eigen::VectorXf    histLE;
-            Eigen::VectorXf    mcStatErr;
-            std::vector<Eigen::VectorXf> otherMCStatErr;
-            uint32_t           hash;
+            std::vector<std::vector<int>> variable_bin_indices;
+            std::vector<std::vector<float>> variable_values;
+            std::vector<Eigen::VectorXf> variable_mc_stat_err;
+            std::vector<Eigen::VectorXf> variable_midbin;
+            PROhistStorage variable_hist_storage;
+
+
+                  uint32_t           hash;
 
             // boost serialize save to file
             void save(const std::string& filename) const {

@@ -18,24 +18,34 @@ namespace PROfit {
 class PROmodel {
 public:
     size_t nparams;
+    int ivar; //TODO, this should be a string like "true" and then in config we have a map to that variable. error if not found. 
     std::vector<std::string> param_names;
     std::vector<std::string> pretty_param_names;
     Eigen::VectorXf lb, ub, default_val;
     std::vector<std::function<float(const Eigen::VectorXf&, float)>> model_functions;
-    std::vector<Eigen::MatrixXf> hists; //2D hists for binned oscilattions
+    std::vector<std::vector<Eigen::MatrixXf>> hists; //2D hists for binned oscilattion, one for each model function, and the N-variables 
+                                        //Todo: make this a vector of length n_variables, and fill them all. For now 1 is "special". 
 };
 
 class NullModel : public PROmodel {
 public:
     NullModel(const PROpeller &prop) {
         nparams = 0;
+        ivar = 1;
         model_functions.push_back([](const Eigen::VectorXf &, float){ return 1.0f; });
-
-        hists.emplace_back(Eigen::MatrixXf::Constant(prop.hist.rows(), prop.hist.cols(),0.0));
-        Eigen::MatrixXf &h = hists.back();
-        for(size_t i = 0; i < prop.bin_indices.size(); ++i) {
-            int tbin = prop.true_bin_indices[i], rbin = prop.bin_indices[i];
-            h(tbin, rbin) += prop.added_weights[i];
+       
+        size_t nvar = prop.variable_mc_stat_err.size();
+        hists.resize(nvar);
+        for(size_t v = 0; v <nvar ;v++){
+            for(size_t m = 0; m < model_functions.size(); ++m) {
+                hists.at(v).emplace_back(Eigen::MatrixXf::Constant(prop.variable_hist_storage(ivar,v).rows(), prop.variable_hist_storage(ivar,v).cols(),0.0));
+                Eigen::MatrixXf &h = hists.at(v).back();
+                for(size_t i = 0; i < prop.variable_bin_indices.size(); ++i) {
+                    int tbin = prop.variable_bin_indices[i][ivar], rbin = prop.variable_bin_indices[i][v];
+                    if(tbin<0 || rbin<0)continue;
+                    h(tbin, rbin) += prop.added_weights[i];
+                }
+            }
         }
     }
 };
@@ -45,17 +55,23 @@ public:
     PROnumudis(const PROpeller &prop) {
         model_functions.push_back([this]([[maybe_unused]] const Eigen::VectorXf &v, float) {(void)this; return 1.0;});
         model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pmumu(v(0),v(1),le);});
+        ivar = 1;
 
-        for(size_t m = 0; m < model_functions.size(); ++m) {
-            hists.emplace_back(Eigen::MatrixXf::Constant(prop.hist.rows(), prop.hist.cols(),0.0));
-            Eigen::MatrixXf &h = hists.back();
-            for(size_t i = 0; i < prop.bin_indices.size(); ++i) {
-                if(prop.model_rule[i] != (int)m) continue;
-                int tbin = prop.true_bin_indices[i], rbin = prop.bin_indices[i];
-                h(tbin, rbin) += prop.added_weights[i];
+
+        size_t nvar = prop.variable_mc_stat_err.size();
+        hists.resize(nvar);
+        for(size_t v = 0; v <nvar ;v++){
+            for(size_t m = 0; m < model_functions.size(); ++m) {
+                hists.at(v).emplace_back(Eigen::MatrixXf::Constant(prop.variable_hist_storage(ivar,v).rows(), prop.variable_hist_storage(ivar,v).cols(),0.0));
+                Eigen::MatrixXf &h = hists.at(v).back();
+                for(size_t i = 0; i < prop.added_weights.size(); ++i) {
+                    if(prop.model_rule[i] != (int)m) continue;
+                    int tbin = prop.variable_bin_indices[i][ivar], rbin = prop.variable_bin_indices[i][v];
+                    if(tbin<0 || rbin<0) continue;
+                    h(tbin, rbin) += prop.added_weights[i];
+                }
             }
         }
-
         nparams = 2;
         param_names = {"dmsq", "sinsq2thmm"}; 
         pretty_param_names = {"#Deltam^{2}", "sin^{2}2#theta_{#mu#mu}"}; 
@@ -103,18 +119,23 @@ public:
     PROnueapp(const PROpeller &prop) {
         model_functions.push_back([this]([[maybe_unused]] const Eigen::VectorXf &v, float) {(void)this; return 1.0;});
         model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pmue(v(0),v(1),le);});
+        ivar = 1;
 
-        for(size_t m = 0; m < model_functions.size(); ++m) {
-            hists.emplace_back(Eigen::MatrixXf::Constant(prop.hist.rows(), prop.hist.cols(),0.0));
-            Eigen::MatrixXf &h = hists.back();
-            for(size_t i = 0; i < prop.bin_indices.size(); ++i) {
-                if(prop.model_rule[i] != (int)m) continue;
-                int tbin = prop.true_bin_indices[i], rbin = prop.bin_indices[i];
-                h(tbin, rbin) += prop.added_weights[i];
+        size_t nvar = prop.variable_mc_stat_err.size();
+        hists.resize(nvar);
+        for(size_t v = 0; v <nvar ;v++){
+            for(size_t m = 0; m < model_functions.size(); ++m) {
+                hists.at(v).emplace_back(Eigen::MatrixXf::Constant(prop.variable_hist_storage(ivar,v).rows(), prop.variable_hist_storage(ivar,v).cols(),0.0));
+                Eigen::MatrixXf &h = hists.at(v).back();
+                for(size_t i = 0; i < prop.added_weights.size(); ++i) {
+                    if(prop.model_rule[i] != (int)m) continue;
+                    int tbin = prop.variable_bin_indices[i][ivar], rbin = prop.variable_bin_indices[i][v];
+                    if(tbin<0 || rbin<0)continue;
+                    h(tbin, rbin) += prop.added_weights[i];
+                }
             }
         }
-
-        nparams = 2;
+         nparams = 2;
         param_names = {"dmsq", "sinsq2thme"}; 
         pretty_param_names = {"#Deltam^{2}", "sin^{2}2#theta_{#mu{e}}"}; 
         lb = Eigen::VectorXf(2);
@@ -168,16 +189,23 @@ public:
         model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pmumu(v(0),v(1),v(2),le); });
         model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pmue(v(0),v(1),v(2),le); });
         model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pee(v(0),v(1),v(2),le); });
+        ivar = 1;
 
-        for(size_t m = 0; m < model_functions.size(); ++m) {
-            hists.emplace_back(Eigen::MatrixXf::Constant(prop.hist.rows(), prop.hist.cols(),0.0));
-            Eigen::MatrixXf &h = hists.back();
-            for(size_t i = 0; i < prop.bin_indices.size(); ++i) {
-                if(prop.model_rule[i] != (int)m) continue;
-                int tbin = prop.true_bin_indices[i], rbin = prop.bin_indices[i];
-                h(tbin, rbin) += prop.added_weights[i];
+         size_t nvar = prop.variable_mc_stat_err.size();
+        hists.resize(nvar);
+        for(size_t v = 0; v <nvar ;v++){
+            for(size_t m = 0; m < model_functions.size(); ++m) {
+                hists.at(v).emplace_back(Eigen::MatrixXf::Constant(prop.variable_hist_storage(ivar,v).rows(), prop.variable_hist_storage(ivar,v).cols(),0.0));
+                Eigen::MatrixXf &h = hists.at(v).back();
+                for(size_t i = 0; i < prop.added_weights.size(); ++i) {
+                    if(prop.model_rule[i] != (int)m) continue;
+                    int tbin = prop.variable_bin_indices[i][ivar], rbin = prop.variable_bin_indices[i][v];
+                    if(tbin<0 || rbin<0)continue;
+                    h(tbin, rbin) += prop.added_weights[i];
+                }
             }
         }
+
 
         nparams = 3;
         param_names = {"dmsq", "Ue4^2", "Um4^2"}; 
