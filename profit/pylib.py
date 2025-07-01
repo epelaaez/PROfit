@@ -46,7 +46,7 @@ class DataFrameFormula(object):
 
         ret.name = self.name
 
-        return ret
+        return ret.astype(np.float32)
 
     def PrintValue(self):
         return self.formula

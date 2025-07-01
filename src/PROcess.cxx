@@ -40,6 +40,7 @@ namespace PROfit {
         return myspectrum;
     }
 
+
   PROspec FillRecoSpectra(const PROconfig &inconfig, const PROpeller &inprop, const PROsyst &insyst, const PROmodel &inmodel, const Eigen::VectorXf &params, const std::vector<TH2D*> inweighthists, bool binned){
         PROspec myspectrum(inconfig.m_num_bins_total);
         Eigen::VectorXf phys   = params.segment(0, inmodel.nparams);

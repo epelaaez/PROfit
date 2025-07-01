@@ -562,21 +562,9 @@ int main(int argc, char* argv[])
     if(*profile_command){
 
         PROmetric *metric_to_use = systs_only_profile ? null_metric : metric;
-        size_t nparams = metric_to_use->GetModel().nparams + metric_to_use->GetSysts().GetNSplines();
+        size_t nparams = metric_to_use->nParams();
         size_t nphys = metric_to_use->GetModel().nparams;
-        Eigen::VectorXf lb = Eigen::VectorXf::Constant(nparams, -3.0);
-        Eigen::VectorXf ub = Eigen::VectorXf::Constant(nparams, 3.0);
-        for(size_t i = 0; i < nphys; ++i) {
-            lb(i) = metric_to_use->GetModel().lb(i);
-            ub(i) = metric_to_use->GetModel().ub(i);
-        }
-        for(size_t i = nphys; i < nparams; ++i) {
-            lb(i) = metric_to_use->GetSysts().spline_lo[i-nphys];
-            ub(i) = metric_to_use->GetSysts().spline_hi[i-nphys];
-
-
-        }
-        PROfitter fitter(ub, lb, fitconfig);
+        PROfitter fitter(metric_to_use->UpperBound(), metric_to_use->LowerBound(), fitconfig);
 
         log<LOG_INFO>(L"%1% || ########### Starting Global Best Fit Minimizing ############") % __func__;
 
