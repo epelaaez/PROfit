@@ -297,10 +297,34 @@ int main(int argc, char* argv[])
 
     //Spline injection studies
     Eigen::VectorXf allparams = Eigen::VectorXf::Constant(model->nparams + other_systs[config.i_prime].GetNSplines(), 0);
+    Eigen::VectorXf systparams = Eigen::VectorXf::Constant(other_systs[config.i_prime].GetNSplines(), 0);
+    for(size_t i = 0; i < model->nparams; ++i) allparams(i) = pparams(i);
+    for(const auto& [name, shift]: injected_systs) {
+        log<LOG_INFO>(L"%1% || Injected syst: %2% shifted by %3%") % __func__ % name.c_str() % shift;
+
+        auto it = std::find(other_systs[config.i_prime].spline_names.begin(), other_systs[config.i_prime].spline_names.end(), name);
+        if(it == other_systs[config.i_prime].spline_names.end()) {
+            for(const auto &[xml_name, plot_name]: config.m_mcgen_variation_plotname_map) {
+                if(name == plot_name) {
+                    it = std::find(other_systs[config.i_prime].spline_names.begin(), other_systs[config.i_prime].spline_names.end(), xml_name);
+                    break;
+                }
+            }
+            if(it == other_systs[config.i_prime].spline_names.end()) {
+                log<LOG_ERROR>(L"%1% || Error: Unrecognized spline %2%. Ignoring this injected shift.") % __func__ % name.c_str();
+                continue;
+            }
+
+        }
+        int idx = std::distance(other_systs[config.i_prime].spline_names.begin(), it);
+        allparams(idx+model->nparams) = shift;
+        systparams(idx) = shift;
+    }
 
     //Some logic for EITHER injecting fake/mock data of oscillated signal/syst shifts OR using real data
     PROdata data;
-    std::vector<PROdata> other_data;
+
+    std::vector<PROdata> variable_data;
     if(!data_xml.empty()){
         PROconfig dataconfig(data_xml);
         std::string dataBinName = analysis_tag+"_data.bin";
@@ -336,7 +360,7 @@ int main(int argc, char* argv[])
             data = alldata[0];
             //data.save(dataconfig,dataBinName);
             for(size_t io = 0; io < dataconfig.m_num_variables; ++io)
-                other_data.push_back(alldata[io+1]);
+                variable_data.push_back(alldata[io+1]);
 
             log<LOG_INFO>(L"%1% || Done processing Data from XML defined root files, and saving to binary output also: %2%") % __func__ % dataBinName.c_str();
         }else{
@@ -347,7 +371,7 @@ int main(int argc, char* argv[])
             data = alldata[0];
             //data.save(dataconfig,dataBinName);
             for(size_t io = 0; io < dataconfig.m_num_variables; ++io)
-                other_data.push_back(alldata[io+1]);
+                variable_data.push_back(alldata[io+1]);
 
             log<LOG_INFO>(L"%1% || Done loading. Config hash (%2%) and binary loaded Data (%3%) hash are here. ") % __func__ %  dataconfig.hash % data.hash;
             if(dataconfig.hash!=data.hash){
@@ -369,29 +393,19 @@ int main(int argc, char* argv[])
 
     }//if no data, use injected or fake data;
     else{
-
-        //PROspec data_spec = osc_params.size() || injected_systs.size() || weighthists.size() ? FillRecoSpectra(config, prop, systs, *model, allparams, weighthists, !eventbyevent) :  FillCVSpectrum(config, prop, !eventbyevent);
-        PROspec data_spec = osc_params.size() || injected_systs.size() ? FillSpectra(config, prop, other_systs[config.i_prime], *model, allparams, !eventbyevent) :  FillCVSpectra(config, prop, !eventbyevent);
-
-        if(poisson_throw) data_spec = PROspec::PoissonVariation(data_spec, dseed(myseed.global_rng));
-        Eigen::VectorXf data_vec = CollapseMatrix(config, data_spec.Spec());
-        Eigen::VectorXf err_vec_sq = data_spec.Error().array().square();
-        Eigen::VectorXf err_vec = CollapseMatrix(config, err_vec_sq).array().sqrt();
-        //data = PROdata(data_vec, err_vec);
-        data = PROdata(data_vec, data_vec.array().sqrt());
-
         for(size_t io = 0; io < config.m_num_variables; ++io) {
             PROspec data_spec = osc_params.size() || injected_systs.size() 
                 ? FillSpectra(config, prop, other_systs[io], *model, allparams, !eventbyevent, io)
                 : FillCVSpectra(config, prop, !eventbyevent, io);
 
+            if(poisson_throw) PROspec::PoissonVariation(data_spec, dseed(myseed.global_rng));
             Eigen::VectorXf data_vec = CollapseMatrix(config, data_spec.Spec(), io);
-            Eigen::VectorXf err_vec_sq = data_spec.Error().array().square();
-            Eigen::VectorXf err_vec = CollapseMatrix(config, err_vec_sq, io).array().sqrt();
-            other_data.push_back(PROdata(data_vec, err_vec));
+            variable_data.push_back(PROdata(data_vec, data_vec.array().sqrt()));
 
         }
     }
+
+    data = variable_data[config.i_prime];
 
     // Leave this after creating fake data so we can make fake data using systs that aren't
     // included in the fit.
@@ -446,30 +460,7 @@ int main(int argc, char* argv[])
         }
     }
 
-    Eigen::VectorXf systparams = Eigen::VectorXf::Constant(other_systs[config.i_prime].GetNSplines(), 0);
-    for(size_t i = 0; i < model->nparams; ++i) allparams(i) = pparams(i);
-    for(const auto& [name, shift]: injected_systs) {
-        log<LOG_INFO>(L"%1% || Injected syst: %2% shifted by %3%") % __func__ % name.c_str() % shift;
-
-        auto it = std::find(other_systs[config.i_prime].spline_names.begin(), other_systs[config.i_prime].spline_names.end(), name);
-        if(it == other_systs[config.i_prime].spline_names.end()) {
-            for(const auto &[xml_name, plot_name]: config.m_mcgen_variation_plotname_map) {
-                if(name == plot_name) {
-                    it = std::find(other_systs[config.i_prime].spline_names.begin(), other_systs[config.i_prime].spline_names.end(), xml_name);
-                    break;
-                }
-            }
-            if(it == other_systs[config.i_prime].spline_names.end()) {
-                log<LOG_ERROR>(L"%1% || Error: Unrecognized spline %2%. Ignoring this injected shift.") % __func__ % name.c_str();
-                continue;
-            }
-
-        }
-        int idx = std::distance(other_systs[config.i_prime].spline_names.begin(), it);
-        allparams(idx+model->nparams) = shift;
-        systparams(idx) = shift;
-    }
-    PROsyst allcovsyst = other_systs[config.i_prime].allsplines2cov(config, prop, dseed(PROseed::global_rng));
+        PROsyst allcovsyst = other_systs[config.i_prime].allsplines2cov(config, prop, dseed(PROseed::global_rng));
 
     log<LOG_INFO>(L"%1% || Starting from fit preset :  %2%.")% __func__ % fit_preset.c_str();
     if (allowed_preset.find(fit_preset) == allowed_preset.end()) {
@@ -541,9 +532,9 @@ int main(int argc, char* argv[])
         for(size_t i = 0; i< nparams; i++){
 
             if(i<nphys){
-                log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % metric_to_use->GetModel().pretty_param_names[i].c_str() % best_fit(i);
+                log<LOG_INFO>(L"%1% || %2%  : %3% (log) %4% (nonlog) ") % __func__ % metric_to_use->GetModel().pretty_param_names[i].c_str() % best_fit(i) % pow(10,best_fit(i));
             }else{
-                log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % metric_to_use->GetSysts().spline_names[i-nphys].c_str() % best_fit(i);
+                log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % metric_to_use->GetSysts().spline_names[i-nphys].c_str() % best_fit(i) ;
             }
         }
         log<LOG_INFO>(L"%1% || ################################################") % __func__;
@@ -1104,7 +1095,7 @@ int main(int argc, char* argv[])
         std::vector<std::unique_ptr<TGraphAsymmErrors>> other_err_bands;
         for(size_t io = 0; io < config.m_num_variables; ++io) {
             other_err_bands.push_back(getErrorBand(config, prop, other_systs[io], binwidth_scale, io));
-            plot_channels(final_output_tag+"_PROplot_other_"+std::to_string(io)+"_ErrorBand.pdf", config, other_cvs[io], {}, other_data[io], 
+            plot_channels(final_output_tag+"_PROplot_other_"+std::to_string(io)+"_ErrorBand.pdf", config, other_cvs[io], {}, variable_data[io], 
                     other_err_bands.back().get(), {}, other_channel_chitexts[io], opt | PlotOptions::DataMCRatio, io);
         }
 
