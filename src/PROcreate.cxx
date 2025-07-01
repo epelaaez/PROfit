@@ -443,7 +443,7 @@ namespace PROfit {
                         size_t ic = inconfig.GetChannelIndex(is);     
 
                         size_t start = inconfig.GetGlobalVariableBinStart(is,i_variable); 
-                        for(size_t b = 0; b < inconfig.m_channel_variable_num_bins[i_variable][ic] ; b++){
+                        for(size_t b = 0; b < inconfig.m_channel_variable_num_bins[ic][i_variable] ; b++){
                             flatbins.push_back((int)(start+b));
                         }
                     }
