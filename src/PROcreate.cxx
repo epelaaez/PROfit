@@ -18,7 +18,6 @@ namespace PROfit {
 
 
 
-
     void saveSystStructVector(const std::vector<std::vector<SystStruct>> &structs, const std::string &filename) {
         std::ofstream ofs(filename, std::ios::binary);
         boost::archive::binary_oarchive oa(ofs);
@@ -246,10 +245,10 @@ namespace PROfit {
                 //branch_variable->branch_true_pdg_formula = std::make_shared<TTreeFormula>(("branch_pdg_form_"+std::to_string(fid) +"_" + std::to_string(ib)).c_str(), branch_variable->pdg_name.c_str(), chains[fid]);
                 //log<LOG_INFO>(L"%1% || Setting up PDG variable for this branch: %2%") % __func__ %  branch_variable->pdg_name.c_str();
                 //if (branch_variable->hist_reweight) {
-                    //branch_variable->branch_true_proton_mom_formula = std::make_shared<TTreeFormula>(("branch_pmom_form_"+std::to_string(fid) +"_" + std::to_string(ib)).c_str(), branch_variable->true_proton_mom_name.c_str(), chains[fid]);
-                    //log<LOG_INFO>(L"%1% || Setting up leading proton momentum variable for this branch: %2%") % __func__ %  branch_variable->true_proton_mom_name.c_str();
-                    //branch_variable->branch_true_proton_costh_formula = std::make_shared<TTreeFormula>(("branch_costh_form_"+std::to_string(fid) +"_" + std::to_string(ib)).c_str(), branch_variable->true_proton_costh_name.c_str(), chains[fid]);
-                    //log<LOG_INFO>(L"%1% || Setting up leading proton costh variable for this branch: %2%") % __func__ %  branch_variable->true_proton_costh_name.c_str();
+                //branch_variable->branch_true_proton_mom_formula = std::make_shared<TTreeFormula>(("branch_pmom_form_"+std::to_string(fid) +"_" + std::to_string(ib)).c_str(), branch_variable->true_proton_mom_name.c_str(), chains[fid]);
+                //log<LOG_INFO>(L"%1% || Setting up leading proton momentum variable for this branch: %2%") % __func__ %  branch_variable->true_proton_mom_name.c_str();
+                //branch_variable->branch_true_proton_costh_formula = std::make_shared<TTreeFormula>(("branch_costh_form_"+std::to_string(fid) +"_" + std::to_string(ib)).c_str(), branch_variable->true_proton_costh_name.c_str(), chains[fid]);
+                //log<LOG_INFO>(L"%1% || Setting up leading proton costh variable for this branch: %2%") % __func__ %  branch_variable->true_proton_costh_name.c_str();
                 //}
                 int other_count = 0;
                 for(const auto &name: branch_variable->variable_names) {
@@ -358,7 +357,7 @@ namespace PROfit {
             for(auto& allow_sys : inconfig.m_mcgen_variation_type_map){
                 if(allow_sys.second=="norm"){
 
- 
+
                     map_systematic_num_universe[allow_sys.first] = 7;
                 }
             }
@@ -377,6 +376,7 @@ namespace PROfit {
 
         //constuct object for each systematic variation, and grab weight maps
         log<LOG_INFO>(L"%1% || Now start to grab related weightmaps") % __func__;
+        size_t i_variable = 0;
         for(auto& sys_pair : map_systematic_num_universe){
 
             const std::string& sys_name = sys_pair.first;
@@ -442,8 +442,8 @@ namespace PROfit {
                         size_t is = inconfig.GetSubchannelIndex(name);     
                         size_t ic = inconfig.GetChannelIndex(is);     
 
-                        size_t start = inconfig.GetGlobalOtherBinStart(is,inconfig.i_prime); //TBfixed 
-                        for(size_t b = 0; b < inconfig.m_channel_variable_num_bins[inconfig.i_prime][ic] ; b++){
+                        size_t start = inconfig.GetGlobalVariableBinStart(is,i_variable); 
+                        for(size_t b = 0; b < inconfig.m_channel_variable_num_bins[i_variable][ic] ; b++){
                             flatbins.push_back((int)(start+b));
                         }
                     }
@@ -467,6 +467,7 @@ namespace PROfit {
                     }
                 }
             }
+        i_variable++;
         }
 
 
@@ -492,11 +493,8 @@ namespace PROfit {
         }
 
 
-        inprop.mcStatErr = Eigen::VectorXf::Constant(inconfig.m_num_variable_bins_total[inconfig.i_prime], 0);
-        inprop.hist = Eigen::MatrixXf::Constant(inconfig.m_num_variable_bins_total[inconfig.i_osc], inconfig.m_num_variable_bins_total[inconfig.i_prime], 0);
         for(size_t i = 0; i < inconfig.m_num_variables; ++i) {
-            inprop.variableMCStatErr.push_back(Eigen::VectorXf::Constant(inconfig.m_num_variable_bins_total[i], 0));
-            inprop.variable_hists.push_back(Eigen::MatrixXf::Constant(inconfig.m_num_variable_bins_total[i], inconfig.m_num_variable_bins_total[inconfig.i_prime], 0));
+            inprop.variable_mc_stat_err.push_back(Eigen::VectorXf::Constant(inconfig.m_num_variable_bins_total[i], 0));
         }
 
         //setup and initilizte the hists
@@ -508,15 +506,18 @@ namespace PROfit {
             }
         }
 
-              inprop.histLE = Eigen::VectorXf::Constant(inconfig.m_num_variable_bins_total[inconfig.i_osc], 0);
-        size_t LE_bin = 0;
-        for(size_t im = 0; im < inconfig.m_num_modes; im++){
-            for(size_t id =0; id < inconfig.m_num_detectors; id++){
-                for(size_t ic = 0; ic < inconfig.m_num_channels; ic++){
-                    const std::vector<float> &edges = inconfig.m_channel_variable_bin_edges.at(ic)[inconfig.i_osc];
-                    for(size_t sc = 0; sc < inconfig.m_num_subchannels.at(ic); sc++){
-                        for(size_t j = 0; j < edges.size() - 1; ++j){
-                            inprop.histLE(LE_bin++) = (edges[j+1] + edges[j])/2;
+        for(size_t i = 0; i < inconfig.m_num_variables; ++i) {
+
+            inprop.variable_midbin.emplace_back(Eigen::VectorXf::Constant(inconfig.m_num_variable_bins_total[i], 0));
+            size_t LE_bin = 0;
+            for(size_t im = 0; im < inconfig.m_num_modes; im++){
+                for(size_t id =0; id < inconfig.m_num_detectors; id++){
+                    for(size_t ic = 0; ic < inconfig.m_num_channels; ic++){
+                        const std::vector<float> &edges = inconfig.m_channel_variable_bin_edges.at(ic)[i];
+                        for(size_t sc = 0; sc < inconfig.m_num_subchannels.at(ic); sc++){
+                            for(size_t j = 0; j < edges.size() - 1; ++j){
+                                inprop.variable_midbin.back()(LE_bin++) = (edges[j+1] + edges[j])/2;
+                            }
                         }
                     }
                 }
@@ -587,10 +588,10 @@ namespace PROfit {
 
                     for(int ib = 0; ib != num_branch; ++ib) {
 
-                    if(inconfig.m_mcgen_additional_weight_bool[fid][ib]){
-                        branches[ib]->branch_monte_carlo_weight_formula->GetNdata();
-                        branches[ib]->branch_monte_carlo_weight_formula->UpdateFormulaLeaves();
-                    }
+                        if(inconfig.m_mcgen_additional_weight_bool[fid][ib]){
+                            branches[ib]->branch_monte_carlo_weight_formula->GetNdata();
+                            branches[ib]->branch_monte_carlo_weight_formula->UpdateFormulaLeaves();
+                        }
                         for(auto &b: branches[ib]->branch_variable_formulas) {
                             b->GetNdata();
                             b->UpdateFormulaLeaves();
@@ -633,7 +634,6 @@ namespace PROfit {
 
         //ensure hash is correctly assigned
         inprop.hash=inconfig.hash;
-        inprop.mcStatErr = inprop.mcStatErr.array().sqrt();
 
         time_t time_took = time(nullptr) - start_time;
         log<LOG_INFO>(L"%1% || Finish reading files, it took %2% seconds..") % __func__ % time_took;
@@ -741,7 +741,6 @@ namespace PROfit {
 
         time_t start_time = time(nullptr);
         std::vector<PROdata> data;
-        data.emplace_back(inconfig.m_num_variable_bins_total[inconfig.i_prime]);
         for(size_t io = 0; io < inconfig.m_num_variables; ++io)
             data.emplace_back(inconfig.m_num_variable_bins_total[io]);
         log<LOG_INFO>(L"%1% || Start reading the files..") % __func__;
@@ -771,7 +770,6 @@ namespace PROfit {
                 //branch loop
                 for(int ib = 0; ib != num_branch; ++ib) {
                     std::vector<float> vars = branches[ib]->GetVariables();
-                    float reco_value = vars[inconfig.i_prime];
                     float additional_weight = branches[ib]->GetMonteCarloWeight();
                     additional_weight *= pot_scale[fid];
 
@@ -781,15 +779,14 @@ namespace PROfit {
 
                     std::vector<int> variable_bin_indices;
                     for(size_t i = 0; i < vars.size(); ++i) {
-                        variable_bin_indices.push_back(FindGlobalOtherBin(inconfig, vars[i], channel_index[ib], i));
+                        variable_bin_indices.push_back(FindGlobalVariableBin(inconfig, vars[i], channel_index[ib], i));
                     }
 
                     if(i%100==0)	
-                        //log<LOG_DEBUG>(L"%1% || Subchannel %2% -- Reco variable value: %3%, MC event weight: %4%, correponds to global bin: %5%") % __func__ %  channel_index[ib] % reco_value % additional_weight % global_bin;
 
-                    for(size_t io = 0; io < inconfig.m_num_variables; ++io)
-                        if(variable_bin_indices[io] >= 0)
-                            data[io].Fill(variable_bin_indices[io], additional_weight);//from io+1
+                        for(size_t io = 0; io < inconfig.m_num_variables; ++io)
+                            if(variable_bin_indices[io] >= 0)
+                                data[io].Fill(variable_bin_indices[io], additional_weight);//from io+1
                 }  //end of branch loop
             } //end of entry loop
         } //end of file loop
@@ -805,48 +802,38 @@ namespace PROfit {
 
         int total_num_sys = syst_vector[0].size(); 
         std::vector<float> vars = branch->GetVariables();
-        
+
         int run_syst = branch->GetIncludeSystematics();
         float mc_weight = branch->GetMonteCarloWeight();
         mc_weight *= inconfig.m_plot_pot / mcpot;
 
 
-        int global_bin = FindGlobalOtherBin(inconfig, vars[inconfig.i_prime], subchannel_index, inconfig.i_prime);
-        int global_true_bin = run_syst ? FindGlobalOtherBin(inconfig, vars[inconfig.i_osc], subchannel_index, inconfig.i_osc) : 0 ;//seems werid, but restricts ALL cosmics to one bin. 
         int model_rule = branch->GetModelRule();
 
         std::vector<int> variable_bin_indices;
         for(size_t i = 0; i < vars.size(); ++i) {
-            variable_bin_indices.push_back(FindGlobalOtherBin(inconfig, vars[i], subchannel_index, i));
+            variable_bin_indices.push_back(FindGlobalVariableBin(inconfig, vars[i], subchannel_index, i));
         }
-        
-        if(global_bin < 0 )  //out of range
-            return;
-        if(global_true_bin < 0)
-            return;
+
         if(mc_weight == 0)
             return;
 
         inprop.added_weights.push_back(mc_weight);
         inprop.model_rule.push_back((int)model_rule);
-        inprop.hist(global_true_bin, global_bin) += mc_weight;
-        inprop.mcStatErr(global_bin) += 1;
         inprop.variable_bin_indices.push_back(variable_bin_indices);
         inprop.variable_values.push_back(vars);
 
         for(size_t io = 0; io < inconfig.m_num_variables; ++io) {
             if(variable_bin_indices[io] >= 0) {
-                inprop.variableMCStatErr[io](variable_bin_indices[io]) += 1;
-                inprop.variable_hists[io](variable_bin_indices[io], variable_bin_indices[inconfig.i_prime]) += mc_weight; //TBD
+                inprop.variable_mc_stat_err[io](variable_bin_indices[io]) += 1;
                 for(size_t jo = io; jo < inconfig.m_num_variables; ++jo) {
 
-       //              log<LOG_ERROR>(L"%1% , %2% || GARP io %3% jo %4% (%5%,%6%) inside (%7%,%8%) ") % __func__ % __LINE__ % io % jo% variable_bin_indices[io]  % variable_bin_indices[jo] % inprop.variable_hist_storage(io,jo).rows() %  inprop.variable_hist_storage(io,jo).cols() ; 
- 
+
                     if(variable_bin_indices[jo]<0)continue;
                     inprop.variable_hist_storage.set(io,jo)(variable_bin_indices[io], variable_bin_indices[jo]) += mc_weight; 
                 }
             }
-            
+
         }
 
         if(!run_syst) return;
@@ -855,7 +842,7 @@ namespace PROfit {
             std::vector<SystStruct*> var_syst_objs;
             for(size_t io = 0; io < inconfig.m_num_variables; ++io)
                 var_syst_objs.push_back(&syst_vector[io][i]);
-            
+
             float additional_weight = syst_additional_weight.at(i);
             auto map_iter = eventweight_map.find(var_syst_objs.front()->GetSysName());
             int spline_bin =  variable_bin_indices[var_syst_objs.front()->binning];
@@ -879,7 +866,7 @@ namespace PROfit {
 
                 for(size_t io = 0; io < inconfig.m_num_variables; ++io) {
                     if(variable_bin_indices[io] >= 0){
-                      
+
                         var_syst_objs[io]->FillCV(variable_bin_indices[io], mc_weight);
                     }
                 }
@@ -896,13 +883,16 @@ namespace PROfit {
                 for(auto so: var_syst_objs)
                     so->FillCV(spline_bin, mc_weight);
                 float norm_shift_percentage = 0.0;
-                if( std::find(var_syst_objs.front()->norm_bins.begin(), var_syst_objs.front()->norm_bins.end(),variable_bin_indices[inconfig.i_prime])!=var_syst_objs.front()->norm_bins.end()){
-                    norm_shift_percentage =  var_syst_objs.front()->norm_value;
-                }
-
+                
                 for(int is = 0; is < var_syst_objs.front()->GetNUniverse(); ++is){
-                    for(auto so: var_syst_objs)
-                        so->FillUniverse(is, spline_bin, mc_weight * additional_weight * (1+var_syst_objs.front()->knobval[is]*norm_shift_percentage) );
+                    size_t ivar=0;
+                    for(auto so: var_syst_objs){
+                        if( std::find(var_syst_objs.front()->norm_bins.begin(), var_syst_objs.front()->norm_bins.end(),variable_bin_indices[ivar])!=var_syst_objs.front()->norm_bins.end()){
+                            norm_shift_percentage =  var_syst_objs.front()->norm_value;
+                       }
+                       so->FillUniverse(is, spline_bin, mc_weight * additional_weight * (1+var_syst_objs.front()->knobval[is]*norm_shift_percentage) );
+                       ivar++;
+                    }
                 }
                 continue;
             }

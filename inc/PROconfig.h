@@ -192,8 +192,7 @@ namespace PROfit{
 
             std::vector<size_t> m_num_subchannels; 
 
-            size_t i_prime;
-            size_t i_osc;
+            size_t i_prime;// The main fitting variable, will move to be xml config soon
 
             // New
             std::vector<std::vector<size_t>> m_channel_variable_num_bins;
@@ -313,17 +312,17 @@ namespace PROfit{
 
 
             /* Function: given channel index, return number of other bins for this channel and other var*/
-            size_t GetChannelNOtherBins(size_t channel_index, size_t other_index) const;
+            size_t GetChannelNVariableBins(size_t channel_index, size_t other_index) const;
 
             /* Function: given subchannel global index, return corresponding global bin start
              * Note: global bin index start from 0, not 1
              */
-            size_t GetGlobalOtherBinStart(size_t subchannel_index, size_t other_index) const;
+            size_t GetGlobalVariableBinStart(size_t subchannel_index, size_t other_index) const;
 
-            size_t GetCollapsedGlobalOtherBinStart(size_t channel_index, size_t other_index) const;
+            size_t GetCollapsedGlobalVariableBinStart(size_t channel_index, size_t other_index) const;
 
             /* Function: given channel index, return list of bin edges for this channel */
-            const std::vector<float>& GetChannelOtherBinEdges(size_t channel_index, size_t other_index) const;
+            const std::vector<float>& GetChannelVariableBinEdges(size_t channel_index, size_t other_index) const;
 
             /* Function: Hex to int*/
             int HexToROOTColor(const std::string& hexColor) const;

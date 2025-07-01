@@ -47,7 +47,7 @@ float PROpoisson::Pull(const Eigen::VectorXf &systs) {
     // No correlations: sum of squares
     if (!correlated_systematics) return systs.array().square().sum();
 
-    // Otherwise dot onto covariance
+    // Variablewise dot onto covariance
     return systs.dot(prior_covariance.inverse() * systs);
 }
 
@@ -119,7 +119,7 @@ float PROpoisson::getSingleChannelChi(size_t channel_index,size_t var_index) {
     PROspec cv = FillCVSpectra(config, peller,strat == BinnedChi2);
 
     size_t nbin =  config.m_channel_variable_num_bins[config.i_prime][channel_index];
-    size_t startBin = config.GetCollapsedGlobalOtherBinStart(channel_index,var_index);
+    size_t startBin = config.GetCollapsedGlobalVariableBinStart(channel_index,var_index);
 
     const Eigen::VectorXf &vdata = data.Spec().segment(startBin, nbin);
     const Eigen::VectorXf vmc = CollapseMatrix(config, cv.Spec()).segment(startBin, nbin);

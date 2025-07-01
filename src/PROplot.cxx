@@ -128,11 +128,9 @@ namespace PROfit{
         //TODO: Only works with 1 mode/detector/channel
         
 
-        log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
         Eigen::VectorXf cv =  CollapseMatrix(config, FillCVSpectra(config, prop, true, other_index).Spec(), other_index);
-        log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
 
-        std::vector<float> edges = config.GetChannelOtherBinEdges(0, other_index);
+        std::vector<float> edges = config.GetChannelVariableBinEdges(0, other_index);
         log<LOG_DEBUG>(L"%1% || For other var %2% the cv is %3% and the edges are %4%") % __func__ % other_index % cv % edges;
         std::vector<float> centers;
         size_t nerrorsample = 5000;
@@ -194,7 +192,7 @@ namespace PROfit{
             for(size_t det = 0; det < config.m_num_detectors; ++det) {
                 for(size_t channel = 0; channel < config.m_num_channels; ++channel) {
                     size_t channel_nbins = config.m_channel_variable_num_bins[channel][other_index];
-                    std::vector<float> edges =  config.GetChannelOtherBinEdges(0, other_index);
+                    std::vector<float> edges =  config.GetChannelVariableBinEdges(0, other_index);
                     std::string xtitle = config.m_channel_variable_units[channel][other_index];
                     std::string hist_title = config.m_detector_plotnames[det]  + " "+ config.m_channel_plotnames[channel]+";"+xtitle+";"+ytitle;
                     std::unique_ptr<TLegend> leg = std::make_unique<TLegend>(0.59,0.89,0.59,0.89);
@@ -243,7 +241,7 @@ namespace PROfit{
                     TGraphAsymmErrors *channel_errband = NULL;
                     if(errband) {
                         channel_errband = new TGraphAsymmErrors(&cv_hist);
-                        int channel_start =  config.GetCollapsedGlobalOtherBinStart(global_channel_index, other_index);
+                        int channel_start =  config.GetCollapsedGlobalVariableBinStart(global_channel_index, other_index);
                         for(size_t bin = 0; bin < channel_nbins; ++bin) {
                             float scale = 1.0;
                             if(bool(opt&PlotOptions::AreaNormalized)) {
@@ -262,7 +260,7 @@ namespace PROfit{
 
                     TH1D bf_hist(("bf"+std::to_string(global_channel_index)).c_str(), hist_title.c_str(), channel_nbins, edges.data());
                     if(best_fit) {
-                        int channel_start =  config.GetCollapsedGlobalOtherBinStart(global_channel_index, other_index);
+                        int channel_start =  config.GetCollapsedGlobalVariableBinStart(global_channel_index, other_index);
                         for(size_t bin = 0; bin < channel_nbins; ++bin) {
                             bf_hist.SetBinContent(bin+1, bf_spec(bin+channel_start));
                         }
@@ -276,7 +274,7 @@ namespace PROfit{
                     TGraphAsymmErrors *post_channel_errband = NULL;
                     if(posterrband) {
                         post_channel_errband = new TGraphAsymmErrors(&bf_hist);
-                        int channel_start =  config.GetCollapsedGlobalOtherBinStart(global_channel_index, other_index);
+                        int channel_start =  config.GetCollapsedGlobalVariableBinStart(global_channel_index, other_index);
                         for(size_t bin = 0; bin < channel_nbins; ++bin) {
                             float scale = 1.0;
                             if(bool(opt&PlotOptions::AreaNormalized)) {

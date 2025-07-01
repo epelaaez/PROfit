@@ -34,7 +34,7 @@ public:
         ivar = 1;
         model_functions.push_back([](const Eigen::VectorXf &, float){ return 1.0f; });
        
-        size_t nvar = prop.variableMCStatErr.size();
+        size_t nvar = prop.variable_mc_stat_err.size();
         hists.resize(nvar);
         for(size_t v = 0; v <nvar ;v++){
             for(size_t m = 0; m < model_functions.size(); ++m) {
@@ -58,7 +58,7 @@ public:
         ivar = 1;
 
 
-        size_t nvar = prop.variableMCStatErr.size();
+        size_t nvar = prop.variable_mc_stat_err.size();
         hists.resize(nvar);
         for(size_t v = 0; v <nvar ;v++){
             for(size_t m = 0; m < model_functions.size(); ++m) {
@@ -121,7 +121,7 @@ public:
         model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pmue(v(0),v(1),le);});
         ivar = 1;
 
-        size_t nvar = prop.variableMCStatErr.size();
+        size_t nvar = prop.variable_mc_stat_err.size();
         hists.resize(nvar);
         for(size_t v = 0; v <nvar ;v++){
             for(size_t m = 0; m < model_functions.size(); ++m) {
@@ -191,7 +191,7 @@ public:
         model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pee(v(0),v(1),v(2),le); });
         ivar = 1;
 
-         size_t nvar = prop.variableMCStatErr.size();
+         size_t nvar = prop.variable_mc_stat_err.size();
         hists.resize(nvar);
         for(size_t v = 0; v <nvar ;v++){
             for(size_t m = 0; m < model_functions.size(); ++m) {

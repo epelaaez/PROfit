@@ -4,9 +4,9 @@
 namespace PROfit{
 
 
-    int FindLocalOtherBin(const PROconfig &inconfig, float other_value, int channel_index, int other_index) {
+    int FindLocalVariableBin(const PROconfig &inconfig, float other_value, int channel_index, int other_index) {
         //find local bin 
-        const std::vector<float>& bin_edges = inconfig.GetChannelOtherBinEdges(channel_index, other_index);
+        const std::vector<float>& bin_edges = inconfig.GetChannelVariableBinEdges(channel_index, other_index);
         auto pos_iter = std::upper_bound(bin_edges.begin(), bin_edges.end(), other_value);
 
         //over/under-flow, don't care for now
@@ -18,22 +18,22 @@ namespace PROfit{
         return pos_iter - bin_edges.begin() - 1; 
     }
 
-    int FindGlobalOtherBin(const PROconfig &inconfig, float other_value, int subchannel_index, int other_index) {
-        int global_bin_start = inconfig.GetGlobalOtherBinStart(subchannel_index, other_index);
+    int FindGlobalVariableBin(const PROconfig &inconfig, float other_value, int subchannel_index, int other_index) {
+        int global_bin_start = inconfig.GetGlobalVariableBinStart(subchannel_index, other_index);
         int channel_index = inconfig.GetChannelIndex(subchannel_index);
-        if(inconfig.GetChannelNOtherBins(channel_index, other_index) == 0){
+        if(inconfig.GetChannelNVariableBins(channel_index, other_index) == 0){
             log<LOG_ERROR>(L"%1% || Subchannel %2% does not have other bins") % __func__ % subchannel_index;
             log<LOG_ERROR>(L"%1% || Return global bin of -1") % __func__ ;
             return -1;
         }
-        int local_bin = FindLocalOtherBin(inconfig, other_value, channel_index, other_index);
+        int local_bin = FindLocalVariableBin(inconfig, other_value, channel_index, other_index);
         return local_bin == -1 ? -1 : global_bin_start + local_bin;
     }
 
 
-    int FindGlobalOtherBin(const PROconfig &inconfig, float other_value, const std::string& subchannel_fullname, int other_index) {
+    int FindGlobalVariableBin(const PROconfig &inconfig, float other_value, const std::string& subchannel_fullname, int other_index) {
         int subchannel_index = inconfig.GetSubchannelIndex(subchannel_fullname);
-        return FindGlobalOtherBin(inconfig, other_value, subchannel_index, other_index);
+        return FindGlobalVariableBin(inconfig, other_value, subchannel_index, other_index);
     }
 
 

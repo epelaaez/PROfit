@@ -79,14 +79,11 @@ namespace PROfit{
                 void serialize(Archive& ar, [[maybe_unused]] const unsigned int version) {
                     ar & added_weights;
                     ar & model_rule;
-                    ar & variableMCStatErr;
+                    ar & variable_mc_stat_err;
                     ar & variable_bin_indices;
                     ar & variable_hist_storage;
-                    ar & hist;
-                    ar & histLE;
-                    ar & mcStatErr;
+                    ar & variable_midbin;
                     ar & variable_values;
-                    ar & variable_hists;
                     ar & hash;
                 }
 
@@ -103,9 +100,7 @@ namespace PROfit{
             /*Function: Primary Constructor from raw std::vectors of MC values */ 
             PROpeller( std::vector<std::vector<float>> &intruth, std::vector<float> &inadded_weights,  std::vector<int> &inmodel_rule) : variable_values(intruth), added_weights(inadded_weights),  model_rule(inmodel_rule) {
                 //size_t nevents = variable_values.size();
-                //hist = Eigen::MatrixXf::Constant(config.m_num_variable_bins_total[config.i_osc], config.m_num_variable_bins_total[config.i_prime], 0);
                 //for(size_t i = 0; i < bin_indices.size(); ++i)
-                //    hist(true_bin_indices[i], bin_indices[i]) += added_weights[i];
                 //hash = config.hash;
             };
 
@@ -114,18 +109,13 @@ namespace PROfit{
             std::vector<float> added_weights;
             std::vector<int>   model_rule;
             std::vector<std::vector<int>> variable_bin_indices;
-            std::vector<Eigen::VectorXf> variableMCStatErr;
+            std::vector<std::vector<float>> variable_values;
+            std::vector<Eigen::VectorXf> variable_mc_stat_err;
+            std::vector<Eigen::VectorXf> variable_midbin;
             PROhistStorage variable_hist_storage;
 
 
-            Eigen::MatrixXf    hist;
-            Eigen::VectorXf    histLE;
-            Eigen::VectorXf    mcStatErr;
-
-            std::vector<std::vector<float>> variable_values;
-            std::vector<Eigen::MatrixXf> variable_hists;
-
-            uint32_t           hash;
+                  uint32_t           hash;
 
             // boost serialize save to file
             void save(const std::string& filename) const {

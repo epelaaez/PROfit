@@ -43,10 +43,10 @@ void PROdata::QuickFill(int bin_index, float weight){
 }
 
 TH1D PROdata::toTH1D(const PROconfig &inconfig, int channel_index, int other_index) const {
-    int global_bin_start =  inconfig.GetCollapsedGlobalOtherBinStart(channel_index, other_index);
+    int global_bin_start =  inconfig.GetCollapsedGlobalVariableBinStart(channel_index, other_index);
     //set up hist specs
     int nbins =  inconfig.m_channel_variable_num_bins[channel_index][other_index];
-    const std::vector<float>& bin_edges =  inconfig.GetChannelOtherBinEdges(channel_index, other_index);
+    const std::vector<float>& bin_edges =  inconfig.GetChannelVariableBinEdges(channel_index, other_index);
     std::string hist_name = inconfig.m_channel_names[channel_index] + " Data";
     std::string xaxis_title = other_index < 0 ? inconfig.m_channel_units[channel_index] : inconfig.m_channel_variable_units[channel_index][other_index];
 

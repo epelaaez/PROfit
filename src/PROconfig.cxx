@@ -114,7 +114,6 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
     //Temp usage
     i_prime=0;
-    i_osc=1;
 
 
     //max subchannels 100? Can we avoid this
@@ -918,8 +917,8 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
     }
     for(size_t io = 0; io < m_num_variables; ++io) {
-        log<LOG_INFO>(L"%1% || variable %2% num_bins_total: %3%") % __func__ % m_num_variable_bins_total[io];
-        log<LOG_INFO>(L"%1% || num_bins_total_collapsed: %2%") % __func__ % m_num_variable_bins_total_collapsed[io];
+        log<LOG_INFO>(L"%1% || variable %2% num_bins_total: %3%") % __func__ % io % m_num_variable_bins_total[io];
+        log<LOG_INFO>(L"%1% || variable %2% num_bins_total_collapsed: %3%") % __func__ % io % m_num_variable_bins_total_collapsed[io];
     }
 
     log<LOG_INFO>(L"%1% || Done reading the xmls") % __func__;
@@ -972,12 +971,12 @@ size_t PROconfig::GetChannelIndex(size_t subchannel_index) const{
 
 
 
-size_t PROconfig::GetGlobalOtherBinStart(size_t subchannel_index, size_t other_index) const{
+size_t PROconfig::GetGlobalVariableBinStart(size_t subchannel_index, size_t other_index) const{
     size_t index = this->find_equal_index(m_vec_subchannel_index, subchannel_index);
     return m_vec_global_variable_index_start[other_index][index];
 }
 
-size_t PROconfig::GetCollapsedGlobalOtherBinStart(size_t channel_index, size_t other_index) const{
+size_t PROconfig::GetCollapsedGlobalVariableBinStart(size_t channel_index, size_t other_index) const{
     if(channel_index >= m_num_channels) {
         log<LOG_ERROR>(L"%1% || Requested bin start of channel %2%, but only %3% channels are known.")
             % __func__ % channel_index % m_num_channels;
@@ -1000,7 +999,7 @@ size_t PROconfig::GetSubchannelIndexFromVariableGlobalBin(size_t global_reco_ind
 
 
 
-size_t PROconfig::GetChannelNOtherBins(size_t channel_index, size_t other_index) const{
+size_t PROconfig::GetChannelNVariableBins(size_t channel_index, size_t other_index) const{
     if(channel_index >= m_num_channels){
         log<LOG_ERROR>(L"%1% || Given channel index: %2% is out of bound") % __func__ % channel_index;
         log<LOG_ERROR>(L"%1% || Total number of channels : %2%") % __func__ % m_num_channels;
@@ -1010,7 +1009,7 @@ size_t PROconfig::GetChannelNOtherBins(size_t channel_index, size_t other_index)
     return m_channel_variable_num_bins[channel_index][other_index];
 }
 
-const std::vector<float>& PROconfig::GetChannelOtherBinEdges(size_t channel_index, size_t other_index) const{
+const std::vector<float>& PROconfig::GetChannelVariableBinEdges(size_t channel_index, size_t other_index) const{
 
     //check for out of bound
     if(channel_index >= m_num_channels){
@@ -1073,14 +1072,6 @@ void PROconfig::remove_unused_channel(){
         log<LOG_DEBUG>(L"%1% || Found unused channels!! Clean the messs up...") % __func__;
 
         //update channel-related info
-        std::vector<size_t> temp_channel_num_bins(m_num_channels, 0);
-        std::vector<std::vector<float>> temp_channel_bin_edges(m_num_channels, std::vector<float>());
-        std::vector<std::vector<float>> temp_channel_bin_widths(m_num_channels, std::vector<float>());
-
-        std::vector<size_t> temp_channel_num_truebins(m_num_channels, 0);
-        std::vector<std::vector<float>> temp_channel_truebin_edges(m_num_channels, std::vector<float>());
-        std::vector<std::vector<float>> temp_channel_truebin_widths(m_num_channels, std::vector<float>());
-
         std::vector<std::vector<size_t>> temp_channel_num_other_bins(m_num_channels);
         std::vector<std::vector<std::vector<float>>> temp_channel_other_bin_edges(m_num_channels);
         std::vector<std::vector<std::vector<float>>> temp_channel_other_bin_widths(m_num_channels);
@@ -1091,14 +1082,6 @@ void PROconfig::remove_unused_channel(){
         std::vector<std::vector<std::string>> temp_channel_other_units(m_num_channels);
         for(size_t i=0, chan_index = 0; i< m_channel_bool.size(); ++i){
             if(m_channel_bool[i]){
-                temp_channel_num_bins[chan_index] = m_channel_variable_num_bins[i_prime][i];
-                temp_channel_bin_edges[chan_index] = m_channel_variable_bin_edges[i_prime][i];
-                temp_channel_bin_widths[chan_index] = m_channel_variable_bin_widths[i_prime][i];
-
-                temp_channel_num_truebins[chan_index] = m_channel_variable_num_bins[i_osc][i];
-                temp_channel_truebin_edges[chan_index] = m_channel_variable_bin_edges[i_osc][i];
-                temp_channel_truebin_widths[chan_index] = m_channel_variable_bin_widths[i_osc][i];
-
                 temp_channel_names[chan_index] = m_channel_names[i];
                 temp_channel_plotnames[chan_index] = m_channel_plotnames[i];
                 temp_channel_units[chan_index] = m_channel_units[i];
@@ -1112,12 +1095,6 @@ void PROconfig::remove_unused_channel(){
             }
         }
 
-        m_channel_variable_num_bins[i_prime] = temp_channel_num_bins;
-        m_channel_variable_bin_edges[i_prime] = temp_channel_bin_edges;
-        m_channel_variable_bin_widths[i_prime] = temp_channel_bin_widths;
-        m_channel_variable_num_bins[i_osc] = temp_channel_num_truebins;
-        m_channel_variable_bin_edges[i_osc] = temp_channel_truebin_edges;
-        m_channel_variable_bin_widths[i_osc] = temp_channel_truebin_widths;
         m_channel_names = temp_channel_names;
         m_channel_plotnames = temp_channel_plotnames;
         m_channel_units = temp_channel_units;
@@ -1400,7 +1377,7 @@ void PROconfig::construct_variable_collapsing_matrices(){
 
     for(size_t io = 0; io < m_num_variables; ++io) {
         variable_collapsing_matrices.push_back(Eigen::MatrixXf::Zero(m_num_variable_bins_total[io], m_num_variable_bins_total_collapsed[io]));
-        log<LOG_INFO>(L"%1% || Creating Other %2% Collapsing Matrix. m_num_variable_bins_total[io], m_num_variable_bins_total[io]_collapsed:  %3%  %4%") % __func__ % io % m_num_variable_bins_total[io] % m_num_variable_bins_total_collapsed[io];
+        log<LOG_INFO>(L"%1% || Creating Variable %2% Collapsing Matrix. m_num_variable_bins_total[io], m_num_variable_bins_total[io]_collapsed:  %3%  %4%") % __func__ % io % m_num_variable_bins_total[io] % m_num_variable_bins_total_collapsed[io];
 
         //construct the matrix by detector block
         Eigen::MatrixXf block_collapser = Eigen::MatrixXf::Zero(m_num_variable_bins_detector_block[io], m_num_variable_bins_detector_block_collapsed[io]);

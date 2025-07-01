@@ -250,16 +250,11 @@ int main(int argc, char* argv[])
 
 
 
-    log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
     std::unique_ptr<PROmodel> model = get_model_from_string(config.m_model_tag, prop);
-    log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
     std::unique_ptr<PROmodel> null_model = std::make_unique<NullModel>(prop);
-    log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
     //Pysics parameter input
     Eigen::VectorXf pparams = Eigen::VectorXf::Constant(model->nparams + other_systs[config.i_prime].GetNSplines(), 0);
-    log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
     Eigen::VectorXf CVpparams = Eigen::VectorXf::Constant(model->nparams + other_systs[config.i_prime].GetNSplines(), 0);
-    log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
     if(osc_params.size()) {
         if(osc_params.size() != model->nparams) {
             log<LOG_ERROR>(L"%1% || Incorrect number of physics parameters provided. Expected %2%, found %3%.")
@@ -278,7 +273,6 @@ int main(int argc, char* argv[])
         }
     }
 
-    log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
     //Spline injection studies
     Eigen::VectorXf allparams = Eigen::VectorXf::Constant(model->nparams + other_systs[config.i_prime].GetNSplines(), 0);
     Eigen::VectorXf systparams = Eigen::VectorXf::Constant(other_systs[config.i_prime].GetNSplines(), 0);
@@ -295,12 +289,10 @@ int main(int argc, char* argv[])
         systparams(idx) = shift;
     }
 
-    log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
     //Seed time
     PROseed myseed(nthread, global_seed);
     std::uniform_int_distribution<uint32_t> dseed(0, std::numeric_limits<uint32_t>::max());
 
-    log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
     //Some logic for EITHER injecting fake/mock data of oscillated signal/syst shifts OR using real data
     PROdata data;
     std::vector<PROdata> other_data;
@@ -369,16 +361,13 @@ int main(int argc, char* argv[])
             return 1;
         }
 
-    log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
 
     }//if no data, use injected or fake data;
     else{
-    log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
         //Create CV or injected data spectrum for all subsequent steps
         //this now will inject osc param, splines and reweight all at once
         PROspec data_spec = osc_params.size() || injected_systs.size() ? FillSpectra(config, prop, other_systs[config.i_prime], *model, allparams, !eventbyevent) :  FillCVSpectra(config, prop, !eventbyevent);
 
-    log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
         //Only for reweighting tests
         if (!mockreweights.empty()) {
             log<LOG_INFO>(L"%1% || Will use reweighted MC (with any requested oscillations) as data for this study") % __func__  ;
@@ -394,7 +383,6 @@ int main(int argc, char* argv[])
             }
             data_spec = FillWeightedSpectrumFromHist(config, prop, weighthists, *model, allparams, !eventbyevent);
         }
-    log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
         if(poisson_throw) data_spec = PROspec::PoissonVariation(data_spec, dseed(myseed.global_rng));
         Eigen::VectorXf data_vec = CollapseMatrix(config, data_spec.Spec());
         Eigen::VectorXf err_vec_sq = data_spec.Error().array().square();
@@ -402,25 +390,18 @@ int main(int argc, char* argv[])
         //data = PROdata(data_vec, err_vec);
         data = PROdata(data_vec, data_vec.array().sqrt());
 
-    log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
         for(size_t io = 0; io < config.m_num_variables; ++io) {
-            log<LOG_ERROR>(L"%1% , %2% || GARP io %3% .") % __func__ % __LINE__ % io;
             PROspec data_spec = osc_params.size() || injected_systs.size() 
                 ? FillSpectra(config, prop, other_systs[io], *model, allparams, !eventbyevent, io)
                 : FillCVSpectra(config, prop, !eventbyevent, io);
 
-            log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
             Eigen::VectorXf data_vec = CollapseMatrix(config, data_spec.Spec(), io);
-            log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
             Eigen::VectorXf err_vec_sq = data_spec.Error().array().square();
-            log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
             Eigen::VectorXf err_vec = CollapseMatrix(config, err_vec_sq, io).array().sqrt();
-            log<LOG_ERROR>(L"%1% , %2% || GARP ds %3% es %4%.") % __func__ % __LINE__ % data_vec.size() % err_vec.size();
             other_data.push_back(PROdata(data_vec, err_vec));
         }
     }
 
-    log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
     // Leave this after creating fake data so we can make fake data using systs that aren't
     // included in the fit.
     if(syst_list.size()) {
@@ -431,7 +412,6 @@ int main(int argc, char* argv[])
             syst = syst.excluding(systs_excluded);
     }
 
-    log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
 
     PROsyst allcovsyst = other_systs[config.i_prime].allsplines2cov(config, prop, dseed(PROseed::global_rng));
 
@@ -440,12 +420,10 @@ int main(int argc, char* argv[])
         log<LOG_ERROR>(L"%1% || ERROR allowed fit_presets are good, fast or overkill. You entred : %2%.")% __func__ % fit_preset.c_str();
         return 1;
     }
-    log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
     //Some global minimizer params
     // This runs for the single best gobal fit
     PROfitterConfig fitconfig(global_fit_options, fit_preset, false);
 
-    log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
 
 
     //Some Scan minimizer params.
@@ -473,7 +451,6 @@ int main(int argc, char* argv[])
         abort();
     }
 
-    log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
 
     //***********************************************************************
     //***********************************************************************
@@ -482,7 +459,6 @@ int main(int argc, char* argv[])
     //***********************************************************************
 
     if(*profile_command){
-    log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
 
         PROmetric *metric_to_use = systs_only_profile ? null_metric : metric;
         size_t nparams = metric_to_use->nParams();
@@ -491,13 +467,11 @@ int main(int argc, char* argv[])
 
         log<LOG_INFO>(L"%1% || ########### Starting Global Best Fit Minimizing ############") % __func__;
 
-    log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
 
         float chi2 = fitter.Fit(*metric_to_use); 
         Eigen::VectorXf best_fit = fitter.best_fit;
         Eigen::MatrixXf post_covar = fitter.Covariance();
 
-    log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
 
         log<LOG_INFO>(L"%1% || ################################################") % __func__;
         log<LOG_INFO>(L"%1% || ########### Global Best Fit Results ############") % __func__;
@@ -519,20 +493,17 @@ int main(int argc, char* argv[])
         log<LOG_INFO>(L"%1% || Starting a metropolis hastings chain to estimate the covariace matrix aroud the above best fit. Run and Burn is (%2%,%3%);") % __func__%fitconfig.MCMCiter % fitconfig.MCMCburn;
         Metropolis mh(simple_target{*metric_to_use}, simple_proposal(*metric_to_use, dseed(PROseed::global_rng)), best_fit, dseed(PROseed::global_rng));
 
-    log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
         Eigen::MatrixXf covmat = Eigen::MatrixXf::Constant(nparams, nparams, 0);
         size_t count = 0;
         const auto action = [&](const Eigen::VectorXf &value) {
             covmat += (value-best_fit) * (value-best_fit).transpose();
             count += 1; 
         };
-    log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
         mh.run(fitconfig.MCMCburn,fitconfig.MCMCiter, action);
 
         TH2D covhist("ch", "", nparams, 0, nparams, nparams, 0, nparams);
         TH2D physhist("ph","", nparams, 0, nparams, nphys, 0, nphys);
         for(size_t i = 0; i < nparams; ++i) {
-    log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
             std::string label = i < metric_to_use->GetModel().nparams 
                 ? metric_to_use->GetModel().pretty_param_names[i]
                 : config.m_mcgen_variation_plotname_map[metric_to_use->GetSysts().spline_names[i-metric_to_use->GetModel().nparams]].c_str();
@@ -546,7 +517,6 @@ int main(int argc, char* argv[])
                     physhist.SetBinContent(i+1, j+1, covmat(i,j)/count);
             }
         }
-    log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
         TCanvas c1;
         covhist.SetMaximum(1);
         covhist.SetMinimum(-1);
@@ -556,7 +526,6 @@ int main(int argc, char* argv[])
         c1.Print("phys_cov.pdf");
         log<LOG_INFO>(L"%1% || MCMC acceptance is  %2%. ") % __func__% ((double)count /fitconfig.MCMCiter);
 
-    log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
         std::string hname = "#chi^{2}/ndf = " + to_string(chi2) + "/" + to_string(config.m_num_variable_bins_total_collapsed[config.i_prime]);
         PROspec cv = FillCVSpectra(config, prop, true);
         PROspec bf = FillSpectra(config, prop, metric_to_use->GetSysts(), metric_to_use->GetModel(), best_fit, true);
@@ -575,13 +544,10 @@ int main(int argc, char* argv[])
         std::vector<int> fixed_pars;
         for(size_t i = 0; i < metric_to_use->GetModel().nparams; ++i) fixed_pars.push_back(i);
 
-        log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
         log<LOG_INFO>(L"%1% || Starting global getErrorBand() ") % __func__;
         Metropolis mh_pre(prior_only_target{*metric_to_use}, simple_proposal(*metric_to_use, dseed(PROseed::global_rng), 0.2, fixed_pars), best_fit, dseed(PROseed::global_rng));
-        log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
         for(size_t vv = 0; vv < config.m_num_variables; ++vv){
 
-            log<LOG_ERROR>(L"%1% , %2% || GARP var %3% has %4% ") % __func__ % __LINE__ % vv % config.m_num_variable_bins_total[vv];
         }
 
         std::unique_ptr<TGraphAsymmErrors> err_band = 
@@ -589,13 +555,10 @@ int main(int argc, char* argv[])
             ? getMCMCErrorBand(mh_pre, fitconfig.MCMCburn, fitconfig.MCMCiter, config, prop, *metric_to_use, best_fit, priors, prior_covariance)
             : getErrorBand(config, prop, other_systs[config.i_prime], binwidth_scale);
 
-        log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
         Metropolis mh_post(simple_target{*metric_to_use}, simple_proposal(*metric_to_use, dseed(PROseed::global_rng), 0.2, fixed_pars), best_fit, dseed(PROseed::global_rng));
-        log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
         log<LOG_INFO>(L"%1% || Starting global getPostFitErrorBand() ") % __func__;
         std::unique_ptr<TGraphAsymmErrors> post_err_band = getMCMCErrorBand(mh_post, fitconfig.MCMCburn, fitconfig.MCMCiter, config, prop, *metric_to_use, best_fit, posteriors, spline_covariance, binwidth_scale);
 
-        log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
         TPaveText chi2text(0.59, 0.50, 0.89, 0.59, "NDC");
         chi2text.AddText(hname.c_str());
         chi2text.SetFillColor(0);
@@ -634,7 +597,6 @@ int main(int argc, char* argv[])
         post_err_band->Write("postfit_errband");
         post_hist.Write("best_fit");
 
-    log<LOG_ERROR>(L"%1% , %2% || GARP .") % __func__ % __LINE__;
         //***********************************************************************
         //***********************************************************************
         //******************** PROsurf PROsurf PROsurf **************************

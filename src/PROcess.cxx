@@ -14,16 +14,10 @@
 namespace PROfit {
     PROspec FillCVSpectra(const PROconfig &inconfig, const PROpeller &inprop, bool binned, size_t var_index){
         PROspec myspectrum(inconfig.m_num_variable_bins_total[var_index]);
-//        log<LOG_ERROR>(L"%1% , %2% || GARP ") % __func__ % __LINE__  ;
         if(binned) {
-            for(int i = 0; i < inprop.variable_hist_storage(inconfig.i_osc, var_index).rows(); ++i) {
+            for(int i = 0; i < inprop.variable_hist_storage(var_index, var_index).rows(); ++i) {
                 for(size_t k = 0; k < myspectrum.GetNbins(); ++k) {
-                   if(myspectrum.GetNbins()!=inprop.variable_hist_storage(inconfig.i_osc,var_index).cols()){
-                        log<LOG_ERROR>(L"%1% , %2% || fail: %3% is not (rows,cols) : (%4%,%5%). should also be %6% ") % __func__ % __LINE__ % myspectrum.GetNbins() % inprop.variable_hist_storage(inconfig.i_osc,var_index).rows() %inprop.variable_hist_storage(inconfig.i_osc,var_index).cols() % inconfig.m_num_variable_bins_total[var_index];
-                        exit(EXIT_FAILURE);
-                   }
-             //      log<LOG_ERROR>(L"%1% , %2% || GARP i %3% k %4% bounds %5%,%6% ") % __func__ % __LINE__ % i % k % inprop.variable_hist_storage(inconfig.i_osc,var_index).rows() % inprop.variable_hist_storage(inconfig.i_osc,var_index).cols();
-                    myspectrum.Fill(k, inprop.variable_hist_storage(inconfig.i_osc,var_index)(i, k));
+                    myspectrum.Fill(k, inprop.variable_hist_storage(var_index,var_index)(i, k));
                 }
             }
         } else {
@@ -37,31 +31,31 @@ namespace PROfit {
 
 
     PROspec FillSpectra(const PROconfig &inconfig, const PROpeller &inprop, const PROsyst &insyst, const PROmodel &inmodel, const std::map<std::string, float> &inparams, bool binned, size_t var_index) {
-      // default parameters
-      Eigen::VectorXf params = Eigen::VectorXf::Zero(inmodel.nparams + insyst.GetNSplines());
+        // default parameters
+        Eigen::VectorXf params = Eigen::VectorXf::Zero(inmodel.nparams + insyst.GetNSplines());
 
-      // default pulls are all 0. Set the default model parameters
-      for (size_t ind = 0; ind < inmodel.nparams; ind++) params[ind] = inmodel.default_val[ind];
+        // default pulls are all 0. Set the default model parameters
+        for (size_t ind = 0; ind < inmodel.nparams; ind++) params[ind] = inmodel.default_val[ind];
 
-      // set parameters configured by user
-      for (auto const &pair: inparams) {
-        auto it1 = std::find(insyst.spline_names.begin(), insyst.spline_names.end(), pair.first);
-        auto it2 = std::find(inmodel.param_names.begin(), inmodel.param_names.end(), pair.first);
-        if (it1 != insyst.spline_names.end()) {
-          int ind = std::distance(insyst.spline_names.begin(), it1);
-          params[ind + inmodel.nparams] = pair.second;
+        // set parameters configured by user
+        for (auto const &pair: inparams) {
+            auto it1 = std::find(insyst.spline_names.begin(), insyst.spline_names.end(), pair.first);
+            auto it2 = std::find(inmodel.param_names.begin(), inmodel.param_names.end(), pair.first);
+            if (it1 != insyst.spline_names.end()) {
+                int ind = std::distance(insyst.spline_names.begin(), it1);
+                params[ind + inmodel.nparams] = pair.second;
+            }
+            else if (it2 != inmodel.param_names.end()) {
+                int ind = std::distance(inmodel.param_names.begin(), it2);
+                params[ind] = pair.second;
+            }
+            else {
+                log<LOG_WARNING>(L"%1% | unable to find parameters %2% . Skipping.") % __func__ % pair.first.c_str();
+            }
         }
-        else if (it2 != inmodel.param_names.end()) {
-          int ind = std::distance(inmodel.param_names.begin(), it2);
-          params[ind] = pair.second;
-        }
-        else {
-          log<LOG_WARNING>(L"%1% | unable to find parameters %2% . Skipping.") % __func__ % pair.first.c_str();
-        }
-      }
-      
 
-      return FillSpectra(inconfig, inprop, insyst, inmodel, params, binned, var_index);
+
+        return FillSpectra(inconfig, inprop, insyst, inmodel, params, binned, var_index);
     }
 
 
@@ -77,13 +71,11 @@ namespace PROfit {
                 const Eigen::MatrixXf &hist = inprop.variable_hist_storage(binning,var_index);
                 for(size_t k = 0; k < inconfig.m_num_variable_bins_total[var_index]; ++k) {
                     if(binning == var_index){
-                        //log<LOG_ERROR>(L"%1% , %2% || GARP binning %3% %4% %5%") % __func__ % __LINE__  % i % shifts(i) % k;
                         systw(k) *= insyst.GetSplineShift(i, shifts(i), k);
                     }
                     else {
                         float val = 0, unweighted = 0;
                         for(long int j = 0; j < hist.rows(); ++j) {
-                      //log<LOG_ERROR>(L"%1%, %2% || GARP hist stor size (%3%,%4%) and were at (%5%,%6%) of var index %7% binning %8% (which should be (%9%,%10%) size)") % __func__ % __LINE__ % hist.rows() % hist.cols() %j % k % var_index % binning % inconfig.m_num_variable_bins_total[var_index] % inconfig.m_num_variable_bins_total[binning];
                             float binsystw = insyst.GetSplineShift(i, shifts(i), j);
                             val += binsystw * hist(j, k);
                             unweighted += hist(j,k);
@@ -92,19 +84,17 @@ namespace PROfit {
                     }
                 }
             }
-            //log<LOG_ERROR>(L"%1%, %2% || GARP hist stor size (%3%,%4%)") % __func__ % __LINE__ % inprop.variable_hist_storage(inconfig.i_osc, var_index).rows() % inprop.variable_hist_storage(inconfig.i_osc, var_index).cols();
-            for(long int i = 0; i < inprop.variable_hist_storage(inconfig.i_osc, var_index).rows(); ++i) {
-                float le = inprop.histLE[i];
+            for(long int i = 0; i < inprop.variable_hist_storage(inmodel.ivar, var_index).rows(); ++i) {
+                float le = inprop.variable_midbin[inmodel.ivar][i];
                 for(size_t j = 0; j < inmodel.model_functions.size(); ++j) {
                     float oscw = inmodel.model_functions[j](phys, le);
-        if (inmodel.hists[var_index][j].data() == nullptr) {
-            log<LOG_ERROR>(L"Null matrix at var_index=%1%, j=%2%") % var_index % j;
-                continue;
-    }
+                    if (inmodel.hists[var_index][j].data() == nullptr) {
+                        log<LOG_ERROR>(L"Null matrix at var_index=%1%, j=%2%") % var_index % j;
+                        continue;
+                    }
 
                     for(size_t k = 0; k < myspectrum.GetNbins(); ++k) {
-                        //log<LOG_ERROR>(L"%1% , %2% || GARP Spec: i(bin):%3% j(model fun):%4% k(specbin):%5% . size for (i,k): hists(%6%,%7%) ") % __func__ % __LINE__  % i % j % k % inmodel.hists[var_index][j].rows() % inmodel.hists[var_index][j].cols() ;
-myspectrum.Fill(k, systw(k) * oscw * inmodel.hists[var_index][j](i, k));
+                        myspectrum.Fill(k, systw(k) * oscw * inmodel.hists[var_index][j](i, k));
                     }
                 }
             }
@@ -129,18 +119,18 @@ myspectrum.Fill(k, systw(k) * oscw * inmodel.hists[var_index][j](i, k));
 
 
 
-    
-   //*********************************************************************************************
 
-      PROspec FillWeightedSpectrumFromHist(const PROconfig &inconfig, const PROpeller &inprop, std::vector<TH2D*> inweighthists, const PROmodel &inmodel, const Eigen::VectorXf &params, bool binned){
+    //*********************************************************************************************
+
+    PROspec FillWeightedSpectrumFromHist(const PROconfig &inconfig, const PROpeller &inprop, std::vector<TH2D*> inweighthists, const PROmodel &inmodel, const Eigen::VectorXf &params, bool binned){
         PROspec myspectrum(inconfig.m_num_variable_bins_total[inconfig.i_prime]);
         Eigen::VectorXf phys   = params.segment(0, inmodel.nparams);
         Eigen::VectorXf shifts = params.segment(inmodel.nparams, params.size() - inmodel.nparams);
 
         int i_osc_tmp =1;
         if (binned) {
-            for(long int i = 0; i < inprop.hist.rows(); ++i) {
-                float le = inprop.histLE[i];
+            for(long int i = 0; i < inprop.variable_hist_storage(i_osc_tmp,inconfig.i_prime).rows(); ++i) {
+                float le = inprop.variable_midbin[i_osc_tmp][i];
                 float hist_w = 1.0 ;
 
                 //Figure out what subchannel the event is in
@@ -203,7 +193,7 @@ myspectrum.Fill(k, systw(k) * oscw * inmodel.hists[var_index][j](i, k));
 
     PROspec FillSystRandomThrow(const PROconfig &inconfig, const PROpeller &inprop, const PROsyst &insyst, uint32_t seed, int other_index) {
         int nbins = inconfig.m_num_variable_bins_total[other_index],
-            nbins_collapsed = inconfig.m_num_variable_bins_total_collapsed[other_index];
+        nbins_collapsed = inconfig.m_num_variable_bins_total_collapsed[other_index];
         Eigen::VectorXf spec = Eigen::VectorXf::Constant(nbins, 0);
         Eigen::VectorXf cvspec = Eigen::VectorXf::Constant(nbins, 0);
 
@@ -220,44 +210,18 @@ myspectrum.Fill(k, systw(k) * oscw * inmodel.hists[var_index][j](i, k));
             throwC(i) = d(rng);
 
 
-        if(other_index < 0) {
-            Eigen::VectorXf systw = Eigen::VectorXf::Constant(nbins, 1);
-            for(size_t i = 0; i < throws.size(); ++i) {
-                int binning = insyst.spline_binnings[i];
-                const Eigen::MatrixXf &hist =  inprop.variable_hists[binning];
-                for(int k = 0; k < nbins; ++k) {
-                    if(binning == -1) systw(k) *= insyst.GetSplineShift(i, throws[i], k);
-                    else {
-                        float val = 0, unweighted = 0;
-                        for(long int j = 0; j < hist.rows(); ++j) {
-                            float binsystw = insyst.GetSplineShift(i, throws[i], j);
-                            val += binsystw * hist(j, k);
-                            unweighted += hist(j,k);
-                        }
-                        if(unweighted > 0) systw(k) *= val/unweighted;
-                    }
-                }
+        for(size_t i = 0; i<inprop.variable_values.size(); ++i){
+            float add_w = inprop.added_weights[i]; 
+            float systw = 1;
+            for(size_t j = 0; j < throws.size(); ++j) {
+                int binning = insyst.spline_binnings[j];
+                const int spline_bin =  inprop.variable_bin_indices[i][binning];
+                systw *= insyst.GetSplineShift(j, throws[j], spline_bin);
             }
-            for(long int i = 0; i < inprop.hist.rows(); ++i) {
-                for(int k = 0; k < nbins; ++k) {
-                    spec(k) += systw(k) * inprop.hist(i, k);
-                    cvspec(k) += inprop.hist(i, k);
-                }
-            }
-        } else {
-            for(size_t i = 0; i<inprop.variable_values.size(); ++i){
-                float add_w = inprop.added_weights[i]; 
-                float systw = 1;
-                for(size_t j = 0; j < throws.size(); ++j) {
-                    int binning = insyst.spline_binnings[j];
-                    const int spline_bin =  inprop.variable_bin_indices[i][binning];
-                    systw *= insyst.GetSplineShift(j, throws[j], spline_bin);
-                }
-                if(inprop.variable_bin_indices[i][other_index] >= 0) {
-                    float finalw = systw * add_w;
-                    spec(inprop.variable_bin_indices[i][other_index]) += finalw;
-                    cvspec(inprop.variable_bin_indices[i][other_index]) += add_w;
-                }
+            if(inprop.variable_bin_indices[i][other_index] >= 0) {
+                float finalw = systw * add_w;
+                spec(inprop.variable_bin_indices[i][other_index]) += finalw;
+                cvspec(inprop.variable_bin_indices[i][other_index]) += add_w;
             }
         }
 
@@ -288,7 +252,7 @@ myspectrum.Fill(k, systw(k) * oscw * inmodel.hists[var_index][j](i, k));
         int binning = insyst.spline_binnings[spline];
 
         if(other_index == inconfig.i_prime) {
-            const Eigen::MatrixXf &hist = inprop.variable_hists[binning];
+            const Eigen::MatrixXf &hist = inprop.variable_hist_storage(binning,other_index);
             for(long int i = 0; i < hist.rows(); ++i) {
                 float systw = 1.0;
                 if(binning != -1) systw = insyst.GetSplineShift(spline, spline_throw, i);

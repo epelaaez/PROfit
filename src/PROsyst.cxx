@@ -29,7 +29,7 @@ namespace PROfit {
                 covar_names.push_back(syst.systname); 
             }
         }
-        Eigen::MatrixXf fractional_mcstat_cov =  prop.variableMCStatErr[other_index].array().square().inverse().matrix().asDiagonal();
+        Eigen::MatrixXf fractional_mcstat_cov =  prop.variable_mc_stat_err[other_index].array().square().inverse().matrix().asDiagonal();
         toFiniteMatrix(fractional_mcstat_cov);
         Eigen::MatrixXf mcstat_corr = GenerateCorrMatrix(fractional_mcstat_cov);
         syst_map["mcstat"] = {covmat.size(), SystType::Covariance};
@@ -262,7 +262,7 @@ namespace PROfit {
             size_t ic = config.GetChannelIndex(is);     
 
 
-            size_t start = config.GetGlobalOtherBinStart(is, other_index);
+            size_t start = config.GetGlobalVariableBinStart(is, other_index);
             for(size_t b = 0; b < config.m_channel_variable_num_bins[ic][other_index] ; b++){
                 fracM(start+b,start+b)=flat_percent*flat_percent;
                 flatbins.push_back(start+b);
