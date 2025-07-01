@@ -626,7 +626,9 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
             tinyxml2::XMLElement *pAllowList = pList->FirstChildElement("allowlist");
             while(pAllowList){
-                std::string wt = std::string(pAllowList->GetText());
+                const char *text = pAllowList->GetText();
+                std::string wt = "null";
+                if(text) wt = std::string(text);
                 const char *variation_type = pAllowList->Attribute("type");
                 const char *plot_name = pAllowList->Attribute("plotname");
                 const char *binning = pAllowList->Attribute("binning");
