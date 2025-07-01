@@ -1085,7 +1085,7 @@ int main(int argc, char* argv[])
                     for(size_t ic = 0; ic < config.m_num_channels; ic++){
                         log<LOG_INFO>(L"%1% || On channel %2%:") % __func__ % global_channel_index ;
                         double chival = allcov_metric->getSingleChannelChi(global_channel_index,io);
-                        int ndf = config.m_channel_variable_num_bins[io][ic] - bool(opt&PlotOptions::AreaNormalized);
+                        int ndf = config.m_channel_variable_num_bins[ic][io] - bool(opt&PlotOptions::AreaNormalized);
                         log<LOG_INFO>(L"%1% || -- the datamc chi^2/ndof is %2%/%3% .") % __func__ % chival % ndf;
                         TPaveText chi2text(0.59, 0.50, 0.89, 0.59, "NDC");
                         chi2text.AddText(("#chi^{2}/ndf = "+to_string_prec(chival,2)+"/"+std::to_string(ndf)).c_str());
