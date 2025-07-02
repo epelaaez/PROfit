@@ -809,6 +809,7 @@ namespace PROfit {
         std::vector<int> variable_bin_indices;
         for(size_t i = 0; i < vars.size(); ++i) {
             variable_bin_indices.push_back(FindGlobalVariableBin(inconfig, vars[i], subchannel_index, i));
+            //log<LOG_INFO>(L"%1% || GURP  var %2%  value: %3% bin: %4% : sbindex %5% ") % __func__ %   i % vars[i] % FindGlobalVariableBin(inconfig, vars[i], subchannel_index, i) % subchannel_index;
         }
 
         if(mc_weight == 0)
@@ -823,7 +824,6 @@ namespace PROfit {
             if(variable_bin_indices[io] >= 0) {
                 inprop.variable_mc_stat_err[io](variable_bin_indices[io]) += 1;
                 for(size_t jo = io; jo < inconfig.m_num_variables; ++jo) {
-
 
                     if(variable_bin_indices[jo]<0)continue;
                     inprop.variable_hist_storage.set(io,jo)(variable_bin_indices[io], variable_bin_indices[jo]) += mc_weight; 

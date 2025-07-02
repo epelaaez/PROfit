@@ -316,12 +316,12 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 pBinO = pBinO->NextSiblingElement("bins");
             }
             if(m_bool_rate_only ){
-                    m_channel_variable_num_bins[i_prime] = {1};
-                    std::vector<float> binedges = m_channel_variable_bin_edges.back()[i_prime];
-                    std::vector<float> counting_exp_bin = {binedges.front(), binedges.back()};
-                    m_channel_variable_bin_edges.back()[i_prime] = {counting_exp_bin};
-                    std::vector<float> counting_exp_width = {binedges.front()-binedges.back()};
-                    m_channel_variable_bin_widths.back()[i_prime] = {counting_exp_width};
+                m_channel_variable_num_bins[i_prime] = {1};
+                std::vector<float> binedges = m_channel_variable_bin_edges.back()[i_prime];
+                std::vector<float> counting_exp_bin = {binedges.front(), binedges.back()};
+                m_channel_variable_bin_edges.back()[i_prime] = {counting_exp_bin};
+                std::vector<float> counting_exp_width = {binedges.front()-binedges.back()};
+                m_channel_variable_bin_widths.back()[i_prime] = {counting_exp_width};
             }
 
             // Now loop over all this channels subchanels. Not the names must be UNIQUE!!
@@ -570,11 +570,11 @@ int PROconfig::LoadFromXML(const std::string &filename){
                     pVariable = pVariable->NextSiblingElement("variable");
                 }
                 if(nvar == 0){
-                        log<LOG_ERROR>(L"%1% || ERROR: Need at least 1 variable passed in. You passed zero ") % __func__;
-                        log<LOG_ERROR>(L"Terminating.");
-                        exit(EXIT_FAILURE);
+                    log<LOG_ERROR>(L"%1% || ERROR: Need at least 1 variable passed in. You passed zero ") % __func__;
+                    log<LOG_ERROR>(L"Terminating.");
+                    exit(EXIT_FAILURE);
                 }
-                 
+
 
 
                 TEMP_branch_variables.back()->SetIncludeSystematics(TEMP_eventweight_branch_syst.back());
@@ -904,11 +904,11 @@ int PROconfig::LoadFromXML(const std::string &filename){
         else if(m_mcgen_variation_type[i] == "covariance"){
             m_num_variation_type_covariance+=1;
         }
-        
+
         else if(m_mcgen_variation_type[i] == "flat"){
             m_num_variation_type_flat+=1;
         }
-         else if(m_mcgen_variation_type[i] == "norm"){
+        else if(m_mcgen_variation_type[i] == "norm"){
             m_num_variation_type_norm+=1;
         }else if(m_mcgen_variation_type[i] == "mcstat"){
             m_use_mcstats = true;
@@ -963,7 +963,7 @@ void PROconfig::CalcTotalBins(){
         m_num_variable_bins_mode_block_collapsed[io] = m_num_variable_bins_detector_block_collapsed[io] * m_num_detectors;
     }
 
-     for(size_t io = 0; io < m_num_variables; ++io) {
+    for(size_t io = 0; io < m_num_variables; ++io) {
         m_num_variable_bins_total[io] = m_num_variable_bins_mode_block[io] * m_num_modes;
         m_num_variable_bins_total_collapsed[io] = m_num_variable_bins_mode_block_collapsed[io] * m_num_modes;
     }
@@ -997,11 +997,11 @@ size_t PROconfig::GetGlobalVariableBinStart(size_t subchannel_index, size_t othe
     size_t index = this->find_equal_index(m_vec_subchannel_index, subchannel_index);
     return m_vec_global_variable_index_start[other_index][index];
 }
-
 size_t PROconfig::GetCollapsedGlobalVariableBinStart(size_t channel_index, size_t other_index) const{
-    if(channel_index >= m_num_channels) {
-        log<LOG_ERROR>(L"%1% || Requested bin start of channel %2%, but only %3% channels are known.")
-            % __func__ % channel_index % m_num_channels;
+    if(channel_index >= m_num_channels*m_num_modes*m_num_detectors) {
+        size_t tot= m_num_channels*m_num_modes*m_num_detectors;
+        log<LOG_ERROR>(L"%1% || Requested bin start of channel %2%, but only %3% total channels are known (chat*mode*det).")
+            % __func__ % channel_index % tot;
         log<LOG_ERROR>(L"Terminating.");
         exit(EXIT_FAILURE);
     }    
@@ -1330,7 +1330,7 @@ void PROconfig::generate_index_map(){
             std::vector<size_t> detector_variable_start;
             std::vector<size_t> channel_variable_start;
             for(size_t io = 0; io < m_num_variables; ++io) {
-                detector_variable_start.push_back(im*m_num_variable_bins_detector_block[io]);
+                detector_variable_start.push_back(id*m_num_variable_bins_detector_block[io]);
                 channel_variable_start.push_back(0);
             }
 
@@ -1499,11 +1499,11 @@ uint32_t PROconfig::CalcHash() const{
             }
         }
     }
-   
+
     log<LOG_DEBUG>(L"%1% || MurmurHash input uniue string %2% ") % __func__ % unique_string.str().c_str();
 
     MurmurHash3_x86_32(unique_string.str().c_str(), unique_string.str().size(), fixed_seed, &hash);
-    
+
     log<LOG_INFO>(L"%1% || MurmurHash output hash %2% ") % __func__ % hash;
 
     return hash;

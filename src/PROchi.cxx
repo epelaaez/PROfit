@@ -67,7 +67,7 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
     // Get Spectra from FillSpectra
     Eigen::VectorXf subvector2 = param.segment(nparams - nsyst, nsyst);
     
-    PROspec result = FillSpectra(config, peller, *syst, model, param, strat == BinnedChi2);
+    PROspec result = FillSpectra(config, peller, *syst, model, param, strat == BinnedChi2, config.i_prime);
 
     Eigen::MatrixXf inverted_collapsed_full_covariance(config.m_num_variable_bins_total_collapsed[config.i_prime],config.m_num_variable_bins_total_collapsed[config.i_prime]);
 
@@ -95,7 +95,7 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
             tmpParams(i) = /*param(i) != last_param(i) ? param(i) :*/ param(i) + sgn * dval;
             
             Eigen::VectorXf subvector2 = tmpParams.segment(nparams - nsyst, nsyst);
-            PROspec result = FillSpectra(config, peller, *syst, model, tmpParams, strat != EventByEvent);
+            PROspec result = FillSpectra(config, peller, *syst, model, tmpParams, strat != EventByEvent, config.i_prime);
             // Calcuate Full Covariance matrix
             Eigen::MatrixXf inverted_collapsed_full_covariance(config.m_num_variable_bins_total_collapsed[config.i_prime],config.m_num_variable_bins_total_collapsed[config.i_prime]);
 
@@ -120,7 +120,6 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
 
         }
     }
-    //std::cout<<"Grad: "<<gradient<<std::endl;
 
 
     //Update last param
@@ -162,5 +161,11 @@ float PROchi::getSingleChannelChi(size_t global_channel_index, size_t var_index)
     float value = covar_portion;//pull;
 
     return value;
+}
+
+void PROchi::print(const Eigen::VectorXf &param){
+
+
+return;
 }
 

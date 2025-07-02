@@ -129,7 +129,9 @@ int main(int argc, char* argv[])
     app.add_flag("--no-xrootd",noxrootd,"Do not use XRootD, which is enabled by default");
     auto* shape_flag = app.add_flag("--shapeonly", shapeonly, "Run a shape only analysis");
     auto* rate_flag = app.add_flag("--rateonly", rateonly, "Run a rate only analysis");
-    shape_flag->excludes(rate_flag);   //PROcess, into binary data [Do this once first!]
+    shape_flag->excludes(rate_flag);   
+
+    //PROcess, into binary data [Do this once first!]
     CLI::App *process_command = app.add_subcommand("process", "PROcess the MC and systematics in root files into binary data for future rapid loading.");
 
     //PROsurf, make a 2D surface scan of physics parameters
@@ -166,6 +168,9 @@ int main(int argc, char* argv[])
     //PROfc, Feldmand-Cousins
     CLI::App *profc_command = app.add_subcommand("fc", "Run Feldman-Cousins for this injected signal");
     profc_command->add_option("-u,--universes", nuniv, "Number of Feldman Cousins universes to throw")->default_val(1000);
+
+    //PROglobal
+    CLI::App *proglobal_command = app.add_subcommand("global", "Just do a single global fit.");
 
     //PROtest, test things
     CLI::App *protest_command = app.add_subcommand("protest", "Testing ground for rapid quick tests.");
@@ -258,9 +263,9 @@ int main(int argc, char* argv[])
 
     //Build a PROsyst to sort and analyze all systematics
     //PROsyst systs(prop, config, systsstructs.front(), shapeonly);
-    std::vector<PROsyst> other_systs;
+    std::vector<PROsyst> variable_systs;
     for(size_t i = 0; i < config.m_num_variables; ++i)
-        other_systs.emplace_back(prop, config, systsstructs.at(i), shapeonly, i);
+        variable_systs.emplace_back(prop, config, systsstructs.at(i), shapeonly, i);
 
 
 
@@ -288,42 +293,44 @@ int main(int argc, char* argv[])
     std::uniform_int_distribution<uint32_t> dseed(0, std::numeric_limits<uint32_t>::max());
 
     //Pysics parameter input
-    Eigen::VectorXf pparams = Eigen::VectorXf::Constant(model->nparams + other_systs[config.i_prime].GetNSplines(), 0);
-    Eigen::VectorXf CVpparams = Eigen::VectorXf::Constant(model->nparams + other_systs[config.i_prime].GetNSplines(), 0);
+    Eigen::VectorXf pparams = Eigen::VectorXf::Constant(model->nparams + variable_systs[config.i_prime].GetNSplines(), 0);
+    Eigen::VectorXf CVpparams = Eigen::VectorXf::Constant(model->nparams + variable_systs[config.i_prime].GetNSplines(), 0);
     for(long i = 0; i < osc_param_vector.size(); ++i) {
         pparams(i) = osc_param_vector(i);
         CVpparams(i) = model->default_val(i);
     }
 
     //Spline injection studies
-    Eigen::VectorXf allparams = Eigen::VectorXf::Constant(model->nparams + other_systs[config.i_prime].GetNSplines(), 0);
-    Eigen::VectorXf systparams = Eigen::VectorXf::Constant(other_systs[config.i_prime].GetNSplines(), 0);
+    Eigen::VectorXf allparams = Eigen::VectorXf::Constant(model->nparams + variable_systs[config.i_prime].GetNSplines(), 0);
+    Eigen::VectorXf systparams = Eigen::VectorXf::Constant(variable_systs[config.i_prime].GetNSplines(), 0);
     for(size_t i = 0; i < model->nparams; ++i) allparams(i) = pparams(i);
     for(const auto& [name, shift]: injected_systs) {
         log<LOG_INFO>(L"%1% || Injected syst: %2% shifted by %3%") % __func__ % name.c_str() % shift;
 
-        auto it = std::find(other_systs[config.i_prime].spline_names.begin(), other_systs[config.i_prime].spline_names.end(), name);
-        if(it == other_systs[config.i_prime].spline_names.end()) {
+        auto it = std::find(variable_systs[config.i_prime].spline_names.begin(), variable_systs[config.i_prime].spline_names.end(), name);
+        if(it == variable_systs[config.i_prime].spline_names.end()) {
             for(const auto &[xml_name, plot_name]: config.m_mcgen_variation_plotname_map) {
                 if(name == plot_name) {
-                    it = std::find(other_systs[config.i_prime].spline_names.begin(), other_systs[config.i_prime].spline_names.end(), xml_name);
+                    it = std::find(variable_systs[config.i_prime].spline_names.begin(), variable_systs[config.i_prime].spline_names.end(), xml_name);
                     break;
                 }
             }
-            if(it == other_systs[config.i_prime].spline_names.end()) {
+            if(it == variable_systs[config.i_prime].spline_names.end()) {
                 log<LOG_ERROR>(L"%1% || Error: Unrecognized spline %2%. Ignoring this injected shift.") % __func__ % name.c_str();
                 continue;
             }
 
         }
-        int idx = std::distance(other_systs[config.i_prime].spline_names.begin(), it);
+        int idx = std::distance(variable_systs[config.i_prime].spline_names.begin(), it);
         allparams(idx+model->nparams) = shift;
         systparams(idx) = shift;
     }
 
     //Some logic for EITHER injecting fake/mock data of oscillated signal/syst shifts OR using real data
+    //Main data for the i_prime fitting.
     PROdata data;
 
+    //We will load all other variables too, but many are truth level so data won't be as common. 
     std::vector<PROdata> variable_data;
     if(!data_xml.empty()){
         PROconfig dataconfig(data_xml);
@@ -395,13 +402,12 @@ int main(int argc, char* argv[])
     else{
         for(size_t io = 0; io < config.m_num_variables; ++io) {
             PROspec data_spec = osc_params.size() || injected_systs.size() 
-                ? FillSpectra(config, prop, other_systs[io], *model, allparams, !eventbyevent, io)
+                ? FillSpectra(config, prop, variable_systs[io], *model, allparams, !eventbyevent, io)
                 : FillCVSpectra(config, prop, !eventbyevent, io);
 
             if(poisson_throw) PROspec::PoissonVariation(data_spec, dseed(myseed.global_rng));
             Eigen::VectorXf data_vec = CollapseMatrix(config, data_spec.Spec(), io);
             variable_data.push_back(PROdata(data_vec, data_vec.array().sqrt()));
-
         }
     }
 
@@ -410,7 +416,7 @@ int main(int argc, char* argv[])
     // Leave this after creating fake data so we can make fake data using systs that aren't
     // included in the fit.
 
-    for(auto & systs : other_systs){
+    for(auto & systs : variable_systs){
         if(syst_list.size()) {
 
             std::vector<std::string> systs_to_include;
@@ -432,7 +438,7 @@ int main(int argc, char* argv[])
                 }
             }
             systs = systs.subset(systs_to_include);
-            for(PROsyst &syst: other_systs)
+            for(PROsyst &syst: variable_systs)
                 syst = syst.subset(systs_to_include);
         } else if(systs_excluded.size()) {
 
@@ -455,12 +461,12 @@ int main(int argc, char* argv[])
                 }
             }
             systs = systs.excluding(systs_to_exclude);
-            for(PROsyst &syst: other_systs)
+            for(PROsyst &syst: variable_systs)
                 syst = syst.excluding(systs_to_exclude);
         }
     }
 
-        PROsyst allcovsyst = other_systs[config.i_prime].allsplines2cov(config, prop, dseed(PROseed::global_rng));
+        PROsyst allcovsyst = variable_systs[config.i_prime].allsplines2cov(config, prop, dseed(PROseed::global_rng));
 
     log<LOG_INFO>(L"%1% || Starting from fit preset :  %2%.")% __func__ % fit_preset.c_str();
     if (allowed_preset.find(fit_preset) == allowed_preset.end()) {
@@ -480,16 +486,17 @@ int main(int argc, char* argv[])
 
 
     //Metric Time
+    //Metrics are for i_prime only for now
     PROmetric *metric, *null_metric;
     if(chi2 == "PROchi") {
-        metric = new PROchi("", config, prop, &(other_systs[config.i_prime]), *model, data, eventbyevent ? PROmetric::EventByEvent : PROmetric::BinnedChi2);
-        null_metric = new PROchi("", config, prop, &(other_systs[config.i_prime]), *null_model, data, eventbyevent ? PROmetric::EventByEvent : PROmetric::BinnedChi2);
+        metric = new PROchi("", config, prop, &(variable_systs[config.i_prime]), *model, data, eventbyevent ? PROmetric::EventByEvent : PROmetric::BinnedChi2);
+        null_metric = new PROchi("", config, prop, &(variable_systs[config.i_prime]), *null_model, data, eventbyevent ? PROmetric::EventByEvent : PROmetric::BinnedChi2);
     } else if(chi2 == "PROCNP") {
-        metric = new PROCNP("", config, prop, &(other_systs[config.i_prime]), *model, data, eventbyevent ? PROmetric::EventByEvent : PROmetric::BinnedChi2);
-        null_metric = new PROCNP("", config, prop, &(other_systs[config.i_prime]), *null_model, data, eventbyevent ? PROmetric::EventByEvent : PROmetric::BinnedChi2);
+        metric = new PROCNP("", config, prop, &(variable_systs[config.i_prime]), *model, data, eventbyevent ? PROmetric::EventByEvent : PROmetric::BinnedChi2);
+        null_metric = new PROCNP("", config, prop, &(variable_systs[config.i_prime]), *null_model, data, eventbyevent ? PROmetric::EventByEvent : PROmetric::BinnedChi2);
     } else if(chi2 == "Poisson") {
-        metric = new PROpoisson("", config, prop, &(other_systs[config.i_prime]), *model, data, eventbyevent ? PROmetric::EventByEvent : PROmetric::BinnedChi2);
-        null_metric = new PROpoisson("", config, prop, &(other_systs[config.i_prime]), *null_model, data, eventbyevent ? PROmetric::EventByEvent : PROmetric::BinnedChi2);
+        metric = new PROpoisson("", config, prop, &(variable_systs[config.i_prime]), *model, data, eventbyevent ? PROmetric::EventByEvent : PROmetric::BinnedChi2);
+        null_metric = new PROpoisson("", config, prop, &(variable_systs[config.i_prime]), *null_model, data, eventbyevent ? PROmetric::EventByEvent : PROmetric::BinnedChi2);
     } else {
         log<LOG_ERROR>(L"%1% || Unrecognized chi2 function %2%") % __func__ % chi2.c_str();
         abort();
@@ -606,7 +613,7 @@ int main(int argc, char* argv[])
         std::unique_ptr<TGraphAsymmErrors> err_band = 
             MCMC_prefit_errors
             ? getMCMCErrorBand(mh_pre, fitconfig.MCMCburn, fitconfig.MCMCiter, config, prop, *metric_to_use, best_fit, priors, prior_covariance)
-            : getErrorBand(config, prop, other_systs[config.i_prime], binwidth_scale);
+            : getErrorBand(config, prop, variable_systs[config.i_prime], binwidth_scale);
 
         Metropolis mh_post(simple_target{*metric_to_use}, simple_proposal(*metric_to_use, dseed(PROseed::global_rng), 0.2, fixed_pars), best_fit, dseed(PROseed::global_rng));
         log<LOG_INFO>(L"%1% || Starting global getPostFitErrorBand() ") % __func__;
@@ -727,14 +734,14 @@ int main(int argc, char* argv[])
         if(const auto loc = std::find(model->param_names.begin(), model->param_names.end(), xvar); loc != model->param_names.end()) {
             xaxis_idx = std::distance(model->param_names.begin(), loc);
 
-        } else if(const auto loc = std::find(other_systs[config.i_prime].spline_names.begin(), other_systs[config.i_prime].spline_names.end(), xvar); loc != other_systs[config.i_prime].spline_names.end()) {
-            xaxis_idx = std::distance(other_systs[config.i_prime].spline_names.begin(), loc);
+        } else if(const auto loc = std::find(variable_systs[config.i_prime].spline_names.begin(), variable_systs[config.i_prime].spline_names.end(), xvar); loc != variable_systs[config.i_prime].spline_names.end()) {
+            xaxis_idx = std::distance(variable_systs[config.i_prime].spline_names.begin(), loc);
         } else {
             for(const auto &[xml_name, plot_name]: config.m_mcgen_variation_plotname_map) {
                 if(xvar == plot_name) {
-                    const auto loc = std::find(other_systs[config.i_prime].spline_names.begin(), other_systs[config.i_prime].spline_names.end(), xml_name);
-                    if(loc != other_systs[config.i_prime].spline_names.end()) {
-                        xaxis_idx = std::distance(other_systs[config.i_prime].spline_names.begin(), loc);
+                    const auto loc = std::find(variable_systs[config.i_prime].spline_names.begin(), variable_systs[config.i_prime].spline_names.end(), xml_name);
+                    if(loc != variable_systs[config.i_prime].spline_names.end()) {
+                        xaxis_idx = std::distance(variable_systs[config.i_prime].spline_names.begin(), loc);
                     }
                     break;
                 }
@@ -742,14 +749,14 @@ int main(int argc, char* argv[])
         }
         if(const auto loc = std::find(model->param_names.begin(), model->param_names.end(), yvar); loc != model->param_names.end()) {
             yaxis_idx = std::distance(model->param_names.begin(), loc);
-        } else if(const auto loc = std::find(other_systs[config.i_prime].spline_names.begin(),other_systs[config.i_prime].spline_names.end(), yvar); loc != other_systs[config.i_prime].spline_names.end()) {
-            yaxis_idx = std::distance(other_systs[config.i_prime].spline_names.begin(), loc);
+        } else if(const auto loc = std::find(variable_systs[config.i_prime].spline_names.begin(),variable_systs[config.i_prime].spline_names.end(), yvar); loc != variable_systs[config.i_prime].spline_names.end()) {
+            yaxis_idx = std::distance(variable_systs[config.i_prime].spline_names.begin(), loc);
         } else {
             for(const auto &[xml_name, plot_name]: config.m_mcgen_variation_plotname_map) {
                 if(yvar == plot_name) {
-                    const auto loc = std::find(other_systs[config.i_prime].spline_names.begin(), other_systs[config.i_prime].spline_names.end(), xml_name);
-                    if(loc != other_systs[config.i_prime].spline_names.end()) {
-                        yaxis_idx = std::distance(other_systs[config.i_prime].spline_names.begin(), loc);
+                    const auto loc = std::find(variable_systs[config.i_prime].spline_names.begin(), variable_systs[config.i_prime].spline_names.end(), xml_name);
+                    if(loc != variable_systs[config.i_prime].spline_names.end()) {
+                        yaxis_idx = std::distance(variable_systs[config.i_prime].spline_names.begin(), loc);
                     }
                     break;
                 }
@@ -775,10 +782,10 @@ int main(int argc, char* argv[])
 
         if(xlabel == "") 
             xlabel = xaxis_idx < model->nparams ? model->pretty_param_names[xaxis_idx] : 
-                config.m_mcgen_variation_plotname_map[other_systs[config.i_prime].spline_names[xaxis_idx]];
+                config.m_mcgen_variation_plotname_map[variable_systs[config.i_prime].spline_names[xaxis_idx]];
         if(ylabel == "") 
             ylabel = yaxis_idx < model->nparams ? model->pretty_param_names[yaxis_idx] : 
-                config.m_mcgen_variation_plotname_map[other_systs[config.i_prime].spline_names[yaxis_idx]];
+                config.m_mcgen_variation_plotname_map[variable_systs[config.i_prime].spline_names[yaxis_idx]];
         TH2D surf("surf", (";"+xlabel+";"+ylabel).c_str(), surface.nbinsx, binedges_x.data(), surface.nbinsy, binedges_y.data());
 
         for(size_t i = 0; i < surface.nbinsx; i++) {
@@ -809,8 +816,8 @@ int main(int argc, char* argv[])
                 for(size_t i = 0; i < model->nparams; ++i) {
                     best_fit[model->param_names[i]] = res.best_fit(i);
                 }
-                for(size_t i = 0; i < other_systs[config.i_prime].GetNSplines(); ++i) {
-                    best_fit[other_systs[config.i_prime].spline_names[i]] = res.best_fit(i + model->nparams);
+                for(size_t i = 0; i < variable_systs[config.i_prime].GetNSplines(); ++i) {
+                    best_fit[variable_systs[config.i_prime].spline_names[i]] = res.best_fit(i + model->nparams);
                 }
                 tree.Fill();
             }
@@ -848,11 +855,11 @@ int main(int argc, char* argv[])
                 PROdata data(newSpec.Spec(), newSpec.Error());
                 PROmetric *metric;
                 if(chi2 == "PROchi") {
-                    metric = new PROchi("", config, prop, &other_systs[config.i_prime], *model, data, eventbyevent ? PROmetric::EventByEvent : PROmetric::BinnedChi2);
+                    metric = new PROchi("", config, prop, &variable_systs[config.i_prime], *model, data, eventbyevent ? PROmetric::EventByEvent : PROmetric::BinnedChi2);
                 } else if(chi2 == "PROCNP") {
-                    metric = new PROCNP("", config, prop, &other_systs[config.i_prime], *model, data, eventbyevent ? PROmetric::EventByEvent : PROmetric::BinnedChi2);
+                    metric = new PROCNP("", config, prop, &variable_systs[config.i_prime], *model, data, eventbyevent ? PROmetric::EventByEvent : PROmetric::BinnedChi2);
                 } else if(chi2 == "Poisson") {
-                    metric = new PROpoisson("", config, prop, &other_systs[config.i_prime], *model, data, eventbyevent ? PROmetric::EventByEvent : PROmetric::BinnedChi2);
+                    metric = new PROpoisson("", config, prop, &variable_systs[config.i_prime], *model, data, eventbyevent ? PROmetric::EventByEvent : PROmetric::BinnedChi2);
                 } else {
                     log<LOG_ERROR>(L"%1% || Unrecognized chi2 function %2%") % __func__ % chi2.c_str();
                     abort();
@@ -944,6 +951,7 @@ int main(int argc, char* argv[])
         std::vector<PROspec> other_cvs;
         for(size_t io = 0; io < config.m_num_variables; ++io) {
             other_cvs.push_back(FillCVSpectra(config, prop, !eventbyevent, io));
+
             plot_channels(final_output_tag+"_other_"+std::to_string(io)+"_PROplot_CV.pdf", config, other_cvs.back(), {}, {}, {}, {}, notext, opt, io);
         }
 
@@ -957,7 +965,7 @@ int main(int argc, char* argv[])
 
             c.Print((final_output_tag +"_PROplot_Osc.pdf"+ "[").c_str(), "pdf");
 
-            PROspec osc_spec = FillSpectra(config, prop, other_systs[config.i_prime], *model, pparams, !eventbyevent,config.i_prime );
+            PROspec osc_spec = FillSpectra(config, prop, variable_systs[config.i_prime], *model, pparams, !eventbyevent,config.i_prime );
             std::map<std::string, std::unique_ptr<TH1D>> osc_hists = getCVHists(osc_spec, config, binwidth_scale);
             size_t global_subchannel_index = 0;
             for(size_t im = 0; im < config.m_num_modes; im++){
@@ -1052,8 +1060,8 @@ int main(int argc, char* argv[])
         //Now some covariances
         std::map<std::string, std::unique_ptr<TH2D>> matrices;
 
-        if(other_systs[config.i_prime].GetNCovar()>0){
-            matrices = covarianceTH2D(other_systs[config.i_prime], config, other_cvs[config.i_prime]);
+        if(variable_systs[config.i_prime].GetNCovar()>0){
+            matrices = covarianceTH2D(variable_systs[config.i_prime], config, other_cvs[config.i_prime]);
             c.Print((final_output_tag+"_PROplot_Covar.pdf" + "[").c_str(), "pdf");
             for(const auto &[name, mat]: matrices) {
                 mat->Draw("colz");
@@ -1068,18 +1076,26 @@ int main(int argc, char* argv[])
         std::vector<std::vector<TPaveText>> other_channel_chitexts; 
 
         for(size_t io = 0; io < config.m_num_variables; ++io) {
+        
+            log<LOG_INFO>(L"%1% || On Variable number %2%:") % __func__ % io ;
             int global_channel_index = 0;
             std::vector<TPaveText> channel_chitexts;
+
+            //Currently metrics are for i_prime only. TO BE DONE
 
             for(size_t im = 0; im < config.m_num_modes; im++){
                 for(size_t id =0; id < config.m_num_detectors; id++){
                     for(size_t ic = 0; ic < config.m_num_channels; ic++){
-                        log<LOG_INFO>(L"%1% || On channel %2%:") % __func__ % global_channel_index ;
-                        double chival = allcov_metric->getSingleChannelChi(global_channel_index,io);
-                        int ndf = config.m_channel_variable_num_bins[ic][io] - bool(opt&PlotOptions::AreaNormalized);
-                        log<LOG_INFO>(L"%1% || -- the datamc chi^2/ndof is %2%/%3% .") % __func__ % chival % ndf;
                         TPaveText chi2text(0.59, 0.50, 0.89, 0.59, "NDC");
-                        chi2text.AddText(("#chi^{2}/ndf = "+to_string_prec(chival,2)+"/"+std::to_string(ndf)).c_str());
+                        if(io==config.i_prime){
+                            log<LOG_INFO>(L"%1% || On channel %2%:") % __func__ % global_channel_index ;
+                            double chival = allcov_metric->getSingleChannelChi(global_channel_index, io);
+                            int ndf = config.m_channel_variable_num_bins[ic][io] - bool(opt&PlotOptions::AreaNormalized);
+                            log<LOG_INFO>(L"%1% || -- the datamc chi^2/ndof is %2%/%3% .") % __func__ % chival % ndf;
+                            chi2text.AddText(("#chi^{2}/ndf = "+to_string_prec(chival,2)+"/"+std::to_string(ndf)).c_str());
+                        }else{
+                            chi2text.AddText("");
+                        }
                         chi2text.SetFillColor(0);
                         chi2text.SetBorderSize(0);
                         chi2text.SetTextAlign(12);
@@ -1094,7 +1110,8 @@ int main(int argc, char* argv[])
 
         std::vector<std::unique_ptr<TGraphAsymmErrors>> other_err_bands;
         for(size_t io = 0; io < config.m_num_variables; ++io) {
-            other_err_bands.push_back(getErrorBand(config, prop, other_systs[io], binwidth_scale, io));
+            if(io==1)continue;// For now skip the L/E 250 bin. 
+            other_err_bands.push_back(getErrorBand(config, prop, variable_systs[io], binwidth_scale, io));
             plot_channels(final_output_tag+"_PROplot_other_"+std::to_string(io)+"_ErrorBand.pdf", config, other_cvs[io], {}, variable_data[io], 
                     other_err_bands.back().get(), {}, other_channel_chitexts[io], opt | PlotOptions::DataMCRatio, io);
         }
@@ -1104,7 +1121,7 @@ int main(int argc, char* argv[])
         if(with_splines) {
             c.Print((final_output_tag+"_PROplot_Spline.pdf" + "[").c_str(), "pdf");
 
-            std::map<std::string, std::vector<std::pair<std::unique_ptr<TGraph>,std::unique_ptr<TGraph>>>> spline_graphs = getSplineGraphs(other_systs[config.i_prime], config);
+            std::map<std::string, std::vector<std::pair<std::unique_ptr<TGraph>,std::unique_ptr<TGraph>>>> spline_graphs = getSplineGraphs(variable_systs[config.i_prime], config);
             c.Clear();
             c.Divide(4,4);
             for(const auto &[syst_name, syst_bins]: spline_graphs) {
@@ -1145,7 +1162,7 @@ int main(int argc, char* argv[])
         }
 
         if((osc_params.size())) {
-            PROspec osc_spec = FillSpectra(config, prop, other_systs[config.i_prime], *model, pparams, !eventbyevent,config.i_prime);
+            PROspec osc_spec = FillSpectra(config, prop, variable_systs[config.i_prime], *model, pparams, !eventbyevent,config.i_prime);
             std::map<std::string, std::unique_ptr<TH1D>> osc_hists = getCVHists(osc_spec, config, binwidth_scale);
             fout.mkdir("Osc_hists");
             fout.cd("Osc_hists");
@@ -1168,7 +1185,7 @@ int main(int argc, char* argv[])
 
 
         if((with_splines)) {
-            std::map<std::string, std::vector<std::pair<std::unique_ptr<TGraph>,std::unique_ptr<TGraph>>>> spline_graphs = getSplineGraphs(other_systs[config.i_prime], config);
+            std::map<std::string, std::vector<std::pair<std::unique_ptr<TGraph>,std::unique_ptr<TGraph>>>> spline_graphs = getSplineGraphs(variable_systs[config.i_prime], config);
             fout.mkdir("Splines");
             fout.cd("Splines");
             for(const auto &[name, syst_splines]: spline_graphs) {
@@ -1193,7 +1210,7 @@ int main(int argc, char* argv[])
     if(*profc_command) {
         size_t FCthreads = nthread > nuniv ? nuniv : nthread;
         Eigen::MatrixXf cv_vec = FillCVSpectra(config, prop, !eventbyevent).Spec();
-        Eigen::MatrixXf L = other_systs[config.i_prime].DecomposeFractionalCovariance(config, cv_vec);
+        Eigen::MatrixXf L = variable_systs[config.i_prime].DecomposeFractionalCovariance(config, cv_vec);
 
         std::vector<std::vector<float>> dchi2s;
         dchi2s.reserve(FCthreads);
@@ -1205,7 +1222,7 @@ int main(int argc, char* argv[])
         for(size_t i = 0; i < nthread; i++) {
             dchi2s.emplace_back();
             outs.emplace_back();
-            fc_args args{todo + (i >= addone), &dchi2s.back(), &outs.back(), config, prop, other_systs[config.i_prime], chi2, pparams, L, scanFitConfig,(*myseed.getThreadSeeds())[i], (int)i, !eventbyevent};
+            fc_args args{todo + (i >= addone), &dchi2s.back(), &outs.back(), config, prop, variable_systs[config.i_prime], chi2, pparams, L, scanFitConfig,(*myseed.getThreadSeeds())[i], (int)i, !eventbyevent};
 
             threads.emplace_back([args]() {
                     PROfit::fc_worker(args);
@@ -1235,10 +1252,10 @@ int main(int argc, char* argv[])
                     chi2_syst = fco.chi2_syst;
                     best_dmsq = fco.dmsq;
                     best_sinsq2t = fco.sinsq2tmm;
-                    for(size_t i = 0; i < other_systs[config.i_prime].GetNSplines(); ++i) {
-                        best_systs_osc[other_systs[config.i_prime].spline_names[i]] = fco.best_fit_osc(i);
-                        best_systs[other_systs[config.i_prime].spline_names[i]] = fco.best_fit_syst(i);
-                        syst_throw[other_systs[config.i_prime].spline_names[i]] = fco.syst_throw(i);
+                    for(size_t i = 0; i < variable_systs[config.i_prime].GetNSplines(); ++i) {
+                        best_systs_osc[variable_systs[config.i_prime].spline_names[i]] = fco.best_fit_osc(i);
+                        best_systs[variable_systs[config.i_prime].spline_names[i]] = fco.best_fit_syst(i);
+                        syst_throw[variable_systs[config.i_prime].spline_names[i]] = fco.syst_throw(i);
                     }
                     tree.Fill();
                 }
@@ -1249,7 +1266,7 @@ int main(int argc, char* argv[])
         {
             ofstream fcout(final_output_tag+"_FC.csv");
             fcout << "chi2_osc,chi2_syst,best_dmsq,best_sinsq2t";
-            for(const std::string &name: other_systs[config.i_prime].spline_names) {
+            for(const std::string &name: variable_systs[config.i_prime].spline_names) {
                 fcout << ",best_" << name << "_osc,best_" << name << "," << name << "_throw";
             }
             fcout << "\r\n";
@@ -1257,7 +1274,7 @@ int main(int argc, char* argv[])
             for(const auto &out: outs) {
                 for(const auto &fco: out) {
                     fcout << fco.chi2_osc << "," << fco.chi2_syst << "," << fco.dmsq << "," << fco.sinsq2tmm;
-                    for(size_t i = 0; i < other_systs[config.i_prime].GetNSplines(); ++i) {
+                    for(size_t i = 0; i < variable_systs[config.i_prime].GetNSplines(); ++i) {
                         fcout << fco.best_fit_osc(i) << "," << fco.best_fit_syst(i) << "," << fco.syst_throw(i);
                     }
                     fcout << "\r\n";
@@ -1271,6 +1288,50 @@ int main(int argc, char* argv[])
             % __func__ % nuniv % flattened_dchi2s[0.9*flattened_dchi2s.size()];
     }
 
+
+    //***********************************************************************
+    //***********************************************************************
+    //******************** global       **************************
+    //***********************************************************************
+    //***********************************************************************
+    if(*proglobal_command){
+
+
+        PROmetric *metric_to_use = systs_only_profile ? null_metric : metric;
+        size_t nparams = metric_to_use->nParams();
+        size_t nphys = metric_to_use->GetModel().nparams;
+        PROfitter fitter(metric_to_use->UpperBound(), metric_to_use->LowerBound(), fitconfig);
+
+        log<LOG_INFO>(L"%1% || ########### Print of inputs ############") % __func__;
+        metric_to_use->print(allparams);
+        log<LOG_INFO>(L"%1% || ########### Starting Global Best Fit Minimizing ############") % __func__;
+
+
+
+        float chi2 = fitter.Fit(*metric_to_use); 
+        global_fit_chi2 = chi2;
+        Eigen::VectorXf best_fit = fitter.best_fit;
+        if(global_fit_result.size() == 0) global_fit_result = best_fit;
+        Eigen::MatrixXf post_covar = fitter.Covariance();
+
+
+        log<LOG_INFO>(L"%1% || ################################################") % __func__;
+        log<LOG_INFO>(L"%1% || ########### Global Best Fit Results ############") % __func__;
+        log<LOG_INFO>(L"%1% || ################################################") % __func__;
+        log<LOG_INFO>(L"%1% || Global Best Fit chi^2: %2%") %__func__ % chi2;
+        log<LOG_INFO>(L"%1% || at paramters: ") % __func__;
+
+        for(size_t i = 0; i< nparams; i++){
+
+            if(i<nphys){
+                log<LOG_INFO>(L"%1% || %2%  : %3% (log) %4% (nonlog) ") % __func__ % metric_to_use->GetModel().pretty_param_names[i].c_str() % best_fit(i) % pow(10,best_fit(i));
+            }else{
+                log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % metric_to_use->GetSysts().spline_names[i-nphys].c_str() % best_fit(i) ;
+            }
+        }
+        log<LOG_INFO>(L"%1% || ################################################") % __func__;
+
+    }
 
     //***********************************************************************
     //***********************************************************************

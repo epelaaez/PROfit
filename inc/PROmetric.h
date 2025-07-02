@@ -27,7 +27,7 @@ public:
     virtual ~PROmetric() {}
     virtual void fixSpline(int,float)  = 0;
     virtual float Pull(const Eigen::VectorXf &systs) = 0;
-
+    virtual void print(const Eigen::VectorXf &param) = 0;
     size_t nParams() const {return GetModel().nparams + GetSysts().GetNSplines();}
 
     Eigen::VectorXf LowerBound() const {
