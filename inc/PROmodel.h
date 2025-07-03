@@ -1,6 +1,7 @@
 #ifndef PROMODEL_H
 #define PROMODEL_H
 
+#include "PROconfig.h"
 #include "PROpeller.h"
 
 #include <Eigen/Eigen>
@@ -52,10 +53,10 @@ public:
 
 class PROnumudis : public PROmodel {
 public:
-    PROnumudis(const PROpeller &prop) {
+    PROnumudis(const PROpeller &prop,const std::map<std::string,int> &parameter_map) {
         model_functions.push_back([this]([[maybe_unused]] const Eigen::VectorXf &v, float) {(void)this; return 1.0;});
         model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pmumu(v(0),v(1),le);});
-        ivar = 1;
+        ivar = parameter_map.at("L/E");
 
 
         size_t nvar = prop.variable_mc_stat_err.size();
@@ -116,10 +117,10 @@ public:
 
 class PROnueapp : public PROmodel {
 public:
-    PROnueapp(const PROpeller &prop) {
+    PROnueapp(const PROpeller &prop,const std::map<std::string,int> &parameter_map) {
         model_functions.push_back([this]([[maybe_unused]] const Eigen::VectorXf &v, float) {(void)this; return 1.0;});
         model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pmue(v(0),v(1),le);});
-        ivar = 1;
+        ivar = parameter_map.at("L/E");
 
         size_t nvar = prop.variable_mc_stat_err.size();
         hists.resize(nvar);
@@ -183,13 +184,13 @@ public:
 
 class PRO3p1 : public PROmodel {
 public:
-    PRO3p1(const PROpeller &prop) {
+    PRO3p1(const PROpeller &prop, const std::map<std::string,int> &parameter_map) {
 
         model_functions.push_back([this]([[maybe_unused]] const Eigen::VectorXf &v, float) {(void)this; return 1.0; });
         model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pmumu(v(0),v(1),v(2),le); });
         model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pmue(v(0),v(1),v(2),le); });
         model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pee(v(0),v(1),v(2),le); });
-        ivar = 1;
+        ivar = parameter_map.at("L/E");
 
          size_t nvar = prop.variable_mc_stat_err.size();
         hists.resize(nvar);
@@ -315,13 +316,15 @@ public:
 
 // Main interface to different models
 static inline
-std::unique_ptr<PROmodel> get_model_from_string(const std::string &name, const PROpeller &prop) {
-    if(name == "numudis") {
-        return std::unique_ptr<PROmodel>(new PROnumudis(prop));
+std::unique_ptr<PROmodel> get_model_from_string(const PROconfig& config, const PROpeller &prop) {
+     std::string name = config.m_model_tag;
+
+     if(name == "numudis") {
+        return std::unique_ptr<PROmodel>(new PROnumudis(prop,config.m_model_parameter_map));
     } else if(name == "nueapp") {
-        return std::unique_ptr<PROmodel>(new PROnueapp(prop));
+        return std::unique_ptr<PROmodel>(new PROnueapp(prop,config.m_model_parameter_map));
     } else if(name == "3+1") {
-        return std::unique_ptr<PROmodel>(new PRO3p1(prop));
+        return std::unique_ptr<PROmodel>(new PRO3p1(prop,config.m_model_parameter_map));
     }
     log<LOG_ERROR>(L"%1% || Unrecognized model name %2%. Try numudis, nueapp or 3+1 for now. Terminating.") % __func__ % name.c_str();
     exit(EXIT_FAILURE);

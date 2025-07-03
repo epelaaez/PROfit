@@ -269,7 +269,7 @@ int main(int argc, char* argv[])
 
 
 
-    std::unique_ptr<PROmodel> model = get_model_from_string(config.m_model_tag, prop);
+    std::unique_ptr<PROmodel> model = get_model_from_string(config, prop);
     std::unique_ptr<PROmodel> null_model = std::make_unique<NullModel>(prop);
 
     Eigen::VectorXf osc_param_vector = model->default_val;

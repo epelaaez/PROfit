@@ -275,7 +275,9 @@ namespace PROfit{
             std::string m_model_tag;
             std::vector<int> m_model_rule_index;
             std::vector<std::string> m_model_rule_names;
-
+            std::vector<int> m_model_parameter_index;
+            std::vector<std::string> m_model_parameter_names;
+            std::map<std::string,int> m_model_parameter_map;
 
             bool m_bool_rate_only;
             //----- PUBLIC FUNCTIONS ------

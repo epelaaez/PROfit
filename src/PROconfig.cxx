@@ -868,7 +868,6 @@ int PROconfig::LoadFromXML(const std::string &filename){
         }
 
         // Now loop over all this models rules
-
         tinyxml2::XMLElement *pModelRule;
         pModelRule = pModel->FirstChildElement("rule");
         while(pModelRule){
@@ -894,6 +893,35 @@ int PROconfig::LoadFromXML(const std::string &filename){
             log<LOG_DEBUG>(L"%1% || Model Rule Name :  %2% and index %3% ") % __func__ % m_model_rule_names.back().c_str() % m_model_rule_index.back()  ;
             pModelRule = pModelRule->NextSiblingElement("rule");
         }
+
+       // Now loop over all this models Parameters
+        tinyxml2::XMLElement *pModelParam;
+        pModelParam = pModel->FirstChildElement("parameter");
+        while(pModelParam){
+            const char* model_parameter_name= pModelParam->Attribute("name");
+            if(model_parameter_name==NULL){
+                log<LOG_ERROR>(L"%1% || ERROR: Model Params need a name in xml.@ line %2% in %3% ") % __func__ % __LINE__  % __FILE__;
+                log<LOG_ERROR>(L"Terminating.");
+                exit(EXIT_FAILURE);
+            }else{
+                m_model_parameter_names.push_back(model_parameter_name);
+            }
+
+
+            const char* model_parameter_index= pModelParam->Attribute("variable_index");
+            if(model_parameter_index==NULL){
+                log<LOG_ERROR>(L"%1% || ERROR: Model Params need a variable index in xml.@ line %2% in %3% ") % __func__ % __LINE__  % __FILE__;
+                log<LOG_ERROR>(L"Terminating.");
+                exit(EXIT_FAILURE);
+            }else{
+                m_model_parameter_index.push_back(strtod(model_parameter_index, &end));
+            }
+
+            log<LOG_DEBUG>(L"%1% || Model Param Name :  %2% and index %3% ") % __func__ % m_model_parameter_names.back().c_str() % m_model_parameter_index.back()  ;
+            m_model_parameter_map[m_model_parameter_names.back()]=m_model_parameter_index.back();
+            pModelParam = pModelParam->NextSiblingElement("parameter");
+        }
+
     }//end model
 
     for(size_t i = 0 ; i<m_mcgen_variation_type.size(); ++i){
