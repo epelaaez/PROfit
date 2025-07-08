@@ -58,6 +58,10 @@ namespace PROfit{
     Eigen::VectorXf CollapseMatrix(const PROconfig &inconfig, const Eigen::VectorXf& full_vector, int other_index);
 
     std::string getIcon();
+    
+    /* Mostly a debug function to print all information from PROconfig on variables and the binning above. */
+    void PrintVariableInfo(const PROconfig &inconfig);
+
 
     template <typename T>
     std::string to_string_prec(const T a_value, const int n = 6)    {
