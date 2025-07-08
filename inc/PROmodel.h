@@ -56,8 +56,13 @@ public:
     PROnumudis(const PROpeller &prop,const std::map<std::string,int> &parameter_map) {
         model_functions.push_back([this]([[maybe_unused]] const Eigen::VectorXf &v, float) {(void)this; return 1.0;});
         model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pmumu(v(0),v(1),le);});
-        ivar = parameter_map.at("L/E");
+        
 
+        if(parameter_map.find("L/E") == parameter_map.end()) {
+            log<LOG_ERROR>(L"%1%, %2% || Missing expected parameter: 'L/E'.Make sure its in your model section of XML. ") % __func__ % __LINE__;
+            throw std::runtime_error("Missing parameter: L/E");
+        }
+        ivar = parameter_map.at("L/E");
 
         size_t nvar = prop.variable_mc_stat_err.size();
         hists.resize(nvar);
@@ -120,7 +125,12 @@ public:
     PROnueapp(const PROpeller &prop,const std::map<std::string,int> &parameter_map) {
         model_functions.push_back([this]([[maybe_unused]] const Eigen::VectorXf &v, float) {(void)this; return 1.0;});
         model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pmue(v(0),v(1),le);});
+        if(parameter_map.find("L/E") == parameter_map.end()) {
+            log<LOG_ERROR>(L"%1%, %2% || Missing expected parameter: 'L/E'. Make sure its in your model section of XML.") % __func__ % __LINE__;
+            throw std::runtime_error("Missing parameter: L/E");
+        }
         ivar = parameter_map.at("L/E");
+
 
         size_t nvar = prop.variable_mc_stat_err.size();
         hists.resize(nvar);
@@ -190,7 +200,13 @@ public:
         model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pmumu(v(0),v(1),v(2),le); });
         model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pmue(v(0),v(1),v(2),le); });
         model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pee(v(0),v(1),v(2),le); });
+        if(parameter_map.find("L/E") == parameter_map.end()) {
+            log<LOG_ERROR>(L"%1%, %2% || Missing expected parameter: 'L/E'. Make sure its in your model section of XML.") % __func__ % __LINE__;
+            throw std::runtime_error("Missing parameter: L/E");
+        }
         ivar = parameter_map.at("L/E");
+
+
 
          size_t nvar = prop.variable_mc_stat_err.size();
         hists.resize(nvar);
