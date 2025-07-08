@@ -279,7 +279,7 @@ namespace PROfit {
         std::vector<size_t> flatbins;
         for(auto &name: flatnames){
             size_t is = config.GetSubchannelIndex(name);     
-            size_t ic = config.GetChannelIndex(is);     
+            size_t ic = config.GetLocalChannelIndexFromGlobalSubchannelIndex(is);     
 
 
             size_t start = config.GetGlobalVariableBinStart(is, other_index);

@@ -1011,12 +1011,10 @@ size_t PROconfig::GetSubchannelIndex(const std::string& fullname) const{
     return pos_iter->second;
 }
 
-size_t PROconfig::GetChannelIndex(size_t subchannel_index) const{
+size_t PROconfig::GetLocalChannelIndexFromGlobalSubchannelIndex(size_t subchannel_index) const{
     size_t index = this->find_equal_index(m_vec_subchannel_index, subchannel_index);
     return m_vec_channel_index[index];
 }
-
-
 
 
 
@@ -1034,7 +1032,7 @@ size_t PROconfig::GetCollapsedGlobalVariableBinStart(size_t channel_index, size_
         exit(EXIT_FAILURE);
     }    
     size_t index = 0;
-    for(size_t i = 0; i < channel_index; ++i) index += m_channel_variable_num_bins[GetLocalChannelIndex(i)][other_index];
+    for(size_t i = 0; i < channel_index; ++i) index += m_channel_variable_num_bins[GetLocalChannelIndexFromGlobalChannelIndex(i)][other_index];
     return index;
 }
 
@@ -1045,7 +1043,7 @@ size_t PROconfig::GetSubchannelIndexFromVariableGlobalBin(size_t global_reco_ind
 }
 
 
-size_t PROconfig::GetLocalChannelIndex(size_t global_channel_index) const{
+size_t PROconfig::GetLocalChannelIndexFromGlobalChannelIndex(size_t global_channel_index) const{
     return global_channel_index%m_num_channels; 
 }
 
@@ -1061,7 +1059,7 @@ size_t PROconfig::GetChannelNVariableBins(size_t channel_index, size_t other_ind
         log<LOG_ERROR>(L"Terminating.");
         exit(EXIT_FAILURE);
     }
-    return m_channel_variable_num_bins[GetLocalChannelIndex(channel_index)][other_index];
+    return m_channel_variable_num_bins[GetLocalChannelIndexFromGlobalChannelIndex(channel_index)][other_index];
 
 }
 
@@ -1075,7 +1073,7 @@ const std::vector<float>& PROconfig::GetChannelVariableBinEdges(size_t channel_i
         exit(EXIT_FAILURE);
     }
 
-    return m_channel_variable_bin_edges[GetLocalChannelIndex(channel_index)][other_index];
+    return m_channel_variable_bin_edges[GetLocalChannelIndexFromGlobalChannelIndex(channel_index)][other_index];
 
 }
 

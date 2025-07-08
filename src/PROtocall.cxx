@@ -21,7 +21,7 @@ namespace PROfit{
 
     int FindGlobalVariableBin(const PROconfig &inconfig, float other_value, int subchannel_index, int other_index) {
         int global_bin_start = inconfig.GetGlobalVariableBinStart(subchannel_index, other_index);
-        int channel_index = inconfig.GetChannelIndex(subchannel_index);
+        int channel_index = inconfig.GetLocalChannelIndexFromGlobalSubchannelIndex(subchannel_index);
         if(inconfig.GetChannelNVariableBins(channel_index, other_index) == 0){
             log<LOG_ERROR>(L"%1% || Subchannel %2% does not have other bins") % __func__ % subchannel_index;
             log<LOG_ERROR>(L"%1% || Return global bin of -1") % __func__ ;
@@ -101,18 +101,18 @@ namespace PROfit{
                     for(size_t sc = 0; sc < inconfig.m_num_subchannels[ic]; sc++){
 
                         std::string temp_name  = inconfig.m_mode_names[im] +"_" +inconfig.m_detector_names[id]+"_"+inconfig.m_channel_names[ic]+"_"+inconfig.m_subchannel_names[ic][sc];
+                        //global subchannel index is the main marker/identifier.
                         int global_subchannel_index1 = inconfig.GetSubchannelIndex(temp_name);
-                        int global_channel_index = inconfig.GetChannelIndex(global_subchannel_index1);
-                        int local_channel_index1 = inconfig.GetLocalChannelIndex(global_subchannel_index1);
+                        int local_channel_index1 = inconfig.GetLocalChannelIndexFromGlobalSubchannelIndex(global_subchannel_index1);
                         int local_channel_index2 = ic;
                         int local_subchannel_index = sc;
 
-                        log<LOG_INFO>(L"%1% || im:id %2%:%3%  %4%  || local_channel_index (%5%,%6%) || local_subchannel_index %7% global (%8%)") % __func__ % im % id % temp_name.c_str() %  local_channel_index1 % local_channel_index2 % sc % global_subchannel_index1 ;
+                        log<LOG_INFO>(L"%1% || im:id %2%:%3%  %4%  || local_channel_index (%5%,ic:%6%) global_channel_index (%7%) || local_subchannel_index %8% global (%9%)") % __func__ % im % id % temp_name.c_str() %  local_channel_index1 % local_channel_index2 % -9 % sc % global_subchannel_index1 ;
 
                         for(size_t io = 0; io < inconfig.m_num_variables; ++io) {
 
                             int nstart = inconfig.GetGlobalVariableBinStart(global_subchannel_index1,io);
-                            int nbin = inconfig.GetChannelNVariableBins(global_channel_index,io);
+                            int nbin = inconfig.GetChannelNVariableBins(local_channel_index1,io);
                             std::vector<float> edges = inconfig.GetChannelVariableBinEdges (global_subchannel_index1,io);
                             log<LOG_INFO>(L"%1% ||  ---  Vartiable %2%  || nstart %3% nbin %4% ") % __func__ % io %nstart % nbin ;
                             log<LOG_INFO>(L"%1% ||  --- -- Edges %2% ") % __func__ % edges ;

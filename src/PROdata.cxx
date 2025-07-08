@@ -43,7 +43,7 @@ void PROdata::QuickFill(int bin_index, float weight){
 }
 
 TH1D PROdata::toTH1D(const PROconfig &inconfig, int global_channel_index, int other_index) const {
-    int local_channel_index = inconfig.GetLocalChannelIndex(global_channel_index);
+    int local_channel_index = inconfig.GetLocalChannelIndexFromGlobalChannelIndex(global_channel_index);
 
     int global_bin_start =  inconfig.GetCollapsedGlobalVariableBinStart(global_channel_index, other_index);
     //set up hist specs

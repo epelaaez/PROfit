@@ -82,7 +82,7 @@ TH1D PROspec::toTH1D_Collapsed(const PROconfig &inconfig, int channel_index, siz
 
 TH1D PROspec::toTH1D(PROconfig const & inconfig, int subchannel_index, int other_index) const{
     int global_bin_start = inconfig.GetGlobalVariableBinStart(subchannel_index, other_index);
-    int channel_index = inconfig.GetChannelIndex(subchannel_index);
+    int channel_index = inconfig.GetLocalChannelIndexFromGlobalSubchannelIndex(subchannel_index);
 
     //set up hist specs
     int nbins =  inconfig.m_channel_variable_num_bins[channel_index][other_index];

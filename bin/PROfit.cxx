@@ -330,7 +330,7 @@ int main(int argc, char* argv[])
     //Main data for the i_prime fitting.
     PROdata data;
 
-    //We will load all other variables too, but many are truth level so data won't be as common. 
+    //We will load all other variables too, but many are truth level so data won't be as common.
     std::vector<PROdata> variable_data;
     if(!data_xml.empty()){
         PROconfig dataconfig(data_xml);
@@ -400,6 +400,7 @@ int main(int argc, char* argv[])
 
     }//if no data, use injected or fake data;
     else{
+        log<LOG_INFO>(L"%1% || Going to get fake data set up for each variable.") % __func__ ;
         for(size_t io = 0; io < config.m_num_variables; ++io) {
             PROspec data_spec = osc_params.size() || injected_systs.size() 
                 ? FillSpectra(config, prop, variable_systs[io], *model, allparams, !eventbyevent, io)
@@ -465,8 +466,8 @@ int main(int argc, char* argv[])
                 syst = syst.excluding(systs_to_exclude);
         }
     }
-
-        PROsyst allcovsyst = variable_systs[config.i_prime].allsplines2cov(config, prop, dseed(PROseed::global_rng));
+    log<LOG_INFO>(L"%1% || Making a PROsyst thats full covarinace for future error bar creation (might be slow) ")% __func__ ;
+    PROsyst allcovsyst = variable_systs[config.i_prime].allsplines2cov(config, prop, dseed(PROseed::global_rng));
 
     log<LOG_INFO>(L"%1% || Starting from fit preset :  %2%.")% __func__ % fit_preset.c_str();
     if (allowed_preset.find(fit_preset) == allowed_preset.end()) {
