@@ -65,7 +65,7 @@ int main(int argc, char* argv[])
     bool noxrootd = false;
     bool poisson_throw = false;
     std::vector<std::string> scale_arg;
-    std::map<std::string, float> scale;
+    std::map<std::string, float> scale_map;
     size_t nthread = 1;
     std::map<std::string, float> scan_fit_options;
     std::map<std::string, float> global_fit_options;
@@ -256,9 +256,9 @@ int main(int argc, char* argv[])
             exit(EXIT_FAILURE);
         }
         for (size_t i = 0; i < scale_arg.size(); i += 2) {
-            scale[scale_arg[i]] = std::stof(scale_arg[i + 1]);
+            scale_map[scale_arg[i]] = std::stof(scale_arg[i + 1]);
         }
-        prop.scale(config, scale);
+        prop.scale(config, scale_map);
     }
 
     //Build a PROsyst to sort and analyze all systematics
