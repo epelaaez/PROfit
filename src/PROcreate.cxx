@@ -356,8 +356,6 @@ namespace PROfit {
         if(inconfig.m_num_variation_type_norm>0){
             for(auto& allow_sys : inconfig.m_mcgen_variation_type_map){
                 if(allow_sys.second=="norm"){
-
-
                     map_systematic_num_universe[allow_sys.first] = 7;
                 }
             }
@@ -376,16 +374,16 @@ namespace PROfit {
 
         //constuct object for each systematic variation, and grab weight maps
         log<LOG_INFO>(L"%1% || Now start to grab related weightmaps") % __func__;
-        size_t i_variable = 0;
         for(auto& sys_pair : map_systematic_num_universe){
 
             const std::string& sys_name = sys_pair.first;
             std::string sys_weight_formula = "1";
             std::string sys_mode = inconfig.m_mcgen_variation_type_map.at(sys_name);
             int binningindex = inconfig.m_mcgen_variation_binning_map.at(sys_name);
-            for(auto &sv: syst_vector) {
+        
+            for (size_t iv = 0; iv < syst_vector.size(); ++iv) {
+                auto& sv = syst_vector[iv];
                 sv.emplace_back(sys_name, sys_pair.second);
-
 
                 log<LOG_INFO>(L"%1% || found mode %2% for systematic %3%: ") % __func__ % sys_mode.c_str() % sys_name.c_str();
                 if(sys_weight_formula != "1" || sys_mode !=""){
@@ -442,8 +440,8 @@ namespace PROfit {
                         size_t is = inconfig.GetSubchannelIndex(name);     
                         size_t ic = inconfig.GetChannelIndex(is);     
 
-                        size_t start = inconfig.GetGlobalVariableBinStart(is,i_variable); 
-                        for(size_t b = 0; b < inconfig.m_channel_variable_num_bins[ic][i_variable] ; b++){
+                        size_t start = inconfig.GetGlobalVariableBinStart(is,iv); 
+                        for(size_t b = 0; b < inconfig.m_channel_variable_num_bins[ic][iv] ; b++){
                             flatbins.push_back((int)(start+b));
                         }
                     }
@@ -467,7 +465,6 @@ namespace PROfit {
                     }
                 }
             }
-        i_variable++;
         }
 
 

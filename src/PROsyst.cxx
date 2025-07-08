@@ -18,7 +18,7 @@ namespace PROfit {
             if(syst.mode == "spline" || syst.mode == "norm") {
                 FillSpline(syst);
                 spline_names.push_back(syst.systname); 
-                spline_lo.push_back(syst.knobval[0]);
+                spline_lo.push_back(syst.knobval.front());
                 spline_hi.push_back(syst.knobval.back());
                 spline_binnings.push_back(syst.binning);
                 ++n_splines;
