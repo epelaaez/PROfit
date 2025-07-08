@@ -95,6 +95,7 @@ namespace PROfit{
     }
     void PrintVariableInfo(const PROconfig &inconfig){
 
+        int global_channel_index = 0;
         for(size_t im = 0; im < inconfig.m_num_modes; im++){
             for(size_t id =0; id < inconfig.m_num_detectors; id++){
                 for(size_t ic = 0; ic < inconfig.m_num_channels; ic++){
@@ -104,20 +105,22 @@ namespace PROfit{
                         //global subchannel index is the main marker/identifier.
                         int global_subchannel_index1 = inconfig.GetSubchannelIndex(temp_name);
                         int local_channel_index1 = inconfig.GetLocalChannelIndexFromGlobalSubchannelIndex(global_subchannel_index1);
+                        int local_channel_index3 = inconfig.GetLocalChannelIndexFromGlobalChannelIndex(global_channel_index);
                         int local_channel_index2 = ic;
                         int local_subchannel_index = sc;
 
-                        log<LOG_INFO>(L"%1% || im:id %2%:%3%  %4%  || local_channel_index (%5%,ic:%6%) global_channel_index (%7%) || local_subchannel_index %8% global (%9%)") % __func__ % im % id % temp_name.c_str() %  local_channel_index1 % local_channel_index2 % -9 % sc % global_subchannel_index1 ;
+                        log<LOG_INFO>(L"%1% || im:id %2%:%3%  %4%  || local_channel_index (%5%,%6%,%7%) global_channel_index (%8%) || local_subchannel_index %9% global (%10%)") % __func__ % im % id % temp_name.c_str() %  local_channel_index1 % local_channel_index2 % local_channel_index3 % global_channel_index % sc % global_subchannel_index1 ;
 
                         for(size_t io = 0; io < inconfig.m_num_variables; ++io) {
 
                             int nstart = inconfig.GetGlobalVariableBinStart(global_subchannel_index1,io);
                             int nbin = inconfig.GetChannelNVariableBins(local_channel_index1,io);
-                            std::vector<float> edges = inconfig.GetChannelVariableBinEdges (global_subchannel_index1,io);
+                            std::vector<float> edges = inconfig.GetChannelVariableBinEdges (local_channel_index1,io);
                             log<LOG_INFO>(L"%1% ||  ---  Vartiable %2%  || nstart %3% nbin %4% ") % __func__ % io %nstart % nbin ;
                             log<LOG_INFO>(L"%1% ||  --- -- Edges %2% ") % __func__ % edges ;
                         }
                     }
+                global_channel_index++;
                 }
             }
         }
