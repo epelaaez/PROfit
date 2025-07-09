@@ -67,7 +67,7 @@ namespace PROfit {
         if(binned) {
             Eigen::VectorXf systw = Eigen::VectorXf::Constant(inconfig.m_num_variable_bins_total[var_index], 1);
             for(int i = 0; i < shifts.size(); ++i) {
-                int binning = insyst.spline_binnings[i];
+                size_t binning = insyst.spline_binnings[i];
                 const Eigen::MatrixXf &hist = inprop.variable_hist_storage(binning,var_index);
                 for(size_t k = 0; k < inconfig.m_num_variable_bins_total[var_index]; ++k) {
                     if(binning == var_index){
@@ -205,7 +205,7 @@ namespace PROfit {
         //Eigen::VectorXf throwC = Eigen::VectorXf::Constant(inconfig.m_num_variable_bins_total[inconfig.i_prime], 0);
         Eigen::VectorXf throwC = Eigen::VectorXf::Constant(nbins_collapsed, 0);
         for(size_t i = 0; i < insyst.GetNSplines(); i++)
-            throws.push_back(d(rng));
+            throws.push_back(d(rng) * insyst.spline_priors(i));
         for(int i = 0; i < nbins_collapsed; i++)
             throwC(i) = d(rng);
 
@@ -248,10 +248,10 @@ namespace PROfit {
         // TODO: We should think about centralizing rng in a thread-safe/thread-aware way
         static std::mt19937 rng{seed};
         std::normal_distribution<float> d;
-        float spline_throw = d(rng);
+        float spline_throw = d(rng) * insyst.spline_priors(spline);
         int binning = insyst.spline_binnings[spline];
 
-        if(other_index == inconfig.i_prime) {
+        if(other_index == (int)inconfig.i_prime) {
             const Eigen::MatrixXf &hist = inprop.variable_hist_storage(binning,other_index);
             for(long int i = 0; i < hist.rows(); ++i) {
                 float systw = 1.0;

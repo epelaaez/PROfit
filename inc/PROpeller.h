@@ -58,7 +58,7 @@ namespace PROfit{
             Eigen::MatrixXf& set(size_t i, size_t j) {
                 if (i > j){
                     log<LOG_ERROR>(L"%1% || If your seeing this, something went wrong. dont access PROhistStorage out of order.") % __func__;
-                        exit(EXIT_FAILURE);
+                    exit(EXIT_FAILURE);
                 }
                 return data[compute_index(i, j)];
             }
@@ -98,10 +98,8 @@ namespace PROfit{
             };
 
             /*Function: Primary Constructor from raw std::vectors of MC values */ 
-            PROpeller( std::vector<std::vector<float>> &intruth, std::vector<float> &inadded_weights,  std::vector<int> &inmodel_rule) : variable_values(intruth), added_weights(inadded_weights),  model_rule(inmodel_rule) {
-                //size_t nevents = variable_values.size();
+            PROpeller( std::vector<std::vector<float>> &invars, std::vector<float> &inadded_weights,  std::vector<int> &inmodel_rule) :  added_weights(inadded_weights),  model_rule(inmodel_rule), variable_values(invars){
                 //for(size_t i = 0; i < bin_indices.size(); ++i)
-                //hash = config.hash;
             };
 
             /* the Core MC is saved in these vectors.*/
@@ -114,8 +112,8 @@ namespace PROfit{
             std::vector<Eigen::VectorXf> variable_midbin;
             PROhistStorage variable_hist_storage;
 
+            uint32_t           hash;
 
-                  uint32_t           hash;
 
             // boost serialize save to file
             void save(const std::string& filename) const {
@@ -140,8 +138,8 @@ namespace PROfit{
             }
 
             // Scale detector weights for POT studies
-            void scale(const PROconfig &inconfig, std::map<std::string, float> scaling){
-                for (const auto& [detector, value] : scaling) {
+            void scale(const PROconfig &inconfig, std::map<std::string, float> scaling_map){
+                for (const auto& [detector, value] : scaling_map) {
 
                     if (value <= 0.0f) {
                         log<LOG_ERROR>(L"%1% || Scale factor %2% for '%3%' is invalid. Must be > 0.")
@@ -161,7 +159,7 @@ namespace PROfit{
 
                     log<LOG_INFO>(L"%1% || %2% . ") % __func__  % scalenames;
 
- 
+
                     std::vector<std::vector<int>> scaleotherbins;
                     for(size_t io =0; io<inconfig.m_num_variables; io++){
                         std::vector<int> tmpbins;
@@ -178,25 +176,27 @@ namespace PROfit{
                     }
 
 
-
+                    //Scale the binned bits first
                     for(size_t io =0; io<inconfig.m_num_variables; io++){
-                      log<LOG_INFO>(L"%1% || and scales other bins  %2% .") % __func__  %  scaleotherbins[io];
-                        for (int o : scaleotherbins[io]) {
-                            for (int j : scaleotherbins[io]) {
-                                (variable_hist_storage(io,io))(o, j) *= value;//FIX FIX
+                        for(size_t jo =io; jo<inconfig.m_num_variables; jo++){
+                            log<LOG_INFO>(L"%1% || and scales other bins  %2% .") % __func__  %  scaleotherbins[io];
+                            for (int o : scaleotherbins[io]) {
+                                for (int j : scaleotherbins[io]) {
+                                    (variable_hist_storage(io,jo))(o, j) *= value;//FIX FIX
+                                }
                             }
                         }
                     }
+                    //And then the unbinned weights
                     for (size_t i = 0; i < added_weights.size(); ++i) {
-                         for(size_t io =0; io<inconfig.m_num_variables; io++){
-
-                        int bin = variable_bin_indices[i][io];
-                        if (std::find(scaleotherbins[io].begin(), scaleotherbins[io].end(), bin) != scaleotherbins[io].end()) {
-                            added_weights[i] *= value;
-                        }
+                        for(size_t io =0; io<inconfig.m_num_variables; io++){
+                            if(io>0)break;//Hmm, we scale of the reco and not other bins. That seems fine, but might want to rethink
+                            int bin = variable_bin_indices[i][io];
+                            if (std::find(scaleotherbins[io].begin(), scaleotherbins[io].end(), bin) != scaleotherbins[io].end()) {
+                                added_weights[i] *= value;
+                            }
                         }
                     }
-
 
                     log<LOG_INFO>(L"%1% || Applied %2% scaling for '%3%'")
                         % __func__ % value % detector.c_str();

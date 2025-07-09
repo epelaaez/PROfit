@@ -40,12 +40,15 @@ PROpoisson::PROpoisson(const std::string tag, const PROconfig &conin, const PROp
           prior_covariance(iA, iB) = std::get<2>(t);
           prior_covariance(iB, iA) = std::get<2>(t);
         }
+        prior_covariance = systin->spline_priors.asDiagonal() * prior_covariance * systin->spline_priors.asDiagonal();
     }
 }
 
 float PROpoisson::Pull(const Eigen::VectorXf &systs) {
     // No correlations: sum of squares
-    if (!correlated_systematics) return systs.array().square().sum();
+    if (!correlated_systematics) {
+        return (systs.array().square() / syst->spline_priors.array().square()).sum();
+    }
 
     // Variablewise dot onto covariance
     return systs.dot(prior_covariance.inverse() * systs);

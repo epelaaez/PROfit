@@ -642,9 +642,11 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 const char *binning = pAllowList->Attribute("binning");
                 const char *knobs = pAllowList->Attribute("knobvals");
                 const char *tags = pAllowList->Attribute("tag");
+                const char *prior = pAllowList->Attribute("prior");
                 m_mcgen_variation_type.push_back(variation_type);
                 m_mcgen_variation_type_map[wt] = variation_type;
                 m_mcgen_variation_allowlist.push_back(wt);
+                if(prior) m_mcgen_variation_prior[wt] = std::strtof(prior, NULL);
                 m_mcgen_variation_plotname_map[wt] = plot_name ? plot_name : wt;
                 if(!binning || strcmp(binning, "reco") == 0) {
                     m_mcgen_variation_binning_map[wt] = i_prime;
