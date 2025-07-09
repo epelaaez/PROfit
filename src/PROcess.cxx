@@ -68,22 +68,52 @@ namespace PROfit {
             Eigen::VectorXf systw = Eigen::VectorXf::Constant(inconfig.m_num_variable_bins_total[var_index], 1);
             for(int i = 0; i < shifts.size(); ++i) {
                 size_t binning = insyst.spline_binnings[i];
+
+
+                const auto& shifts_i = shifts(i);  // Hoist this lookup
                 const Eigen::MatrixXf &hist = inprop.variable_hist_storage(binning,var_index);
-                for(size_t k = 0; k < inconfig.m_num_variable_bins_total[var_index]; ++k) {
-                    if(binning == var_index){
-                        systw(k) *= insyst.GetSplineShift(i, shifts(i), k);
-                    }
-                    else {
-                        float val = 0, unweighted = 0;
-                        for(long int j = 0; j < hist.rows(); ++j) {
-                            float binsystw = insyst.GetSplineShift(i, shifts(i), j);
-                            val += binsystw * hist(j, k);
-                            unweighted += hist(j,k);
+                const long num_bins = hist.rows();
+
+                for (size_t k = 0; k < inconfig.m_num_variable_bins_total[var_index]; ++k) {
+                    if (binning == var_index) {
+                        systw(k) *= insyst.GetSplineShift(i, shifts_i, k);
+                    } else {
+                        float val = 0.0f;
+                        float unweighted = 0.0f;
+
+                        const long stride = hist.outerStride();  // Usually == rows() for column-major
+                        const float* hist_col_k = &hist(0, k);  // Pointer to start of column k
+
+                        for (long j = 0; j < num_bins; ++j) {
+                            const float binsystw = insyst.GetSplineShift(i, shifts_i, j);
+                            const float hist_val = hist_col_k[j];  // Contiguous access
+                            val += binsystw * hist_val;
+                            unweighted += hist_val;
                         }
-                        if(unweighted > 0) systw(k) *= val/unweighted;
+
+                        if (unweighted > 0.0f) {
+                            systw(k) *= val / unweighted;
+                        }
                     }
                 }
             }
+            /*const Eigen::MatrixXf &hist = inprop.variable_hist_storage(binning,var_index);
+              for(size_t k = 0; k < inconfig.m_num_variable_bins_total[var_index]; ++k) {
+              if(binning == var_index){
+              systw(k) *= insyst.GetSplineShift(i, shifts(i), k);
+              }
+              else {
+              float val = 0, unweighted = 0;
+              for(long int j = 0; j < hist.rows(); ++j) {
+              float binsystw = insyst.GetSplineShift(i, shifts(i), j);
+              val += binsystw * hist(j, k);
+              unweighted += hist(j,k);
+              }
+              if(unweighted > 0) systw(k) *= val/unweighted;
+              }
+              }
+              }
+              */
             for(long int i = 0; i < inprop.variable_hist_storage(inmodel.ivar, var_index).rows(); ++i) {
                 float le = inprop.variable_midbin[inmodel.ivar][i];
 
@@ -99,181 +129,181 @@ namespace PROfit {
                     }
                 }
             }
-        } else {
-            for(size_t i = 0; i<inprop.variable_values.size(); ++i){
-                float oscw  =  inmodel.model_functions[inprop.model_rule[i]](phys, inprop.variable_values[i][var_index]);
-                float add_w = inprop.added_weights[i]; 
-                const int reco_bin = inprop.variable_bin_indices[i][var_index];
+    } else {
+        for(size_t i = 0; i<inprop.variable_values.size(); ++i){
+            float oscw  =  inmodel.model_functions[inprop.model_rule[i]](phys, inprop.variable_values[i][var_index]);
+            float add_w = inprop.added_weights[i]; 
+            const int reco_bin = inprop.variable_bin_indices[i][var_index];
 
-                float systw = 1;
-                for(int j = 0; j < shifts.size(); ++j) {
-                    int binning = insyst.spline_binnings[j];
-                    const int spline_bin = inprop.variable_bin_indices[i][binning];
-                    systw *= insyst.GetSplineShift(j, shifts[j], spline_bin);
-                }
-                float finalw = oscw * systw * add_w;
-                myspectrum.Fill(reco_bin, finalw);
+            float systw = 1;
+            for(int j = 0; j < shifts.size(); ++j) {
+                int binning = insyst.spline_binnings[j];
+                const int spline_bin = inprop.variable_bin_indices[i][binning];
+                systw *= insyst.GetSplineShift(j, shifts[j], spline_bin);
             }
+            float finalw = oscw * systw * add_w;
+            myspectrum.Fill(reco_bin, finalw);
         }
-        return myspectrum;
     }
-
-
-
-
-    //*********************************************************************************************
-
-    PROspec FillWeightedSpectrumFromHist(const PROconfig &inconfig, const PROpeller &inprop, std::vector<TH2D*> inweighthists, const PROmodel &inmodel, const Eigen::VectorXf &params, bool binned){
-        PROspec myspectrum(inconfig.m_num_variable_bins_total[inconfig.i_prime]);
-        Eigen::VectorXf phys   = params.segment(0, inmodel.nparams);
-        Eigen::VectorXf shifts = params.segment(inmodel.nparams, params.size() - inmodel.nparams);
-
-        int i_osc_tmp =1;
-        if (binned) {
-            for(long int i = 0; i < inprop.variable_hist_storage(i_osc_tmp,inconfig.i_prime).rows(); ++i) {
-                float le = inprop.variable_midbin[i_osc_tmp][i];
-                float hist_w = 1.0 ;
-
-                //Figure out what subchannel the event is in
-                size_t subchan = inconfig.GetSubchannelIndexFromVariableGlobalBin(inprop.variable_bin_indices[i][i_osc_tmp],i_osc_tmp);
-                std::string name = inconfig.m_fullnames[subchan];
-
-                //Put name for ICARUS study here. How to handle more generically?
-                if (name == "nu_ICARUS_numu_numucc") {
-                    int ipmom = 2;
-                    int ipcosth = 3;
-
-                    float pmom = 2;//static_cast<float>(inprop.pmom[i]);
-                    float pcosth = 3;// static_cast<float>(inprop.pcosth[i]);
-                    for (size_t j = 0; j<inweighthists.size(); ++j){
-                        TH2D h = *inweighthists[j];
-                        int bin = h.FindBin(pmom,pcosth);
-                        hist_w *= h.GetBinContent(bin);
-                    }
-                }
-
-                for(size_t j = 0; j < inmodel.model_functions.size(); ++j) {
-                    float oscw = inmodel.model_functions[j](phys, le);
-                    for(size_t k = 0; k < myspectrum.GetNbins(); ++k) {
-                        myspectrum.Fill(k, hist_w * oscw * inmodel.hists[inconfig.i_prime][j](i, k));
-                    }
-                }
-            }
-        } else {
-            for(size_t i = 0; i<inprop.variable_values.size(); ++i){
-
-                float oscw  = phys.size() != 0 ? 
-                    inmodel.model_functions[inprop.model_rule[i]](phys, inprop.variable_values[i][inconfig.i_prime]) :
-                    1;	
-                float add_w = inprop.added_weights[i];
-                float hist_w = 1.0 ;
-
-                //Figure out what subchannel the event is in
-                size_t subchan = inconfig.GetSubchannelIndexFromVariableGlobalBin(inprop.variable_bin_indices[i][i_osc_tmp],i_osc_tmp);
-                std::string name = inconfig.m_fullnames[subchan];
-
-                //Put name for ICARUS study here. How to handle more generically?
-                if (name == "nu_ICARUS_numu_numucc") {
-                    float pmom = 2;//static_cast<float>(inprop.pmom[i]);
-                    float pcosth = 2;//static_cast<float>(inprop.pcosth[i]);
-
-                    for (size_t j = 0; j<inweighthists.size(); ++j){
-                        TH2D h = *inweighthists[j];
-                        int bin = h.FindBin(pmom,pcosth);
-                        hist_w *= h.GetBinContent(bin);
-                    }
-                }
-
-                float finalw = oscw * add_w * hist_w;
-                myspectrum.Fill(inprop.variable_bin_indices[i][inconfig.i_prime], finalw);
-            }
-        }
-        return myspectrum;
+    return myspectrum;
 }
 
-    PROspec FillSystRandomThrow(const PROconfig &inconfig, const PROpeller &inprop, const PROsyst &insyst, uint32_t seed, int other_index) {
-        int nbins = inconfig.m_num_variable_bins_total[other_index],
-        nbins_collapsed = inconfig.m_num_variable_bins_total_collapsed[other_index];
-        Eigen::VectorXf spec = Eigen::VectorXf::Constant(nbins, 0);
-        Eigen::VectorXf cvspec = Eigen::VectorXf::Constant(nbins, 0);
 
 
-        // TODO: We should think about centralizing rng in a thread-safe/thread-aware way
-        static std::mt19937 rng{seed};
-        std::normal_distribution<float> d;
-        std::vector<float> throws;
-        //Eigen::VectorXf throwC = Eigen::VectorXf::Constant(inconfig.m_num_variable_bins_total[inconfig.i_prime], 0);
-        Eigen::VectorXf throwC = Eigen::VectorXf::Constant(nbins_collapsed, 0);
-        for(size_t i = 0; i < insyst.GetNSplines(); i++)
-            throws.push_back(d(rng) * insyst.spline_priors(i));
-        for(int i = 0; i < nbins_collapsed; i++)
-            throwC(i) = d(rng);
 
+//*********************************************************************************************
 
+PROspec FillWeightedSpectrumFromHist(const PROconfig &inconfig, const PROpeller &inprop, std::vector<TH2D*> inweighthists, const PROmodel &inmodel, const Eigen::VectorXf &params, bool binned){
+    PROspec myspectrum(inconfig.m_num_variable_bins_total[inconfig.i_prime]);
+    Eigen::VectorXf phys   = params.segment(0, inmodel.nparams);
+    Eigen::VectorXf shifts = params.segment(inmodel.nparams, params.size() - inmodel.nparams);
+
+    int i_osc_tmp =1;
+    if (binned) {
+        for(long int i = 0; i < inprop.variable_hist_storage(i_osc_tmp,inconfig.i_prime).rows(); ++i) {
+            float le = inprop.variable_midbin[i_osc_tmp][i];
+            float hist_w = 1.0 ;
+
+            //Figure out what subchannel the event is in
+            size_t subchan = inconfig.GetSubchannelIndexFromVariableGlobalBin(inprop.variable_bin_indices[i][i_osc_tmp],i_osc_tmp);
+            std::string name = inconfig.m_fullnames[subchan];
+
+            //Put name for ICARUS study here. How to handle more generically?
+            if (name == "nu_ICARUS_numu_numucc") {
+                int ipmom = 2;
+                int ipcosth = 3;
+
+                float pmom = 2;//static_cast<float>(inprop.pmom[i]);
+                float pcosth = 3;// static_cast<float>(inprop.pcosth[i]);
+                for (size_t j = 0; j<inweighthists.size(); ++j){
+                    TH2D h = *inweighthists[j];
+                    int bin = h.FindBin(pmom,pcosth);
+                    hist_w *= h.GetBinContent(bin);
+                }
+            }
+
+            for(size_t j = 0; j < inmodel.model_functions.size(); ++j) {
+                float oscw = inmodel.model_functions[j](phys, le);
+                for(size_t k = 0; k < myspectrum.GetNbins(); ++k) {
+                    myspectrum.Fill(k, hist_w * oscw * inmodel.hists[inconfig.i_prime][j](i, k));
+                }
+            }
+        }
+    } else {
         for(size_t i = 0; i<inprop.variable_values.size(); ++i){
-            float add_w = inprop.added_weights[i]; 
-            float systw = 1;
-            for(size_t j = 0; j < throws.size(); ++j) {
-                int binning = insyst.spline_binnings[j];
-                const int spline_bin =  inprop.variable_bin_indices[i][binning];
-                systw *= insyst.GetSplineShift(j, throws[j], spline_bin);
+
+            float oscw  = phys.size() != 0 ? 
+                inmodel.model_functions[inprop.model_rule[i]](phys, inprop.variable_values[i][inconfig.i_prime]) :
+                1;	
+            float add_w = inprop.added_weights[i];
+            float hist_w = 1.0 ;
+
+            //Figure out what subchannel the event is in
+            size_t subchan = inconfig.GetSubchannelIndexFromVariableGlobalBin(inprop.variable_bin_indices[i][i_osc_tmp],i_osc_tmp);
+            std::string name = inconfig.m_fullnames[subchan];
+
+            //Put name for ICARUS study here. How to handle more generically?
+            if (name == "nu_ICARUS_numu_numucc") {
+                float pmom = 2;//static_cast<float>(inprop.pmom[i]);
+                float pcosth = 2;//static_cast<float>(inprop.pcosth[i]);
+
+                for (size_t j = 0; j<inweighthists.size(); ++j){
+                    TH2D h = *inweighthists[j];
+                    int bin = h.FindBin(pmom,pcosth);
+                    hist_w *= h.GetBinContent(bin);
+                }
             }
-            if(inprop.variable_bin_indices[i][other_index] >= 0) {
-                float finalw = systw * add_w;
-                spec(inprop.variable_bin_indices[i][other_index]) += finalw;
-                cvspec(inprop.variable_bin_indices[i][other_index]) += add_w;
-            }
+
+            float finalw = oscw * add_w * hist_w;
+            myspectrum.Fill(inprop.variable_bin_indices[i][inconfig.i_prime], finalw);
         }
+    }
+    return myspectrum;
+}
 
-        if(insyst.GetNCovar() == 0) {
-            Eigen::VectorXf final_spec = CollapseMatrix(inconfig, spec, other_index);
-            return PROspec(final_spec, final_spec.array().sqrt());
+PROspec FillSystRandomThrow(const PROconfig &inconfig, const PROpeller &inprop, const PROsyst &insyst, uint32_t seed, int other_index) {
+    int nbins = inconfig.m_num_variable_bins_total[other_index],
+        nbins_collapsed = inconfig.m_num_variable_bins_total_collapsed[other_index];
+    Eigen::VectorXf spec = Eigen::VectorXf::Constant(nbins, 0);
+    Eigen::VectorXf cvspec = Eigen::VectorXf::Constant(nbins, 0);
+
+
+    // TODO: We should think about centralizing rng in a thread-safe/thread-aware way
+    static std::mt19937 rng{seed};
+    std::normal_distribution<float> d;
+    std::vector<float> throws;
+    //Eigen::VectorXf throwC = Eigen::VectorXf::Constant(inconfig.m_num_variable_bins_total[inconfig.i_prime], 0);
+    Eigen::VectorXf throwC = Eigen::VectorXf::Constant(nbins_collapsed, 0);
+    for(size_t i = 0; i < insyst.GetNSplines(); i++)
+        throws.push_back(d(rng) * insyst.spline_priors(i));
+    for(int i = 0; i < nbins_collapsed; i++)
+        throwC(i) = d(rng);
+
+
+    for(size_t i = 0; i<inprop.variable_values.size(); ++i){
+        float add_w = inprop.added_weights[i]; 
+        float systw = 1;
+        for(size_t j = 0; j < throws.size(); ++j) {
+            int binning = insyst.spline_binnings[j];
+            const int spline_bin =  inprop.variable_bin_indices[i][binning];
+            systw *= insyst.GetSplineShift(j, throws[j], spline_bin);
         }
+        if(inprop.variable_bin_indices[i][other_index] >= 0) {
+            float finalw = systw * add_w;
+            spec(inprop.variable_bin_indices[i][other_index]) += finalw;
+            cvspec(inprop.variable_bin_indices[i][other_index]) += add_w;
+        }
+    }
 
-        Eigen::MatrixXf decomp_cov = insyst.DecomposeFractionalCovariance(inconfig, cvspec);
-        Eigen::VectorXf collapsed_spec = CollapseMatrix(inconfig, spec, other_index);
-        Eigen::VectorXf final_spec = collapsed_spec + decomp_cov * throwC;
-
-        //std::vector<float> stdVec(final_spec.data(), final_spec.data() + final_spec.size());
-        //log<LOG_INFO>(L"%1% | final_spec is %2% ") % __func__ % stdVec;
-
-
+    if(insyst.GetNCovar() == 0) {
+        Eigen::VectorXf final_spec = CollapseMatrix(inconfig, spec, other_index);
         return PROspec(final_spec, final_spec.array().sqrt());
     }
 
-    PROspec FillSplineRandomThrow(const PROconfig &inconfig, const PROpeller &inprop, const PROsyst &insyst, int spline, uint32_t seed, int other_index) {
-        int nbins =  inconfig.m_num_variable_bins_total[other_index];
-        Eigen::VectorXf spec = Eigen::VectorXf::Constant(nbins, 0);
+    Eigen::MatrixXf decomp_cov = insyst.DecomposeFractionalCovariance(inconfig, cvspec);
+    Eigen::VectorXf collapsed_spec = CollapseMatrix(inconfig, spec, other_index);
+    Eigen::VectorXf final_spec = collapsed_spec + decomp_cov * throwC;
 
-        // TODO: We should think about centralizing rng in a thread-safe/thread-aware way
-        static std::mt19937 rng{seed};
-        std::normal_distribution<float> d;
-        float spline_throw = d(rng) * insyst.spline_priors(spline);
-        int binning = insyst.spline_binnings[spline];
+    //std::vector<float> stdVec(final_spec.data(), final_spec.data() + final_spec.size());
+    //log<LOG_INFO>(L"%1% | final_spec is %2% ") % __func__ % stdVec;
 
-        if(other_index == (int)inconfig.i_prime) {
-            const Eigen::MatrixXf &hist = inprop.variable_hist_storage(binning,other_index);
-            for(long int i = 0; i < hist.rows(); ++i) {
-                float systw = 1.0;
-                if(binning != -1) systw = insyst.GetSplineShift(spline, spline_throw, i);
-                for(int k = 0; k < nbins; ++k) {
-                    float binsystw = systw;
-                    if(binning == -1) binsystw *= insyst.GetSplineShift(spline, spline_throw, k);
-                    spec(k) += binsystw * hist(i, k);
-                }
-            }
-        } else {
-            for(size_t i = 0; i<inprop.variable_values.size(); ++i){
-                float add_w = inprop.added_weights[i]; 
-                const int spline_bin = inprop.variable_bin_indices[i][binning];
-                float systw = insyst.GetSplineShift(spline, spline_throw, spline_bin);
-                float finalw = systw * add_w;
-                if(inprop.variable_bin_indices[i][other_index] >= 0) {
-                    spec(inprop.variable_bin_indices[i][other_index]) += finalw;
-                }
+
+    return PROspec(final_spec, final_spec.array().sqrt());
+}
+
+PROspec FillSplineRandomThrow(const PROconfig &inconfig, const PROpeller &inprop, const PROsyst &insyst, int spline, uint32_t seed, int other_index) {
+    int nbins =  inconfig.m_num_variable_bins_total[other_index];
+    Eigen::VectorXf spec = Eigen::VectorXf::Constant(nbins, 0);
+
+    // TODO: We should think about centralizing rng in a thread-safe/thread-aware way
+    static std::mt19937 rng{seed};
+    std::normal_distribution<float> d;
+    float spline_throw = d(rng) * insyst.spline_priors(spline);
+    int binning = insyst.spline_binnings[spline];
+
+    if(other_index == (int)inconfig.i_prime) {
+        const Eigen::MatrixXf &hist = inprop.variable_hist_storage(binning,other_index);
+        for(long int i = 0; i < hist.rows(); ++i) {
+            float systw = 1.0;
+            if(binning != -1) systw = insyst.GetSplineShift(spline, spline_throw, i);
+            for(int k = 0; k < nbins; ++k) {
+                float binsystw = systw;
+                if(binning == -1) binsystw *= insyst.GetSplineShift(spline, spline_throw, k);
+                spec(k) += binsystw * hist(i, k);
             }
         }
-
-        return PROspec(spec, spec.array().sqrt());
+    } else {
+        for(size_t i = 0; i<inprop.variable_values.size(); ++i){
+            float add_w = inprop.added_weights[i]; 
+            const int spline_bin = inprop.variable_bin_indices[i][binning];
+            float systw = insyst.GetSplineShift(spline, spline_throw, spline_bin);
+            float finalw = systw * add_w;
+            if(inprop.variable_bin_indices[i][other_index] >= 0) {
+                spec(inprop.variable_bin_indices[i][other_index]) += finalw;
+            }
+        }
     }
+
+    return PROspec(spec, spec.array().sqrt());
+}
 };
