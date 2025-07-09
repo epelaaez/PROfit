@@ -466,8 +466,6 @@ int main(int argc, char* argv[])
                 syst = syst.excluding(systs_to_exclude);
         }
     }
-    log<LOG_INFO>(L"%1% || Making a PROsyst thats full covarinace for future error bar creation (might be slow) ")% __func__ ;
-    PROsyst allcovsyst = variable_systs[config.i_prime].allsplines2cov(config, prop, dseed(PROseed::global_rng));
 
     log<LOG_INFO>(L"%1% || Starting from fit preset :  %2%.")% __func__ % fit_preset.c_str();
     if (allowed_preset.find(fit_preset) == allowed_preset.end()) {
@@ -944,6 +942,9 @@ int main(int argc, char* argv[])
         //***********************************************************************
     }
     if(*proplot_command){
+
+        log<LOG_INFO>(L"%1% || Making a PROsyst thats full covarinace for future error bar creation (might be slow) ")% __func__ ;
+        PROsyst allcovsyst = variable_systs[config.i_prime].allsplines2cov(config, prop, dseed(PROseed::global_rng));
 
         PlotOptions opt = PlotOptions::CVasStack;
         std::vector<TPaveText> notext;
