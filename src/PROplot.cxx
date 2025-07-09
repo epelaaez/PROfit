@@ -42,20 +42,20 @@ namespace PROfit{
         Eigen::MatrixXf collapsed_cv_inv_diag = collapsed_cv.asDiagonal().inverse();
         Eigen::MatrixXf collapsed_frac_cov = collapsed_cv_inv_diag * collapsed_full_covariance * collapsed_cv_inv_diag;
 
-        std::unique_ptr<TH2D> cov_hist = std::make_unique<TH2D>("cov", "Fractional Covariance Matrix;Bin # ;Bin #", config.m_num_bins_total, 0, config.m_num_bins_total, config.m_num_bins_total, 0, config.m_num_bins_total);
-        std::unique_ptr<TH2D> collapsed_cov_hist = std::make_unique<TH2D>("ccov", "Collapsed Fractional Covariance Matrix;Bin # ;Bin #", config.m_num_bins_total_collapsed, 0, config.m_num_bins_total_collapsed, config.m_num_bins_total_collapsed, 0, config.m_num_bins_total_collapsed);
+        std::unique_ptr<TH2D> cov_hist = std::make_unique<TH2D>("cov", "Fractional Covariance Matrix;Bin # ;Bin #", config.m_num_variable_bins_total[config.i_prime], 0, config.m_num_variable_bins_total[config.i_prime], config.m_num_variable_bins_total[config.i_prime], 0, config.m_num_variable_bins_total[config.i_prime]);
+        std::unique_ptr<TH2D> collapsed_cov_hist = std::make_unique<TH2D>("ccov", "Collapsed Fractional Covariance Matrix;Bin # ;Bin #", config.m_num_variable_bins_total_collapsed[config.i_prime], 0, config.m_num_variable_bins_total_collapsed[config.i_prime], config.m_num_variable_bins_total_collapsed[config.i_prime], 0, config.m_num_variable_bins_total_collapsed[config.i_prime]);
 
-        std::unique_ptr<TH2D> cor_hist = std::make_unique<TH2D>("cor", "Correlation Matrix;Bin # ;Bin #", config.m_num_bins_total, 0, config.m_num_bins_total, config.m_num_bins_total, 0, config.m_num_bins_total);
-        std::unique_ptr<TH2D> collapsed_cor_hist = std::make_unique<TH2D>("ccor", "Collapsed Correlation Matrix;Bin # ;Bin #", config.m_num_bins_total_collapsed, 0, config.m_num_bins_total_collapsed, config.m_num_bins_total_collapsed, 0, config.m_num_bins_total_collapsed);
+        std::unique_ptr<TH2D> cor_hist = std::make_unique<TH2D>("cor", "Correlation Matrix;Bin # ;Bin #", config.m_num_variable_bins_total[config.i_prime], 0, config.m_num_variable_bins_total[config.i_prime], config.m_num_variable_bins_total[config.i_prime], 0, config.m_num_variable_bins_total[config.i_prime]);
+        std::unique_ptr<TH2D> collapsed_cor_hist = std::make_unique<TH2D>("ccor", "Collapsed Correlation Matrix;Bin # ;Bin #", config.m_num_variable_bins_total[config.i_prime], 0, config.m_num_variable_bins_total_collapsed[config.i_prime], config.m_num_variable_bins_total_collapsed[config.i_prime], 0, config.m_num_variable_bins_total_collapsed[config.i_prime]);
 
-        for(size_t i = 0; i < config.m_num_bins_total; ++i)
-            for(size_t j = 0; j < config.m_num_bins_total; ++j){
+        for(size_t i = 0; i < config.m_num_variable_bins_total[config.i_prime]; ++i)
+            for(size_t j = 0; j < config.m_num_variable_bins_total[config.i_prime]; ++j){
                 cov_hist->SetBinContent(i+1,j+1,fractional_cov(i,j));
                 cor_hist->SetBinContent(i+1,j+1,fractional_cov(i,j)/(sqrt(fractional_cov(i,i))*sqrt(fractional_cov(j,j))));
             }
 
-        for(size_t i = 0; i < config.m_num_bins_total_collapsed; ++i)
-            for(size_t j = 0; j < config.m_num_bins_total_collapsed; ++j){
+        for(size_t i = 0; i < config.m_num_variable_bins_total_collapsed[config.i_prime]; ++i)
+            for(size_t j = 0; j < config.m_num_variable_bins_total_collapsed[config.i_prime]; ++j){
                 collapsed_cov_hist->SetBinContent(i+1,j+1,collapsed_frac_cov(i,j));
                 collapsed_cor_hist->SetBinContent(i+1,j+1,collapsed_frac_cov(i,j)/(sqrt(collapsed_frac_cov(i,i))*sqrt(collapsed_frac_cov(j,j))));
             }
@@ -69,10 +69,10 @@ namespace PROfit{
             const Eigen::MatrixXf &covar = syst.GrabMatrix(name);
             const Eigen::MatrixXf &corr = syst.GrabCorrMatrix(name);
 
-            std::unique_ptr<TH2D> cov_h = std::make_unique<TH2D>(("cov"+name).c_str(), (name+" Fractional Covariance;Bin # ;Bin #").c_str(), config.m_num_bins_total, 0, config.m_num_bins_total, config.m_num_bins_total, 0, config.m_num_bins_total);
-            std::unique_ptr<TH2D> corr_h = std::make_unique<TH2D>(("cor"+name).c_str(), (name+" Correlation;Bin # ;Bin #").c_str(), config.m_num_bins_total, 0, config.m_num_bins_total, config.m_num_bins_total, 0, config.m_num_bins_total);
-            for(size_t i = 0; i < config.m_num_bins_total; ++i){
-                for(size_t j = 0; j < config.m_num_bins_total; ++j){
+            std::unique_ptr<TH2D> cov_h = std::make_unique<TH2D>(("cov"+name).c_str(), (name+" Fractional Covariance;Bin # ;Bin #").c_str(), config.m_num_variable_bins_total[config.i_prime], 0, config.m_num_variable_bins_total[config.i_prime], config.m_num_variable_bins_total[config.i_prime], 0, config.m_num_variable_bins_total[config.i_prime]);
+            std::unique_ptr<TH2D> corr_h = std::make_unique<TH2D>(("cor"+name).c_str(), (name+" Correlation;Bin # ;Bin #").c_str(), config.m_num_variable_bins_total[config.i_prime], 0, config.m_num_variable_bins_total[config.i_prime], config.m_num_variable_bins_total[config.i_prime], 0, config.m_num_variable_bins_total[config.i_prime]);
+            for(size_t i = 0; i < config.m_num_variable_bins_total[config.i_prime]; ++i){
+                for(size_t j = 0; j < config.m_num_variable_bins_total[config.i_prime]; ++j){
                     cov_h->SetBinContent(i+1,j+1,covar(i,j));
                     corr_h->SetBinContent(i+1,j+1,corr(i,j));
                 }
@@ -94,10 +94,7 @@ namespace PROfit{
                 const PROsyst::Spline &spline = systs.GrabSpline(name);
                 //using Spline = std::vector<std::vector<std::pair<float, std::array<float, 4>>>>;
                 std::vector<std::pair<std::unique_ptr<TGraph>,std::unique_ptr<TGraph>>> bin_graphs;
-                size_t nbins = 
-                    systs.spline_binnings[i] == -2 ? config.m_num_truebins_total :
-                    systs.spline_binnings[i] == -1 ? config.m_num_bins_total
-                    : config.m_num_other_bins_total[systs.spline_binnings[i]];
+                size_t nbins =  config.m_num_variable_bins_total[systs.spline_binnings[i]];
                 bin_graphs.reserve(nbins);
 
                 for(size_t j = 0; j < nbins; ++j) {
@@ -129,19 +126,22 @@ namespace PROfit{
 
     std::unique_ptr<TGraphAsymmErrors> getErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, bool scale, int other_index) {
         //TODO: Only works with 1 mode/detector/channel
-        Eigen::VectorXf cv = other_index < 0 ? CollapseMatrix(config, FillCVSpectrum(config, prop, true).Spec()) :
-            CollapseMatrix(config, FillOtherCVSpectrum(config, prop, other_index).Spec(), other_index);
-        std::vector<float> edges = other_index < 0 ? config.GetChannelBinEdges(0) : config.GetChannelOtherBinEdges(0, other_index);
-        log<LOG_DEBUG>(L"%1% || For other var %2% the cv is %3% and the edges are %4%")
-            % __func__ % other_index % cv % edges;
+        
+
+        Eigen::VectorXf cv =  CollapseMatrix(config, FillCVSpectra(config, prop, true, other_index).Spec(), other_index);
+
+        std::vector<float> edges = config.GetChannelVariableBinEdges(0, other_index);
+        log<LOG_DEBUG>(L"%1% || For other var %2% the cv is %3% and the edges are %4%") % __func__ % other_index % cv % edges;
         std::vector<float> centers;
         size_t nerrorsample = 5000;
         for(size_t i = 0; i < edges.size() - 1; ++i)
             centers.push_back((edges[i+1] + edges[i])/2);
         std::vector<Eigen::VectorXf> specs;
         std::uniform_int_distribution<uint32_t> dseed(0, std::numeric_limits<uint32_t>::max());
-        for(size_t i = 0; i < nerrorsample; ++i)
+        for(size_t i = 0; i < nerrorsample; ++i){
             specs.push_back(FillSystRandomThrow(config, prop, syst, dseed(PROseed::global_rng), other_index).Spec());
+
+        }
         //specs.push_back(CollapseMatrix(config, FillSystRandomThrow(config, prop, syst).Spec()));
         TH1D tmphist("th", "", cv.size(), edges.data());
         for(int i = 0; i < cv.size(); ++i)
@@ -177,7 +177,7 @@ namespace PROfit{
 
         Eigen::VectorXf bf_spec;
         if(best_fit) {
-            bf_spec = other_index < 0 ? CollapseMatrix(config, best_fit->Spec()) : CollapseMatrix(config, best_fit->Spec(), other_index);
+            bf_spec =  CollapseMatrix(config, best_fit->Spec(), other_index);
         }
 
         std::string ytitle = bool(opt&PlotOptions::AreaNormalized)
@@ -191,10 +191,10 @@ namespace PROfit{
         for(size_t mode = 0; mode < config.m_num_modes; ++mode) {
             for(size_t det = 0; det < config.m_num_detectors; ++det) {
                 for(size_t channel = 0; channel < config.m_num_channels; ++channel) {
-                    size_t channel_nbins = other_index < 0 ? config.m_channel_num_bins[channel] : config.m_channel_num_other_bins[channel][other_index];
+                    size_t channel_nbins = config.m_channel_variable_num_bins[channel][other_index];
+                    std::vector<float> edges =  config.GetChannelVariableBinEdges(global_channel_index, other_index);
+                    std::string xtitle = config.m_channel_variable_units[channel][other_index];
 
-                    std::vector<float> edges = other_index < 0 ? config.GetChannelBinEdges(0) : config.GetChannelOtherBinEdges(0, other_index);
-                    std::string xtitle = other_index < 0 ? config.m_channel_units[channel] : config.m_channel_other_units[channel][other_index];
                     std::string hist_title = config.m_detector_plotnames[det]  + " "+ config.m_channel_plotnames[channel]+";"+xtitle+";"+ytitle;
                     std::unique_ptr<TLegend> leg = std::make_unique<TLegend>(0.59,0.89,0.59,0.89);
                     leg->SetFillStyle(0);
@@ -249,7 +249,7 @@ namespace PROfit{
                     TGraphAsymmErrors *channel_errband = NULL;
                     if(errband) {
                         channel_errband = new TGraphAsymmErrors(&cv_hist);
-                        int channel_start = other_index < 0 ? config.GetCollapsedGlobalBinStart(global_channel_index) : config.GetCollapsedGlobalOtherBinStart(global_channel_index, other_index);
+                        int channel_start =  config.GetCollapsedGlobalVariableBinStart(global_channel_index, other_index);
 
                         for(size_t bin = 0; bin < channel_nbins; ++bin) {
                             float scale = 1.0;
@@ -269,7 +269,7 @@ namespace PROfit{
 
                     TH1D bf_hist(("bf"+std::to_string(global_channel_index)).c_str(), hist_title.c_str(), channel_nbins, edges.data());
                     if(best_fit) {
-                        int channel_start = other_index < 0 ? config.GetCollapsedGlobalBinStart(global_channel_index) : config.GetCollapsedGlobalOtherBinStart(global_channel_index, other_index);
+                        int channel_start =  config.GetCollapsedGlobalVariableBinStart(global_channel_index, other_index);
                         for(size_t bin = 0; bin < channel_nbins; ++bin) {
                             bf_hist.SetBinContent(bin+1, bf_spec(bin+channel_start));
                         }
@@ -285,7 +285,7 @@ namespace PROfit{
                     TGraphAsymmErrors *post_channel_errband = NULL;
                     if(posterrband) {
                         post_channel_errband = new TGraphAsymmErrors(&bf_hist);
-                        int channel_start = other_index < 0 ? config.GetCollapsedGlobalBinStart(global_channel_index) : config.GetCollapsedGlobalOtherBinStart(global_channel_index, other_index);
+                        int channel_start =  config.GetCollapsedGlobalVariableBinStart(global_channel_index, other_index);
                         for(size_t bin = 0; bin < channel_nbins; ++bin) {
                             float scale = 1.0;
                             if(bool(opt&PlotOptions::AreaNormalized)) {

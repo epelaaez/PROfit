@@ -54,73 +54,35 @@ namespace PROfit{
      */
 
     struct BranchVariable{
-      std::string name;
-      std::string type;
       std::string associated_hist;
       std::string associated_systematic;
       bool central_value;
 
-      std::shared_ptr<TTreeFormula> branch_formula=nullptr;
       std::shared_ptr<TTreeFormula> branch_monte_carlo_weight_formula = nullptr;
-      std::shared_ptr<TTreeFormula> branch_true_value_formula=nullptr;
-      std::shared_ptr<TTreeFormula> branch_true_L_formula=nullptr;
-      std::shared_ptr<TTreeFormula> branch_true_pdg_formula=nullptr;
-      std::shared_ptr<TTreeFormula> branch_true_proton_mom_formula=nullptr;
-      std::shared_ptr<TTreeFormula> branch_true_proton_costh_formula=nullptr;
-      std::vector<std::shared_ptr<TTreeFormula>> branch_other_values_formulas;
+      std::vector<std::shared_ptr<TTreeFormula>> branch_variable_formulas;
 
-      std::string true_param_name;
-      std::string true_L_name;
-      std::string pdg_name;
       int model_rule;
       int include_systematics;
 
-      std::vector<std::string> other_param_names;
+      std::vector<std::string> variable_names;
 
       bool hist_reweight;
-      std::string true_proton_mom_name;
-      std::string true_proton_costh_name;
 
       //constructor
-      BranchVariable(std::string n, std::string t, std::string a) : name(n), type(t), associated_hist(a), central_value(false), model_rule(-9), include_systematics(1), hist_reweight(false){}
-      BranchVariable(std::string n, std::string t, std::string a_hist, std::string a_syst, bool cv) : name(n), type(t), associated_hist(a_hist), associated_systematic(a_syst), central_value(cv), model_rule(-9), include_systematics(1), hist_reweight(false){}
+      BranchVariable(std::string a) : associated_hist(a), central_value(false), model_rule(-9), include_systematics(1), hist_reweight(false){}
+      BranchVariable(std::string a_hist, std::string a_syst, bool cv) :  associated_hist(a_hist), associated_systematic(a_syst), central_value(cv), model_rule(-9), include_systematics(1), hist_reweight(false){}
  
-      /* Function: Return the TTreeformula for branch 'name', usually it's the reconstructed variable */
-      std::shared_ptr<TTreeFormula> GetFormula(){
-	return branch_formula;
-      }
 
-      void SetTrueParam(const std::string& true_parameter_def){ true_param_name = true_parameter_def; return;}
-      void SetPDG(const std::string& pdg_def){ pdg_name = pdg_def; return;}
-      void SetTrueL(const std::string& true_L_def){true_L_name = true_L_def; return;}
       void SetModelRule(const std::string & model_rule_def){model_rule = std::stoi(model_rule_def); return;}
       void SetIncludeSystematics(int insyst){include_systematics = insyst; return;} 
 
-      void SetOtherParams(const std::string &other_parameter_def) { 
-          size_t start = 0;
-          while(start < other_parameter_def.size()) {
-              size_t semicolon = other_parameter_def.find_first_of(';', start);
-              if(semicolon == std::string::npos) {
-                  other_param_names.push_back(other_parameter_def.substr(start, other_parameter_def.size()-start));
-                  start = other_parameter_def.size();
-              } else {
-                  other_param_names.push_back(other_parameter_def.substr(start, semicolon - start));
-                  start = semicolon + 1;
-              }
-          }
-      }
-      
+      //main loader for all variables
+      void AddVariable(const std::string& var_in){ variable_names.push_back(var_in); return;}
+     
       void SetReweight(bool inbool){ hist_reweight = inbool; return;}
       bool GetReweight() const {return hist_reweight;}
-      void SetTrueLeadingProtonP(const std::string& true_protonp_def){ true_proton_mom_name = true_protonp_def; return;}
-      void SetTrueLeadingProtonCosth(const std::string& true_protoncosth_def){ true_proton_costh_name = true_protoncosth_def; return;}
 
-      //Function: evaluate branch "pdg", and return the value. Usually it's the pdg value of the particle
-      //Note: when called, if the corresponding TreeFormula is not linked to a TTree, value of ZERO (0) will be returned.
-      template <typename T = int>
-	T GetTruePDG() const;
-
-      int GetModelRule() const{
+       int GetModelRule() const{
 	return model_rule;
       };
 
@@ -140,37 +102,9 @@ namespace PROfit{
 	return 1.0;
       }
 
-      
-      //Function: evaluate branch 'name' and return the value. Usually its reconstructed quantity
-      //Note: when called, if the corresponding TreeFormula is not linked to a TTree, value of ZERO (0) will be returned.
-      template <typename T=float>
-	T GetValue() const;
-
-
-      //Function: evaluate formula 'true_L_name' and return the value. Usually it's true baseline.
-      //Note: when called, if the corresponding TreeFormula is not linked to a TTree, value of ZERO (0) will be returned.
-      template <typename T=float>
-	T GetTrueL() const;
-      
-
-      //Function: evaluate formula 'true_param_name' and return the value. Usually it's true energy  
-      //Note: when called, if the corresponding TreeFormula is not linked to a TTree, value of ZERO (0) will be returned.
-      template <typename T=float>
-	T GetTrueValue() const;
-
-      //Function: evaluate formula 'true_proton_mom_name' and return the value. Used for reweighting
-      //Note: when called, if the corresponding TreeFormula is not linked to a TTree, value of ZERO (0) will be returned.
-      template <typename T=float>
-	T GetTrueLeadProtonMom() const;
-
-
-      //Function: evaluate formula 'true_proton_costh_name' and return the value. Used for reweighting
-      //Note: when called, if the corresponding TreeFormula is not linked to a TTree, value of ZERO (0) will be returned.
-      template <typename T=float>
-	T GetTrueLeadProtonCosth() const;
-
       template<typename T=float>
-    std::vector<T> GetOtherValues() const;
+    std::vector<T> GetVariables() const;
+
 
     };
 
@@ -198,15 +132,12 @@ namespace PROfit{
             std::unordered_map<std::string, size_t> m_map_fullname_subchannel_index;
             std::vector<size_t> m_vec_subchannel_index; //vector of global subchannel index, in increasing order
             std::vector<size_t> m_vec_channel_index;    //vector of corresponding channel index
-            std::vector<size_t> m_vec_global_reco_index_start;  //vector of global reco bin index, in increasing order
-            std::vector<size_t> m_vec_global_true_index_start;  //vector of global true bin index, in increasing order
-            std::vector<std::vector<size_t>> m_vec_global_other_index_start;  //vector of global true bin index, in increasing order
-
+            std::vector<std::vector<size_t>> m_vec_global_variable_index_start;  //vector of global true bin index, in increasing order
 
             //---- PRIVATE FUNCTION ------
 
             /* Function: construct a matrix T, which will be used to collapse matrix and vectors */
-            void construct_collapsing_matrix();
+            void construct_variable_collapsing_matrices();
 
             /* Function: remove any mode/detector/channel/subchannels in the configuration xml that are not used from consideration
             */
@@ -257,25 +188,16 @@ namespace PROfit{
             size_t m_num_detectors;
             size_t m_num_channels;
             size_t m_num_modes;
-            size_t m_num_other_vars;
+            size_t m_num_variables;
 
-            /*Vectors of length num_channels. Unless specificed all refer to fittable (reco) variables*/
             std::vector<size_t> m_num_subchannels; 
-            std::vector<size_t> m_channel_num_bins;
-            std::vector<std::vector<float> > m_channel_bin_edges;
-            std::vector<std::vector<float> > m_channel_bin_widths;
 
-            /* New true bins to save the truth level variables in addition.*/
-            std::vector<size_t> m_channel_num_truebins;
-            std::vector<std::vector<float> > m_channel_truebin_edges;
-            std::vector<std::vector<float> > m_channel_truebin_widths;
+            size_t i_prime;// The main fitting variable, will move to be xml config soon
 
-            // Same but for "other" vars
-            std::vector<std::vector<size_t>> m_channel_num_other_bins;
-            std::vector<std::vector<std::vector<float>>> m_channel_other_bin_edges;
-            std::vector<std::vector<std::vector<float>>> m_channel_other_bin_widths;
-
-            bool m_has_oscillation_patterns;
+            // New
+            std::vector<std::vector<size_t>> m_channel_variable_num_bins;
+            std::vector<std::vector<std::vector<float>>> m_channel_variable_bin_edges;
+            std::vector<std::vector<std::vector<float>>> m_channel_variable_bin_widths;
 
             //the xml names are the way we track which channels and subchannels we want to use later
             std::vector<std::string> m_mode_names; 			
@@ -287,36 +209,22 @@ namespace PROfit{
             std::vector<std::string> m_channel_names; 		
             std::vector<std::string> m_channel_plotnames; 		
             std::vector<std::string> m_channel_units; 		
-            std::vector<std::vector<std::string>> m_channel_other_units;
+
+            std::vector<std::vector<std::string>> m_channel_variable_units;
 
             std::vector<std::vector<std::string >> m_subchannel_names; 
             std::vector<std::vector<std::string >> m_subchannel_plotnames; 
             std::vector<std::vector<std::string >> m_subchannel_colors; 
             std::vector<std::vector<size_t >> m_subchannel_datas; 
 
-            size_t m_num_bins_detector_block;
-            size_t m_num_bins_mode_block;
-            size_t m_num_bins_total;
+            std::vector<size_t> m_num_variable_bins_detector_block;
+            std::vector<size_t> m_num_variable_bins_mode_block;
+            std::vector<size_t> m_num_variable_bins_total;
+            std::vector<size_t> m_num_variable_bins_detector_block_collapsed; 
+            std::vector<size_t> m_num_variable_bins_mode_block_collapsed; 
+            std::vector<size_t> m_num_variable_bins_total_collapsed; 
 
-            size_t m_num_truebins_detector_block;
-            size_t m_num_truebins_mode_block;
-            size_t m_num_truebins_total;
-
-            std::vector<size_t> m_num_other_bins_detector_block;
-            std::vector<size_t> m_num_other_bins_mode_block;
-            std::vector<size_t> m_num_other_bins_total;
-
-            size_t m_num_bins_detector_block_collapsed;
-            size_t m_num_bins_mode_block_collapsed;
-            size_t m_num_bins_total_collapsed;
-
-            std::vector<size_t> m_num_other_bins_detector_block_collapsed;
-            std::vector<size_t> m_num_other_bins_mode_block_collapsed;
-            std::vector<size_t> m_num_other_bins_total_collapsed;
-
-            /* Eigen Matrix for collapsing subchannels->channels*/
-            Eigen::MatrixXf collapsing_matrix;
-            std::vector<Eigen::MatrixXf> other_collapsing_matrices;
+            std::vector<Eigen::MatrixXf> variable_collapsing_matrices; 
 
             //This section entirely for montecarlo generation of a covariance matrix or PROspec 
             bool m_write_out_variation;
@@ -368,7 +276,9 @@ namespace PROfit{
             std::string m_model_tag;
             std::vector<int> m_model_rule_index;
             std::vector<std::string> m_model_rule_names;
-
+            std::vector<int> m_model_parameter_index;
+            std::vector<std::string> m_model_parameter_names;
+            std::map<std::string,int> m_model_parameter_map;
 
             bool m_bool_rate_only;
             //----- PUBLIC FUNCTIONS ------
@@ -380,9 +290,9 @@ namespace PROfit{
              * 	     To collapse a full vector V, please do T.transpose() * V
              */
             inline 
-                Eigen::MatrixXf GetCollapsingMatrix() const {return collapsing_matrix; }
+                Eigen::MatrixXf GetCollapsingMatrix() const {return variable_collapsing_matrices[i_prime]; }
             inline
-                Eigen::MatrixXf GetCollapsingMatrix(int other_index) const {return other_collapsing_matrices[other_index]; }
+                Eigen::MatrixXf GetCollapsingMatrix(int other_index) const {return variable_collapsing_matrices[other_index]; }
 
             /* Function: Calculate how big each mode block and decector block are, for any given number of channels/subchannels, before and after the collapse
              * Note: only consider mode/detector/channel/subchannels that are actually used 
@@ -398,55 +308,30 @@ namespace PROfit{
             /* Function: given global index (in the full vector), return global subchannel index of associated subchannel
              * Note: returns a 0-based index 
              */
-            size_t GetSubchannelIndexFromGlobalBin(size_t global_index) const;
-
-            /* Function: given global true index , return global subchannel index of associated subchannel
-             * Note: returns a 0-based index 
-             */
-            size_t GetSubchannelIndexFromGlobalTrueBin(size_t global_trueindex) const;
+            size_t GetSubchannelIndexFromVariableGlobalBin(size_t global_index, size_t var_index) const;
 
             /* Function: given subchannel global index, return corresponding channel index 
              * Note: index start from 0, not 1
              */
-            size_t GetChannelIndex(size_t subchannel_index) const;
-
-
-            /* Function: given subchannel global index, return corresponding global bin start
-             * Note: global bin index start from 0, not 1
-             */
-            size_t GetGlobalBinStart(size_t subchannel_index) const;
-
-            size_t GetCollapsedGlobalBinStart(size_t channel_index) const;
-
-            /* Function: given channel index, return list of bin edges for this channel */
-            const std::vector<float>& GetChannelBinEdges(size_t channel_index) const;
-
-            /* Function: given channel index, return number of true bins for this channel */
-            size_t GetChannelNTrueBins(size_t channel_index) const;
-
-            /* Function: given subchannel global index, return corresponding global bin start
-             * Note: global bin index start from 0, not 1
-             */
-            size_t GetGlobalTrueBinStart(size_t subchannel_index) const;
-
-            /* Function: given channel index, return list of bin edges for this channel */
-            const std::vector<float>& GetChannelTrueBinEdges(size_t channel_index) const;
-
-            /* Function: given channel index, return number of other bins for this channel and other var*/
-            size_t GetChannelNOtherBins(size_t channel_index, size_t other_index) const;
-
-            /* Function: given subchannel global index, return corresponding global bin start
-             * Note: global bin index start from 0, not 1
-             */
-            size_t GetGlobalOtherBinStart(size_t subchannel_index, size_t other_index) const;
-
-            size_t GetCollapsedGlobalOtherBinStart(size_t channel_index, size_t other_index) const;
-
-            /* Function: given channel index, return list of bin edges for this channel */
-            const std::vector<float>& GetChannelOtherBinEdges(size_t channel_index, size_t other_index) const;
+            size_t GetLocalChannelIndexFromGlobalSubchannelIndex(size_t global_subchannel_index) const;
 
             /* Function: Given a global channel index return the local channel index */
-            size_t GetLocalChannelIndex(size_t global_channel_index) const; 
+            size_t GetLocalChannelIndexFromGlobalChannelIndex(size_t global_channel_index) const; 
+
+
+            /* Function: given channel index, return number of other bins for this channel and other var*/
+            size_t GetChannelNVariableBins(size_t channel_index, size_t other_index) const;
+
+            /* Function: given subchannel global index, return corresponding global bin start
+             * Note: global bin index start from 0, not 1
+             */
+            size_t GetGlobalVariableBinStart(size_t subchannel_index, size_t other_index) const;
+
+            size_t GetCollapsedGlobalVariableBinStart(size_t channel_index, size_t other_index) const;
+
+            /* Function: given channel index, return list of bin edges for this channel */
+            const std::vector<float>& GetChannelVariableBinEdges(size_t channel_index, size_t other_index) const;
+
 
             /* Function: Hex to int*/
             int HexToROOTColor(const std::string& hexColor) const;
@@ -463,62 +348,14 @@ namespace PROfit{
     //----------- BELOW: Definition of BranchVariable templated member function. Please don't move it elsewhere !! ---------------
 
     template <typename T>
-        T BranchVariable::GetTruePDG() const{
-            if(branch_true_pdg_formula == NULL) return static_cast<T>(0);
-            else{
-                return static_cast<T>(branch_true_pdg_formula->EvalInstance());
-            }
-        }
-
-
-    template <typename T>
-        T BranchVariable::GetValue() const{
-            if(branch_formula == NULL) return static_cast<T>(0);
-            else{
-                return static_cast<T>(branch_formula->EvalInstance());
-            }
-        }
-
-    template <typename T>
-        T BranchVariable::GetTrueL() const{
-            if(branch_true_L_formula == NULL) return static_cast<T>(0);
-            else{
-                return static_cast<T>(branch_true_L_formula->EvalInstance());
-            }
-        }
-
-    template <typename T>
-        T BranchVariable::GetTrueValue() const{
-            if(branch_true_value_formula == NULL) return static_cast<T>(0);
-            else{
-                return static_cast<T>(branch_true_value_formula->EvalInstance());
-            }
-        }
-
-    template <typename T>
-        T BranchVariable::GetTrueLeadProtonMom() const{
-            if(branch_true_proton_mom_formula == NULL) return static_cast<T>(0);
-            else{
-                return static_cast<T>(branch_true_proton_mom_formula->EvalInstance());
-            }
-        }
-
-    template <typename T>
-        T BranchVariable::GetTrueLeadProtonCosth() const{
-            if(branch_true_proton_costh_formula == NULL) return static_cast<T>(0);
-            else{
-                            return static_cast<T>(branch_true_proton_costh_formula->EvalInstance());
-            }
-        }
-
-    template <typename T>
-        std::vector<T> BranchVariable::GetOtherValues() const {
+        std::vector<T> BranchVariable::GetVariables() const {
             std::vector<T> ret;
-            for(const auto &formula: branch_other_values_formulas) {
+            for(const auto &formula: branch_variable_formulas) {
                 ret.push_back(formula->EvalInstance());
             }
             return ret;
         }
+
 
     //----------- ABOVE: Definition of BranchVariable templated member function. END ---------------
 

@@ -78,7 +78,7 @@ void PROsurf::FillSurfaceStat(const PROconfig &config, const PROfitterConfig &fi
     (void)fitconfig;
 
     PROsyst dummy_syst;
-    dummy_syst.fractional_covariance = Eigen::MatrixXf::Constant(config.m_num_bins_total, config.m_num_bins_total, 0);
+    dummy_syst.fractional_covariance = Eigen::MatrixXf::Constant(config.m_num_variable_bins_total[config.i_prime], config.m_num_variable_bins_total[config.i_prime], 0);
     Eigen::VectorXf empty_vec;
 
     PROmetric *local_metric = metric.Clone();
