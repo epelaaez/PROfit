@@ -830,26 +830,26 @@ namespace PROfit {
                     for(int ib = 0; ib != num_branch; ++ib) {
 
                     if(inconfig.m_mcgen_additional_weight_bool[fid][ib]){
-                        branches[ib]->branch_monte_carlo_weight_formula->GetNdata();
                         branches[ib]->branch_monte_carlo_weight_formula->UpdateFormulaLeaves();
+                        branches[ib]->branch_monte_carlo_weight_formula->GetNdata();
                     }
-                        branches[ib]->branch_true_pdg_formula->GetNdata();
                         branches[ib]->branch_true_pdg_formula->UpdateFormulaLeaves();
-                        branches[ib]->branch_formula->GetNdata();
+                        branches[ib]->branch_true_pdg_formula->GetNdata();
                         branches[ib]->branch_formula->UpdateFormulaLeaves();
-                        branches[ib]->branch_true_L_formula->GetNdata();
+                        branches[ib]->branch_formula->GetNdata();
                         branches[ib]->branch_true_L_formula->UpdateFormulaLeaves();
-                        branches[ib]->branch_true_value_formula->GetNdata();
+                        branches[ib]->branch_true_L_formula->GetNdata();
                         branches[ib]->branch_true_value_formula->UpdateFormulaLeaves();
+                        branches[ib]->branch_true_value_formula->GetNdata();
                         for(auto &b: branches[ib]->branch_other_values_formulas) {
-                            b->GetNdata();
                             b->UpdateFormulaLeaves();
+                            b->GetNdata();
                         }
                         if (branches[ib]->hist_reweight) {
-                            branches[ib]->branch_true_proton_mom_formula->GetNdata();
                             branches[ib]->branch_true_proton_mom_formula->UpdateFormulaLeaves();
-                            branches[ib]->branch_true_proton_costh_formula->GetNdata();
+                            branches[ib]->branch_true_proton_mom_formula->GetNdata();
                             branches[ib]->branch_true_proton_costh_formula->UpdateFormulaLeaves();
+                            branches[ib]->branch_true_proton_costh_formula->GetNdata();
                         }
                     }
 
