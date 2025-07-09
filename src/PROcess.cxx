@@ -17,7 +17,7 @@ namespace PROfit {
         if(binned) {
             for(int i = 0; i < inprop.variable_hist_storage(var_index, var_index).rows(); ++i) {
                 for(size_t k = 0; k < myspectrum.GetNbins(); ++k) {
-                    myspectrum.Fill(k, inprop.variable_hist_storage(var_index,var_index)(i, k));
+                    myspectrum.Fill(k, inprop.variable_hist_storage(var_index,var_index,i, k));
                 }
             }
         } else {

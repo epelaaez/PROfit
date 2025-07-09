@@ -46,13 +46,25 @@ namespace PROfit{
 
             void init(size_t n) { n_vars = n;data.resize(n * (n + 1) / 2);}
 
-            Eigen::MatrixXf operator()(size_t i, size_t j) const {
+
+            //Grab whole matrix
+            Eigen::Ref<const Eigen::MatrixXf> operator()(size_t i, size_t j) const {
                 if (i <= j) {
-                    return data[compute_index(i, j)];
+                    return data[compute_index(i, j)]; 
                 } else {
                     return data[compute_index(j, i)].transpose();
                 }
             }
+
+            //element
+            float operator()(size_t rowvar, size_t colvar, size_t l, size_t m) const {
+                if (rowvar <= colvar) {
+                    return data[compute_index(rowvar, colvar)](l, m);
+                } else {
+                    return data[compute_index(colvar, rowvar)](m, l); 
+                }
+            }
+
 
             // Direct access for setting (must use i <= j)
             Eigen::MatrixXf& set(size_t i, size_t j) {
@@ -182,7 +194,7 @@ namespace PROfit{
                             log<LOG_INFO>(L"%1% || and scales other bins  %2% .") % __func__  %  scaleotherbins[io];
                             for (int o : scaleotherbins[io]) {
                                 for (int j : scaleotherbins[io]) {
-                                    (variable_hist_storage(io,jo))(o, j) *= value;//FIX FIX
+                                    variable_hist_storage.set(io,jo)(o, j) *= value;//FIX FIX
                                 }
                             }
                         }
