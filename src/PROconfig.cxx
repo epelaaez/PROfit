@@ -573,7 +573,15 @@ int PROconfig::LoadFromXML(const std::string &filename){
                     log<LOG_ERROR>(L"%1% || ERROR: Need at least 1 variable passed in. You passed zero ") % __func__;
                     log<LOG_ERROR>(L"Terminating.");
                     exit(EXIT_FAILURE);
+                }else if(nvar!=m_num_variables){
+                    log<LOG_ERROR>(L"%1% || ERROR: The number of variables in this MCFile %2%, is not the same as n_num_variables in bookeeping of XML %3%. ") % __func__ % nvar % m_num_variables;
+                    log<LOG_ERROR>(L"%1% || ERROR: They need to be the same for now, Sorry. ") % __func__;
+                    log<LOG_ERROR>(L"Terminating.");
+                    exit(EXIT_FAILURE);
+
+
                 }
+                        
 
 
 
