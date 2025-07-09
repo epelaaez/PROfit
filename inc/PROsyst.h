@@ -126,6 +126,7 @@ namespace PROfit {
             std::vector<std::string> covar_names;
             std::vector<float> spline_lo, spline_hi;
             std::vector<int> spline_binnings;
+            Eigen::VectorXf spline_priors;
         private:
             std::unordered_map<std::string, std::pair<size_t, SystType>> syst_map;
             std::vector<Spline> splines;
