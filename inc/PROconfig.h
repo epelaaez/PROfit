@@ -195,6 +195,7 @@ namespace PROfit{
             size_t i_prime;// The main fitting variable, will move to be xml config soon
 
             // New
+            std::vector<bool> m_channel_variable_plot_bool;
             std::vector<std::vector<size_t>> m_channel_variable_num_bins;
             std::vector<std::vector<std::vector<float>>> m_channel_variable_bin_edges;
             std::vector<std::vector<std::vector<float>>> m_channel_variable_bin_widths;

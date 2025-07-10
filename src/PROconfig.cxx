@@ -268,17 +268,25 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 const char* onbins = pBinO->Attribute("nbins");
                 const char* oedges = pBinO->Attribute("edges");
                 const char* ounits = pBinO->Attribute("unit");
+                const char* oplot = pBinO->Attribute("plot");
                 if(omin==NULL && omax==NULL && onbins==NULL && oedges == NULL) {
                     log<LOG_DEBUG>(L"%1% || This variable has a NO other binning (or attribute min,max,nbins)  ") % __func__ ;
                     m_channel_variable_num_bins.back().push_back(0);
                     m_channel_variable_bin_edges.back().push_back(std::vector<float>());
                     m_channel_variable_bin_widths.back().push_back(std::vector<float>());
                     m_channel_variable_units.back().push_back("");
+                    m_channel_variable_plot_bool.push_back(true);
                 }else{
                     log<LOG_DEBUG>(L"%1% || This variable has an Variable Binning.   ") % __func__  ;
 
                     int nbinsp;
                     std::vector<float> binedge, binwidth;
+
+                    if(oplot == NULL || std::string(oplot)=="true"){
+                        m_channel_variable_plot_bool.push_back(true);
+                    }else{
+                        m_channel_variable_plot_bool.push_back(false);
+                    }
 
                     // use edges if defined, otherwise use min-max-nbins 
                     if(oedges != NULL){
