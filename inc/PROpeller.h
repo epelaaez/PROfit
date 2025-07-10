@@ -193,8 +193,8 @@ namespace PROfit{
                         for(size_t jo =io; jo<inconfig.m_num_variables; jo++){
                             log<LOG_INFO>(L"%1% || and scales other bins  %2% .") % __func__  %  scaleotherbins[io];
                             for (int o : scaleotherbins[io]) {
-                                for (int j : scaleotherbins[io]) {
-                                    variable_hist_storage.set(io,jo)(o, j) *= value;//FIX FIX
+                                for (int j : scaleotherbins[jo]) {
+                                    variable_hist_storage.set(io,jo)(o, j) *= value;
                                 }
                             }
                         }
