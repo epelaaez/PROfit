@@ -264,8 +264,11 @@ int main(int argc, char* argv[])
     //Build a PROsyst to sort and analyze all systematics
     //PROsyst systs(prop, config, systsstructs.front(), shapeonly);
     std::vector<PROsyst> variable_systs;
-    for(size_t i = 0; i < config.m_num_variables; ++i)
+    for(size_t i = 0; i < config.m_num_variables; ++i){
         variable_systs.emplace_back(prop, config, systsstructs.at(i), shapeonly, i);
+        //variable_systs.back().PrintSplines();
+        //return 0;
+    }
 
 
 

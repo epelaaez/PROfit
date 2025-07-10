@@ -15,12 +15,26 @@
 
 namespace PROfit {
 
+    struct SplineSegment {
+        float knot; // The "x" value this segment starts at
+        std::array<float, 4> coeffs; // Cubic coefficients
+    };
+    class Spline {
+        public:
+            int bins;
+            int segments_per_bin;
+            // Flat vector: [bin0_seg0, bin0_seg1, ..., bin1_seg0, ...]
+            std::vector<SplineSegment> segments;
+
+            // Access: segments[bin * segments_per_bin + seg]
+    };
+
     /*Struct: Class that groups all systematics (each with a SystStruct) and manages their formation and effect on PROspecs
     */
     class PROsyst {
         public:
-            using Spline = std::vector<std::vector<std::pair<float, std::array<float, 4>>>>;
-            
+            //using Spline = std::vector<std::vector<std::pair<float, std::array<float, 4>>>>;
+
             enum class SystType {
                 Spline, Covariance,  MFA
             };
@@ -117,6 +131,7 @@ namespace PROfit {
 
             Eigen::MatrixXf DecomposeFractionalCovariance(const PROconfig &config, const Eigen::VectorXf &cv_vec) const;
 
+            void PrintSplines();
 
             /* the fractional covariance that is the sum of all during constructor*/
             Eigen::MatrixXf fractional_covariance;

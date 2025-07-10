@@ -84,14 +84,14 @@ namespace PROfit{
 
         return ret;
     }
-
+/*
     std::map<std::string, std::vector<std::pair<std::unique_ptr<TGraph>,std::unique_ptr<TGraph>>>> 
         getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
             std::map<std::string, std::vector<std::pair<std::unique_ptr<TGraph>,std::unique_ptr<TGraph>>>> spline_graphs;
 
             for(size_t i = 0; i < systs.GetNSplines(); ++i) {
                 const std::string &name = systs.spline_names[i];
-                const PROsyst::Spline &spline = systs.GrabSpline(name);
+                const Spline &spline = systs.GrabSpline(name);
                 //using Spline = std::vector<std::vector<std::pair<float, std::array<float, 4>>>>;
                 std::vector<std::pair<std::unique_ptr<TGraph>,std::unique_ptr<TGraph>>> bin_graphs;
                 size_t nbins =  config.m_num_variable_bins_total[systs.spline_binnings[i]];
@@ -123,7 +123,54 @@ namespace PROfit{
 
             return spline_graphs;
         }
+*/
+std::map<std::string, std::vector<std::pair<std::unique_ptr<TGraph>, std::unique_ptr<TGraph>>>>
+getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
+    std::map<std::string, std::vector<std::pair<std::unique_ptr<TGraph>, std::unique_ptr<TGraph>>>> spline_graphs;
 
+    for (size_t i = 0; i < systs.GetNSplines(); ++i) {
+        const std::string &name = systs.spline_names[i];
+        const Spline &spline = systs.GrabSpline(name);
+        std::vector<std::pair<std::unique_ptr<TGraph>, std::unique_ptr<TGraph>>> bin_graphs;
+        size_t nbins = config.m_num_variable_bins_total.at(systs.spline_binnings[i]);
+        int nsegs = spline.segments_per_bin;
+        bin_graphs.reserve(nbins);
+
+        for (size_t j = 0; j < nbins; ++j) {
+            std::unique_ptr<TGraph> curve = std::make_unique<TGraph>();
+            std::unique_ptr<TGraph> fixed_pts = std::make_unique<TGraph>();
+
+            // Access the segment range for this bin
+            size_t seg_offset = j * nsegs;
+
+            for (int k = 0; k < nsegs; ++k) {
+                const SplineSegment &seg = spline.segments[seg_offset + k];
+                float lo = seg.knot;
+                std::array<float, 4> coeffs = seg.coeffs;
+                // Determine hi for this segment
+                float hi;
+                if (k < nsegs - 1) {
+                    hi = spline.segments[seg_offset + k + 1].knot;
+                } else {
+                    hi = systs.spline_hi[i];
+                }
+                auto fn = [coeffs](float shift) {
+                    return coeffs[0] + coeffs[1] * shift + coeffs[2] * shift * shift + coeffs[3] * shift * shift * shift;
+                };
+                fixed_pts->SetPoint(fixed_pts->GetN(), lo, fn(0));
+                if (k == nsegs - 1)
+                    fixed_pts->SetPoint(fixed_pts->GetN(), hi, fn(hi - lo));
+                float width = (hi - lo) / 20.0f;
+                for (int l = 0; l < 20; ++l)
+                    curve->SetPoint(curve->GetN(), lo + l * width, fn(l * width));
+            }
+            bin_graphs.push_back(std::make_pair(std::move(fixed_pts), std::move(curve)));
+        }
+        spline_graphs[name] = std::move(bin_graphs);
+    }
+
+    return spline_graphs;
+}
     std::unique_ptr<TGraphAsymmErrors> getErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, bool scale, int other_index) {
         //TODO: Only works with 1 mode/detector/channel
         
