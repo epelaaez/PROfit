@@ -465,112 +465,16 @@ namespace PROfit {
 
     }
 
-    /*
-       void PROsyst::FillSpline(const SystStruct& syst) {
-       std::vector<PROspec> ratios;
-       ratios.reserve(syst.p_multi_spec.size());
-       float cv_integral = syst.p_cv->Spec().sum() ;
-
-       bool found0 = false;
-       for(size_t i = 0; i < syst.p_multi_spec.size(); ++i) {
-    //log<LOG_ERROR>(L"%1% || p_multi_spec, knobval, i, cv (%2%): %3%") % __func__ % tolerance % val;
-
-
-    if(syst.knobval[i] > 0 && !found0) {
-    ratios.push_back(*syst.p_cv / *syst.p_cv);
-    found0 = true;
-    }
-    if(syst.knobval[i] == 0) found0 = true;
-
-    float mod = shape_only ?  cv_integral/syst.p_multi_spec[i]->Spec().sum() : 1.0 ;
-    ratios.push_back( ((*syst.p_multi_spec[i])*mod) / *syst.p_cv);
-    }
-    if(!found0) ratios.push_back(*syst.p_cv / *syst.p_cv);
-    Spline spline_coeffs;
-    spline_coeffs.reserve(syst.p_cv->GetNbins());
-    for(size_t i = 0; i < syst.p_cv->GetNbins(); ++i) {
-    std::vector<std::pair<float, std::array<float, 4>>> spline;
-    spline.reserve(syst.knobval.size());
-
-    // If only 2 points do a linear fit
-    if(ratios.size() < 3) {
-    const float y1 = ratios[0].GetBinContent(i);
-    const float y2 = ratios[1].GetBinContent(i);
-    const float slope = (y2 - y1)/(syst.knobval[1] - syst.knobval[0]);
-    // Mirror about 0 for MCMC
-    spline.push_back({(float)(-syst.knobval[1]), {y2, -slope, 0, 0}});
-    spline.push_back({(float)syst.knobval[0], {slope * (float)syst.knobval[0] + y1, slope, 0, 0}});
-    spline_coeffs.push_back(spline);
-    continue;
-    }
-
-    // This comment is copy-pasted from CAFAna:
-    // This is cubic interpolation. For each adjacent set of four points we
-    // determine coefficients for a cubic which will be the curve between the
-    // center two. We constrain the function to match the two center points
-    // and to have the right mean gradient at them. This causes this patch to
-    // match smoothly with the next one along. The resulting function is
-    // continuous and first and second differentiable. At the ends of the
-    // range we fit a quadratic instead with only one constraint on the
-    // slope. The coordinate conventions are that point y1 sits at x=0 and y2
-    // at x=1. The matrices are simply the inverses of writing out the
-    // constraints expressed above.
-
-    const float y1 = ratios[0].GetBinContent(i);
-    const float y2 = ratios[1].GetBinContent(i);
-    const float y3 = ratios[2].GetBinContent(i);
-    const Eigen::Vector3f v{y1, y2, (y3-y1)/2};
-    const Eigen::Matrix3f m{{ 1, -1,  1},
-    {-2,  2, -1},
-    { 1,  0,  0}};
-    const Eigen::Vector3f res = m * v;
-    spline.push_back({(float)syst.knobval[0], {res(2), res(1), res(0), 0}});
-
-    for(unsigned int shiftIdx = 1; shiftIdx < ratios.size()-2; ++shiftIdx){
-    const float y0 = ratios[shiftIdx-1].GetBinContent(i);
-    const float y1 = ratios[shiftIdx  ].GetBinContent(i);
-    const float y2 = ratios[shiftIdx+1].GetBinContent(i);
-    const float y3 = ratios[shiftIdx+2].GetBinContent(i);
-    const Eigen::Vector4f v{y1, y2, (y2-y0)/2, (y3-y1)/2};
-    const Eigen::Matrix4f m{{ 2, -2,  1,  1},
-    {-3,  3, -2, -1},
-    { 0,  0,  1,  0},
-    { 1,  0,  0,  0}};
-    const Eigen::Vector4f res = m * v;
-    float knobval = syst.knobval[shiftIdx];
-    if(!found0 && knobval >= 0)
-        knobval = syst.knobval[shiftIdx] == 1 ? 0 : syst.knobval[shiftIdx - 1];
-    spline.push_back({knobval, {res(3), res(2), res(1), res(0)}});
-}
-
-const float y4 = ratios[ratios.size() - 3].GetBinContent(i);
-const float y5 = ratios[ratios.size() - 2].GetBinContent(i);
-const float y6 = ratios[ratios.size() - 1].GetBinContent(i);
-const Eigen::Vector3f vp{y5, y6, (y6-y4)/2};
-const Eigen::Matrix3f mp{{-1,  1, -1},
-    { 0,  0,  1},
-    { 1,  0,  0}};
-const Eigen::Vector3f resp = mp * vp;
-spline.push_back({(float)syst.knobval[syst.knobval.size() - 2], {resp(2), resp(1), resp(0), 0}});
-
-spline_coeffs.push_back(spline);
-}
-syst_map[syst.systname] = {splines.size(), SystType::Spline};
-splines.push_back(spline_coeffs);
-}
-*/
+    
 float PROsyst::GetSplineShift(int spline_num, float shift, int bin) const {
     const Spline& spline = splines[spline_num];
     if (bin < 0 || bin >= spline.bins) return -1;
 
 
-    // Find the right segment (formerly shiftBin)
-    // Assume segments are sorted by knot value
+    // Find the right segment with egments are sorted by knob value
     int offset = bin * spline.segments_per_bin;
     const SplineSegment* segs = &spline.segments[offset];
 
-
-    // Fast search for segment (can use binary search if M is large, or clamp like before)
     float lowest_knobval = segs[0].knot;
     int shiftBin = std::clamp(int(shift - lowest_knobval), 0, spline.segments_per_bin - 1);
 
@@ -580,16 +484,6 @@ float PROsyst::GetSplineShift(int spline_num, float shift, int bin) const {
     return c[0] + x*(c[1] + x*(c[2] + x*c[3]));
 }
 
-/*float PROsyst::GetSplineShift(int spline_num, float shift , int bin) const {
-  if(bin < 0 || bin >= (int)splines[spline_num].size()) return -1;
-  const float lowest_knobval = splines[spline_num][0][0].first;
-  const int shiftBin = std::clamp((int)(shift - lowest_knobval), 0, (int)splines[spline_num][0].size() - 1);
-  std::array<float, 4> coeffs = splines[spline_num][bin][shiftBin].second;
-  shift -= splines[spline_num][bin][shiftBin].first;
-//return coeffs[0] + coeffs[1]*shift + coeffs[2]*shift*shift + coeffs[3]*shift*shift*shift;
-return coeffs[0] + shift*(coeffs[1] + shift*(coeffs[2] + shift*coeffs[3]));//use horners methd
-
-}*/
 void PROsyst::FillSpline(const SystStruct& syst) {
     std::vector<PROspec> ratios;
     ratios.reserve(syst.p_multi_spec.size());
@@ -611,13 +505,25 @@ void PROsyst::FillSpline(const SystStruct& syst) {
     int nbins = syst.p_cv->GetNbins();
     Spline spline;
     spline.bins = nbins;
-    spline.segments_per_bin = syst.knobval.size(); // Not always correct if <3, but matches old code for >2
+    spline.segments_per_bin = syst.knobval.size(); 
 
-    // We don't know the # of segments per bin for linear case, so we'll update segments_per_bin after filling
     std::vector<SplineSegment> all_segments;
 
     for (size_t i = 0; i < nbins; ++i) {
         std::vector<SplineSegment> bin_segments;
+
+    // This comment is copy-pasted from CAFAna:
+    // This is cubic interpolation. For each adjacent set of four points we
+    // determine coefficients for a cubic which will be the curve between the
+    // center two. We constrain the function to match the two center points
+    // and to have the right mean gradient at them. This causes this patch to
+    // match smoothly with the next one along. The resulting function is
+    // continuous and first and second differentiable. At the ends of the
+    // range we fit a quadratic instead with only one constraint on the
+    // slope. The coordinate conventions are that point y1 sits at x=0 and y2
+    // at x=1. The matrices are simply the inverses of writing out the
+    // constraints expressed above.
+
 
         if (ratios.size() < 3) {
             const float y1 = ratios[0].GetBinContent(i);
@@ -626,7 +532,6 @@ void PROsyst::FillSpline(const SystStruct& syst) {
             bin_segments.push_back(SplineSegment{(float)(-syst.knobval[1]), {y2, -slope, 0, 0}});
             bin_segments.push_back(SplineSegment{(float)syst.knobval[0], {slope * (float)syst.knobval[0] + y1, slope, 0, 0}});
         } else {
-            // First segment (special cubic)
             {
                 const float y1 = ratios[0].GetBinContent(i);
                 const float y2 = ratios[1].GetBinContent(i);
@@ -638,7 +543,6 @@ void PROsyst::FillSpline(const SystStruct& syst) {
                 const Eigen::Vector3f res = m * v;
                 bin_segments.push_back(SplineSegment{(float)syst.knobval[0], {res(2), res(1), res(0), 0}});
             }
-            // Middle segments
             for (unsigned int shiftIdx = 1; shiftIdx < ratios.size() - 2; ++shiftIdx) {
                 const float y0 = ratios[shiftIdx - 1].GetBinContent(i);
                 const float y1 = ratios[shiftIdx].GetBinContent(i);
@@ -655,7 +559,6 @@ void PROsyst::FillSpline(const SystStruct& syst) {
                     knobval = syst.knobval[shiftIdx] == 1 ? 0 : syst.knobval[shiftIdx - 1];
                 bin_segments.push_back(SplineSegment{knobval, {res(3), res(2), res(1), res(0)}});
             }
-            // Last segment (special quadratic)
             {
                 const float y4 = ratios[ratios.size() - 3].GetBinContent(i);
                 const float y5 = ratios[ratios.size() - 2].GetBinContent(i);

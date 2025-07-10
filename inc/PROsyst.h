@@ -16,16 +16,14 @@
 namespace PROfit {
 
     struct SplineSegment {
-        float knot; // The "x" value this segment starts at
-        std::array<float, 4> coeffs; // Cubic coefficients
+        float knot; 
+        std::array<float, 4> coeffs; 
     };
     class Spline {
         public:
             int bins;
             int segments_per_bin;
-            // Flat vector: [bin0_seg0, bin0_seg1, ..., bin1_seg0, ...]
             std::vector<SplineSegment> segments;
-
             // Access: segments[bin * segments_per_bin + seg]
     };
 
@@ -33,7 +31,6 @@ namespace PROfit {
     */
     class PROsyst {
         public:
-            //using Spline = std::vector<std::vector<std::pair<float, std::array<float, 4>>>>;
 
             enum class SystType {
                 Spline, Covariance,  MFA
