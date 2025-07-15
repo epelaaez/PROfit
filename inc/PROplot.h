@@ -98,6 +98,7 @@ namespace PROfit{
             };
             met.run(burnin, iterations, action);
             post_covar /= accepted;
+            log<LOG_INFO>(L"%1% || Acceptance rate %2%") % __func__ % ((float)accepted / iterations);
 
             //TODO: Only works with 1 mode/detector/channel
             cv = CollapseMatrix(config, cv);
@@ -115,6 +116,7 @@ namespace PROfit{
                 for(size_t j = 0; j < specs.size(); ++j) {
                     binconts[j] = specs[j](i);
                 }
+                if(!binconts.size()) continue;
                 float scale_factor = tmphist.GetBinContent(i+1)/cv(i);
                 if(std::isnan(scale_factor)) scale_factor = 1;
                 std::sort(binconts.begin(), binconts.end());

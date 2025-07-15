@@ -606,7 +606,8 @@ int main(int argc, char* argv[])
 
         // TODO: Not sure I understand this covariance matrix
         log<LOG_INFO>(L"%1% || Starting a metropolis hastings chain to estimate the covariace matrix aroud the above best fit. Run and Burn is (%2%,%3%);") % __func__%fitconfig.MCMCiter % fitconfig.MCMCburn;
-        Metropolis mh(simple_target{*metric_to_use}, simple_proposal(*metric_to_use, dseed(PROseed::global_rng)), best_fit, dseed(PROseed::global_rng));
+        //Metropolis mh(simple_target{*metric_to_use}, simple_proposal(*metric_to_use, dseed(PROseed::global_rng)), best_fit, dseed(PROseed::global_rng));
+        Metropolis mh(simple_target{*metric_to_use}, adaptive_proposal(*metric_to_use, dseed(PROseed::global_rng)), best_fit, dseed(PROseed::global_rng));
 
         Eigen::MatrixXf covmat = Eigen::MatrixXf::Constant(nparams, nparams, 0);
         size_t count = 0;
@@ -616,6 +617,15 @@ int main(int argc, char* argv[])
         };
         mh.run(fitconfig.MCMCburn,fitconfig.MCMCiter, action);
 
+        covmat /= count;
+        Eigen::MatrixXf fraccovmat = (1.0f/best_fit.array()).matrix().asDiagonal() * covmat
+            * (1.0f/best_fit.array()).matrix().asDiagonal();
+        Eigen::MatrixXf corrmat =
+            fraccovmat.diagonal().array().sqrt().matrix().asDiagonal().inverse() * fraccovmat
+            * fraccovmat.diagonal().array().sqrt().matrix().asDiagonal().inverse();
+
+        TH2D corrhist("crh", "", nparams, 0, nparams, nparams, 0, nparams);
+        TH2D fraccovhist("fch", "", nparams, 0, nparams, nparams, 0, nparams);
         TH2D covhist("ch", "", nparams, 0, nparams, nparams, 0, nparams);
         TH2D physhist;
         if(nphys > 0) physhist = TH2D("ph","", nparams, 0, nparams, nphys, 0, nphys);
@@ -625,19 +635,31 @@ int main(int argc, char* argv[])
                 : config.m_mcgen_variation_plotname_map[metric_to_use->GetSysts().spline_names[i-metric_to_use->GetModel().nparams]].c_str();
             covhist.GetXaxis()->SetBinLabel(i+1, label.c_str());
             covhist.GetYaxis()->SetBinLabel(i+1, label.c_str());
+            fraccovhist.GetXaxis()->SetBinLabel(i+1, label.c_str());
+            fraccovhist.GetYaxis()->SetBinLabel(i+1, label.c_str());
+            corrhist.GetXaxis()->SetBinLabel(i+1, label.c_str());
+            corrhist.GetYaxis()->SetBinLabel(i+1, label.c_str());
             if(nphys > 0) physhist.GetXaxis()->SetBinLabel(i+1, label.c_str());
             if(i < metric_to_use->GetModel().nparams) physhist.GetYaxis()->SetBinLabel(i+1, label.c_str());
             for(size_t j = 0; j < nparams; ++j) {
-                covhist.SetBinContent(i+1, j+1, covmat(i,j)/count);
+                covhist.SetBinContent(i+1, j+1, covmat(i,j));
+                fraccovhist.SetBinContent(i+1, j+1, fraccovmat(i,j));
+                corrhist.SetBinContent(i+1, j+1, corrmat(i,j));
                 if(j < metric_to_use->GetModel().nparams)
-                    physhist.SetBinContent(i+1, j+1, covmat(i,j)/count);
+                    physhist.SetBinContent(i+1, j+1, covmat(i,j));
             }
         }
         TCanvas c1;
         covhist.SetMaximum(1);
         covhist.SetMinimum(-1);
+        fraccovhist.SetMaximum(1);
+        fraccovhist.SetMinimum(-1);
         covhist.Draw("colz");
         c1.Print((final_output_tag+"_postfit_cov.pdf").c_str());
+        fraccovhist.Draw("colz");
+        c1.Print((final_output_tag+"_postfit_fraccov.pdf").c_str());
+        corrhist.Draw("colz");
+        c1.Print((final_output_tag+"_postfit_corr.pdf").c_str());
         if(nphys > 0) {
             physhist.Draw("colz");
             c1.Print("phys_cov.pdf");
@@ -663,13 +685,15 @@ int main(int argc, char* argv[])
         for(size_t i = 0; i < metric_to_use->GetModel().nparams; ++i) fixed_pars.push_back(i);
 
         log<LOG_INFO>(L"%1% || Starting global getErrorBand() ") % __func__;
-        Metropolis mh_pre(prior_only_target{*metric_to_use}, simple_proposal(*metric_to_use, dseed(PROseed::global_rng), 0.2, fixed_pars), best_fit, dseed(PROseed::global_rng));
+        //Metropolis mh_pre(prior_only_target{*metric_to_use}, simple_proposal(*metric_to_use, dseed(PROseed::global_rng), 0.2, fixed_pars), best_fit, dseed(PROseed::global_rng));
+        Metropolis mh_pre(prior_only_target{*metric_to_use}, adaptive_proposal(*metric_to_use, dseed(PROseed::global_rng), fixed_pars), best_fit, dseed(PROseed::global_rng));
         std::unique_ptr<TGraphAsymmErrors> err_band = 
             MCMC_prefit_errors
             ? getMCMCErrorBand(mh_pre, fitconfig.MCMCburn, fitconfig.MCMCiter, config, prop, *metric_to_use, best_fit, priors, prior_covariance)
             : getErrorBand(config, prop, systs, binwidth_scale);
 
-        Metropolis mh_post(simple_target{*metric_to_use}, simple_proposal(*metric_to_use, dseed(PROseed::global_rng), 0.2, fixed_pars), best_fit, dseed(PROseed::global_rng));
+        //Metropolis mh_post(simple_target{*metric_to_use}, simple_proposal(*metric_to_use, dseed(PROseed::global_rng), 0.2, fixed_pars), best_fit, dseed(PROseed::global_rng));
+        Metropolis mh_post(simple_target{*metric_to_use}, adaptive_proposal(*metric_to_use, dseed(PROseed::global_rng), fixed_pars), best_fit, dseed(PROseed::global_rng));
         log<LOG_INFO>(L"%1% || Starting global getPostFitErrorBand() ") % __func__;
         std::unique_ptr<TGraphAsymmErrors> post_err_band = getMCMCErrorBand(mh_post, fitconfig.MCMCburn, fitconfig.MCMCiter, config, prop, *metric_to_use, best_fit, posteriors, spline_covariance, binwidth_scale);
 

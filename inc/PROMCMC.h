@@ -175,8 +175,8 @@ struct simple_proposal {
         accepted_list[tune_calls % 1000] = accepted;
         if(++tune_calls % 1000 == 0) {
             float acceptance = std::count(accepted_list.begin(), accepted_list.end(), true) / 1000.0f;
-            if(acceptance < 0.25 || acceptance > 0.35) {
-                if(std::abs(acceptance - 0.3) < std::abs(last_acceptance - 0.3)) {
+            if(acceptance < 0.20 || acceptance > 0.30) {
+                if(std::abs(acceptance - 0.234) < std::abs(last_acceptance - 0.234)) {
                     if(last_acceptance < 0) {
                         width *= 1.25; // Default first step
                         last_shift = 0.25 * width;
@@ -208,7 +208,8 @@ struct adaptive_proposal {
     size_t tune_calls = 0;
     float scale = 5.66;
     float diag_scale = 0.01;
-    float beta = 0.05;
+    //float beta = 0.05;
+    float beta = 1.0;
     Eigen::MatrixXf diagL;
 
     adaptive_proposal(PROmetric &metric, uint32_t seed, std::vector<int> fixed = {}) 
@@ -236,8 +237,21 @@ struct adaptive_proposal {
             throw1(i) = nd(rng);
             throw2(i) = nd(rng);
         }
-        Eigen::LLT<Eigen::MatrixXf> llt(scale * width);
-        Eigen::MatrixXf L = llt.matrixL();
+        //Eigen::LLT<Eigen::MatrixXf> llt(scale * width);
+        //Eigen::MatrixXf L = llt.matrixL();
+        //if(llt.info() != Eigen::Success) {
+        //    log<LOG_ERROR>(L"%1% || LLT decomp failed. Width is %2%.") % __func__ % width;
+        //    exit(1);
+        //}
+        Eigen::LDLT<Eigen::MatrixXf> ldlt(scale * width);
+        if(ldlt.info() != Eigen::Success) {
+            log<LOG_ERROR>(L"%1% || LDLT decomp failed. Width is %2%.") % __func__ % width;
+            exit(1);
+        }
+        Eigen::MatrixXf Lp = ldlt.matrixL();
+        Eigen::VectorXf D_sqrt = ldlt.vectorD().array().sqrt();
+        Eigen::PermutationMatrix<Eigen::Dynamic, Eigen::Dynamic> P(ldlt.transpositionsP());
+        Eigen::MatrixXf L = P * Lp * D_sqrt.asDiagonal();
         last_proposed = current + (1.0f - beta) * L * throw1 + beta * diagL * throw2;
         return last_proposed;
     }
@@ -253,6 +267,8 @@ struct adaptive_proposal {
             if(i < nparams) {
                 if(value(i) > metric.GetModel().ub(i) || value(i) < metric.GetModel().lb(i))
                     return false;
+            } else if(metric.GetSysts().spline_hi[i-nparams] == 1.0) {
+                return value(i) >= -1 || value(i) <= 1;
             } else {
                 if(value(i) < metric.GetSysts().spline_lo[i-nparams] || value(i) > metric.GetSysts().spline_hi[i-nparams])
                     return false;
@@ -269,9 +285,11 @@ struct adaptive_proposal {
             for(const auto &v: proposed)
                 cov += (v - mean) * (v - mean).transpose();
             cov /= proposed.size();
+            for(int idx : fixed) if(cov(idx,idx) == 0) cov(idx,idx) = 1;
         }
-        if(tune_calls++ > 1000) {
+        if(tune_calls++ > (size_t)(2*last_proposed.size())) {
             width = cov;
+            beta = 0.05;
         }
     }
 };
