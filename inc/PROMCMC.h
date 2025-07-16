@@ -36,11 +36,11 @@ namespace PROfit {
                     float u = uniform(rng);
 
                     if(u <= acceptance) {
-                        // log<LOG_DEBUG>(L"%1% || APPROVED acc %2%, rng %3% and proposal: %4%  ") % __func__ % acceptance % u %p;
+ //                        log<LOG_DEBUG>(L"%1% || APPROVED acc %2%, rng %3% and proposal: %4%  ") % __func__ % acceptance % u %p;
                         current = p;
                         return true;
                     }else{
-                        // log<LOG_DEBUG>(L"%1% || REJECTED acc %2%, rng %3% and proposal: %4%  ") % __func__ % acceptance % u %p;
+   //                      log<LOG_DEBUG>(L"%1% || REJECTED acc %2%, rng %3% and proposal: %4%  ") % __func__ % acceptance % u %p;
                     }
                     return false;
                 }
@@ -163,7 +163,7 @@ namespace PROfit {
             for(int i = 0; i < value.size(); ++i) {
                 if(std::find(fixed.begin(), fixed.end(), i) != std::end(fixed)) continue;
                 if(i < nparams) {
-                    if(value(i) > metric.GetModel().ub(i) || value(i) < metric.GetModel().lb(i))
+                    if(value(i) > metric.GetModel().ub(i) || value(i) < metric.GetModel().lb(i) || value(i) < -5.0f)
                         return false;
                 } else if(metric.GetSysts().spline_hi[i-nparams] == 1.0) {
                     if(value(i) < -1 || value(i) > 1) return false;
@@ -233,8 +233,8 @@ namespace PROfit {
             Eigen::VectorXf throw2 = current;
             for(int i = 0; i < throw1.size(); ++i) {
                 if(std::find(fixed.begin(), fixed.end(), i) != std::end(fixed)) {
-                    throw1(i) = 0;
-                    throw2(i) = 0;
+                    throw1(i) = 0.0;
+                    throw2(i) = 0.0;
                 }else{
                     std::normal_distribution<float> nd(0, 1);
                     throw1(i) = nd(rng);
@@ -257,6 +257,11 @@ namespace PROfit {
             Eigen::PermutationMatrix<Eigen::Dynamic, Eigen::Dynamic> P(ldlt.transpositionsP());
             Eigen::MatrixXf L = P * Lp * D_sqrt.asDiagonal();
             last_proposed = current + (1.0f - beta) * L * throw1 + beta * diagL * throw2;
+            
+            for (int idx : fixed) {
+                    last_proposed(idx) = current(idx);
+                }
+            
             return last_proposed;
         }
 
@@ -270,7 +275,7 @@ namespace PROfit {
             for(int i = 0; i < value.size(); ++i) {
                 if(std::find(fixed.begin(), fixed.end(), i) != std::end(fixed)) continue;
                 if(i < nparams) {
-                    if(value(i) > metric.GetModel().ub(i) || value(i) < metric.GetModel().lb(i))
+                    if(value(i) > metric.GetModel().ub(i) || value(i) < std::max(metric.GetModel().lb(i),-5.0f))
                         return false;
                 } else if(metric.GetSysts().spline_hi[i-nparams] == 1.0) {
                     if(value(i) < -1 || value(i) > 1) return false;
