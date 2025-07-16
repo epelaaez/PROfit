@@ -135,6 +135,7 @@ namespace PROfit {
 	      myspectrum.Fill(reco_bin, finalw);
 	    }
 	}
+    
 	return myspectrum;
   }
 
@@ -170,6 +171,14 @@ namespace PROfit {
 		  float oscw = inmodel.model_functions[j](phys, le);
 		  for(size_t k = 0; k < myspectrum.GetNbins(); ++k) {
 		    myspectrum.Fill(k, systw(k) * oscw * inmodel.hists[j](i, k));
+            if( std::isnan(systw(k) * oscw * inmodel.hists[j](i, k))){
+
+                //log<LOG_DEBUG>(L"%1% || systw(k) %2% oscw %3% model %4% k %5% (phs  %6% || le %7%)") % __func__ % systw(k) % oscw % inmodel.hists[j](i, k)% k % phys % le;
+                //log<LOG_DEBUG>(L"%1% || params %2% ") % __func__ % params;
+                //exit(EXIT_FAILURE);
+
+
+            }
 		  }
                 }
             }
@@ -194,6 +203,16 @@ namespace PROfit {
 	    myspectrum.Fill(reco_bin, finalw);
 	  }
         }
+for(int j=0; j<myspectrum.GetNbins(); j++){
+        if(std::isnan(myspectrum.GetBinContent(j)) || myspectrum.GetBinContent(j)!=myspectrum.GetBinContent(j)){
+            for(int k=0; k<myspectrum.GetNbins(); k++){
+    		  //  log<LOG_DEBUG>(L"%1% || i: %2% GetBinContent() %3%") % __func__ % k % myspectrum.GetBinContent(k);
+            }
+    		//log<LOG_DEBUG>(L"%1% || params %2% ") % __func__ % params;
+            //exit(EXIT_FAILURE);
+
+        }
+    }
         return myspectrum;
   }
 	    

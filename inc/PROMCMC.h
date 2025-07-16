@@ -36,11 +36,11 @@ namespace PROfit {
                     float u = uniform(rng);
 
                     if(u <= acceptance) {
-                        //log<LOG_DEBUG>(L"%1% || APPROVED acc %2%, rng %3% and proposal: %4%  ") % __func__ % acceptance % u %p;
+                       // log<LOG_DEBUG>(L"%1% || APPROVED acc %2%, rng %3% and proposal: %4%  ") % __func__ % acceptance % u %p;
                         current = p;
                         return true;
                     }else{
-                        //log<LOG_DEBUG>(L"%1% || REJECTED acc %2%, rng %3% and proposal: %4%  ") % __func__ % acceptance % u %p;
+                       // log<LOG_DEBUG>(L"%1% || REJECTED acc %2%, rng %3% and proposal: %4%  ") % __func__ % acceptance % u %p;
                     }
                     return false;
                 }
@@ -158,15 +158,15 @@ namespace PROfit {
             return prob;
         }
 
-        bool within_bound(Eigen::VectorXf &value) {
+        bool within_bound(const Eigen::VectorXf &value) {
             int nparams = metric.GetModel().nparams;
             for(int i = 0; i < value.size(); ++i) {
                 if(std::find(fixed.begin(), fixed.end(), i) != std::end(fixed)) continue;
                 if(i < nparams) {
                     if(value(i) > metric.GetModel().ub(i) || value(i) < metric.GetModel().lb(i))
                         return false;
-                } else if(metric.GetSysts().spline_lo[i-nparams] == 0) {
-                    return value(i) >= -metric.GetSysts().spline_hi[i-nparams] && value(i) <= metric.GetSysts().spline_hi[i-nparams];
+                } else if(metric.GetSysts().spline_hi[i-nparams] == 1.0) {
+                    if(value(i) < -1 || value(i) > 1) return false;
                 } else {
                     if(value(i) < metric.GetSysts().spline_lo[i-nparams] || value(i) > metric.GetSysts().spline_hi[i-nparams])
                         return false;
@@ -210,7 +210,7 @@ namespace PROfit {
         Eigen::VectorXf mean;
         Eigen::MatrixXf cov;
         size_t tune_calls = 0;
-        float scale = 0.5*5.66;
+        float scale = 0.75*5.66;
         float diag_scale = 0.01;
         float beta = 1.0;
         Eigen::MatrixXf diagL;
@@ -282,22 +282,24 @@ namespace PROfit {
         }
 
 
-        void tune(bool /*accepted*/) {
-            ++tune_calls;
-            Eigen::VectorXf delta = last_proposed - mean;
-            mean += delta / tune_calls;
-            if (tune_calls > 1) {
-                cov += (delta * (last_proposed - mean).transpose() - cov) / tune_calls;
+        void tune(bool accepted) {
+            if (accepted) {
+                ++tune_calls;
+                Eigen::VectorXf delta = last_proposed - mean;
+                mean += delta / tune_calls;
+                if (tune_calls > 1) {
+                    cov += (delta * (last_proposed - mean).transpose() - cov) / tune_calls;
+                }
+                if(tune_calls > (size_t)(2*last_proposed.size())) {
+                    Eigen::MatrixXf cov_pd = cov;//numerical stability apparrently
+                    for(int i = 0; i < cov_pd.rows(); ++i)
+                        cov_pd(i, i) += 1e-6;
+                    width = cov_pd;
+                    beta = 0.05;
+                }
             }
-            if(tune_calls > (size_t)(2*last_proposed.size())) {
-                Eigen::MatrixXf cov_pd = cov;//numerical stability apparrently
-                for(int i = 0; i < cov_pd.rows(); ++i)
-                    cov_pd(i, i) += 1e-6;
-                width = cov_pd;
-                beta = 0.05;
-            }
-        }
 
+        }
 
     };
 };
