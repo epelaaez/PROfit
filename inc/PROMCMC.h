@@ -36,11 +36,11 @@ namespace PROfit {
                     float u = uniform(rng);
 
                     if(u <= acceptance) {
-                       // log<LOG_DEBUG>(L"%1% || APPROVED acc %2%, rng %3% and proposal: %4%  ") % __func__ % acceptance % u %p;
+                        // log<LOG_DEBUG>(L"%1% || APPROVED acc %2%, rng %3% and proposal: %4%  ") % __func__ % acceptance % u %p;
                         current = p;
                         return true;
                     }else{
-                       // log<LOG_DEBUG>(L"%1% || REJECTED acc %2%, rng %3% and proposal: %4%  ") % __func__ % acceptance % u %p;
+                        // log<LOG_DEBUG>(L"%1% || REJECTED acc %2%, rng %3% and proposal: %4%  ") % __func__ % acceptance % u %p;
                     }
                     return false;
                 }
@@ -210,7 +210,7 @@ namespace PROfit {
         Eigen::VectorXf mean;
         Eigen::MatrixXf cov;
         size_t tune_calls = 0;
-        float scale = 0.75*5.66;
+        float scale = 5.66;
         float diag_scale = 0.01;
         float beta = 1.0;
         Eigen::MatrixXf diagL;
@@ -235,10 +235,11 @@ namespace PROfit {
                 if(std::find(fixed.begin(), fixed.end(), i) != std::end(fixed)) {
                     throw1(i) = 0;
                     throw2(i) = 0;
+                }else{
+                    std::normal_distribution<float> nd(0, 1);
+                    throw1(i) = nd(rng);
+                    throw2(i) = nd(rng);
                 }
-                std::normal_distribution<float> nd(0, 1);
-                throw1(i) = nd(rng);
-                throw2(i) = nd(rng);
             }
             //Eigen::LLT<Eigen::MatrixXf> llt(scale * width);
             //Eigen::MatrixXf L = llt.matrixL();
@@ -290,6 +291,11 @@ namespace PROfit {
                 if (tune_calls > 1) {
                     cov += (delta * (last_proposed - mean).transpose() - cov) / tune_calls;
                 }
+                for (int idx : fixed) {
+                    cov.row(idx).setZero();
+                    cov.col(idx).setZero();
+                }
+
                 if(tune_calls > (size_t)(2*last_proposed.size())) {
                     Eigen::MatrixXf cov_pd = cov;//numerical stability apparrently
                     for(int i = 0; i < cov_pd.rows(); ++i)
