@@ -36,11 +36,11 @@ namespace PROfit {
                     float u = uniform(rng);
 
                     if(u <= acceptance) {
- //                        log<LOG_DEBUG>(L"%1% || APPROVED acc %2%, rng %3% and proposal: %4%  ") % __func__ % acceptance % u %p;
+                          //                      log<LOG_DEBUG>(L"%1% || APPROVED acc %2%, rng %3% and proposal: %4%  ") % __func__ % acceptance % u %p;
                         current = p;
                         return true;
                     }else{
-   //                      log<LOG_DEBUG>(L"%1% || REJECTED acc %2%, rng %3% and proposal: %4%  ") % __func__ % acceptance % u %p;
+                        //                      log<LOG_DEBUG>(L"%1% || REJECTED acc %2%, rng %3% and proposal: %4%  ") % __func__ % acceptance % u %p;
                     }
                     return false;
                 }
@@ -215,6 +215,14 @@ namespace PROfit {
         float beta = 1.0;
         Eigen::MatrixXf diagL;
 
+        // Adaptive scaling state
+        std::vector<bool> accept_history;
+        size_t adapt_window = 1000;  // window size for adaptation
+        float target_accept = 0.234; 
+        float adapt_factor = 1.02;   
+
+
+
         adaptive_proposal(PROmetric &metric, uint32_t seed, std::vector<int> fixed = {}) 
             : metric(metric), seed(seed), fixed(fixed), rng(seed) {
                 int nparams = metric.GetModel().nparams + metric.GetSysts().GetNSplines();
@@ -257,11 +265,11 @@ namespace PROfit {
             Eigen::PermutationMatrix<Eigen::Dynamic, Eigen::Dynamic> P(ldlt.transpositionsP());
             Eigen::MatrixXf L = P * Lp * D_sqrt.asDiagonal();
             last_proposed = current + (1.0f - beta) * L * throw1 + beta * diagL * throw2;
-            
+
             for (int idx : fixed) {
-                    last_proposed(idx) = current(idx);
-                }
-            
+                last_proposed(idx) = current(idx);
+            }
+
             return last_proposed;
         }
 
@@ -301,14 +309,28 @@ namespace PROfit {
                     cov.col(idx).setZero();
                 }
 
-                if(tune_calls > (size_t)(2*last_proposed.size())) {
+            }
+                accept_history.push_back(accepted);
+                if (accept_history.size() == adapt_window) {
+                    float acc_rate = std::count(accept_history.begin(), accept_history.end(), true) / float(adapt_window);
+
+                    if (acc_rate > target_accept) {
+                        scale *= adapt_factor;
+                    } else {
+                        scale /= adapt_factor;
+                    }
+                    accept_history.clear();
+                    log<LOG_DEBUG>(L"%1% || Adaptive scale updated to %2%, acceptance rate = %3%") % __func__ % scale % acc_rate;
+                }
+
+                if(tune_calls > (size_t)(4*last_proposed.size())) {
                     Eigen::MatrixXf cov_pd = cov;//numerical stability apparrently
                     for(int i = 0; i < cov_pd.rows(); ++i)
-                        cov_pd(i, i) += 1e-6;
+                        cov_pd(i, i) += 1e-12;
                     width = cov_pd;
-                    beta = 0.05;
+                    beta = tune_calls > (size_t)(100*last_proposed.size()) ? 0.05 : 0.5;
                 }
-            }
+            
 
         }
 

@@ -95,6 +95,7 @@ namespace PROfit{
                 Eigen::VectorXf splines = value.segment(nphys, nspline);
                 Eigen::VectorXf diff = splines-splines_bf;
                 post_covar += diff * diff.transpose();
+                log<LOG_DEBUG>(L"%1% || AUTO  %2% : %3%") % __func__ % accepted % value;
             };
             met.run(burnin, iterations, action);
             post_covar /= accepted;
