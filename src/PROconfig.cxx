@@ -773,10 +773,12 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 const char *knobs = pAllowList->Attribute("knobvals");
                 const char *tags = pAllowList->Attribute("tag");
                 const char *prior = pAllowList->Attribute("prior");
+                const char *center = pAllowList->Attribute("center");
                 m_mcgen_variation_type.push_back(variation_type);
                 m_mcgen_variation_type_map[wt] = variation_type;
                 m_mcgen_variation_allowlist.push_back(wt);
                 if(prior) m_mcgen_variation_prior[wt] = std::strtof(prior, NULL);
+                if(center) m_mcgen_variation_prior_centers[wt] = std::strtof(center, NULL);
                 m_mcgen_variation_plotname_map[wt] = plot_name ? plot_name : wt;
                 if(!binning || strcmp(binning, "reco") == 0) {
                     m_mcgen_variation_binning_map[wt] = -1;

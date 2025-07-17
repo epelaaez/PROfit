@@ -34,11 +34,19 @@ namespace PROfit {
         }
 
         spline_priors = Eigen::VectorXf::Constant(n_splines, 1);
+        spline_centers = Eigen::VectorXf::Constant(n_splines, 0);
         for(const auto &[name, prior]: config.m_mcgen_variation_prior) {
             auto it = std::find(spline_names.begin(), spline_names.end(), name);
             if(it != std::end(spline_names)) {
                 size_t idx = std::distance(std::begin(spline_names), it);
                 spline_priors(idx) = prior;
+            }
+        }
+        for(const auto &[name, center]: config.m_mcgen_variation_prior_centers) {
+            auto it = std::find(spline_names.begin(), spline_names.end(), name);
+            if(it != std::end(spline_names)) {
+                size_t idx = std::distance(std::begin(spline_names), it);
+                spline_centers(idx) = center;
             }
         }
 

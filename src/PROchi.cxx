@@ -44,12 +44,13 @@ PROchi::PROchi(const std::string tag, const PROconfig &conin, const PROpeller &p
 
 float PROchi::Pull(const Eigen::VectorXf &systs) {
     // No correlations: sum of squares
+    Eigen::VectorXf centered = systs - syst->spline_centers;
     if (!correlated_systematics) {
-        return (systs.array().square() / syst->spline_priors.array().square()).sum();
+        return (centered.array().square() / syst->spline_priors.array().square()).sum();
     }
 
     // Otherwise dot onto covariance
-    return systs.dot(prior_covariance.inverse() * systs);
+    return centered.dot(prior_covariance.inverse() * centered);
 }
 
 void PROchi::fixSpline(int fix, float valin){
