@@ -203,7 +203,8 @@ namespace PROfit {
         PROmetric &metric;
         uint32_t seed;
         Eigen::MatrixXf width;
-        std::vector<int> fixed;
+        std::vector<int> fixed;//fixed and active are opposite. usually active is 
+        std::vector<int> active;
         std::mt19937 rng;
         static constexpr bool has_tune = true;
         std::vector<Eigen::VectorXf> proposed;
@@ -212,19 +213,17 @@ namespace PROfit {
         Eigen::MatrixXf cov;
         size_t tune_calls = 0;
         float scale = 5.66;
-        float diag_scale = 0.01;
         float beta = 1.0;
+        
+        float diag_scale = 0.01;
         Eigen::MatrixXf diagL;
+        Eigen::MatrixXf sub_diagL;
 
         // Adaptive scaling state
         std::vector<bool> accept_history;
         size_t adapt_window = 1000;  // window size for adaptation
         float target_accept = 0.234; 
         float adapt_factor = 1.02;   
-
-
-       Eigen::MatrixXf sub_diagL;
-       std::vector<int> active;
 
         adaptive_proposal(PROmetric &metric, uint32_t seed, std::vector<int> fixed = {}) 
             : metric(metric), seed(seed), fixed(fixed), rng(seed) {
@@ -243,8 +242,9 @@ namespace PROfit {
                         active.push_back(i);
                     }
                 }
+                //grab the bits that correspond to the active only.
                 sub_diagL = Eigen::MatrixXf::Identity(active.size(), active.size());
-                sub_diagL = diagL(active, active);  // Magical Eigen indexing
+                sub_diagL = diagL(active, active);  
 
             }
 
@@ -260,8 +260,7 @@ namespace PROfit {
             
             Eigen::MatrixXf inp = scale*width;//fulldim
 
-            Eigen::MatrixXf sub_inp = inp(active, active);  // Magic Eigen indexing?!
-            Eigen::MatrixXf sub_L = ComputeSquareRootCovariance(sub_inp,false);
+            Eigen::MatrixXf sub_L = ComputeSquareRootCovariance( inp(active, active)); //magic eigen indexing
 
             last_proposed = current;//fulldim
             last_proposed(active) += (1.0f - beta) * sub_L * sub_throw1 + beta * sub_diagL * sub_throw2; //More index nonsesne?!
@@ -320,9 +319,9 @@ namespace PROfit {
             }
 
             if(tune_calls > (size_t)(4*last_proposed.size())) {
-                Eigen::MatrixXf cov_pd = cov;//numerical stability apparrently
+                Eigen::MatrixXf cov_pd = cov;
                 for(int i = 0; i < cov_pd.rows(); ++i)
-                    cov_pd(i, i) += 1e-12;
+                    cov_pd(i, i) += 1e-8;
                 width = cov_pd;
                 beta = tune_calls > (size_t)(100*last_proposed.size()) ? 0.05 : 0.5;
             }
