@@ -30,7 +30,7 @@
 #include "TRatioPlot.h"
 #include "TPaveText.h"
 #include "TTree.h"
-
+#include "TLine.h"
 namespace PROfit{
 
     enum class PlotOptions {

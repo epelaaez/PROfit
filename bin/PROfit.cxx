@@ -269,9 +269,9 @@ int main(int argc, char* argv[])
         const auto it = std::find(model->param_names.begin(), model->param_names.end(), name);
         if(it == std::end(model->param_names)) {
             log<LOG_ERROR>(L"%1% || Unrecognized model parameter name %2%.\n"
-                           L"Valid names for model %3% are %4%") %
-                           __func__% name.c_str()% config.m_model_tag.c_str()%
-                           model->param_names;
+                    L"Valid names for model %3% are %4%") %
+                __func__% name.c_str()% config.m_model_tag.c_str()%
+                model->param_names;
             return 1;
         }
         int loc = std::distance(model->param_names.begin(), it);
@@ -386,48 +386,48 @@ int main(int argc, char* argv[])
     }//if no data, use injected or fake data;
     else{
 
-      //Only for reweighting tests                                                                                                                                       
-      if (!mockreweights.empty()) {
-        log<LOG_INFO>(L"%1% || Will use reweighted MC (with any requested oscillations and parameter shifts) as data for this study") % __func__  ;
-        auto file = std::make_unique<TFile>(reweights_file.c_str());
-        log<LOG_DEBUG>(L"%1% || Set file to : %2% ") % __func__ % reweights_file.c_str();
-        log<LOG_DEBUG>(L"%1% || Size of reweights vector : %2% ") % __func__ % mockreweights.size() ;
-        for (size_t i=0; i < mockreweights.size(); ++i) {
-          log<LOG_DEBUG>(L"%1% || Mock reweight i : %2% ") % __func__ % mockreweights[i].c_str() ;
-          TH2D* rwhist = (TH2D*)file->Get(mockreweights[i].c_str());
-          //std::string newName = "rwhist_" + std::to_string(i);
-          //TH2D* clonedHist = static_cast<TH2D*>(rwhist->Clone(newName.c_str()));
-	  rwhist->SetDirectory(0);
-          weighthists.push_back(rwhist);
-          log<LOG_DEBUG>(L"%1% || Read in weight hist with %2% entries ") % __func__ % rwhist->GetEntries();
+        //Only for reweighting tests                                                                                                                                       
+        if (!mockreweights.empty()) {
+            log<LOG_INFO>(L"%1% || Will use reweighted MC (with any requested oscillations and parameter shifts) as data for this study") % __func__  ;
+            auto file = std::make_unique<TFile>(reweights_file.c_str());
+            log<LOG_DEBUG>(L"%1% || Set file to : %2% ") % __func__ % reweights_file.c_str();
+            log<LOG_DEBUG>(L"%1% || Size of reweights vector : %2% ") % __func__ % mockreweights.size() ;
+            for (size_t i=0; i < mockreweights.size(); ++i) {
+                log<LOG_DEBUG>(L"%1% || Mock reweight i : %2% ") % __func__ % mockreweights[i].c_str() ;
+                TH2D* rwhist = (TH2D*)file->Get(mockreweights[i].c_str());
+                //std::string newName = "rwhist_" + std::to_string(i);
+                //TH2D* clonedHist = static_cast<TH2D*>(rwhist->Clone(newName.c_str()));
+                rwhist->SetDirectory(0);
+                weighthists.push_back(rwhist);
+                log<LOG_DEBUG>(L"%1% || Read in weight hist with %2% entries ") % __func__ % rwhist->GetEntries();
+            }
         }
-      }
 
-      //Create CV or injected data spectrum for all subsequent steps                                                                                                          //this now will inject osc param, splines and reweight all at once                                                                                                 
-      for (size_t i=0; i < weighthists.size(); ++i) {
-        TH2D *rwhist = weighthists[i];
-        log<LOG_DEBUG>(L"%1% || Passing weight hist with %2% entries ") % __func__ % rwhist->GetEntries();
-      }
+        //Create CV or injected data spectrum for all subsequent steps                                                                                                          //this now will inject osc param, splines and reweight all at once                                                                                                 
+        for (size_t i=0; i < weighthists.size(); ++i) {
+            TH2D *rwhist = weighthists[i];
+            log<LOG_DEBUG>(L"%1% || Passing weight hist with %2% entries ") % __func__ % rwhist->GetEntries();
+        }
 
-      PROspec data_spec = osc_params.size() || injected_systs.size() || weighthists.size() ? FillRecoSpectra(config, prop, systs, *model, allparams, weighthists, !eventbyevent) :  FillCVSpectrum(config, prop, !eventbyevent);
+        PROspec data_spec = osc_params.size() || injected_systs.size() || weighthists.size() ? FillRecoSpectra(config, prop, systs, *model, allparams, weighthists, !eventbyevent) :  FillCVSpectrum(config, prop, !eventbyevent);
 
-      if(poisson_throw) data_spec = PROspec::PoissonVariation(data_spec, dseed(myseed.global_rng));
-      Eigen::VectorXf data_vec = CollapseMatrix(config, data_spec.Spec());
-      Eigen::VectorXf err_vec_sq = data_spec.Error().array().square();
-      Eigen::VectorXf err_vec = CollapseMatrix(config, err_vec_sq).array().sqrt();
-      //data = PROdata(data_vec, err_vec);
-      data = PROdata(data_vec, data_vec.array().sqrt());
+        if(poisson_throw) data_spec = PROspec::PoissonVariation(data_spec, dseed(myseed.global_rng));
+        Eigen::VectorXf data_vec = CollapseMatrix(config, data_spec.Spec());
+        Eigen::VectorXf err_vec_sq = data_spec.Error().array().square();
+        Eigen::VectorXf err_vec = CollapseMatrix(config, err_vec_sq).array().sqrt();
+        //data = PROdata(data_vec, err_vec);
+        data = PROdata(data_vec, data_vec.array().sqrt());
 
-      for(size_t io = 0; io < config.m_num_other_vars; ++io) {
-	PROspec data_spec = osc_params.size() || injected_systs.size() || weighthists.size() 
-	  ? FillOtherRecoSpectra(config, prop, systs, *model, allparams, io, weighthists)
-	  : FillOtherCVSpectrum(config, prop, io);
+        for(size_t io = 0; io < config.m_num_other_vars; ++io) {
+            PROspec data_spec = osc_params.size() || injected_systs.size() || weighthists.size() 
+                ? FillOtherRecoSpectra(config, prop, systs, *model, allparams, io, weighthists)
+                : FillOtherCVSpectrum(config, prop, io);
 
-	Eigen::VectorXf data_vec = CollapseMatrix(config, data_spec.Spec(), io);
-	Eigen::VectorXf err_vec_sq = data_spec.Error().array().square();
-	Eigen::VectorXf err_vec = CollapseMatrix(config, err_vec_sq, io).array().sqrt();
-	other_data.push_back(PROdata(data_vec, err_vec));
-      }
+            Eigen::VectorXf data_vec = CollapseMatrix(config, data_spec.Spec(), io);
+            Eigen::VectorXf err_vec_sq = data_spec.Error().array().square();
+            Eigen::VectorXf err_vec = CollapseMatrix(config, err_vec_sq, io).array().sqrt();
+            other_data.push_back(PROdata(data_vec, err_vec));
+        }
     }
 
     // Leave this after creating fake data so we can make fake data using systs that aren't
@@ -493,17 +493,17 @@ int main(int argc, char* argv[])
     for(const auto& [name, shift]: injected_systs) {
         log<LOG_INFO>(L"%1% || Injected syst: %2% shifted by %3%") % __func__ % name.c_str() % shift;
         auto it = std::find(systs.spline_names.begin(), systs.spline_names.end(), name);
-            for(const auto &[xml_name, plot_name]: config.m_mcgen_variation_plotname_map) {
-                if(name == plot_name) {
-                    it = std::find(systs.spline_names.begin(), systs.spline_names.end(), xml_name);
-                    break;
-                }
+        for(const auto &[xml_name, plot_name]: config.m_mcgen_variation_plotname_map) {
+            if(name == plot_name) {
+                it = std::find(systs.spline_names.begin(), systs.spline_names.end(), xml_name);
+                break;
             }
-            if(it == systs.spline_names.end()) {
-                log<LOG_ERROR>(L"%1% || Error: Unrecognized spline %2%. Ignoring this injected shift.") % __func__ % name.c_str();
-                continue;
-            }
-        
+        }
+        if(it == systs.spline_names.end()) {
+            log<LOG_ERROR>(L"%1% || Error: Unrecognized spline %2%. Ignoring this injected shift.") % __func__ % name.c_str();
+            continue;
+        }
+
         int idx = std::distance(systs.spline_names.begin(), it);
         allparams(idx+model->nparams) = shift;
         systparams(idx) = shift;
@@ -657,12 +657,41 @@ int main(int argc, char* argv[])
         covhist.SetMinimum(-1);
         fraccovhist.SetMaximum(100);
         fraccovhist.SetMinimum(-100);
-        covhist.Draw("colz");
-        c1.Print((final_output_tag+"_postfit_cov.pdf").c_str());
+        //covhist.Draw("colz");
+        //c1.Print((final_output_tag+"_postfit_cov.pdf").c_str());
         //fraccovhist.Draw("colz");
         //c1.Print((final_output_tag+"_postfit_fraccov.pdf").c_str());
+        const Int_t NCont = 255;
+        const Int_t NRGBs = 9;  // Reduced control points for smoother white stretch
+        Double_t stops[NRGBs] = {
+            0.0,    // -1.0 (dark blue)
+            0.075,    // -0.6 (transition to white)
+            0.3,    // -0.2 (mostly white)
+            0.4,   // -0.04 (almost pure white)
+            0.5,    //  0.0 (pure white)
+            0.6,   // +0.04 (almost pure white)
+            0.7,    // +0.2 (transition to red)
+            0.925,    // +0.6 (strong red)
+            1.0     // +1.0 (dark red)
+        };
+
+        Double_t red[NRGBs]   = {0.00,0.259,0.824, 0.949, 1.0, 0.988, 0.980, 0.918,0.839};
+        Double_t green[NRGBs] = {0.341,0.404,0.890, 0.961, 1.0, 0.933, 0.824, 0.263,0.125};
+        Double_t blue[NRGBs]  = {0.906,0.824,0.989, 0.980, 1.0, 0.929, 0.812, 0.208,0.024};
+
+        TColor::CreateGradientColorTable(NRGBs, stops, red, green, blue, NCont);
+        gStyle->SetNumberContours(NCont);
+        c1.SetLeftMargin(0.18);   
+        corrhist.SetTitle("Post-Fit Correlation Matrix");
         corrhist.Draw("colz");
-        c1.Print((final_output_tag+"_postfit_corr.pdf").c_str());
+        gPad->Update();
+
+        TLine line;
+        line.SetLineColor(kBlack);
+        line.SetLineWidth(2);
+        line.DrawLine(nphys, 0, nphys, nparams);
+        line.DrawLine(0, nphys, nparams, nphys);
+        c1.Print((final_output_tag+"_postfit_correlation_matrix.pdf").c_str());
         if(nphys > 0) {
             physhist.Draw("colz");
             c1.Print("phys_cov.pdf");
@@ -1159,21 +1188,21 @@ int main(int argc, char* argv[])
         std::vector<TPaveText> channel_chitexts;
         std::vector<TPaveText> other_channel_chitexts; //todo
         for(size_t im = 0; im < config.m_num_modes; im++){
-                for(size_t id =0; id < config.m_num_detectors; id++){
-                    for(size_t ic = 0; ic < config.m_num_channels; ic++){
-                        log<LOG_INFO>(L"%1% || On channel %2%:") % __func__ % global_channel_index ;
-                        double chival = allcov_metric->getSingleChannelChi(global_channel_index);
-                        int ndf = config.m_channel_num_bins[ic] - bool(opt&PlotOptions::AreaNormalized);
-                        log<LOG_INFO>(L"%1% || -- the datamc chi^2/ndof is %2%/%3% .") % __func__ % chival % ndf;
-                        TPaveText chi2text(0.59, 0.50, 0.89, 0.59, "NDC");
-                        chi2text.AddText(("#chi^{2}/ndf = "+to_string_prec(chival,2)+"/"+std::to_string(ndf)).c_str());
-                        chi2text.SetFillColor(0);
-                        chi2text.SetBorderSize(0);
-                        chi2text.SetTextAlign(12);
-                        channel_chitexts.push_back(chi2text);
-                        global_channel_index++;
-                    }
+            for(size_t id =0; id < config.m_num_detectors; id++){
+                for(size_t ic = 0; ic < config.m_num_channels; ic++){
+                    log<LOG_INFO>(L"%1% || On channel %2%:") % __func__ % global_channel_index ;
+                    double chival = allcov_metric->getSingleChannelChi(global_channel_index);
+                    int ndf = config.m_channel_num_bins[ic] - bool(opt&PlotOptions::AreaNormalized);
+                    log<LOG_INFO>(L"%1% || -- the datamc chi^2/ndof is %2%/%3% .") % __func__ % chival % ndf;
+                    TPaveText chi2text(0.59, 0.50, 0.89, 0.59, "NDC");
+                    chi2text.AddText(("#chi^{2}/ndf = "+to_string_prec(chival,2)+"/"+std::to_string(ndf)).c_str());
+                    chi2text.SetFillColor(0);
+                    chi2text.SetBorderSize(0);
+                    chi2text.SetTextAlign(12);
+                    channel_chitexts.push_back(chi2text);
+                    global_channel_index++;
                 }
+            }
         }
 
         std::unique_ptr<TGraphAsymmErrors> err_band = getErrorBand(config, prop, systs, binwidth_scale);
@@ -1390,12 +1419,12 @@ int main(int argc, char* argv[])
             if(use_phys && i < (long)metric->GetModel().nparams){
                 log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % metric->GetModel().pretty_param_names[i].c_str() % global_fit_result(i);
                 global_fit_out << metric->GetModel().param_names[i]
-                               << " : " << global_fit_result(i) << "\n";
+                    << " : " << global_fit_result(i) << "\n";
             }else{
                 long idx = use_phys ? i - metric->GetModel().nparams : i;
                 log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % metric->GetSysts().spline_names[idx].c_str() % global_fit_result(i);
                 global_fit_out << metric->GetSysts().spline_names[idx]
-                               << " : " << global_fit_result(i) << "\n";
+                    << " : " << global_fit_result(i) << "\n";
             }
         }
         log<LOG_INFO>(L"%1% || ################################################") % __func__;
@@ -1417,11 +1446,11 @@ int main(int argc, char* argv[])
             if(i < (long)metric->GetModel().nparams){
                 log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % metric->GetModel().pretty_param_names[i].c_str() % global_fit_result(i);
                 global_fit_out << metric->GetModel().param_names[i]
-                               << " : " << global_fit_result(i) << "\n";
+                    << " : " << global_fit_result(i) << "\n";
             }else{
                 log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % metric->GetSysts().spline_names[i - metric->GetModel().nparams].c_str() % global_fit_result(i);
                 global_fit_out << metric->GetSysts().spline_names[i - metric->GetModel().nparams]
-                               << " : " << global_fit_result(i) << "\n";
+                    << " : " << global_fit_result(i) << "\n";
             }
         }
         log<LOG_INFO>(L"%1% || ########################################################") % __func__;
