@@ -618,11 +618,12 @@ int main(int argc, char* argv[])
         mh.run(fitconfig.MCMCburn,fitconfig.MCMCiter, action);
 
         covmat /= count;
-        Eigen::MatrixXf fraccovmat = (1.0f/best_fit.array()).matrix().asDiagonal() * covmat
-            * (1.0f/best_fit.array()).matrix().asDiagonal();
-        Eigen::MatrixXf corrmat =
-            fraccovmat.diagonal().array().sqrt().matrix().asDiagonal().inverse() * fraccovmat
-            * fraccovmat.diagonal().array().sqrt().matrix().asDiagonal().inverse();
+        Eigen::VectorXf inv_best_fit = best_fit.array().abs().max(1e-10f).inverse();
+        Eigen::MatrixXf fraccovmat = inv_best_fit.asDiagonal() * covmat * inv_best_fit.asDiagonal();
+
+        Eigen::VectorXf inv_sqrt_diag = fraccovmat.diagonal().array().abs().max(1e-10f).sqrt().inverse();
+        Eigen::MatrixXf corrmat = inv_sqrt_diag.asDiagonal() * fraccovmat * inv_sqrt_diag.asDiagonal();
+
 
         TH2D corrhist("crh", "", nparams, 0, nparams, nparams, 0, nparams);
         TH2D fraccovhist("fch", "", nparams, 0, nparams, nparams, 0, nparams);
@@ -654,12 +655,12 @@ int main(int argc, char* argv[])
         corrhist.SetMinimum(-1);
         covhist.SetMaximum(1);
         covhist.SetMinimum(-1);
-        fraccovhist.SetMaximum(2);
-        fraccovhist.SetMinimum(-2);
+        fraccovhist.SetMaximum(100);
+        fraccovhist.SetMinimum(-100);
         covhist.Draw("colz");
         c1.Print((final_output_tag+"_postfit_cov.pdf").c_str());
-        fraccovhist.Draw("colz");
-        c1.Print((final_output_tag+"_postfit_fraccov.pdf").c_str());
+        //fraccovhist.Draw("colz");
+        //c1.Print((final_output_tag+"_postfit_fraccov.pdf").c_str());
         corrhist.Draw("colz");
         c1.Print((final_output_tag+"_postfit_corr.pdf").c_str());
         if(nphys > 0) {
