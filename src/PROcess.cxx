@@ -332,8 +332,8 @@ namespace PROfit {
 
         // TODO: We should think about centralizing rng in a thread-safe/thread-aware way
         static std::mt19937 rng{seed};
-        std::normal_distribution<float> d;
-        float spline_throw = d(rng) * insyst.spline_priors(spline);
+        std::normal_distribution<float> d(insyst.spline_centers(spline), insyst.spline_priors(spline));
+        float spline_throw = d(rng);
         int binning = insyst.spline_binnings[spline];
 
         if(other_index < 0) {
