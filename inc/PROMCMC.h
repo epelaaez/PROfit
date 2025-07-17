@@ -13,6 +13,7 @@
 #include <optional>
 namespace PROfit {
 
+        
     template<class Target_FN, class Proposal_FN>
         class Metropolis {
             private:
@@ -36,7 +37,7 @@ namespace PROfit {
                     float u = uniform(rng);
 
                     if(u <= acceptance) {
-                          //                      log<LOG_DEBUG>(L"%1% || APPROVED acc %2%, rng %3% and proposal: %4%  ") % __func__ % acceptance % u %p;
+                        //                      log<LOG_DEBUG>(L"%1% || APPROVED acc %2%, rng %3% and proposal: %4%  ") % __func__ % acceptance % u %p;
                         current = p;
                         return true;
                     }else{
@@ -222,6 +223,8 @@ namespace PROfit {
         float adapt_factor = 1.02;   
 
 
+       Eigen::MatrixXf sub_diagL;
+       std::vector<int> active;
 
         adaptive_proposal(PROmetric &metric, uint32_t seed, std::vector<int> fixed = {}) 
             : metric(metric), seed(seed), fixed(fixed), rng(seed) {
@@ -234,41 +237,34 @@ namespace PROfit {
                 Eigen::MatrixXf diag = Eigen::MatrixXf::Identity(nparams, nparams);
                 Eigen::LLT<Eigen::MatrixXf> llt(diag_scale * diag);
                 diagL = llt.matrixL();
+
+                for (int i = 0; i < nparams; ++i) {
+                    if (std::find(fixed.begin(), fixed.end(), i) == fixed.end()) {
+                        active.push_back(i);
+                    }
+                }
+                sub_diagL = Eigen::MatrixXf::Identity(active.size(), active.size());
+                sub_diagL = diagL(active, active);  // Magical Eigen indexing
+
             }
 
         Eigen::VectorXf operator()(Eigen::VectorXf &current) {
-            Eigen::VectorXf throw1 = current;
-            Eigen::VectorXf throw2 = current;
-            for(int i = 0; i < throw1.size(); ++i) {
-                if(std::find(fixed.begin(), fixed.end(), i) != std::end(fixed)) {
-                    throw1(i) = 0.0;
-                    throw2(i) = 0.0;
-                }else{
-                    std::normal_distribution<float> nd(0, 1);
-                    throw1(i) = nd(rng);
-                    throw2(i) = nd(rng);
-                }
-            }
-            //Eigen::LLT<Eigen::MatrixXf> llt(scale * width);
-            //Eigen::MatrixXf L = llt.matrixL();
-            //if(llt.info() != Eigen::Success) {
-            //    log<LOG_ERROR>(L"%1% || LLT decomp failed. Width is %2%.") % __func__ % width;
-            //    exit(1);
-            //}
-            Eigen::LDLT<Eigen::MatrixXf> ldlt(scale * width);
-            if(ldlt.info() != Eigen::Success) {
-                log<LOG_ERROR>(L"%1% || LDLT decomp failed. Width is %2%.") % __func__ % width;
-                exit(1);
-            }
-            Eigen::MatrixXf Lp = ldlt.matrixL();
-            Eigen::VectorXf D_sqrt = ldlt.vectorD().array().sqrt();
-            Eigen::PermutationMatrix<Eigen::Dynamic, Eigen::Dynamic> P(ldlt.transpositionsP());
-            Eigen::MatrixXf L = P * Lp * D_sqrt.asDiagonal();
-            last_proposed = current + (1.0f - beta) * L * throw1 + beta * diagL * throw2;
 
-            for (int idx : fixed) {
-                last_proposed(idx) = current(idx);
+            Eigen::VectorXf sub_throw1(active.size());
+            Eigen::VectorXf sub_throw2(active.size());
+            std::normal_distribution<float> nd(0.0f, 1.0f);
+            for (int i = 0; i < active.size(); ++i) {
+                sub_throw1(i) = nd(rng);
+                sub_throw2(i) = nd(rng);
             }
+            
+            Eigen::MatrixXf inp = scale*width;//fulldim
+
+            Eigen::MatrixXf sub_inp = inp(active, active);  // Magic Eigen indexing?!
+            Eigen::MatrixXf sub_L = ComputeSquareRootCovariance(sub_inp,false);
+
+            last_proposed = current;//fulldim
+            last_proposed(active) += (1.0f - beta) * sub_L * sub_throw1 + beta * sub_diagL * sub_throw2; //More index nonsesne?!
 
             return last_proposed;
         }
@@ -310,27 +306,27 @@ namespace PROfit {
                 }
 
             }
-                accept_history.push_back(accepted);
-                if (accept_history.size() == adapt_window) {
-                    float acc_rate = std::count(accept_history.begin(), accept_history.end(), true) / float(adapt_window);
+            accept_history.push_back(accepted);
+            if (accept_history.size() == adapt_window) {
+                float acc_rate = std::count(accept_history.begin(), accept_history.end(), true) / float(adapt_window);
 
-                    if (acc_rate > target_accept) {
-                        scale *= adapt_factor;
-                    } else {
-                        scale /= adapt_factor;
-                    }
-                    accept_history.clear();
-                    log<LOG_DEBUG>(L"%1% || Adaptive scale updated to %2%, acceptance rate = %3%") % __func__ % scale % acc_rate;
+                if (acc_rate > target_accept) {
+                    scale *= adapt_factor;
+                } else {
+                    scale /= adapt_factor;
                 }
+                accept_history.clear();
+                log<LOG_DEBUG>(L"%1% || Adaptive scale updated to %2%, acceptance rate = %3%") % __func__ % scale % acc_rate;
+            }
 
-                if(tune_calls > (size_t)(4*last_proposed.size())) {
-                    Eigen::MatrixXf cov_pd = cov;//numerical stability apparrently
-                    for(int i = 0; i < cov_pd.rows(); ++i)
-                        cov_pd(i, i) += 1e-12;
-                    width = cov_pd;
-                    beta = tune_calls > (size_t)(100*last_proposed.size()) ? 0.05 : 0.5;
-                }
-            
+            if(tune_calls > (size_t)(4*last_proposed.size())) {
+                Eigen::MatrixXf cov_pd = cov;//numerical stability apparrently
+                for(int i = 0; i < cov_pd.rows(); ++i)
+                    cov_pd(i, i) += 1e-12;
+                width = cov_pd;
+                beta = tune_calls > (size_t)(100*last_proposed.size()) ? 0.05 : 0.5;
+            }
+
 
         }
 
