@@ -200,8 +200,8 @@ namespace PROfit{
                     leg->SetFillStyle(0);
                     leg->SetLineWidth(0);
                     TH1D cv_hist(std::to_string(global_channel_index).c_str(), hist_title.c_str(), channel_nbins, edges.data());
-                    cv_hist.SetLineWidth(3);
-                    cv_hist.SetLineColor(kBlue);
+                    cv_hist.SetLineWidth(2);
+                    cv_hist.SetLineColor(kBlack);
                     cv_hist.SetFillStyle(0);
                     for(size_t bin = 0; bin < channel_nbins; ++bin) {
                         cv_hist.SetBinContent(bin+1, 0);
@@ -259,10 +259,9 @@ namespace PROfit{
                             channel_errband->SetPointEYhigh(bin, scale*(*errband)->GetErrorYhigh(bin+channel_start));
                             channel_errband->SetPointEYlow(bin, scale*(*errband)->GetErrorYlow(bin+channel_start));
                         }
-                        channel_errband->SetFillColor(kGray+2);
-                        //channel_errband->SetFillColorAlpha(kGray, 0.35);
-                        channel_errband->SetFillStyle(3002);
-                        channel_errband->SetLineColor(kGray+2);
+                        channel_errband->SetFillStyle(1001);
+                        channel_errband->SetFillColorAlpha(kGray+2, 0.2);
+                        channel_errband->SetLineColor(kBlack);
                         channel_errband->SetLineWidth(1);
                         leg->AddEntry(channel_errband, "#pm 1#sigma", "f");
                     }
@@ -273,8 +272,10 @@ namespace PROfit{
                         for(size_t bin = 0; bin < channel_nbins; ++bin) {
                             bf_hist.SetBinContent(bin+1, bf_spec(bin+channel_start));
                         }
-                        bf_hist.SetLineColor(kGreen);
-                        bf_hist.SetLineWidth(3);
+                        //bf_hist.SetLineColor(TColor::GetColor(234, 67, 53)); // pastel red
+                        bf_hist.SetLineColor(kBlack); 
+                        bf_hist.SetLineStyle(kDashed); 
+                        bf_hist.SetLineWidth(2);
                         leg->AddEntry(&bf_hist, "Best Fit", "l");
                         if(bool(opt&PlotOptions::BinWidthScaled))
                             bf_hist.Scale(1, "width");
@@ -294,9 +295,9 @@ namespace PROfit{
                             post_channel_errband->SetPointEYhigh(bin, scale*(*posterrband)->GetErrorYhigh(bin+channel_start));
                             post_channel_errband->SetPointEYlow(bin, scale*(*posterrband)->GetErrorYlow(bin+channel_start));
                         }
-                        post_channel_errband->SetFillColor(kRed);
-                        post_channel_errband->SetFillStyle(3354);
-                        post_channel_errband->SetLineColor(kRed);
+                        post_channel_errband->SetFillColor(kBlack);
+                        post_channel_errband->SetFillStyle(3254);
+                        post_channel_errband->SetLineColor(kBlack);
                         post_channel_errband->SetLineWidth(1);
                         leg->AddEntry(post_channel_errband, "post-fit #pm 1#sigma", "f");
                     }
@@ -347,8 +348,28 @@ namespace PROfit{
                     if(posterrband) post_channel_errband->Draw("2 same");
 
                     if(data) {
-                        if(cv || best_fit) data_hist.Draw("PE1 same");
-                        else data_hist.Draw("E1P");
+                        TGraphErrors *g = new TGraphErrors(data_hist.GetNbinsX());
+                        for (int i = 1; i <= data_hist.GetNbinsX(); ++i) {
+                            double x = data_hist.GetBinCenter(i);
+                            double y = data_hist.GetBinContent(i);
+                            double ex = 0;
+                            double ey = data_hist.GetBinError(i);
+                            g->SetPoint(i - 1, x, y);
+                            g->SetPointError(i - 1, ex, ey);
+                            g->SetLineColor(kBlack);
+                            g->SetLineWidth(2);
+                            g->SetMarkerStyle(kFullCircle);
+                            g->SetMarkerColor(kBlack);
+                            g->SetMarkerSize(1);
+
+                        }
+
+
+                        if(cv || best_fit) {
+                            g->Draw("PE1 same");
+                        } else {
+                            g->Draw("PE1");
+                        }
                     }
 
                     if(texts.size()!=0) {
@@ -366,7 +387,7 @@ namespace PROfit{
                     if(bool(opt&PlotOptions::DataMCRatio) || bool(opt&PlotOptions::DataPostfitRatio)) {
                         p2.cd();
 
-                        std::string y_title = bool(opt&PlotOptions::DataMCRatio) ? "data/MC" : "data/Best Fit";
+                        std::string y_title = bool(opt&PlotOptions::DataMCRatio) ? "Data/MC" : "Data/Best-Fit";
                         ratio = new TH1D(("rat"+std::to_string(global_channel_index)).c_str(), (";"+xtitle+";"+y_title).c_str(), channel_nbins, edges.data());
                         one = new TH1D(("one"+std::to_string(global_channel_index)).c_str(), (";"+xtitle+";"+y_title).c_str(), channel_nbins, edges.data());
                         ratio_err = new TGraphAsymmErrors(); 
@@ -394,11 +415,28 @@ namespace PROfit{
                             ratio_err->SetPointEYhigh(i, ratio_err->GetErrorYhigh(i)/ratio_err->GetPointY(i));
                             ratio_err->SetPointEYlow(i, ratio_err->GetErrorYlow(i)/ratio_err->GetPointY(i));
                             ratio_err->SetPointY(i, 1.0);
+
+
                         }
+                        float ymin = 1e9, ymax = -1e9;
+                        for (int i = 0; i < ratio_err->GetN(); ++i) {
+                            float y, eyh, eyl;
+                            y = ratio_err->GetPointY(i);
+                            eyh = ratio_err->GetErrorYhigh(i);
+                            eyl = ratio_err->GetErrorYlow(i);
+                            ymin = std::min(ymin, y - eyl);
+                            ymax = std::max(ymax, y + eyh);
+                        }
+                        float yrange = ymax - ymin;
+                        float ylow = ymin - 0.15 * yrange;  // 15% padding below
+                        float yhigh = ymax + 0.15 * yrange; // 15% padding above
 
+                        one->SetMinimum(ylow);
+                        one->SetMaximum(yhigh);
 
-                        one->SetMaximum(1.5);
-                        one->SetMinimum(0.5);
+                        one->SetMinimum(ylow);
+                        one->SetMaximum(yhigh);
+
                         one->SetLineColor(kBlack);
                         one->SetLineStyle(kDashed);
                         one->Draw("hist");

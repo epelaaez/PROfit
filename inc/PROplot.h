@@ -25,6 +25,7 @@
 #include "TH2D.h"
 #include "TGraph.h"
 #include "TGraphAsymmErrors.h"
+#include "TGraphErrors.h"
 #include "TCanvas.h"
 #include "TFile.h"
 #include "TRatioPlot.h"
