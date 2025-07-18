@@ -748,12 +748,12 @@ namespace PROfit {
         const auto& U = svd.matrixU();
         const auto& S = svd.singularValues();
 
-        log<LOG_DEBUG>(L"%1% | Singular values: %2% ") % __func__ % svd.singularValues();
+        //log<LOG_DEBUG>(L"%1% | Singular values: %2% ") % __func__ % svd.singularValues();
 
         Eigen::FullPivLU<Eigen::MatrixXf> lu_decomp(coll);
           int rank = lu_decomp.rank();
           int size = coll.rows();
-          log<LOG_DEBUG>(L"%1% | Matrix is Rank %2% and size %3%") % __func__ % rank % size ;
+          //log<LOG_DEBUG>(L"%1% | Matrix is Rank %2% and size %3%") % __func__ % rank % size ;
 
         float tol = 1e-8f * S.maxCoeff(); // Some cutoff? is this value impactful on out matricies? need to test
         std::vector<int> keep;

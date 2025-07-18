@@ -30,7 +30,7 @@
 #include "TRatioPlot.h"
 #include "TPaveText.h"
 #include "TTree.h"
-
+#include "TLine.h"
 namespace PROfit{
 
     enum class PlotOptions {
@@ -95,9 +95,14 @@ namespace PROfit{
                 Eigen::VectorXf splines = value.segment(nphys, nspline);
                 Eigen::VectorXf diff = splines-splines_bf;
                 post_covar += diff * diff.transpose();
+                bool print_autocorrelation_values = false;
+                if(print_autocorrelation_values){
+                    log<LOG_INFO>(L"%1% || AUTO  %2% : %3%") % __func__ % accepted % value;
+                }
             };
             met.run(burnin, iterations, action);
             post_covar /= accepted;
+            log<LOG_INFO>(L"%1% || Acceptance rate %2%") % __func__ % ((float)accepted / iterations);
 
             //TODO: Only works with 1 mode/detector/channel
             cv = CollapseMatrix(config, cv);
@@ -115,6 +120,7 @@ namespace PROfit{
                 for(size_t j = 0; j < specs.size(); ++j) {
                     binconts[j] = specs[j](i);
                 }
+                if(!binconts.size()) continue;
                 float scale_factor = tmphist.GetBinContent(i+1)/cv(i);
                 if(std::isnan(scale_factor)) scale_factor = 1;
                 std::sort(binconts.begin(), binconts.end());

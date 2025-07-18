@@ -135,6 +135,7 @@ namespace PROfit {
 	      myspectrum.Fill(reco_bin, finalw);
 	    }
 	}
+    
 	return myspectrum;
   }
 
