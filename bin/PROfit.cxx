@@ -548,6 +548,28 @@ int main(int argc, char* argv[])
         abort();
     }
 
+    //Covariance colors, move this eslewher
+        const Int_t NCont = 255;
+        const Int_t NRGBs = 9;  // Reduced control points for smoother white stretch
+        Double_t stops[NRGBs] = {
+            0.0,    // -1.0 (dark blue)
+            0.075,    // -0.6 (transition to white)
+            0.3,    // -0.2 (mostly white)
+            0.4,   // -0.04 (almost pure white)
+            0.5,    //  0.0 (pure white)
+            0.6,   // +0.04 (almost pure white)
+            0.7,    // +0.2 (transition to red)
+            0.925,    // +0.6 (strong red)
+            1.0     // +1.0 (dark red)
+        };
+
+        Double_t red[NRGBs]   = {0.00,0.259,0.824, 0.949, 1.0, 0.988, 0.980, 0.918,0.839};
+        Double_t green[NRGBs] = {0.341,0.404,0.890, 0.961, 1.0, 0.933, 0.824, 0.263,0.125};
+        Double_t blue[NRGBs]  = {0.906,0.824,0.989, 0.980, 1.0, 0.929, 0.812, 0.208,0.024};
+
+        TColor::CreateGradientColorTable(NRGBs, stops, red, green, blue, NCont);
+        gStyle->SetNumberContours(NCont);
+
 
     // Need a second one for case where we do syst_only profile and surface in same command
     Eigen::VectorXf global_fit_result, global_fit_result_surf;
@@ -661,26 +683,6 @@ int main(int argc, char* argv[])
         //c1.Print((final_output_tag+"_postfit_cov.pdf").c_str());
         //fraccovhist.Draw("colz");
         //c1.Print((final_output_tag+"_postfit_fraccov.pdf").c_str());
-        const Int_t NCont = 255;
-        const Int_t NRGBs = 9;  // Reduced control points for smoother white stretch
-        Double_t stops[NRGBs] = {
-            0.0,    // -1.0 (dark blue)
-            0.075,    // -0.6 (transition to white)
-            0.3,    // -0.2 (mostly white)
-            0.4,   // -0.04 (almost pure white)
-            0.5,    //  0.0 (pure white)
-            0.6,   // +0.04 (almost pure white)
-            0.7,    // +0.2 (transition to red)
-            0.925,    // +0.6 (strong red)
-            1.0     // +1.0 (dark red)
-        };
-
-        Double_t red[NRGBs]   = {0.00,0.259,0.824, 0.949, 1.0, 0.988, 0.980, 0.918,0.839};
-        Double_t green[NRGBs] = {0.341,0.404,0.890, 0.961, 1.0, 0.933, 0.824, 0.263,0.125};
-        Double_t blue[NRGBs]  = {0.906,0.824,0.989, 0.980, 1.0, 0.929, 0.812, 0.208,0.024};
-
-        TColor::CreateGradientColorTable(NRGBs, stops, red, green, blue, NCont);
-        gStyle->SetNumberContours(NCont);
         c1.SetLeftMargin(0.18);   
         corrhist.SetTitle("Post-Fit Correlation Matrix");
         corrhist.Draw("colz");
