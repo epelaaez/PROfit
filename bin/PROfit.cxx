@@ -743,7 +743,6 @@ int main(int argc, char* argv[])
         if(area_normalized) opt |= PlotOptions::AreaNormalized;
         plot_channels((final_output_tag+"_PROfile_hists.pdf"), config, cv, bf, data, err_band.get(), post_err_band.get(), texts, opt);
 
-        return 0;
         TCanvas c;
         c.Print((final_output_tag+"_postfit_posteriors.pdf[").c_str());
         for(auto &h: posteriors) {

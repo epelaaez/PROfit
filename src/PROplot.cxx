@@ -225,7 +225,7 @@ namespace PROfit{
 
                     THStack *cvstack = NULL;
                     if(cv) {
-                        if(bool(opt&PlotOptions::CVasStack)) cvstack = new THStack(std::to_string(global_channel_index).c_str(), hist_title.c_str());
+                        if(bool(opt&PlotOptions::CVasStack)) cvstack = new THStack(std::to_string(global_channel_index).c_str(), "");
                         std::vector<std::pair<std::string, const char*>> subplots;
                         for(size_t subchannel = 0; subchannel < config.m_num_subchannels[channel]; ++subchannel){
                             const std::string& subchannel_name  = config.m_fullnames[global_subchannel_index];
@@ -286,7 +286,7 @@ namespace PROfit{
                         //leg->AddEntry(channel_errband, "#pm 1#sigma", "f");
                     }
 
-                                     TH1D bf_hist(("bf"+std::to_string(global_channel_index)).c_str(), hist_title.c_str(), channel_nbins, edges.data());
+                                     TH1D bf_hist(("bf"+std::to_string(global_channel_index)).c_str(), "", channel_nbins, edges.data());
                     if(best_fit) {
                         int channel_start = other_index < 0 ? config.GetCollapsedGlobalBinStart(global_channel_index) : config.GetCollapsedGlobalOtherBinStart(global_channel_index, other_index);
                         for(size_t bin = 0; bin < channel_nbins; ++bin) {
@@ -309,7 +309,7 @@ namespace PROfit{
                         }else{
                             leg->AddEntry(&bf_hist, "Best Fit #pm 1#sigma (post-fit)", "l");
                         }
-                        cv_hist.Draw("hist");
+                        //cv_hist.Draw("hist");
                        
                         if(bool(opt&PlotOptions::BinWidthScaled))
                             bf_hist.Scale(1, "width");
@@ -375,8 +375,6 @@ namespace PROfit{
                         } else {
                             cv_hist.SetMaximum(1.2*cv_hist.GetMaximum());
 
-
-
                             cv_hist.Draw("hist");
                             cv_hist.GetYaxis()->SetTitleSize(0.06);  
                             cv_hist.GetYaxis()->SetTitleOffset(0.75);
@@ -388,6 +386,7 @@ namespace PROfit{
                     if(errband) channel_errband->Draw("2 same");
 
                     if(best_fit) {
+                        bf_hist.SetTitle("");
                         if(cv) bf_hist.Draw("hist same");
                         else bf_hist.Draw("hist");
                     }
@@ -396,11 +395,15 @@ namespace PROfit{
 
                     if(data) {
                         TGraphErrors *g = new TGraphErrors(data_hist.GetNbinsX());
+                        float datmax =-999;
                         for (int i = 1; i <= data_hist.GetNbinsX(); ++i) {
                             double x = data_hist.GetBinCenter(i);
                             double y = data_hist.GetBinContent(i);
                             double ex = 0;
                             double ey = data_hist.GetBinError(i);
+                            if(y>datmax){
+                                datmax=y;
+                            }
                             g->SetPoint(i - 1, x, y);
                             g->SetPointError(i - 1, ex, ey);
                             g->SetLineColor(kBlack);
@@ -414,6 +417,8 @@ namespace PROfit{
 
                         if(cv || best_fit) {
                             g->Draw("PE1 same");
+                            cv_hist.SetMaximum(std::max(cv_hist.GetMaximum(),1.2*datmax));
+
                         } else {
                             g->Draw("PE1");
                         }
@@ -473,19 +478,19 @@ namespace PROfit{
                         float ylow = ymin - 0.15 * yrange;  // 15% padding below
                         float yhigh = ymax + 0.15 * yrange; // 15% padding above
 
-                        one->SetMinimum(std::min(ylow,0.7f));
-                        one->SetMaximum(std::max(yhigh,1.297f));
+                        one->SetMinimum(std::min(ylow,0.85f));
+                        one->SetMaximum(std::max(yhigh,1.148f));
 
                         one->SetLineColor(kBlack);
                         one->SetLineStyle(kDashed);
                         one->Draw("hist");
+                        one->SetTitle("");
                         one->GetYaxis()->SetTitleSize(0.15);
                         one->GetYaxis()->SetLabelSize(0.12);
                         one->GetXaxis()->SetTitleSize(0.14);
                         one->GetXaxis()->SetLabelSize(0.14);
-                        one->GetYaxis()->SetTitleOffset(0.2);
+                        one->GetYaxis()->SetTitleOffset(0.21);
                         one->GetXaxis()->SetTitleOffset(0.85);
-
                         ratio->SetLineColor(kBlack);
                         ratio->SetLineWidth(2);
                         ratio->SetMarkerStyle(kFullCircle);
@@ -496,7 +501,7 @@ namespace PROfit{
                         //ratio_err->SetFillStyle(3345);
                         ratio_err->Draw("2 same");
 
-                        ratio->Draw("PE1 same");
+                        ratio->Draw("PE1 E0 same");
 
                         c.cd();
                         p1.Draw();
