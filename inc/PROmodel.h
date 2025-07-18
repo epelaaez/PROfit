@@ -131,7 +131,6 @@ public:
         }
         ivar = parameter_map.at("L/E");
 
-
         size_t nvar = prop.variable_mc_stat_err.size();
         hists.resize(nvar);
         for(size_t v = 0; v <nvar ;v++){

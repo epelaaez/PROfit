@@ -1346,7 +1346,6 @@ int main(int argc, char* argv[])
     if(*protest_command){
         log<LOG_INFO>(L"%1% || PROtest. Place anything here, a playground for testing things .") % __func__;
         PrintVariableInfo(config);
-        return 0;
         //***************************** END *********************************
     }
 

@@ -39,6 +39,8 @@ void PROspec::Print() const {
     std::string spec_string = "";
     for(auto &f : spec) spec_string+=" "+std::to_string(f); 
     log<LOG_INFO>(L"%1% || %2%" ) % __func__ % spec_string.c_str();
+    log<LOG_INFO>(L"%1% || -- and Error : %2%" ) % __func__ % this->error;
+
     return;
 }
 

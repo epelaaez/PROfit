@@ -85,7 +85,6 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
     float covar_portion = (delta.transpose())*inverted_collapsed_full_covariance*(delta);
     float value = covar_portion + pull;
 
-
     if(std::isnan(value) || value!=value) {
         log<LOG_ERROR>(L"%1% || ERROR: CNP chi2 is NaN (%2%). This is very bad.\n"
                 L"covar_portion: %3%\npull: %4%\ndelta: %5%\n"

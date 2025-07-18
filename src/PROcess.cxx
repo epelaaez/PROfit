@@ -105,7 +105,7 @@ namespace PROfit {
             }
         } else {
             for(size_t i = 0; i<inprop.variable_values.size(); ++i){
-                float oscw  =  inmodel.model_functions[inprop.model_rule[i]](phys, inprop.variable_values[i][var_index]);
+                float oscw  =  inmodel.model_functions[inprop.model_rule[i]](phys, inprop.variable_values[i][inmodel.ivar]);
                 float add_w = inprop.added_weights[i]; 
                 const int reco_bin = inprop.variable_bin_indices[i][var_index];
 
@@ -117,6 +117,7 @@ namespace PROfit {
                 }
                 float finalw = oscw * systw * add_w;
                 myspectrum.Fill(reco_bin, finalw);
+
             }
         }
         return myspectrum;

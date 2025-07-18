@@ -631,6 +631,11 @@ namespace PROfit {
 
         //ensure hash is correctly assigned
         inprop.hash=inconfig.hash;
+        //finished, so make sure MCstat is ok
+        for(size_t i = 0; i < inconfig.m_num_variables; ++i) {
+            inprop.variable_mc_stat_err[i]=inprop.variable_mc_stat_err[i].array().sqrt();
+        }
+
 
         time_t time_took = time(nullptr) - start_time;
         log<LOG_INFO>(L"%1% || Finish reading files, it took %2% seconds..") % __func__ % time_took;
