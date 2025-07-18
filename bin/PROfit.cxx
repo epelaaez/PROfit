@@ -698,7 +698,7 @@ int main(int argc, char* argv[])
         }
         log<LOG_INFO>(L"%1% || MCMC acceptance is  %2%. ") % __func__% ((double)count /fitconfig.MCMCiter);
 
-        std::string hname = "#chi^{2}/ndf = " + to_string(chi2) + "/" + to_string(config.m_num_bins_total_collapsed);
+        std::string hname = "#chi^{2}/ndof = " + to_string_prec(chi2,3) + "/" + to_string(config.m_num_bins_total_collapsed);
         PROspec cv = FillCVSpectrum(config, prop, true);
         PROspec bf = FillRecoSpectra(config, prop, metric_to_use->GetSysts(), metric_to_use->GetModel(), best_fit, true);
         TH1D post_hist("ph", hname.c_str(), config.m_num_bins_total_collapsed, config.m_channel_bin_edges[0].data());
@@ -730,11 +730,12 @@ int main(int argc, char* argv[])
         std::unique_ptr<TGraphAsymmErrors> post_err_band = getMCMCErrorBand(mh_post, fitconfig.MCMCburn, fitconfig.MCMCiter, config, prop, *metric_to_use, best_fit, posteriors, spline_covariance, binwidth_scale);
 
         std::vector<TPaveText> texts;
-        TPaveText chi2text(0.59, 0.50, 0.89, 0.59, "NDC");
+        TPaveText chi2text(0.55, 0.50, 0.85, 0.58, "NDC");
         chi2text.AddText(hname.c_str());
         chi2text.SetFillColor(0);
         chi2text.SetBorderSize(0);
         chi2text.SetTextAlign(12);
+        //chi2text.SetTextSize(0.035); 
         texts.push_back(chi2text);
 
         PlotOptions opt = PlotOptions::DataPostfitRatio;
