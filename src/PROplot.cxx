@@ -195,7 +195,7 @@ namespace PROfit{
 
                     Color_t bfcol = TColor::GetColor(234, 67, 53);//ncie red
                     Color_t cvcol =  TColor::GetColor(66, 103, 210);//nice blue :)
-
+                    if(!best_fit)cvcol=kBlack;
 
                     std::vector<float> edges = other_index < 0 ? config.GetChannelBinEdges(0) : config.GetChannelOtherBinEdges(0, other_index);
                     std::string xtitle = other_index < 0 ? config.m_channel_units[channel] : config.m_channel_other_units[channel][other_index];
@@ -371,6 +371,7 @@ namespace PROfit{
                         if(bool(opt&PlotOptions::CVasStack)) {
                             cvstack->SetMaximum(1.2*cvstack->GetMaximum());
                             cvstack->Draw("hist");
+                            cv_hist.Draw("same hist");
                        
                         } else {
                             cv_hist.SetMaximum(1.2*cv_hist.GetMaximum());
