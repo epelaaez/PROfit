@@ -479,8 +479,14 @@ namespace PROfit{
                         float ylow = ymin - 0.15 * yrange;  // 15% padding below
                         float yhigh = ymax + 0.15 * yrange; // 15% padding above
 
-                        one->SetMinimum(std::min(ylow,0.85f));
-                        one->SetMaximum(std::max(yhigh,1.148f));
+                        if(!posterrband){
+                            one->SetMinimum(std::max(0.5f,std::min(ylow,0.85f)));
+                            one->SetMaximum(std::min(1.5f,std::max(yhigh,1.148f)));
+                        }else{
+                            one->SetMinimum(std::min(ylow,0.85f));
+                            one->SetMaximum(std::max(yhigh,1.148f));
+
+                        }
 
                         one->SetLineColor(kBlack);
                         one->SetLineStyle(kDashed);
