@@ -54,6 +54,7 @@ namespace PROfit {
                             step();
                         }
                     }
+                    proposal.tune_mode = false; 
                     for(size_t i = 0; i < steps; i++) {
                         if(step() && action) (*action)(current);
                     }
@@ -225,6 +226,10 @@ namespace PROfit {
         float target_accept = 0.234; 
         float adapt_factor = 1.02;   
 
+
+        Eigen::MatrixXf sub_L;
+        bool tune_mode;
+
         adaptive_proposal(PROmetric &metric, uint32_t seed, std::vector<int> fixed = {}) 
             : metric(metric), seed(seed), fixed(fixed), rng(seed) {
                 int nparams = metric.GetModel().nparams + metric.GetSysts().GetNSplines();
@@ -237,6 +242,7 @@ namespace PROfit {
                 Eigen::LLT<Eigen::MatrixXf> llt(diag_scale * diag);
                 diagL = llt.matrixL();
 
+                tune_mode = true;
                 for (int i = 0; i < nparams; ++i) {
                     if (std::find(fixed.begin(), fixed.end(), i) == fixed.end()) {
                         active.push_back(i);
@@ -260,7 +266,7 @@ namespace PROfit {
             
             Eigen::MatrixXf inp = scale*width;//fulldim
 
-            Eigen::MatrixXf sub_L = ComputeSquareRootCovariance( inp(active, active)); //magic eigen indexing
+            if(tune_mode)sub_L = ComputeSquareRootCovariance(inp(active, active)); //magic eigen indexing
 
             last_proposed = current;//fulldim
             last_proposed(active) += (1.0f - beta) * sub_L * sub_throw1 + beta * sub_diagL * sub_throw2; //More index nonsesne?!
