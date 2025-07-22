@@ -753,17 +753,22 @@ int main(int argc, char* argv[])
         }
         c.Print((final_output_tag+"_postfit_posteriors.pdf]").c_str());
 
-        TH2F spline_cov("pc", "", spline_covariance.cols(), 0, spline_covariance.cols(), spline_covariance.rows(), 0, spline_covariance.rows());
-        for(int i = 0; i < spline_covariance.cols(); ++i) {
+        Eigen::VectorXf inv_sqrt_diag_nuis = spline_covariance.diagonal().array().abs().max(1e-10f).sqrt().inverse();
+        Eigen::MatrixXf corrmat_nuis = inv_sqrt_diag_nuis.asDiagonal() * spline_covariance * inv_sqrt_diag_nuis.asDiagonal();
+
+        TH2F spline_cov("pc", "", corrmat_nuis.cols(), 0, corrmat_nuis.cols(), corrmat_nuis.rows(), 0, corrmat_nuis.rows());
+        for(int i = 0; i < corrmat_nuis.cols(); ++i) {
             spline_cov.GetXaxis()->SetBinLabel(i+1, config.m_mcgen_variation_plotname_map[metric_to_use->GetSysts().spline_names[i]].c_str());
             spline_cov.GetYaxis()->SetBinLabel(i+1, config.m_mcgen_variation_plotname_map[metric_to_use->GetSysts().spline_names[i]].c_str());
-            for(int j = 0; j < spline_covariance.rows(); ++j) {
-                spline_cov.SetBinContent(i+1, j+1, spline_covariance(i,j));
+            for(int j = 0; j < corrmat_nuis.rows(); ++j) {
+                spline_cov.SetBinContent(i+1, j+1, corrmat_nuis(i,j));
             }
         }
         spline_cov.Draw("colz");
-        c.Print((final_output_tag+"_postfit_nuisance_covariance.pdf").c_str());
-        return 0;
+        spline_cov.SetMaximum(1);
+        spline_cov.SetMinimum(-1);
+
+        c.Print((final_output_tag+"_postfit_correlation_matrix_nuisance_only.pdf").c_str());
         log<LOG_INFO>(L"%1% ||  Beginning full PROfile ") % __func__;
 
         PROfile profile(config, metric_to_use->GetSysts(), metric_to_use->GetModel(), *metric_to_use, myseed, scanFitConfig, 

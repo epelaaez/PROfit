@@ -366,10 +366,10 @@ namespace PROfit{
                     if(bool(opt&PlotOptions::DataMCRatio) || bool(opt&PlotOptions::DataPostfitRatio))
                         p1.cd();
 
-
+                   
                     if(cv) {
                         if(bool(opt&PlotOptions::CVasStack)) {
-                            cvstack->SetMaximum(std::max(1.2*cvstack->GetMaximum(),1.2*datmax));
+                            cvstack->SetMaximum(std::max(1.2*cvstack->GetMaximum(),1.2*data_hist.GetMaximum()));
                             cvstack->Draw("hist");
                             cv_hist.Draw("same hist");
                        
