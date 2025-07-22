@@ -763,7 +763,7 @@ int main(int argc, char* argv[])
         }
         spline_cov.Draw("colz");
         c.Print((final_output_tag+"_postfit_nuisance_covariance.pdf").c_str());
-
+        return 0;
         log<LOG_INFO>(L"%1% ||  Beginning full PROfile ") % __func__;
 
         PROfile profile(config, metric_to_use->GetSysts(), metric_to_use->GetModel(), *metric_to_use, myseed, scanFitConfig, 

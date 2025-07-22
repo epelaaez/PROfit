@@ -369,7 +369,7 @@ namespace PROfit{
 
                     if(cv) {
                         if(bool(opt&PlotOptions::CVasStack)) {
-                            cvstack->SetMaximum(1.2*cvstack->GetMaximum());
+                            cvstack->SetMaximum(std::max(1.2*cvstack->GetMaximum(),1.2*datmax));
                             cvstack->Draw("hist");
                             cv_hist.Draw("same hist");
                        
