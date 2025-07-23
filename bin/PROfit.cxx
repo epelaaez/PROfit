@@ -457,6 +457,7 @@ int main(int argc, char* argv[])
     } else if(systs_excluded.size()) {
         std::vector<std::string> systs_to_exclude;
         for(const auto &s: systs_excluded) {
+            log<LOG_INFO>(L"%1% || Excluding systematic %2% by command line argument.") % __func__ % s.c_str();
             bool istag = false;
             for(const auto &[syst, tags]: config.m_mcgen_variation_tags) {
                 if(std::find(tags.begin(), tags.end(), s) != std::end(tags)) {
@@ -474,6 +475,7 @@ int main(int argc, char* argv[])
             }
         }
         systs = systs.excluding(systs_to_exclude);
+
         for(PROsyst &syst: other_systs)
             syst = syst.excluding(systs_to_exclude);
     }
