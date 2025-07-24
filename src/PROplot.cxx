@@ -253,7 +253,7 @@ namespace PROfit{
 
                         for(size_t bin = 0; bin < channel_nbins; ++bin) {
                             float scale = 1.0;
-                            if(bool(opt&PlotOptions::AreaNormalized)) {
+                            if(bool(opt&PlotOptions::AreaNormalized) || bool(opt&PlotOptions::BinWidthScaled)) {
                                 scale = channel_errband->GetPointY(bin) / (*errband)->GetPointY(bin+channel_start);
                             }
                             channel_errband->SetPointEYhigh(bin, scale*(*errband)->GetErrorYhigh(bin+channel_start));
