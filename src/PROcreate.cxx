@@ -1305,6 +1305,9 @@ namespace PROfit {
                     size_t u = 0;
                     for(; u < syst_obj.knobval.size(); ++u)
                         if(syst_obj.knobval[u] == syst_obj.knob_index[is]) break;
+                    float w = static_cast<float>(map_iter->second->at(is));
+                    if(std::isnan(w) || std::isinf(w))
+                        w = 1;
                     syst_obj.FillUniverse(u, spline_bin, mc_weight * additional_weight * static_cast<float>(map_iter->second->at(is)));
                     for(auto so: other_syst_objs)
                         so->FillUniverse(u, spline_bin, mc_weight * additional_weight * static_cast<float>(map_iter->second->at(is)));
