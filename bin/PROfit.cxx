@@ -1013,9 +1013,10 @@ int main(int argc, char* argv[])
                 // TODO: Check that axes and labels are the same
                 TH2D *surf = fin.Get<TH2D>("brazil_throw_surf_0");
                 if(!surf) {
-                    log<LOG_ERROR>(L"%1% || Could not find a TH2D called 'surf' in the file %2%. Terminating.")
+                    log<LOG_ERROR>(L"%1% || Could not find a TH2D called 'surf' in the file %2%. Skipping this file.")
                         % __func__ % in.c_str();
-                    return EXIT_FAILURE;
+                    continue;
+                    //return EXIT_FAILURE;
                 }
                 for(size_t i = 0; i < surface.nbinsx; ++i) {
                     for(size_t j = 0; j < surface.nbinsy; ++j) {
