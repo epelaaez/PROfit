@@ -1055,6 +1055,8 @@ int PROconfig::LoadFromXML(const std::string &filename){
          else if(m_mcgen_variation_type[i] == "norm"){
             m_num_variation_type_norm+=1;
         }else if(m_mcgen_variation_type[i] == "mcstat"){
+            m_mcgen_variation_allowlist[i] = "mcstat";
+            m_mcgen_variation_type_map["mcstat"] = "mcstat";
             m_use_mcstats = true;
         }
 
