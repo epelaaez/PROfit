@@ -59,25 +59,27 @@ namespace PROfit{
     }
 
 
-    void plot_channels(const std::string &filename, const PROconfig &config, std::optional<PROspec> cv, std::optional<PROspec> best_fit, std::optional<PROdata> data, std::optional<TGraphAsymmErrors*> errband, std::optional<TGraphAsymmErrors*> posterrband, std::vector<TPaveText> &texts, PlotOptions opt = PlotOptions::Default, int other_index = -1);
+
+    void plot_channels(const std::string &filename, const PROconfig &config, std::optional<PROspec> cv, std::optional<PROspec> best_fit, std::optional<PROdata> data, std::optional<TGraphAsymmErrors*> errband, std::optional<TGraphAsymmErrors*> posterrband, std::vector<TPaveText> &texts, PlotOptions opt = PlotOptions::Default, int var_index = 0);
 
     //some helper functions for PROplot
-    std::map<std::string, std::unique_ptr<TH1D>> getCVHists(const PROspec & spec, const PROconfig& inconfig, bool scale = false, int other_index = -1);
+    std::map<std::string, std::unique_ptr<TH1D>> getCVHists(const PROspec & spec, const PROconfig& inconfig, bool scale = false, int var_index = 0);
     std::map<std::string, std::unique_ptr<TH2D>> covarianceTH2D(const PROsyst &syst, const PROconfig &config, const PROspec &cv);
     std::map<std::string, std::vector<std::pair<std::unique_ptr<TGraph>,std::unique_ptr<TGraph>>>> getSplineGraphs(const PROsyst &systs, const PROconfig &config);
-    std::unique_ptr<TGraphAsymmErrors> getErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, bool scale = false, int other_index = -1);
+
+    std::unique_ptr<TGraphAsymmErrors> getErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, bool scale = false, int var_index = 0);
 
     template<class T, class P>
     std::unique_ptr<TGraphAsymmErrors> getMCMCErrorBand(Metropolis<T, P> met, size_t burnin, size_t iterations, const PROconfig &config, const PROpeller &prop, PROmetric &metric, const Eigen::VectorXf &best_fit, std::vector<TH1D> &posteriors, Eigen::MatrixXf &post_covar, bool scale = false) {
             for(size_t i = 0; i < metric.GetSysts().GetNSplines(); ++i)
                 posteriors.emplace_back("", (";"+config.m_mcgen_variation_plotname_map.at(metric.GetSysts().spline_names[i])).c_str(), 60, -3, 3);
 
-            Eigen::VectorXf cv = FillRecoSpectra(config, prop, metric.GetSysts(), metric.GetModel(), best_fit, true).Spec();
+            Eigen::VectorXf cv = FillSpectra(config, prop, metric.GetSysts(), metric.GetModel(), best_fit, true, config.i_prime).Spec();
             Eigen::MatrixXf L; 
             if(metric.GetSysts().GetNCovar() > 0) L = metric.GetSysts().DecomposeFractionalCovariance(config, cv);
-            else L = Eigen::MatrixXf::Zero(config.m_num_bins_total_collapsed, config.m_num_bins_total_collapsed);
+            else L = Eigen::MatrixXf::Zero(config.m_num_variable_bins_total_collapsed[config.i_prime], config.m_num_variable_bins_total_collapsed[config.i_prime]);
             std::normal_distribution<float> nd;
-            Eigen::VectorXf throws = Eigen::VectorXf::Constant(config.m_num_bins_total_collapsed, 0);
+            Eigen::VectorXf throws = Eigen::VectorXf::Constant(config.m_num_variable_bins_total_collapsed[config.i_prime], 0);
 
             int nspline = metric.GetSysts().GetNSplines();
             int nphys = metric.GetModel().nparams;
@@ -87,9 +89,9 @@ namespace PROfit{
             std::vector<Eigen::VectorXf> specs;
             const auto action = [&](const Eigen::VectorXf &value) {
                 accepted += 1;
-                for(size_t i = 0; i < config.m_num_bins_total_collapsed; ++i)
+                for(size_t i = 0; i < config.m_num_variable_bins_total_collapsed[config.i_prime]; ++i)
                     throws(i) = nd(PROseed::global_rng);
-                specs.push_back(CollapseMatrix(config, FillRecoSpectra(config, prop, metric.GetSysts(), metric.GetModel(), value, true).Spec())+L*throws);
+                specs.push_back(CollapseMatrix(config, FillSpectra(config, prop, metric.GetSysts(), metric.GetModel(), value, true,config.i_prime).Spec())+L*throws);
                 for(size_t i = 0; i < metric.GetSysts().GetNSplines(); ++i)
                     posteriors[i].Fill(value(i+nphys));
                 Eigen::VectorXf splines = value.segment(nphys, nspline);
@@ -101,7 +103,7 @@ namespace PROfit{
 
             //TODO: Only works with 1 mode/detector/channel
             cv = CollapseMatrix(config, cv);
-            std::vector<float> edges = config.GetChannelBinEdges(0);
+            std::vector<float> edges = config.GetChannelVariableBinEdges(0,config.i_prime);
             std::vector<float> centers;
             for(size_t i = 0; i < edges.size() - 1; ++i)
                 centers.push_back((edges[i+1] + edges[i])/2);

@@ -40,14 +40,17 @@ PROpoisson::PROpoisson(const std::string tag, const PROconfig &conin, const PROp
           prior_covariance(iA, iB) = std::get<2>(t);
           prior_covariance(iB, iA) = std::get<2>(t);
         }
+        prior_covariance = systin->spline_priors.asDiagonal() * prior_covariance * systin->spline_priors.asDiagonal();
     }
 }
 
 float PROpoisson::Pull(const Eigen::VectorXf &systs) {
     // No correlations: sum of squares
-    if (!correlated_systematics) return systs.array().square().sum();
+    if (!correlated_systematics) {
+        return (systs.array().square() / syst->spline_priors.array().square()).sum();
+    }
 
-    // Otherwise dot onto covariance
+    // Variablewise dot onto covariance
     return systs.dot(prior_covariance.inverse() * systs);
 }
 
@@ -66,11 +69,11 @@ float PROpoisson::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &grad
     size_t nsyst = syst->GetNSplines();
     log<LOG_DEBUG>(L"%1% || nparams is %2%, nsyst is %3% ") % __func__ % nparams % nsyst;    
 
-    // Get Spectra from FillRecoSpectra
+    // Get Spectra from FillSpectra
     Eigen::VectorXf subvector1 = param.segment(0, nparams - nsyst);
     Eigen::VectorXf subvector2 = param.segment(nparams - nsyst, nsyst);
     
-    PROspec result = FillRecoSpectra(config, peller, *syst, model, param, strat == BinnedChi2);
+    PROspec result = FillSpectra(config, peller, *syst, model, param, strat == BinnedChi2);
 
     const Eigen::VectorXf &vdata = data.Spec();
     const Eigen::VectorXf vmc = CollapseMatrix(config, result.Spec());
@@ -92,7 +95,7 @@ float PROpoisson::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &grad
             
             Eigen::VectorXf subvector1 = tmpParams.segment(0, nparams - nsyst);
             Eigen::VectorXf subvector2 = tmpParams.segment(nparams - nsyst, nsyst);
-            PROspec result = FillRecoSpectra(config, peller, *syst, model, tmpParams, strat != EventByEvent);
+            PROspec result = FillSpectra(config, peller, *syst, model, tmpParams, strat != EventByEvent);
 
             const Eigen::VectorXf &vdata = data.Spec();
             const Eigen::VectorXf vmc = CollapseMatrix(config, result.Spec());
@@ -115,11 +118,11 @@ float PROpoisson::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &grad
     return value;
 }
 
-float PROpoisson::getSingleChannelChi(size_t channel_index) {
-    PROspec cv = FillCVSpectrum(config, peller,strat == BinnedChi2);
+float PROpoisson::getSingleChannelChi(size_t channel_index,size_t var_index) {
+    PROspec cv = FillCVSpectra(config, peller,strat == BinnedChi2);
 
-    size_t nbin =  config.m_channel_num_bins[config.GetLocalChannelIndex(channel_index)];
-    size_t startBin = config.GetCollapsedGlobalBinStart(channel_index);
+    size_t nbin =  config.m_channel_variable_num_bins[channel_index][var_index];
+    size_t startBin = config.GetCollapsedGlobalVariableBinStart(channel_index,var_index);
 
 
     const Eigen::VectorXf &vdata = data.Spec().segment(startBin, nbin);
@@ -131,3 +134,6 @@ float PROpoisson::getSingleChannelChi(size_t channel_index) {
     return value;
 }
 
+void PROpoisson::print(const Eigen::VectorXf &param){
+    return;
+}

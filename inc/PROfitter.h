@@ -245,6 +245,7 @@ namespace PROfit {
             // If you don't belive the uncertainties on the parameters, you can use the final fit value to estimate the variance
             Eigen::MatrixXf ScaledCovariance(float chi2, int n_datapoint) const {return Covariance()*chi2/float(n_datapoint-best_fit.size());}
 
+
     };
 
 }

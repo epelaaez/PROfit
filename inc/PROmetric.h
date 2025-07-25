@@ -15,7 +15,7 @@ public:
         BinnedGrad,
         BinnedChi2
     };
-
+    
     virtual void override_systs(const PROsyst &new_syst) = 0;
     virtual float operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient) = 0;
     virtual float operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient, bool nograd) = 0;
@@ -23,11 +23,11 @@ public:
     virtual PROmetric *Clone() const = 0;
     virtual const PROmodel &GetModel() const = 0;
     virtual const PROsyst  &GetSysts() const = 0;
-    virtual float getSingleChannelChi(size_t channel_index) = 0;
+    virtual float getSingleChannelChi(size_t channel_index, size_t var_index) = 0;
     virtual ~PROmetric() {}
     virtual void fixSpline(int,float)  = 0;
     virtual float Pull(const Eigen::VectorXf &systs) = 0;
-
+    virtual void print(const Eigen::VectorXf &param) = 0;
     size_t nParams() const {return GetModel().nparams + GetSysts().GetNSplines();}
 
     Eigen::VectorXf LowerBound() const {

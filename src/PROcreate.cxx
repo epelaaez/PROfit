@@ -18,7 +18,6 @@ namespace PROfit {
 
 
 
-
     void saveSystStructVector(const std::vector<std::vector<SystStruct>> &structs, const std::string &filename) {
         std::ofstream ofs(filename, std::ios::binary);
         boost::archive::binary_oarchive oa(ofs);
@@ -101,256 +100,6 @@ namespace PROfit {
         }
 
         return;
-    }
-
-    int PROcess_SBNfit(const PROconfig &inconfig, std::vector<SystStruct>& syst_vector){
-
-        log<LOG_DEBUG>(L"%1% || Starting to construct CovarianceMatrixGeneration in EventWeight Mode  ") % __func__ ;
-
-        int num_files = inconfig.m_num_mcgen_files;
-
-        log<LOG_DEBUG>(L"%1% || Using a total of %2% individual files") % __func__  % num_files;
-
-        std::vector<long int> nentries(num_files,0);
-        std::vector<std::unique_ptr<TFile>> files(num_files);
-        std::vector<TTree*> trees(num_files,nullptr);//keep as bare pointers because of ROOT :(
-        std::vector<std::vector<std::map<std::string, std::vector<eweight_type>>* >> f_event_weights(num_files);
-        std::map<std::string, int> map_systematic_num_universe;
-
-
-        //open files, and link trees and branches
-        int good_event = 0;
-        for(int fid=0; fid < num_files; ++fid) {
-            const auto& fn = inconfig.m_mcgen_file_name.at(fid);
-
-            files[fid] = std::make_unique<TFile>(fn.c_str(),"read");
-            trees[fid] = (TTree*)(files[fid]->Get(inconfig.m_mcgen_tree_name.at(fid).c_str()));
-            nentries[fid]= (long int)trees.at(fid)->GetEntries();
-
-            if(files[fid]->IsOpen()){
-                log<LOG_INFO>(L"%1% || Root file succesfully opened: %2%") % __func__  % fn.c_str();
-            }else{
-                log<LOG_ERROR>(L"%1% || Fail to open root file: %2%") % __func__  % fn.c_str();
-                exit(EXIT_FAILURE);
-            }
-            log<LOG_INFO>(L"%1% || Total Entries: %2%") % __func__ %  nentries[fid];
-
-
-            //first, grab friend trees
-            if (inconfig.m_mcgen_numfriends[fid]>0){
-                auto mcgen_file_friend_treename_iter = inconfig.m_mcgen_file_friend_treename_map.find(fn);
-                if (mcgen_file_friend_treename_iter != inconfig.m_mcgen_file_friend_treename_map.end()) {
-
-                    auto mcgen_file_friend_iter = inconfig.m_mcgen_file_friend_map.find(fn);
-                    if (mcgen_file_friend_iter == inconfig.m_mcgen_file_friend_map.end()) {
-                        log<LOG_ERROR>(L"%1% || Friend TTree provided but no friend file??") % __func__;
-                        log<LOG_ERROR>(L"Terminating.");
-                        exit(EXIT_FAILURE);
-                    }
-
-                    for(size_t k=0; k < mcgen_file_friend_treename_iter->second.size(); k++){
-
-                        std::string treefriendname = mcgen_file_friend_treename_iter->second.at(k);
-                        std::string treefriendfile = mcgen_file_friend_iter->second.at(k);
-                        trees[fid]->AddFriend(treefriendname.c_str(),treefriendfile.c_str());
-                    }
-                }
-            }
-
-            // grab branches 
-            int num_branch = inconfig.m_branch_variables[fid].size();
-            f_event_weights[fid].resize(num_branch);
-            for(int ib = 0; ib != num_branch; ++ib) {
-
-                std::shared_ptr<BranchVariable> branch_variable = inconfig.m_branch_variables[fid][ib];
-
-                //quick check that this branch associated subchannel is in the known chanels;
-                int is_valid_subchannel = 0;
-                for(const auto &name: inconfig.m_fullnames){
-                    if(branch_variable->associated_hist==name){
-                        log<LOG_DEBUG>(L"%1% || Found a valid subchannel for this branch %2%") % __func__  % name.c_str();
-                        ++is_valid_subchannel;
-                    }
-                }
-                if(is_valid_subchannel==0){
-                    log<LOG_ERROR>(L"%1% || This branch did not match one defined in the .xml : %2%") % __func__ % inconfig.m_xmlname.c_str();
-                    log<LOG_ERROR>(L"%1% || There is probably a typo somehwhere in xml!") % __func__;
-                    log<LOG_ERROR>(L"Terminating.");
-                    exit(EXIT_FAILURE);
-
-                }else if(is_valid_subchannel>1){
-                    log<LOG_ERROR>(L"%1% || This branch matched more than 1 subchannel!: %2%") % __func__ %  branch_variable->associated_hist.c_str();
-                    log<LOG_ERROR>(L"Terminating.");
-                    exit(EXIT_FAILURE);
-                }
-
-                branch_variable->branch_formula = std::make_shared<TTreeFormula>(("branch_form_"+std::to_string(fid) +"_" + std::to_string(ib)).c_str(), branch_variable->name.c_str(), trees[fid]);
-                log<LOG_INFO>(L"%1% || Setting up reco variable for this branch: %2%") % __func__ %  branch_variable->name.c_str();
-
-
-                //grab monte carlo weight
-                if(inconfig.m_mcgen_additional_weight_bool[fid][ib]){
-                    branch_variable->branch_monte_carlo_weight_formula  =  std::make_shared<TTreeFormula>(("branch_add_weight_"+std::to_string(fid)+"_" + std::to_string(ib)).c_str(),inconfig.m_mcgen_additional_weight_name[fid][ib].c_str(),trees[fid]);
-                    log<LOG_INFO>(L"%1% || Setting up additional monte carlo weight for this branch: %2%") % __func__ %  inconfig.m_mcgen_additional_weight_name[fid][ib].c_str();
-                }
-
-
-                //grab eventweight branch
-                log<LOG_INFO>(L"%1% || Setting up eventweight map for this branch: %2%") % __func__ %  inconfig.m_mcgen_eventweight_branch_names[fid][ib].c_str();
-                trees[fid]->SetBranchAddress(inconfig.m_mcgen_eventweight_branch_names[fid][ib].c_str(), &(f_event_weights[fid][ib]));
-
-                if(!f_event_weights[fid][ib]){
-                    log<LOG_ERROR>(L"%1% || Could not read eventweight branch for file=%2%") % __func__ % fid ;
-                    log<LOG_ERROR>(L"Terminating.");
-                    exit(EXIT_FAILURE);
-                }
-            } //end of branch loop
-
-
-            //calculate how many "universes" each systematic has.
-            log<LOG_INFO>(L"%1% || Start calculating number of universes for systematics") % __func__;
-            trees.at(fid)->GetEntry(good_event);
-            for(int ib = 0; ib != num_branch; ++ib) {
-                const auto& branch_variable = inconfig.m_branch_variables[fid][ib];
-                auto& f_weight = f_event_weights[fid][ib];
-
-                for(const auto& it : *f_weight){
-                    log<LOG_DEBUG>(L"%1% || On systematic: %2%") % __func__ % it.first.c_str();
-                    int ncount = std::count(inconfig.m_mcgen_variation_allowlist.begin(), inconfig.m_mcgen_variation_allowlist.end(), it.first);
-
-                    if(ncount==0){
-                        log<LOG_DEBUG>(L"%1% || Skip systematic: %2% as its not in the AllowList!!") % __func__ % it.first.c_str();
-                        continue;
-                    }
-                    ncount = std::count(inconfig.m_mcgen_variation_denylist.begin(), inconfig.m_mcgen_variation_denylist.end(), it.first);
-                    if(ncount>0){
-                        log<LOG_DEBUG>(L"%1% || Skip systematic: %2% as it is in the DenyList!!") % __func__ % it.first.c_str();
-                        continue;
-                    }
-
-                    log<LOG_INFO>(L"%1% || %2% has %3% montecarlo variations in branch %4%") % __func__ % it.first.c_str() % it.second.size() % branch_variable->associated_hist.c_str();
-
-                    map_systematic_num_universe[it.first]   = std::max((int)map_systematic_num_universe[it.first], (int)it.second.size());
-
-                }
-            }
-
-
-
-        } // end fid
-
-        size_t total_num_systematics = map_systematic_num_universe.size();
-        log<LOG_INFO>(L"%1% || Found %2% unique variations") % __func__ % total_num_systematics;
-        for(auto& sys_pair : map_systematic_num_universe){
-            log<LOG_DEBUG>(L"%1% || Variation: %2% --> %3% universes") % __func__ % sys_pair.first.c_str() % sys_pair.second;
-        }
-
-        //constuct object for each systematic variation, and grab weight maps
-        log<LOG_INFO>(L"%1% || Now start to grab related weightmaps") % __func__;
-        for(auto& sys_pair : map_systematic_num_universe){
-
-            const std::string& sys_name = sys_pair.first;
-            syst_vector.emplace_back(sys_name, sys_pair.second);
-
-
-            // Check to see if pattern is in this variation
-            std::string sys_weight_formula = "1", sys_mode ="";
-
-            for(size_t i = 0 ; i != inconfig.m_mcgen_weightmaps_patterns.size(); ++i){
-                if (inconfig.m_mcgen_weightmaps_uses[i] && sys_name.find(inconfig.m_mcgen_weightmaps_patterns[i]) != std::string::npos) {
-                    sys_weight_formula = sys_weight_formula + "*(" + inconfig.m_mcgen_weightmaps_formulas[i]+")";
-                    sys_mode=inconfig.m_mcgen_weightmaps_mode[i];
-
-                    log<LOG_INFO>(L"%1% || Systematic variation %2% is a match for patten %3%") % __func__ % sys_name.c_str() % inconfig.m_mcgen_weightmaps_patterns[i].c_str();
-                    log<LOG_INFO>(L"%1% || Corresponding weight is : %2%") % __func__ % inconfig.m_mcgen_weightmaps_formulas[i].c_str();
-                    log<LOG_INFO>(L"%1% || Corresponding mode is : %2%") % __func__ % inconfig.m_mcgen_weightmaps_mode[i].c_str();
-                }
-            }
-
-            if(sys_weight_formula != "1" || sys_mode !=""){
-                syst_vector.back().SetWeightFormula(sys_weight_formula);
-                syst_vector.back().SetMode(sys_mode);
-            }
-        }
-
-
-        //sanity check 
-        for(const auto& s : syst_vector)
-            s.SanityCheck();
-
-
-        //create 2D multi-universe spec for covariances
-        for(auto& s : syst_vector){
-            if(s.mode=="covariance")
-                s.CreateSpecs(inconfig.m_num_bins_total);	
-        }
-
-
-        time_t start_time = time(nullptr), time_stamp = time(nullptr);
-        log<LOG_INFO>(L"%1% || Start reading the files..") % __func__;
-        for(int fid=0; fid < num_files; ++fid) {
-            const auto& fn = inconfig.m_mcgen_file_name.at(fid);
-            long int nevents = std::min(inconfig.m_mcgen_maxevents[fid], nentries[fid]);
-            log<LOG_DEBUG>(L"%1% || Start @files: %2% which has %3% events") % __func__ % fn.c_str() % nevents;
-
-
-            // set up systematic weight formula
-            std::vector<float> sys_weight_value(total_num_systematics, 1.0);
-            std::vector<std::unique_ptr<TTreeFormula>> sys_weight_formula;
-            for(const auto& s : syst_vector){
-                if(s.HasWeightFormula())
-                    sys_weight_formula.push_back(std::make_unique<TTreeFormula>(("weightMapsFormulas_"+std::to_string(fid)+"_"+ s.GetSysName()).c_str(), s.GetWeightFormula().c_str(),trees[fid]));
-                else
-                    sys_weight_formula.push_back(nullptr);
-            }
-            log<LOG_DEBUG>(L"%1% || Finished setting up systematic weight formula") % __func__;
-
-
-            // grab the subchannel index
-            int num_branch = inconfig.m_branch_variables[fid].size();
-            auto& branches = inconfig.m_branch_variables[fid];
-            std::vector<int> subchannel_index(num_branch, 0); 
-            log<LOG_DEBUG>(L"%1% || This file includes %2% branch/subchannels") % __func__ % num_branch;
-            for(int ib = 0; ib != num_branch; ++ib) {
-
-                const std::string& subchannel_name = inconfig.m_branch_variables[fid][ib]->associated_hist;
-                subchannel_index[ib] = inconfig.GetSubchannelIndex(subchannel_name);
-                log<LOG_DEBUG>(L"%1% || Subchannel: %2% maps to index: %3%") % __func__ % subchannel_name.c_str() % subchannel_index[ib];
-            }
-
-
-            // loop over all entries
-            for(long int i=0; i < nevents; ++i) {
-                if(i%1000==0){
-                    time_t time_passed = time(nullptr) - time_stamp;
-                    log<LOG_INFO>(L"%1% || File %2% -- uni : %3% / %4%  took %5% seconds") % __func__ % fid % i % nevents % time_passed;
-                    time_stamp = time(nullptr);
-                }
-                trees[fid]->GetEntry(i);
-
-
-                //grab additional weight for systematics
-                for(size_t is = 0; is != total_num_systematics; ++is){
-                    if(syst_vector[is].HasWeightFormula()){
-                        sys_weight_formula[is]->GetNdata();	
-                        sys_weight_value[is] = sys_weight_formula[is]->EvalInstance();
-                    }
-                }
-
-                //branch loop
-                for(int ib = 0; ib != num_branch; ++ib) {
-                    process_sbnfit_event(inconfig, branches[ib], *f_event_weights[fid][ib], subchannel_index[ib], syst_vector, sys_weight_value);
-                } 
-
-            } //end of entry loop
-
-        } //end of file loop
-
-        time_t time_took = time(nullptr) - start_time;
-        log<LOG_INFO>(L"%1% || Finish reading files, it took %2% seconds..") % __func__ % time_took;
-        log<LOG_INFO>(L"%1% || DONE") %__func__ ;
-
-        return 0;
     }
 
     int PROcess_CAFAna(const PROconfig &inconfig, std::vector<std::vector<SystStruct>> &syst_vector, PROpeller& inprop,bool noxrootd){
@@ -487,23 +236,23 @@ namespace PROfit {
                     exit(EXIT_FAILURE);
                 }
 
-                branch_variable->branch_formula = std::make_shared<TTreeFormula>(("branch_form_"+std::to_string(fid) +"_" + std::to_string(ib)).c_str(), branch_variable->name.c_str(), chains[fid]);
-                log<LOG_INFO>(L"%1% || Setting up reco variable for this branch: %2%") % __func__ %  branch_variable->name.c_str();
-                branch_variable->branch_true_L_formula = std::make_shared<TTreeFormula>(("branch_L_form_"+std::to_string(fid) +"_" + std::to_string(ib)).c_str(), branch_variable->true_L_name.c_str(), chains[fid]);
-                log<LOG_INFO>(L"%1% || Setting up L variable for this branch: %2%") % __func__ %  branch_variable->true_L_name.c_str();
-                branch_variable->branch_true_value_formula = std::make_shared<TTreeFormula>(("branch_true_form_"+std::to_string(fid) +"_" + std::to_string(ib)).c_str(), branch_variable->true_param_name.c_str(), chains[fid]);
-                log<LOG_INFO>(L"%1% || Setting up true E variable for this branch: %2%") % __func__ %  branch_variable->true_param_name.c_str();
-                branch_variable->branch_true_pdg_formula = std::make_shared<TTreeFormula>(("branch_pdg_form_"+std::to_string(fid) +"_" + std::to_string(ib)).c_str(), branch_variable->pdg_name.c_str(), chains[fid]);
-                log<LOG_INFO>(L"%1% || Setting up PDG variable for this branch: %2%") % __func__ %  branch_variable->pdg_name.c_str();
-                if (branch_variable->hist_reweight) {
-                    branch_variable->branch_true_proton_mom_formula = std::make_shared<TTreeFormula>(("branch_pmom_form_"+std::to_string(fid) +"_" + std::to_string(ib)).c_str(), branch_variable->true_proton_mom_name.c_str(), chains[fid]);
-                    log<LOG_INFO>(L"%1% || Setting up leading proton momentum variable for this branch: %2%") % __func__ %  branch_variable->true_proton_mom_name.c_str();
-                    branch_variable->branch_true_proton_costh_formula = std::make_shared<TTreeFormula>(("branch_costh_form_"+std::to_string(fid) +"_" + std::to_string(ib)).c_str(), branch_variable->true_proton_costh_name.c_str(), chains[fid]);
-                    log<LOG_INFO>(L"%1% || Setting up leading proton costh variable for this branch: %2%") % __func__ %  branch_variable->true_proton_costh_name.c_str();
-                }
+                //branch_variable->branch_formula = std::make_shared<TTreeFormula>(("branch_form_"+std::to_string(fid) +"_" + std::to_string(ib)).c_str(), branch_variable->name.c_str(), chains[fid]);
+                //log<LOG_INFO>(L"%1% || Setting up reco variable for this branch: %2%") % __func__ %  branch_variable->name.c_str();
+                //branch_variable->branch_true_L_formula = std::make_shared<TTreeFormula>(("branch_L_form_"+std::to_string(fid) +"_" + std::to_string(ib)).c_str(), branch_variable->true_L_name.c_str(), chains[fid]);
+                //log<LOG_INFO>(L"%1% || Setting up L variable for this branch: %2%") % __func__ %  branch_variable->true_L_name.c_str();
+                //branch_variable->branch_true_value_formula = std::make_shared<TTreeFormula>(("branch_true_form_"+std::to_string(fid) +"_" + std::to_string(ib)).c_str(), branch_variable->true_param_name.c_str(), chains[fid]);
+                //log<LOG_INFO>(L"%1% || Setting up true E variable for this branch: %2%") % __func__ %  branch_variable->true_param_name.c_str();
+                //branch_variable->branch_true_pdg_formula = std::make_shared<TTreeFormula>(("branch_pdg_form_"+std::to_string(fid) +"_" + std::to_string(ib)).c_str(), branch_variable->pdg_name.c_str(), chains[fid]);
+                //log<LOG_INFO>(L"%1% || Setting up PDG variable for this branch: %2%") % __func__ %  branch_variable->pdg_name.c_str();
+                //if (branch_variable->hist_reweight) {
+                //branch_variable->branch_true_proton_mom_formula = std::make_shared<TTreeFormula>(("branch_pmom_form_"+std::to_string(fid) +"_" + std::to_string(ib)).c_str(), branch_variable->true_proton_mom_name.c_str(), chains[fid]);
+                //log<LOG_INFO>(L"%1% || Setting up leading proton momentum variable for this branch: %2%") % __func__ %  branch_variable->true_proton_mom_name.c_str();
+                //branch_variable->branch_true_proton_costh_formula = std::make_shared<TTreeFormula>(("branch_costh_form_"+std::to_string(fid) +"_" + std::to_string(ib)).c_str(), branch_variable->true_proton_costh_name.c_str(), chains[fid]);
+                //log<LOG_INFO>(L"%1% || Setting up leading proton costh variable for this branch: %2%") % __func__ %  branch_variable->true_proton_costh_name.c_str();
+                //}
                 int other_count = 0;
-                for(const auto &name: branch_variable->other_param_names) {
-                    branch_variable->branch_other_values_formulas.push_back(std::make_shared<TTreeFormula>(("branch_other_form_"+std::to_string(fid) +"_" + std::to_string(ib)+"_"+std::to_string(other_count)).c_str(), name.c_str(), chains[fid]));
+                for(const auto &name: branch_variable->variable_names) {
+                    branch_variable->branch_variable_formulas.push_back(std::make_shared<TTreeFormula>(("branch_variable_form_"+std::to_string(fid) +"_" + std::to_string(ib)+"_"+std::to_string(other_count)).c_str(), name.c_str(), chains[fid]));
                     other_count++;
                 }
 
@@ -607,8 +356,6 @@ namespace PROfit {
         if(inconfig.m_num_variation_type_norm>0){
             for(auto& allow_sys : inconfig.m_mcgen_variation_type_map){
                 if(allow_sys.second=="norm"){
-
- 
                     map_systematic_num_universe[allow_sys.first] = 7;
                 }
             }
@@ -621,8 +368,8 @@ namespace PROfit {
             log<LOG_DEBUG>(L"%1% || Variation: %2% --> %3% universes") % __func__ % sys_pair.first.c_str() % sys_pair.second;
         }
 
-        syst_vector.emplace_back();
-        for(size_t io = 0; io < inconfig.m_num_other_vars; ++io)
+        //syst_vector.emplace_back();// One for each variable. "reco" is no longer special
+        for(size_t io = 0; io < inconfig.m_num_variables; ++io)
             syst_vector.emplace_back();
 
         //constuct object for each systematic variation, and grab weight maps
@@ -632,10 +379,11 @@ namespace PROfit {
             const std::string& sys_name = sys_pair.first;
             std::string sys_weight_formula = "1";
             std::string sys_mode = inconfig.m_mcgen_variation_type_map.at(sys_name);
-            int binning = inconfig.m_mcgen_variation_binning_map.at(sys_name);
-            for(auto &sv: syst_vector) {
+            int binningindex = inconfig.m_mcgen_variation_binning_map.at(sys_name);
+        
+            for (size_t iv = 0; iv < syst_vector.size(); ++iv) {
+                auto& sv = syst_vector[iv];
                 sv.emplace_back(sys_name, sys_pair.second);
-
 
                 log<LOG_INFO>(L"%1% || found mode %2% for systematic %3%: ") % __func__ % sys_mode.c_str() % sys_name.c_str();
                 if(sys_weight_formula != "1" || sys_mode !=""){
@@ -651,7 +399,7 @@ namespace PROfit {
                     sv.back().knob_index = override_knobs ? inconfig.m_mcgen_variation_knobval_override.at(sys_name) : map_systematic_knob_vals[sys_name];
                     sv.back().knobval = sv.back().knob_index;
                     std::sort(sv.back().knobval.begin(), sv.back().knobval.end());
-                    sv.back().binning = binning;
+                    sv.back().binning = binningindex;
                 }
                 if(sys_mode == "flat"){
                     log<LOG_INFO>(L"%1% || Systematic variation %2% is a match for a flat covariance systematic. Processing a such. ") % __func__ % sys_name.c_str();
@@ -690,10 +438,10 @@ namespace PROfit {
                     std::vector<int> flatbins;
                     for(auto &name: flatnames){
                         size_t is = inconfig.GetSubchannelIndex(name);     
-                        size_t ic = inconfig.GetChannelIndex(is);     
+                        size_t ic = inconfig.GetLocalChannelIndexFromGlobalSubchannelIndex(is);     
 
-                        size_t start = inconfig.GetGlobalBinStart(is); 
-                        for(size_t b = 0; b < inconfig.m_channel_num_bins[ic] ; b++){
+                        size_t start = inconfig.GetGlobalVariableBinStart(is,iv); 
+                        for(size_t b = 0; b < inconfig.m_channel_variable_num_bins[ic][iv] ; b++){
                             flatbins.push_back((int)(start+b));
                         }
                     }
@@ -701,7 +449,7 @@ namespace PROfit {
 
                     sv.back().norm_bins=flatbins;
                     sv.back().norm_value = flat_percent;
-                    sv.back().binning = binning;
+                    sv.back().binning = binningindex;
 
                 }
 
@@ -734,31 +482,39 @@ namespace PROfit {
             auto &sv = syst_vector[i];
             for(auto &s: sv) {
                 if(s.mode=="flat")
-                    continue;	
-                s.CreateSpecs(
-                        s.mode == "covariance" && i == 0 ? inconfig.m_num_bins_total :
-                        s.mode == "covariance" ? inconfig.m_num_other_bins_total[i-1] :
-                        s.binning == -2 ? inconfig.m_num_truebins_total : 
-                        s.binning == -1 ? inconfig.m_num_bins_total  
-                                        : inconfig.m_num_other_bins_total[s.binning]); 
+                    continue;
+                //Get these binnings right
+                s.CreateSpecs( s.mode == "covariance" ? inconfig.m_num_variable_bins_total[i] : inconfig.m_num_variable_bins_total[s.binning]);
+                // use the binnign from the variable if covariance, otherise use the binning fdefined for the spline
             }
         }
 
-        inprop.mcStatErr = Eigen::VectorXf::Constant(inconfig.m_num_bins_total, 0);
-        inprop.hist = Eigen::MatrixXf::Constant(inconfig.m_num_truebins_total, inconfig.m_num_bins_total, 0);
-        for(size_t i = 0; i < inconfig.m_num_other_vars; ++i) {
-            inprop.otherMCStatErr.push_back(Eigen::VectorXf::Constant(inconfig.m_num_other_bins_total[i], 0));
-            inprop.other_hists.push_back(Eigen::MatrixXf::Constant(inconfig.m_num_other_bins_total[i], inconfig.m_num_bins_total, 0));
+
+        for(size_t i = 0; i < inconfig.m_num_variables; ++i) {
+            inprop.variable_mc_stat_err.push_back(Eigen::VectorXf::Constant(inconfig.m_num_variable_bins_total[i], 0));
         }
-        inprop.histLE = Eigen::VectorXf::Constant(inconfig.m_num_truebins_total, 0);
-        size_t LE_bin = 0;
-        for(size_t im = 0; im < inconfig.m_num_modes; im++){
-            for(size_t id =0; id < inconfig.m_num_detectors; id++){
-                for(size_t ic = 0; ic < inconfig.m_num_channels; ic++){
-                    const std::vector<float> &edges = inconfig.m_channel_truebin_edges[ic];
-                    for(size_t sc = 0; sc < inconfig.m_num_subchannels.at(ic); sc++){
-                        for(size_t j = 0; j < edges.size() - 1; ++j){
-                            inprop.histLE(LE_bin++) = (edges[j+1] + edges[j])/2;
+
+        //setup and initilizte the hists
+        inprop.variable_hist_storage.init(inconfig.m_num_variables);
+        for(size_t i = 0; i < inconfig.m_num_variables; ++i) {
+            for(size_t j = i; j < inconfig.m_num_variables; ++j) {
+                log<LOG_DEBUG>(L"%1% || Init Storage hists (i,j): (%2%,%3%) of size (%4%,%5%).") % __func__ % i % j %  inconfig.m_num_variable_bins_total[i] % inconfig.m_num_variable_bins_total[j]; 
+                inprop.variable_hist_storage.set(i,j)= Eigen::MatrixXf::Constant(inconfig.m_num_variable_bins_total[i],inconfig.m_num_variable_bins_total[j],0.0);
+            }
+        }
+
+        for(size_t i = 0; i < inconfig.m_num_variables; ++i) {
+
+            inprop.variable_midbin.emplace_back(Eigen::VectorXf::Constant(inconfig.m_num_variable_bins_total[i], 0));
+            size_t LE_bin = 0;
+            for(size_t im = 0; im < inconfig.m_num_modes; im++){
+                for(size_t id =0; id < inconfig.m_num_detectors; id++){
+                    for(size_t ic = 0; ic < inconfig.m_num_channels; ic++){
+                        const std::vector<float> &edges = inconfig.m_channel_variable_bin_edges.at(ic)[i];
+                        for(size_t sc = 0; sc < inconfig.m_num_subchannels.at(ic); sc++){
+                            for(size_t j = 0; j < edges.size() - 1; ++j){
+                                inprop.variable_midbin.back()(LE_bin++) = (edges[j+1] + edges[j])/2;
+                            }
                         }
                     }
                 }
@@ -829,27 +585,13 @@ namespace PROfit {
 
                     for(int ib = 0; ib != num_branch; ++ib) {
 
-                    if(inconfig.m_mcgen_additional_weight_bool[fid][ib]){
-                        branches[ib]->branch_monte_carlo_weight_formula->GetNdata();
-                        branches[ib]->branch_monte_carlo_weight_formula->UpdateFormulaLeaves();
-                    }
-                        branches[ib]->branch_true_pdg_formula->GetNdata();
-                        branches[ib]->branch_true_pdg_formula->UpdateFormulaLeaves();
-                        branches[ib]->branch_formula->GetNdata();
-                        branches[ib]->branch_formula->UpdateFormulaLeaves();
-                        branches[ib]->branch_true_L_formula->GetNdata();
-                        branches[ib]->branch_true_L_formula->UpdateFormulaLeaves();
-                        branches[ib]->branch_true_value_formula->GetNdata();
-                        branches[ib]->branch_true_value_formula->UpdateFormulaLeaves();
-                        for(auto &b: branches[ib]->branch_other_values_formulas) {
+                        if(inconfig.m_mcgen_additional_weight_bool[fid][ib]){
+                            branches[ib]->branch_monte_carlo_weight_formula->GetNdata();
+                            branches[ib]->branch_monte_carlo_weight_formula->UpdateFormulaLeaves();
+                        }
+                        for(auto &b: branches[ib]->branch_variable_formulas) {
                             b->GetNdata();
                             b->UpdateFormulaLeaves();
-                        }
-                        if (branches[ib]->hist_reweight) {
-                            branches[ib]->branch_true_proton_mom_formula->GetNdata();
-                            branches[ib]->branch_true_proton_mom_formula->UpdateFormulaLeaves();
-                            branches[ib]->branch_true_proton_costh_formula->GetNdata();
-                            branches[ib]->branch_true_proton_costh_formula->UpdateFormulaLeaves();
                         }
                     }
 
@@ -889,7 +631,11 @@ namespace PROfit {
 
         //ensure hash is correctly assigned
         inprop.hash=inconfig.hash;
-        inprop.mcStatErr = inprop.mcStatErr.array().sqrt();
+        //finished, so make sure MCstat is ok
+        for(size_t i = 0; i < inconfig.m_num_variables; ++i) {
+            inprop.variable_mc_stat_err[i]=inprop.variable_mc_stat_err[i].array().sqrt();
+        }
+
 
         time_t time_took = time(nullptr) - start_time;
         log<LOG_INFO>(L"%1% || Finish reading files, it took %2% seconds..") % __func__ % time_took;
@@ -979,12 +725,10 @@ namespace PROfit {
                     exit(EXIT_FAILURE);
                 }
 
-                branch_variable->branch_formula = std::make_shared<TTreeFormula>(("branch_form_"+std::to_string(fid) +"_" + std::to_string(ib)).c_str(), branch_variable->name.c_str(), trees[fid]);
-                log<LOG_INFO>(L"%1% || Setting up reco variable for this branch: %2%") % __func__ %  branch_variable->name.c_str();
 
                 int other_count = 0;
-                for(const auto &name: branch_variable->other_param_names) {
-                    branch_variable->branch_other_values_formulas.push_back(std::make_shared<TTreeFormula>(("branch_other_form_"+std::to_string(fid) +"_" + std::to_string(ib)+"_"+std::to_string(other_count)).c_str(), name.c_str(), trees[fid]));
+                for(const auto &name: branch_variable->variable_names) {
+                    branch_variable->branch_variable_formulas.push_back(std::make_shared<TTreeFormula>(("branch_variabler_form_"+std::to_string(fid) +"_" + std::to_string(ib)+"_"+std::to_string(other_count)).c_str(), name.c_str(), trees[fid]));
                     other_count++;
                 }
 
@@ -999,9 +743,8 @@ namespace PROfit {
 
         time_t start_time = time(nullptr);
         std::vector<PROdata> data;
-        data.emplace_back(inconfig.m_num_bins_total);
-        for(size_t io = 0; io < inconfig.m_num_other_vars; ++io)
-            data.emplace_back(inconfig.m_num_other_bins_total[io]);
+        for(size_t io = 0; io < inconfig.m_num_variables; ++io)
+            data.emplace_back(inconfig.m_num_variable_bins_total[io]);
         log<LOG_INFO>(L"%1% || Start reading the files..") % __func__;
         for(int fid=0; fid < num_files; ++fid) {
             const auto& fn = inconfig.m_mcgen_file_name.at(fid);
@@ -1026,32 +769,22 @@ namespace PROfit {
 
                 //branch loop
                 for(int ib = 0; ib != num_branch; ++ib) {
-                    float reco_value = branches[ib]->GetValue<float>();
+                    std::vector<float> vars = branches[ib]->GetVariables();
                     float additional_weight = branches[ib]->GetMonteCarloWeight();
                     additional_weight *= pot_scale[fid];
-                    std::vector<float> other_params = branches[ib]->GetOtherValues();
 
                     if(additional_weight == 0) //skip on event failing cuts
                         continue;
 
-                    //find bins
-                     
-                    int global_bin = FindGlobalBin(inconfig, reco_value, branch_fullname[ib]);
-                    if(global_bin < 0 )  //out of range
-                        continue;
-
-                    std::vector<int> other_bin_indices;
-                    for(size_t i = 0; i < other_params.size(); ++i) {
-                        other_bin_indices.push_back(FindGlobalOtherBin(inconfig, other_params[i], branch_fullname[ib], i));
+                    std::vector<int> variable_bin_indices;
+                    for(size_t i = 0; i < vars.size(); ++i) {
+                        variable_bin_indices.push_back(FindGlobalVariableBin(inconfig, vars[i], branch_fullname[ib], i));
                     }
 
-                    if(i%100==0)	
-                        log<LOG_DEBUG>(L"%1% || Subchannel %2% -- Reco variable value: %3%, MC event weight: %4%, correponds to global bin: %5%") % __func__ %  branch_fullname[ib].c_str() % reco_value % additional_weight % global_bin;
 
-                    data[0].Fill(global_bin, additional_weight);
-                    for(size_t io = 0; io < inconfig.m_num_other_vars; ++io)
-                        if(other_bin_indices[io] >= 0)
-                            data[io+1].Fill(other_bin_indices[io], additional_weight);
+                        for(size_t io = 0; io < inconfig.m_num_variables; ++io)
+                            if(variable_bin_indices[io] >= 0)
+                                data[io].Fill(variable_bin_indices[io], additional_weight);//from io+1
                 }  //end of branch loop
             } //end of entry loop
         } //end of file loop
@@ -1061,325 +794,110 @@ namespace PROfit {
     }
 
 
-    PROspec CreatePROspecCV(const PROconfig& inconfig){
-
-        float spec_pot = inconfig.m_plot_pot;
-        log<LOG_INFO>(L"%1% || Start generating central value spectrum") % __func__ ;
-        log<LOG_INFO>(L"%1% || Spectrum will be generated with %2% POT") % __func__ % spec_pot;
-
-        int num_files = inconfig.m_num_mcgen_files;
-        log<LOG_DEBUG>(L"%1% || Starting to read file and build spectrum!") % __func__ ;
-        log<LOG_DEBUG>(L"%1% || Using a total of %2% individual files") % __func__  % num_files;
-
-
-        std::vector<long int> nentries(num_files,0);
-        std::vector<float> pot_scale(num_files, 1.0);
-        std::vector<std::unique_ptr<TFile>> files(num_files);
-        std::vector<TTree*> trees(num_files,nullptr);//keep as bare pointers because of ROOT :(
-
-
-        for(int fid=0; fid < num_files; ++fid) {
-            const auto& fn = inconfig.m_mcgen_file_name.at(fid);
-
-            files[fid] = std::make_unique<TFile>(fn.c_str(),"read");
-            trees[fid] = (TTree*)(files[fid]->Get(inconfig.m_mcgen_tree_name.at(fid).c_str()));
-            nentries[fid]= (long int)trees.at(fid)->GetEntries();
-
-            if(files[fid]->IsOpen()){
-                log<LOG_INFO>(L"%1% || Root file succesfully opened: %2%") % __func__  % fn.c_str();
-            }else{
-                log<LOG_ERROR>(L"%1% || Fail to open root file: %2%") % __func__  % fn.c_str();
-                exit(EXIT_FAILURE);
-            }
-            log<LOG_INFO>(L"%1% || Total Entries: %2%") % __func__ %  nentries[fid];
-
-            //calculate POT scale factor
-            if(inconfig.m_mcgen_pot.at(fid) != -1){
-                pot_scale[fid] = spec_pot/inconfig.m_mcgen_pot.at(fid);
-            }
-            pot_scale[fid] *= inconfig.m_mcgen_scale[fid];
-            log<LOG_INFO>(L"%1% || File POT: %2%, additional scale: %3%") % __func__ %  inconfig.m_mcgen_pot.at(fid) % inconfig.m_mcgen_scale[fid];
-            log<LOG_INFO>(L"%1% || POT scale factor: %2%") % __func__ %  pot_scale[fid];
-
-            //first, grab friend trees
-
-            if (inconfig.m_mcgen_numfriends[fid]>0){
-                auto mcgen_file_friend_treename_iter = inconfig.m_mcgen_file_friend_treename_map.find(fn);
-                if (mcgen_file_friend_treename_iter != inconfig.m_mcgen_file_friend_treename_map.end()) {
-
-                    auto mcgen_file_friend_iter = inconfig.m_mcgen_file_friend_map.find(fn);
-                    if (mcgen_file_friend_iter == inconfig.m_mcgen_file_friend_map.end()) {
-                        log<LOG_ERROR>(L"%1% || Friend TTree provided but no friend file??") % __func__;
-                        log<LOG_ERROR>(L"Terminating.");
-                        exit(EXIT_FAILURE);
-                    }
-
-                    for(size_t k=0; k < mcgen_file_friend_treename_iter->second.size(); k++){
-
-                        std::string treefriendname = mcgen_file_friend_treename_iter->second.at(k);
-                        std::string treefriendfile = mcgen_file_friend_iter->second.at(k);
-                        trees[fid]->AddFriend(treefriendname.c_str(),treefriendfile.c_str());
-                    }
-                }
-            }
-
-            // grab branches 
-            int num_branch = inconfig.m_branch_variables[fid].size();
-            for(int ib = 0; ib != num_branch; ++ib) {
-
-                std::shared_ptr<BranchVariable> branch_variable = inconfig.m_branch_variables[fid][ib];
-
-                //quick check that this branch associated subchannel is in the known chanels;
-                int is_valid_subchannel = 0;
-                for(const auto &name: inconfig.m_fullnames){
-                    if(branch_variable->associated_hist==name){
-                        log<LOG_DEBUG>(L"%1% || Found a valid subchannel for this branch %2%") % __func__  % name.c_str();
-                        ++is_valid_subchannel;
-                    }
-                }
-                if(is_valid_subchannel==0){
-                    log<LOG_ERROR>(L"%1% || This branch did not match one defined in the .xml : %2%") % __func__ % inconfig.m_xmlname.c_str();
-                    log<LOG_ERROR>(L"%1% || There is probably a typo somehwhere in xml!") % __func__;
-                    log<LOG_ERROR>(L"Terminating.");
-                    exit(EXIT_FAILURE);
-
-                }else if(is_valid_subchannel>1){
-                    log<LOG_ERROR>(L"%1% || This branch matched more than 1 subchannel!: %2%") % __func__ %  branch_variable->associated_hist.c_str();
-                    log<LOG_ERROR>(L"Terminating.");
-                    exit(EXIT_FAILURE);
-                }
-
-                branch_variable->branch_formula = std::make_shared<TTreeFormula>(("branch_form_"+std::to_string(fid) +"_" + std::to_string(ib)).c_str(), branch_variable->name.c_str(), trees[fid]);
-                log<LOG_INFO>(L"%1% || Setting up reco variable for this branch: %2%") % __func__ %  branch_variable->name.c_str();
-
-
-                //grab monte carlo weight
-                if(inconfig.m_mcgen_additional_weight_bool[fid][ib]){
-                    branch_variable->branch_monte_carlo_weight_formula  =  std::make_shared<TTreeFormula>(("branch_add_weight_"+std::to_string(fid)+"_" + std::to_string(ib)).c_str(),inconfig.m_mcgen_additional_weight_name[fid][ib].c_str(),trees[fid]);
-                    log<LOG_INFO>(L"%1% || Setting up additional monte carlo weight for this branch: %2%") % __func__ %  inconfig.m_mcgen_additional_weight_name[fid][ib].c_str();
-                }
-
-            } //end of branch loop
-        } // end fid
-
-
-        time_t start_time = time(nullptr);
-        PROspec spec(inconfig.m_num_bins_total);
-
-
-        log<LOG_INFO>(L"%1% || Start reading the files..") % __func__;
-        for(int fid=0; fid < num_files; ++fid) {
-            const auto& fn = inconfig.m_mcgen_file_name.at(fid);
-            long int nevents = std::min(inconfig.m_mcgen_maxevents[fid], nentries[fid]);
-            log<LOG_DEBUG>(L"%1% || Start @files: %2% which has %3% events") % __func__ % fn.c_str() % nevents;
-
-
-            // grab the subchannel index
-            int num_branch = inconfig.m_branch_variables[fid].size();
-            auto& branches = inconfig.m_branch_variables[fid];
-            std::vector<int> subchannel_index(num_branch, 0); 
-            log<LOG_INFO>(L"%1% || This file includes %2% branch/subchannels") % __func__ % num_branch;
-            for(int ib = 0; ib != num_branch; ++ib) {
-
-                const std::string& subchannel_name = inconfig.m_branch_variables[fid][ib]->associated_hist;
-                subchannel_index[ib] = inconfig.GetSubchannelIndex(subchannel_name);
-                log<LOG_DEBUG>(L"%1% || Subchannel: %2% maps to index: %3%") % __func__ % subchannel_name.c_str() % subchannel_index[ib];
-            }
-
-
-            // loop over all entries
-            for(long int i=0; i < nevents; ++i) {
-
-                if(i%1000==0)	log<LOG_INFO>(L"%1% || -- uni : %2% / %3%") % __func__ % i % nevents;
-                trees[fid]->GetEntry(i);
-
-                //branch loop
-                for(int ib = 0; ib != num_branch; ++ib) {
-
-                    //guanqun: why have different types for branch_variables 
-                    float reco_value = branches[ib]->GetValue<float>();
-                    float additional_weight = branches[ib]->GetMonteCarloWeight();
-                    additional_weight *= pot_scale[fid];
-
-                    if(additional_weight == 0) //skip on event failing cuts
-                        continue;
-
-                    //find bins
-                    int global_bin = FindGlobalBin(inconfig, reco_value, subchannel_index[ib]);
-                    if(global_bin < 0 )  //out of range
-                        continue;
-
-                    if(i%100==0)	
-                        log<LOG_DEBUG>(L"%1% || Subchannel %2% -- Reco variable value: %3%, MC event weight: %4%, correponds to global bin: %5%") % __func__ %  subchannel_index[ib] % reco_value % additional_weight % global_bin;
-
-                    spec.Fill(global_bin, additional_weight);
-
-                }  //end of branch loop
-
-            } //end of entry loop
-
-        } //end of file loop
-
-        time_t time_took = time(nullptr) - start_time;
-        log<LOG_INFO>(L"%1% || Generating central value spectrum took %2% seconds..") % __func__ % time_took;
-        log<LOG_INFO>(L"%1% || DONE") %__func__ ;
-
-        return spec;
-    }
-
     void process_cafana_event(const PROconfig &inconfig, const std::shared_ptr<BranchVariable>& branch, const std::map<std::string, std::vector<eweight_type>*>& eventweight_map, float mcpot, int subchannel_index, std::vector<std::vector<SystStruct>> &syst_vector, const std::vector<float>& syst_additional_weight, PROpeller& inprop){
 
 
-        int total_num_sys = syst_vector[0].size(); 
-        float reco_value = branch->GetValue<float>();
-        float true_param = branch->GetTrueValue<float>();
-        float baseline = branch->GetTrueL<float>();
-        float true_value = baseline / true_param;
 
-        float pmom = branch->GetTrueLeadProtonMom<double>();
-        float pcosth = branch->GetTrueLeadProtonCosth<double>();
+        int total_num_sys = syst_vector[0].size(); 
+        std::vector<float> vars = branch->GetVariables();
+
         int run_syst = branch->GetIncludeSystematics();
         float mc_weight = branch->GetMonteCarloWeight();
         mc_weight *= inconfig.m_plot_pot / mcpot;
 
-        std::vector<float> other_params = branch->GetOtherValues();
 
-        int global_bin = FindGlobalBin(inconfig, reco_value, subchannel_index);
-        int global_true_bin = run_syst ? FindGlobalTrueBin(inconfig, true_value, subchannel_index) : 0 ;//seems werid, but restricts ALL cosmics to one bin. 
         int model_rule = branch->GetModelRule();
 
-        std::vector<int> other_bin_indices;
-        for(size_t i = 0; i < other_params.size(); ++i) {
-            other_bin_indices.push_back(FindGlobalOtherBin(inconfig, other_params[i], subchannel_index, i));
+        std::vector<int> variable_bin_indices;
+        for(size_t i = 0; i < vars.size(); ++i) {
+            variable_bin_indices.push_back(FindGlobalVariableBin(inconfig, vars[i], subchannel_index, i));
+            //log<LOG_INFO>(L"%1% || GURP  var %2%  value: %3% bin: %4% : sbindex %5% ") % __func__ %   i % vars[i] % FindGlobalVariableBin(inconfig, vars[i], subchannel_index, i) % subchannel_index;
         }
-        
-        if(global_bin < 0 )  //out of range
-            return;
-        if(global_true_bin < 0)
-            return;
+
         if(mc_weight == 0)
             return;
 
         inprop.added_weights.push_back(mc_weight);
-        inprop.bin_indices.push_back(global_bin);
-        inprop.trueLE.push_back((float)(baseline/true_param));
         inprop.model_rule.push_back((int)model_rule);
-        inprop.true_bin_indices.push_back((int)global_true_bin);
-        inprop.hist(global_true_bin, global_bin) += mc_weight;
-        inprop.pmom.push_back((float)pmom);
-        inprop.pcosth.push_back((float)pcosth);
-        inprop.mcStatErr(global_bin) += 1;
-        inprop.other_bin_indices.push_back(other_bin_indices);
-        for(size_t io = 0; io < inconfig.m_num_other_vars; ++io) {
-            if(other_bin_indices[io] >= 0) {
-                inprop.otherMCStatErr[io](other_bin_indices[io]) += 1;
-                inprop.other_hists[io](other_bin_indices[io], global_bin) += mc_weight;
+        inprop.variable_bin_indices.push_back(variable_bin_indices);
+        inprop.variable_values.push_back(vars);
+
+        for(size_t io = 0; io < inconfig.m_num_variables; ++io) {
+            if(variable_bin_indices[io] >= 0) {
+                inprop.variable_mc_stat_err[io](variable_bin_indices[io]) += 1;
+                for(size_t jo = io; jo < inconfig.m_num_variables; ++jo) {
+
+                    if(variable_bin_indices[jo]<0)continue;
+                    inprop.variable_hist_storage.set(io,jo)(variable_bin_indices[io], variable_bin_indices[jo]) += mc_weight; 
+                }
             }
+
         }
 
         if(!run_syst) return;
 
         for(int i = 0; i != total_num_sys; ++i){
-            SystStruct& syst_obj = syst_vector[0][i];
-            std::vector<SystStruct*> other_syst_objs;
-            for(size_t io = 0; io < inconfig.m_num_other_vars; ++io)
-                other_syst_objs.push_back(&syst_vector[io+1][i]);
-            float additional_weight = syst_additional_weight.at(i);
-            auto map_iter = eventweight_map.find(syst_obj.GetSysName());
-            int spline_bin;
-            if(syst_obj.binning == -2) {
-                spline_bin = global_true_bin;
-            } else if(syst_obj.binning == -1) {
-                spline_bin = global_bin;
-            } else {
-                spline_bin = other_bin_indices[syst_obj.binning];
-            }
+            std::vector<SystStruct*> var_syst_objs;
+            for(size_t io = 0; io < inconfig.m_num_variables; ++io)
+                var_syst_objs.push_back(&syst_vector[io][i]);
 
-            if(syst_obj.mode == "spline") {
+            float additional_weight = syst_additional_weight.at(i);
+            auto map_iter = eventweight_map.find(var_syst_objs.front()->GetSysName());
+            int spline_bin =  variable_bin_indices[var_syst_objs.front()->binning];
+
+            if(var_syst_objs.front()->mode == "spline") {
                 if(spline_bin < 0) continue;
-                syst_obj.FillCV(spline_bin, mc_weight);
-                for(auto so: other_syst_objs)
+                for(auto so: var_syst_objs)
                     so->FillCV(spline_bin, mc_weight);
 
-                for(int is = 0; is < syst_obj.GetNUniverse(); ++is){
+                for(int is = 0; is < var_syst_objs.front()->GetNUniverse(); ++is){
                     size_t u = 0;
-                    for(; u < syst_obj.knobval.size(); ++u)
-                        if(syst_obj.knobval[u] == syst_obj.knob_index[is]) break;
-                    syst_obj.FillUniverse(u, spline_bin, mc_weight * additional_weight * static_cast<float>(map_iter->second->at(is)));
-                    for(auto so: other_syst_objs)
+                    for(; u < var_syst_objs.front()->knobval.size(); ++u)
+                        if(var_syst_objs.front()->knobval[u] == var_syst_objs.front()->knob_index[is]) break;
+                    for(auto so: var_syst_objs)
                         so->FillUniverse(u, spline_bin, mc_weight * additional_weight * static_cast<float>(map_iter->second->at(is)));
-                    //log<LOG_INFO>(L"%1% || BLARG_S  %2% %3% %4%") % __func__ % additional_weight % mc_weight % static_cast<float>(map_iter->second->at(is));
                 }
 
                 continue;
 
-            }else if(syst_obj.mode == "covariance"){
-                syst_obj.FillCV(global_bin, mc_weight);
-                for(size_t io = 0; io < inconfig.m_num_other_vars; ++io) {
-                    if(other_bin_indices[io] >= 0)
-                        other_syst_objs[io]->FillCV(other_bin_indices[io], mc_weight);
-                }
-                for(int iuni = 0; iuni < syst_obj.GetNUniverse(); ++iuni){
-                    float sys_wei = run_syst ? additional_weight * static_cast<float>(map_iter->second->at(iuni) ) :  1.0;
-                    syst_obj.FillUniverse(iuni, global_bin, mc_weight *sys_wei );
-                    for(size_t io = 0; io < inconfig.m_num_other_vars; ++io) {
-                        if(other_bin_indices[io] >= 0)
-                            other_syst_objs[io]->FillUniverse(iuni, other_bin_indices[io], mc_weight * sys_wei);
+            }else if(var_syst_objs.front()->mode == "covariance"){
+
+                for(size_t io = 0; io < inconfig.m_num_variables; ++io) {
+                    if(variable_bin_indices[io] >= 0){
+
+                        var_syst_objs[io]->FillCV(variable_bin_indices[io], mc_weight);
                     }
-                    //log<LOG_INFO>(L"%1% || BLARG_C  %2% %3% %4%") % __func__ % additional_weight % mc_weight % static_cast<float>(map_iter->second->at(iuni));
                 }
-            } else  if( syst_obj.mode == "norm") {
+                for(int iuni = 0; iuni < var_syst_objs.front()->GetNUniverse(); ++iuni){
+                    float sys_wei = run_syst ? additional_weight * static_cast<float>(map_iter->second->at(iuni) ) :  1.0;
+                    for(size_t io = 0; io < inconfig.m_num_variables; ++io) {
+                        if(variable_bin_indices[io] >= 0){
+                            var_syst_objs[io]->FillUniverse(iuni, variable_bin_indices[io], mc_weight * sys_wei);
+                        }
+                    }
+                }
+            } else  if( var_syst_objs.front()->mode == "norm") {
                 if(spline_bin < 0) continue;
-                syst_obj.FillCV(spline_bin, mc_weight);
-                for(auto so: other_syst_objs)
+                for(auto so: var_syst_objs)
                     so->FillCV(spline_bin, mc_weight);
                 float norm_shift_percentage = 0.0;
-                if( std::find(syst_obj.norm_bins.begin(), syst_obj.norm_bins.end(),global_bin)!=syst_obj.norm_bins.end()){
-                    norm_shift_percentage =  syst_obj.norm_value;
-                }
-
-                for(int is = 0; is < syst_obj.GetNUniverse(); ++is){
-                    //log<LOG_DEBUG>(L"%1% || NORMBLARG  %2% %3% %4% %5% : gb %6%") % __func__ % is % norm_shift_percentage % (1+syst_obj.knobval[is]*norm_shift_percentage)  % syst_obj.knobval[is] % global_bin;
-                    syst_obj.FillUniverse(is, spline_bin, mc_weight * additional_weight *(1+syst_obj.knobval[is]*norm_shift_percentage) );
-                    for(auto so: other_syst_objs)
-                        so->FillUniverse(is, spline_bin, mc_weight * additional_weight * (1+syst_obj.knobval[is]*norm_shift_percentage) );
+                
+                for(int is = 0; is < var_syst_objs.front()->GetNUniverse(); ++is){
+                    size_t ivar=0;
+                    for(auto so: var_syst_objs){
+                        if( std::find(var_syst_objs.front()->norm_bins.begin(), var_syst_objs.front()->norm_bins.end(),variable_bin_indices[ivar])!=var_syst_objs.front()->norm_bins.end()){
+                            norm_shift_percentage =  var_syst_objs.front()->norm_value;
+                       }
+                       so->FillUniverse(is, spline_bin, mc_weight * additional_weight * (1+var_syst_objs.front()->knobval[is]*norm_shift_percentage) );
+                       ivar++;
+                    }
                 }
                 continue;
             }
         }
+
     }
 
-    void process_sbnfit_event(const PROconfig &inconfig, const std::shared_ptr<BranchVariable>& branch, const std::map<std::string, std::vector<eweight_type>>& eventweight_map, int subchannel_index, std::vector<SystStruct>& syst_vector, const std::vector<float>& syst_additional_weight){
-
-        int total_num_sys = syst_vector.size(); 
-        float reco_value = branch->GetValue<float>();
-        float mc_weight = branch->GetMonteCarloWeight();
-        int global_bin = FindGlobalBin(inconfig, reco_value, subchannel_index);
-        if(global_bin < 0 )  //out of range
-            return;
-
-        for(int i = 0; i != total_num_sys; ++i){
-            SystStruct& syst_obj = syst_vector[i];
-            float additional_weight = syst_additional_weight.at(i);
-
-            syst_obj.FillCV(global_bin, mc_weight);
-
-            auto map_iter = eventweight_map.find(syst_obj.GetSysName());
-            int map_variation_size = (map_iter == eventweight_map.end()) ? 0 : map_iter->second.size();
-            int iuni = 0;
-            for(; iuni != std::min(map_variation_size, syst_obj.GetNUniverse()); ++iuni){
-                syst_obj.FillUniverse(iuni, global_bin, mc_weight * additional_weight * static_cast<float>(map_iter->second.at(iuni)));
-            }
-
-            while(iuni != syst_obj.GetNUniverse()){
-                //syst_obj.FillUniverse(iuni, global_bin, mc_weight);
-                syst_obj.FillUniverse(iuni, global_bin, mc_weight * additional_weight);
-                ++iuni;
-            }
-        }
-
-        return;
-    }
 
 
 }//namespace
