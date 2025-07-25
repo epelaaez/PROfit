@@ -515,6 +515,9 @@ namespace PROfit {
                 }
 
 
+                // check to make sure if its in allowlist, it IS in files
+                std::vector<std::string> allowlist_check;
+
                 //grab eventweight branch
                 if(!gotWeights){
                     for(const TObject* branch: *chains[fid]->GetListOfBranches()) {
@@ -523,9 +526,11 @@ namespace PROfit {
                         if (std::find(inconfig.m_mcgen_variation_allowlist.begin(), inconfig.m_mcgen_variation_allowlist.end(), branch->GetName()) != inconfig.m_mcgen_variation_allowlist.end()) {
                             log<LOG_INFO>(L"%1% || Setting up eventweight map for this branch: %2% for fid %3$") % __func__ %  branch->GetName() % fid;
                             chains[fid]->SetBranchAddress(branch->GetName(), &(f_event_weights[fid][0][branch->GetName()]));
+                            allowlist_check.push_back(branch->GetName());
                         } else if(strlen(branch->GetName()) > 6 && strcmp(branch->GetName() + strlen(branch->GetName()) - 6, "_sigma") == 0) {
                             log<LOG_INFO>(L"%1% || Setting up knob val list using branch %2% for fid %3%") % __func__ % branch->GetName() % fid;
                             chains[fid]->SetBranchAddress(branch->GetName(), &(f_knob_vals[fid][0][branch->GetName()]));
+                            allowlist_check.push_back(branch->GetName());
                         }
                     }
                     if(inconfig.m_mcgen_numfriends[fid]>0){
@@ -539,6 +544,7 @@ namespace PROfit {
                                         log<LOG_INFO>(L"%1% || Setting up eventweight map for this branch: %2%") % __func__ %  branch->GetName();
 
                                         chains[fid]->SetBranchAddress(branch->GetName(), &(f_event_weights[fid][0][branch->GetName()]));
+                                        allowlist_check.push_back(branch->GetName());
 
 
                                     }else{
@@ -547,12 +553,22 @@ namespace PROfit {
                                 } else if(strlen(branch->GetName()) > 6 && strcmp(branch->GetName() + strlen(branch->GetName()) - 6, "_sigma") == 0) {
                                     log<LOG_INFO>(L"%1% || Setting up knob val list using branch %2%") % __func__ % branch->GetName();
                                     chains[fid]->SetBranchAddress(branch->GetName(), &(f_knob_vals[fid][0][branch->GetName()]));
+                                    allowlist_check.push_back(branch->GetName());
                                 }
                             }
                         }
                     }
                     gotWeights = true;
+                    for(const auto &variation: inconfig.m_mcgen_variation_allowlist){
+                        std::string type = inconfig.m_mcgen_variation_type_map.at(variation);
+                        if (std::find(allowlist_check.begin(), allowlist_check.end(), variation  ) == allowlist_check.end() && (type=="covariance" || type=="spline")) {
+                            log<LOG_ERROR>(L"%1% || ERROR! You have a variation named %2% in your allowlist, so you definitely want it, but its NOT found in the files. Is this a typo? FileID %3%") % __func__ % variation.c_str() %fid  ;
+                            throw std::runtime_error("Allowlist variation not in file.");
+                        }
+                    }
                 }//
+                
+
                 log<LOG_INFO>(L"%1% || This mcgen file has %2% friends.") % __func__ %  inconfig.m_mcgen_numfriends[fid];
 
             } //end of branch loop
