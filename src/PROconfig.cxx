@@ -115,6 +115,15 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
     tinyxml2::XMLElement *pMode, *pDet, *pChan, *pPOT;
 
+    std::vector<std::string> allowed_elements = {"mode", "detector", "channel", "plotpot", "MCFile","WeightMaps","model","variation_list","correlation","varied_spectrum", "ShapeOnlyUncertainty"   };
+    for (tinyxml2::XMLElement* elem = doc.FirstChildElement(); elem; elem = elem->NextSiblingElement()) {
+        std::string name = elem->Name();
+        if (std::find(allowed_elements.begin(), allowed_elements.end(), name) == allowed_elements.end()) {
+                    log<LOG_ERROR>(L"%1% || ERROR! Top Level Element [%2%] in the XML is not expected.") % __func__ % name.c_str()  ;
+                    log<LOG_ERROR>(L"%1% || -- Check spelling: allowed elements are %2%") % __func__ % allowed_elements ;
+                    throw std::invalid_argument(std::string("Top level <element> not allowed : ") + name);
+        }
+    }
 
 
     //max subchannels 100? Can we avoid this
