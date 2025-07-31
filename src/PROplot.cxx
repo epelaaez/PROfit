@@ -305,7 +305,7 @@ namespace PROfit{
                         //leg->AddEntry(channel_errband, "#pm 1#sigma", "f");
                     }
 
-                                     TH1D bf_hist(("bf"+std::to_string(global_channel_index)).c_str(), "", channel_nbins, edges.data());
+                    TH1D bf_hist(("bf"+std::to_string(global_channel_index)).c_str(), "", channel_nbins, edges.data());
                     if(best_fit) {
                         int channel_start = other_index < 0 ? config.GetCollapsedGlobalBinStart(global_channel_index) : config.GetCollapsedGlobalOtherBinStart(global_channel_index, other_index);
                         for(size_t bin = 0; bin < channel_nbins; ++bin) {
@@ -329,7 +329,7 @@ namespace PROfit{
                             leg->AddEntry(&bf_hist, "Best Fit #pm 1#sigma (post-fit)", "l");
                         }
                         //cv_hist.Draw("hist");
-                       
+
                         if(bool(opt&PlotOptions::BinWidthScaled))
                             bf_hist.Scale(1, "width");
                         if(bool(opt&PlotOptions::AreaNormalized))
@@ -386,13 +386,13 @@ namespace PROfit{
                     if(bool(opt&PlotOptions::DataMCRatio) || bool(opt&PlotOptions::DataPostfitRatio))
                         p1.cd();
 
-                   
+
                     if(cv) {
                         if(bool(opt&PlotOptions::CVasStack)) {
                             cvstack->SetMaximum(std::max(top_modifier*cvstack->GetMaximum(),top_modifier*data_hist.GetMaximum()));
                             cvstack->Draw("hist");
                             cv_hist.Draw("same hist");
-                       
+
                         } else {
                             cv_hist.SetMaximum(top_modifier*cv_hist.GetMaximum());
 
@@ -477,8 +477,10 @@ namespace PROfit{
                             ? *channel_errband
                             : *post_channel_errband;
 
+
                        
                         float ymin = 1e9, ymax = -1e9;
+
                         for(size_t i = 0; i < channel_nbins; ++i) {
                             float numerator = data_hist.GetBinContent(i+1);
                             float denonminator = 
@@ -556,10 +558,229 @@ namespace PROfit{
                 }
             }
         }
-
         c.Print((filename+"]").c_str());
     }
 
 
+    int plotPriorFractionalSystematicBreakdown(const PROconfig &config, const PROspec &spec, const PROsyst &allsplinesyst, std::string filename) {
+        //Input PROsyst needs to be the allsplinesyst for now
 
-};
+        std::vector<int> colors = {
+            kAzure+1,      // Light blue
+            kRed+1,        // Bright red
+            kGreen+3,      // Medium green
+            kOrange+7,      // Deep orange
+            kBlue+2,        // Darker blue
+            kViolet+2,      // Purple/violet
+            kGray+1,         // Light gray
+            kYellow+2,      // Golden yellow
+            kTeal+3,        // Teal
+            kPink+2,        // Pink
+            kMagenta+2,     // Magenta
+            kSpring+5      // Blue-green
+        };
+
+        std::vector<int> line_styles = {
+            1,  // Solid (base style)
+            1,  // Dashed
+        };
+
+
+
+        //some testing
+        for (const auto& [syst_name, tags] : config.m_mcgen_variation_tags) {
+            std::string tag_list;
+            for (const auto& tag : tags) {
+                tag_list += tag + ", ";
+            }
+            if (!tag_list.empty()) {
+                tag_list.erase(tag_list.size() - 2);  // Remove trailing ", "
+            }
+            log<LOG_INFO>(L"Systematic: %1% | Tags: [%2%]") 
+                % syst_name.c_str() 
+                % tag_list.c_str();
+        }
+
+        //This is for prior everthing of course
+        std::map<std::string,std::vector<std::string>> used_tags;
+        for(const auto &name: allsplinesyst.covar_names){
+            log<LOG_INFO>(L"%1% || Systematic %2% ") % __func__ % name.c_str();
+            auto it = config.m_mcgen_variation_tags.find(name);
+            if (it == config.m_mcgen_variation_tags.end()) {
+                log<LOG_WARNING>(L"%1% || Systematic %2% not in tags map") % __func__ % name.c_str();
+                continue;
+            }
+            const vector<std::string>& mtags = it->second;
+            log<LOG_INFO>(L"%1% || -- has tags %2%") % __func__ %  mtags;
+            for(auto &t: mtags){
+                used_tags[t].push_back(name);
+            }
+        }
+        for(const auto &[tag, vec]: used_tags) {
+            log<LOG_INFO>(L"%1% || So for tag %2% we include %3%") % __func__ % tag.c_str() % vec;
+        }
+
+
+
+        int nTags = used_tags.size()+1;
+        int gridCols = std::ceil(std::sqrt(nTags));
+        int gridRows = std::ceil(nTags / float(gridCols));
+
+        TCanvas c("c", "Systematics Comparison", gridCols*1600, gridRows*1200);  
+        c.Print((filename+"[").c_str());
+        c.Divide(gridCols, gridRows);
+
+        Eigen::MatrixXf diag = spec.Spec().array().matrix().asDiagonal(); 
+        Eigen::MatrixXf collapsed_diag = CollapseMatrix(config, diag);
+
+        size_t global_subchannel_index = 0;
+        size_t global_channel_index = 0;
+        for(size_t mode = 0; mode < config.m_num_modes; ++mode) {
+            for(size_t det = 0; det < config.m_num_detectors; ++det) {
+                for(size_t channel = 0; channel < config.m_num_channels; ++channel) {
+
+                    c.Clear();
+                    c.Divide(gridCols, gridRows);
+
+                    int padIndex = 1;
+
+                    std::vector<float> bin_edges = config.GetChannelBinEdges(global_channel_index);
+                    size_t binstart = config.GetCollapsedGlobalBinStart(global_channel_index);
+                    size_t nbins = config.m_channel_num_bins[channel];
+                    std::vector<int> channel_bins(nbins);
+                    std::iota(channel_bins.begin(), channel_bins.end(), binstart);
+
+                    std::vector<TH1F*> vsums;
+                    std::vector<std::string> vnames;
+                    for (const auto &[tag, vec] : used_tags) {
+
+                        c.cd(padIndex++);
+                        bool first=true;
+
+                        TLegend* leg = new TLegend(0.11, 0.6, 0.89, 0.89);
+                        leg->SetNColumns(3);
+                        //leg->SetHeader(tag.c_str(), "C");  // Center-aligned header
+
+
+                        TH1F* hsum = new TH1F( ("Sum_"+tag+"_"+std::to_string(global_channel_index)).c_str(), tag.c_str(), bin_edges.size()-1, bin_edges.data());
+                        hsum->Reset();
+                        std::vector<TH1F*> hvec;
+                        int i =0;
+                        for(const auto & systname:vec){
+
+                            Eigen::MatrixXf frac_covariance = allsplinesyst.GrabMatrix(systname);
+                            Eigen::MatrixXf full_covariance = diag*(frac_covariance)*diag;
+                            Eigen::MatrixXf collapsed_full_covariance = CollapseMatrix(config, full_covariance);
+                            Eigen::MatrixXf collapsed_frac_covariance = collapsed_diag.inverse()*collapsed_full_covariance*collapsed_diag.inverse();
+
+
+                            //submatix ffractional
+                            Eigen::MatrixXf channel_cov = collapsed_frac_covariance(channel_bins, channel_bins);
+
+                            log<LOG_INFO>(L"%1% || Channel: %2%/%3% | Det: %4%/%5% | Mode: %6%/%7% | Tag: %8% | Syst: %9% | Bins: %10% [%11%:%12%]") 
+                                % __func__ 
+                                % channel % config.m_num_channels
+                                % det % config.m_num_detectors
+                                % mode % config.m_num_modes
+                                % tag.c_str() 
+                                % systname.c_str()
+                                % nbins
+                                % binstart % (binstart + nbins - 1);
+
+                            int color_idx = i % colors.size();
+                            int style_idx = (i / 4) % line_styles.size();  
+                            i++;
+
+                            TH1F* h = new TH1F((tag+"_Channel_"+std::to_string(global_channel_index)+"_"+std::to_string(i)).c_str(), tag.c_str(), bin_edges.size()-1, bin_edges.data());
+
+                            for (size_t i = 0; i < nbins; ++i) {
+                                h->SetBinContent(i+1, sqrt(channel_cov(i,i)));
+                                hsum->SetBinContent(i+1, hsum->GetBinContent(i+1)+channel_cov(i,i));
+                            }
+
+                            const std::string &plotname = config.m_mcgen_variation_plotname_map.at(systname);
+                            leg->AddEntry(h, plotname.c_str(), "l");
+                            h->SetLineColor(colors[color_idx]);
+                            h->SetLineStyle(line_styles[style_idx]);
+                            hvec.push_back(h);
+
+                        }//end syst
+                        for (size_t i = 0; i < nbins; ++i) {
+                            hsum->SetBinContent(i+1, sqrt(hsum->GetBinContent(i+1)));
+                        }
+                        leg->AddEntry(hsum,"Sum","l");
+
+                        hsum->SetXTitle(config.m_channel_plotnames[channel].c_str());
+                        hsum->SetYTitle("Fractional Uncertainty");
+                        hsum->SetLineColor(kBlack);
+                        hsum->SetLineWidth(2);
+                        hsum->SetLineStyle(1);
+                        hsum->SetMinimum(0);
+                        hsum->SetStats(0);  
+                        hsum->Draw("HIST");
+                        hsum->SetMaximum(hsum->GetMaximum()*1.7);
+                        gPad->Modified();
+                        gPad->Update();
+
+
+                        vsums.push_back(hsum);
+                        vnames.push_back(tag);
+                        for(auto &h:hvec) h->Draw("HIST SAME");
+
+                        leg->Draw();
+                    }//end tag
+
+
+                    //and each sum of sums to wrap it off!
+                    c.cd(padIndex++);
+
+                    TH1F* hsum = new TH1F( ("USum_"+std::to_string(global_channel_index)).c_str(),"Summary!", bin_edges.size()-1, bin_edges.data());
+                    hsum->Reset();
+                    TLegend* leg = new TLegend(0.11, 0.6, 0.89, 0.89);
+                    leg->SetNColumns(3);
+                    std::vector<TH1F*> hvec;
+                    for(size_t t=0; t< vsums.size(); t++){
+                        int color_idx = t % colors.size();
+                        for (size_t i = 0; i < nbins; ++i) {
+                            hsum->SetBinContent(i+1, hsum->GetBinContent(i+1)+pow(vsums.at(t)->GetBinContent(i+1),2));
+                        }
+                        TH1F * h = (TH1F*)vsums.at(t)->Clone((to_string(global_channel_index)+vnames[t]).c_str());
+                        leg->AddEntry(h, vnames[t].c_str(), "l");
+                        h->SetLineColor(colors[color_idx]);
+                        h->SetLineStyle(1);
+                        h->SetLineWidth(1);
+                        hvec.push_back(h);
+                    }
+
+                    for (size_t i = 0; i < nbins; ++i) {
+                        hsum->SetBinContent(i+1, sqrt(hsum->GetBinContent(i+1)));
+                    }
+                    leg->AddEntry(hsum,"Sum","l");
+                    hsum->SetXTitle(config.m_channel_plotnames[channel].c_str());
+                    hsum->SetTitle("Summary!");
+                    hsum->SetYTitle("Fractional Uncertainty");
+                    hsum->SetLineColor(kBlack);
+                    hsum->SetLineWidth(2);
+                    hsum->SetLineStyle(1);
+                    hsum->SetMinimum(0);
+                    hsum->SetStats(0);  
+                    hsum->Draw("HIST");
+                    hsum->SetMaximum(hsum->GetMaximum()*1.7);
+                    gPad->Modified();
+                    gPad->Update();
+                    for(auto &h:hvec) h->Draw("HIST SAME");
+                    leg->Draw();
+
+
+                    c.Print(filename.c_str());
+                    global_channel_index++;
+                }
+            }
+        }
+
+
+
+        c.Print((filename+"]").c_str());
+        return 0;
+    };
+}

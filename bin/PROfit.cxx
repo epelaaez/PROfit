@@ -1088,6 +1088,9 @@ int main(int argc, char* argv[])
             plot_channels(final_output_tag+"_other_"+std::to_string(io)+"_PROplot_CV.pdf", config, other_cvs.back(), {}, {}, {}, {}, notext, opt, io);
         }
 
+        std::string filename = final_output_tag+"_fractional_systematics.pdf";
+        plotPriorFractionalSystematicBreakdown(config, spec, allcovsyst, filename);
+
         std::map<std::string, std::unique_ptr<TH1D>> cv_hists = getCVHists(spec, config, binwidth_scale);
         std::vector<std::map<std::string, std::unique_ptr<TH1D>>> other_hists;
         for(size_t io = 0; io < config.m_num_other_vars; ++io) {
