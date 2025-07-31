@@ -34,11 +34,19 @@ namespace PROfit {
         }
 
         spline_priors = Eigen::VectorXf::Constant(n_splines, 1);
+        spline_centers = Eigen::VectorXf::Constant(n_splines, 0);
         for(const auto &[name, prior]: config.m_mcgen_variation_prior) {
             auto it = std::find(spline_names.begin(), spline_names.end(), name);
             if(it != std::end(spline_names)) {
                 size_t idx = std::distance(std::begin(spline_names), it);
                 spline_priors(idx) = prior;
+            }
+        }
+        for(const auto &[name, center]: config.m_mcgen_variation_prior_centers) {
+            auto it = std::find(spline_names.begin(), spline_names.end(), name);
+            if(it != std::end(spline_names)) {
+                size_t idx = std::distance(std::begin(spline_names), it);
+                spline_centers(idx) = center;
             }
         }
 
@@ -69,6 +77,7 @@ namespace PROfit {
         PROsyst ret;
         log<LOG_DEBUG>(L"%1% | Creating a subset with a list of %2% systematics.") % __func__ % systs.size();
         Eigen::VectorXf tmp_priors = spline_priors;
+        Eigen::VectorXf tmp_centers = spline_centers;
         for(const std::string &name: systs) {
             log<LOG_DEBUG>(L"%1% | Looking up systematic %2% from subset list.") % __func__ % name.c_str();
             const auto &[idx, stype] = syst_map.at(name);
@@ -81,6 +90,7 @@ namespace PROfit {
                     ret.spline_lo.push_back(spline_lo[idx]);
                     ret.spline_binnings.push_back(spline_binnings[idx]);
                     tmp_priors(n_splines) = spline_priors(idx);
+                    tmp_centers(n_splines) = spline_centers(idx);
                     ++ret.n_splines;
                     break;
                 case SystType::Covariance:
@@ -96,6 +106,7 @@ namespace PROfit {
             }
         }
         ret.spline_priors = tmp_priors.segment(0, n_splines);
+        ret.spline_centers = tmp_centers.segment(0, n_splines);
         ret.fractional_covariance = ret.covmat.size() ? ret.SumMatrices()
             : Eigen::MatrixXf::Constant(fractional_covariance.rows(), fractional_covariance.cols(), 0.0f);
         ret.other_index = other_index;
@@ -105,6 +116,7 @@ namespace PROfit {
     PROsyst PROsyst::excluding(const std::vector<std::string> &systs) const {
         PROsyst ret;
         Eigen::VectorXf tmp_priors = spline_priors;
+        Eigen::VectorXf tmp_centers = spline_centers;
         for(const auto &[name, spair]: syst_map) {
             if(std::find(systs.begin(), systs.end(), name) != systs.end()) continue;
             const auto &[idx, stype] = spair;
@@ -117,6 +129,7 @@ namespace PROfit {
                     ret.spline_lo.push_back(spline_lo[idx]);
                     ret.spline_binnings.push_back(spline_binnings[idx]);
                     tmp_priors(n_splines) = spline_priors(idx);
+                    tmp_centers(n_splines) = spline_centers(idx);
                     ++ret.n_splines;
                     break;
                 case SystType::Covariance:
@@ -132,6 +145,7 @@ namespace PROfit {
             }
         }
         ret.spline_priors = tmp_priors.segment(0, n_splines);
+        ret.spline_centers = tmp_centers.segment(0, n_splines);
         ret.fractional_covariance = ret.covmat.size() ? ret.SumMatrices()
             : Eigen::MatrixXf::Constant(fractional_covariance.rows(), fractional_covariance.cols(), 0.0f);
         ret.other_index = other_index;

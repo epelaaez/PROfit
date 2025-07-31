@@ -504,6 +504,28 @@ int main(int argc, char* argv[])
         abort();
     }
 
+    //Covariance colors, move this eslewher
+        const Int_t NCont = 255;
+        const Int_t NRGBs = 9;  // Reduced control points for smoother white stretch
+        Double_t stops[NRGBs] = {
+            0.0,    // -1.0 (dark blue)
+            0.075,    // -0.6 (transition to white)
+            0.3,    // -0.2 (mostly white)
+            0.4,   // -0.04 (almost pure white)
+            0.5,    //  0.0 (pure white)
+            0.6,   // +0.04 (almost pure white)
+            0.7,    // +0.2 (transition to red)
+            0.925,    // +0.6 (strong red)
+            1.0     // +1.0 (dark red)
+        };
+
+        Double_t red[NRGBs]   = {0.00,0.259,0.824, 0.949, 1.0, 0.988, 0.980, 0.918,0.839};
+        Double_t green[NRGBs] = {0.341,0.404,0.890, 0.961, 1.0, 0.933, 0.824, 0.263,0.125};
+        Double_t blue[NRGBs]  = {0.906,0.824,0.989, 0.980, 1.0, 0.929, 0.812, 0.208,0.024};
+
+        TColor::CreateGradientColorTable(NRGBs, stops, red, green, blue, NCont);
+        gStyle->SetNumberContours(NCont);
+
 
     // Need a second one for case where we do syst_only profile and surface in same command
     Eigen::VectorXf global_fit_result, global_fit_result_surf;
@@ -550,7 +572,8 @@ int main(int argc, char* argv[])
 
         // TODO: Not sure I understand this covariance matrix
         log<LOG_INFO>(L"%1% || Starting a metropolis hastings chain to estimate the covariace matrix aroud the above best fit. Run and Burn is (%2%,%3%);") % __func__%fitconfig.MCMCiter % fitconfig.MCMCburn;
-        Metropolis mh(simple_target{*metric_to_use}, simple_proposal(*metric_to_use, dseed(PROseed::global_rng)), best_fit, dseed(PROseed::global_rng));
+        //Metropolis mh(simple_target{*metric_to_use}, simple_proposal(*metric_to_use, dseed(PROseed::global_rng)), best_fit, dseed(PROseed::global_rng));
+        Metropolis mh(simple_target{*metric_to_use}, adaptive_proposal(*metric_to_use, dseed(PROseed::global_rng)), best_fit, dseed(PROseed::global_rng));
 
         Eigen::MatrixXf covmat = Eigen::MatrixXf::Constant(nparams, nparams, 0);
         size_t count = 0;
@@ -560,6 +583,16 @@ int main(int argc, char* argv[])
         };
         mh.run(fitconfig.MCMCburn,fitconfig.MCMCiter, action);
 
+        covmat /= count;
+        Eigen::VectorXf inv_best_fit = best_fit.array().abs().max(1e-10f).inverse();
+        Eigen::MatrixXf fraccovmat = inv_best_fit.asDiagonal() * covmat * inv_best_fit.asDiagonal();
+
+        Eigen::VectorXf inv_sqrt_diag = fraccovmat.diagonal().array().abs().max(1e-10f).sqrt().inverse();
+        Eigen::MatrixXf corrmat = inv_sqrt_diag.asDiagonal() * fraccovmat * inv_sqrt_diag.asDiagonal();
+
+
+        TH2D corrhist("crh", "", nparams, 0, nparams, nparams, 0, nparams);
+        TH2D fraccovhist("fch", "", nparams, 0, nparams, nparams, 0, nparams);
         TH2D covhist("ch", "", nparams, 0, nparams, nparams, 0, nparams);
         TH2D physhist;
         if(nphys > 0) physhist = TH2D("ph","", nparams, 0, nparams, nphys, 0, nphys);
@@ -569,19 +602,42 @@ int main(int argc, char* argv[])
                 : config.m_mcgen_variation_plotname_map[metric_to_use->GetSysts().spline_names[i-metric_to_use->GetModel().nparams]].c_str();
             covhist.GetXaxis()->SetBinLabel(i+1, label.c_str());
             covhist.GetYaxis()->SetBinLabel(i+1, label.c_str());
+            fraccovhist.GetXaxis()->SetBinLabel(i+1, label.c_str());
+            fraccovhist.GetYaxis()->SetBinLabel(i+1, label.c_str());
+            corrhist.GetXaxis()->SetBinLabel(i+1, label.c_str());
+            corrhist.GetYaxis()->SetBinLabel(i+1, label.c_str());
             if(nphys > 0) physhist.GetXaxis()->SetBinLabel(i+1, label.c_str());
             if(i < metric_to_use->GetModel().nparams) physhist.GetYaxis()->SetBinLabel(i+1, label.c_str());
             for(size_t j = 0; j < nparams; ++j) {
-                covhist.SetBinContent(i+1, j+1, covmat(i,j)/count);
+                covhist.SetBinContent(i+1, j+1, covmat(i,j));
+                fraccovhist.SetBinContent(i+1, j+1, fraccovmat(i,j));
+                corrhist.SetBinContent(i+1, j+1, corrmat(i,j));
                 if(j < metric_to_use->GetModel().nparams)
-                    physhist.SetBinContent(i+1, j+1, covmat(i,j)/count);
+                    physhist.SetBinContent(i+1, j+1, covmat(i,j));
             }
         }
         TCanvas c1;
+        corrhist.SetMaximum(1);
+        corrhist.SetMinimum(-1);
         covhist.SetMaximum(1);
         covhist.SetMinimum(-1);
-        covhist.Draw("colz");
-        c1.Print((final_output_tag+"_postfit_cov.pdf").c_str());
+        fraccovhist.SetMaximum(100);
+        fraccovhist.SetMinimum(-100);
+        //covhist.Draw("colz");
+        //c1.Print((final_output_tag+"_postfit_cov.pdf").c_str());
+        //fraccovhist.Draw("colz");
+        //c1.Print((final_output_tag+"_postfit_fraccov.pdf").c_str());
+        c1.SetLeftMargin(0.18);   
+        corrhist.SetTitle("Post-Fit Correlation Matrix");
+        corrhist.Draw("colz");
+        gPad->Update();
+
+        TLine line;
+        line.SetLineColor(kBlack);
+        line.SetLineWidth(2);
+        line.DrawLine(nphys, 0, nphys, nparams);
+        line.DrawLine(0, nphys, nparams, nphys);
+        c1.Print((final_output_tag+"_postfit_correlation_matrix.pdf").c_str());
         if(nphys > 0) {
             physhist.Draw("colz");
             c1.Print("phys_cov.pdf");
@@ -607,26 +663,24 @@ int main(int argc, char* argv[])
         for(size_t i = 0; i < metric_to_use->GetModel().nparams; ++i) fixed_pars.push_back(i);
 
         log<LOG_INFO>(L"%1% || Starting global getErrorBand() ") % __func__;
-        Metropolis mh_pre(prior_only_target{*metric_to_use}, simple_proposal(*metric_to_use, dseed(PROseed::global_rng), 0.2, fixed_pars), best_fit, dseed(PROseed::global_rng));
-        for(size_t vv = 0; vv < config.m_num_variables; ++vv){
-
-        }
-
+        Metropolis mh_pre(prior_only_target{*metric_to_use}, adaptive_proposal(*metric_to_use, dseed(PROseed::global_rng), fixed_pars), best_fit, dseed(PROseed::global_rng));
         std::unique_ptr<TGraphAsymmErrors> err_band = 
             MCMC_prefit_errors
             ? getMCMCErrorBand(mh_pre, fitconfig.MCMCburn, fitconfig.MCMCiter, config, prop, *metric_to_use, best_fit, priors, prior_covariance)
             : getErrorBand(config, prop, variable_systs[config.i_prime], binwidth_scale);
 
-        Metropolis mh_post(simple_target{*metric_to_use}, simple_proposal(*metric_to_use, dseed(PROseed::global_rng), 0.2, fixed_pars), best_fit, dseed(PROseed::global_rng));
+        //Metropolis mh_post(simple_target{*metric_to_use}, simple_proposal(*metric_to_use, dseed(PROseed::global_rng), 0.2, fixed_pars), best_fit, dseed(PROseed::global_rng));
+        Metropolis mh_post(simple_target{*metric_to_use}, adaptive_proposal(*metric_to_use, dseed(PROseed::global_rng), fixed_pars), best_fit, dseed(PROseed::global_rng));
         log<LOG_INFO>(L"%1% || Starting global getPostFitErrorBand() ") % __func__;
         std::unique_ptr<TGraphAsymmErrors> post_err_band = getMCMCErrorBand(mh_post, fitconfig.MCMCburn, fitconfig.MCMCiter, config, prop, *metric_to_use, best_fit, posteriors, spline_covariance, binwidth_scale);
 
         std::vector<TPaveText> texts;
-        TPaveText chi2text(0.59, 0.50, 0.89, 0.59, "NDC");
+        TPaveText chi2text(0.55, 0.50, 0.85, 0.58, "NDC");
         chi2text.AddText(hname.c_str());
         chi2text.SetFillColor(0);
         chi2text.SetBorderSize(0);
         chi2text.SetTextAlign(12);
+        //chi2text.SetTextSize(0.035); 
         texts.push_back(chi2text);
 
         PlotOptions opt = PlotOptions::DataPostfitRatio;
@@ -845,8 +899,8 @@ int main(int argc, char* argv[])
             PROspec collapsed_cv = PROspec(CollapseMatrix(config, cv.Spec()), CollapseMatrix(config, cv.Error()));
             Eigen::MatrixXf L = metric->GetSysts().DecomposeFractionalCovariance(config, cv.Spec());
             for(size_t i = 0; i < 1000; ++i) {
-                Eigen::VectorXf throwp = pparams;
-                Eigen::VectorXf throwC = Eigen::VectorXf::Constant(config.m_num_variable_bins_total_collapsed[config.i_prime], 0);
+            Eigen::VectorXf throwp = pparams;
+            Eigen::VectorXf throwC = Eigen::VectorXf::Constant(config.m_num_variable_bins_total_collapsed[config.i_prime], 0);
                 for(size_t i = 0; i < metric->GetSysts().GetNSplines(); i++)
                     throwp(i+nphys) = d(PROseed::global_rng);
                 for(size_t i = 0; i < config.m_num_variable_bins_total[config.i_prime]; i++)

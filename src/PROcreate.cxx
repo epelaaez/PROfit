@@ -586,12 +586,13 @@ namespace PROfit {
                     for(int ib = 0; ib != num_branch; ++ib) {
 
                         if(inconfig.m_mcgen_additional_weight_bool[fid][ib]){
-                            branches[ib]->branch_monte_carlo_weight_formula->GetNdata();
                             branches[ib]->branch_monte_carlo_weight_formula->UpdateFormulaLeaves();
+                            branches[ib]->branch_monte_carlo_weight_formula->GetNdata();
                         }
                         for(auto &b: branches[ib]->branch_variable_formulas) {
                             b->GetNdata();
                             b->UpdateFormulaLeaves();
+                            b->GetNdata();
                         }
                     }
 
