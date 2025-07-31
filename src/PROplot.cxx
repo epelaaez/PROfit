@@ -60,6 +60,17 @@ namespace PROfit{
                 collapsed_cor_hist->SetBinContent(i+1,j+1,collapsed_frac_cov(i,j)/(sqrt(collapsed_frac_cov(i,i))*sqrt(collapsed_frac_cov(j,j))));
             }
 
+        float cov_max_abs = std::max(cov_hist->GetMaximum(), std::abs(cov_hist->GetMinimum()));
+        cov_hist->SetMaximum(cov_max_abs);
+        cov_hist->SetMinimum(-cov_max_abs);
+        float coll_cov_max_abs = std::max(collapsed_cov_hist->GetMaximum(), std::abs(collapsed_cov_hist->GetMinimum()));
+        collapsed_cov_hist->SetMaximum(coll_cov_max_abs);
+        collapsed_cov_hist->SetMinimum(-coll_cov_max_abs);
+        cor_hist->SetMaximum(1);
+        cor_hist->SetMinimum(-1);
+        collapsed_cor_hist->SetMaximum(1);
+        collapsed_cor_hist->SetMinimum(-1);
+
         ret["total_frac_cov"] = std::move(cov_hist);
         ret["collapsed_total_frac_cov"] = std::move(collapsed_cov_hist);
         ret["total_cor"] = std::move(cor_hist);
@@ -77,6 +88,12 @@ namespace PROfit{
                     corr_h->SetBinContent(i+1,j+1,corr(i,j));
                 }
             }
+
+            float cov_max_abs = std::max(cov_h->GetMaximum(), std::abs(cov_h->GetMinimum()));
+            cov_h->SetMaximum(cov_max_abs);
+            cov_h->SetMinimum(-cov_max_abs);
+            corr_h->SetMaximum(1);
+            corr_h->SetMinimum(-1);
 
             ret[name+"_cov"] = std::move(cov_h);
             ret[name+"_corr"] = std::move(corr_h);
@@ -413,10 +430,10 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                     if(bool(opt&PlotOptions::DataMCRatio) || bool(opt&PlotOptions::DataPostfitRatio))
                         p1.cd();
 
-
+                   
                     if(cv) {
                         if(bool(opt&PlotOptions::CVasStack)) {
-                            cvstack->SetMaximum(1.2*cvstack->GetMaximum());
+                            cvstack->SetMaximum(std::max(1.2*cvstack->GetMaximum(),1.2*data_hist.GetMaximum()));
                             cvstack->Draw("hist");
                             cv_hist.Draw("same hist");
                        
@@ -526,8 +543,14 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                         float ylow = ymin - 0.15 * yrange;  // 15% padding below
                         float yhigh = ymax + 0.15 * yrange; // 15% padding above
 
-                        one->SetMinimum(std::min(ylow,0.85f));
-                        one->SetMaximum(std::max(yhigh,1.148f));
+                        if(!posterrband){
+                            one->SetMinimum(std::max(0.5f,std::min(ylow,0.85f)));
+                            one->SetMaximum(std::min(1.5f,std::max(yhigh,1.148f)));
+                        }else{
+                            one->SetMinimum(std::min(ylow,0.85f));
+                            one->SetMaximum(std::max(yhigh,1.148f));
+
+                        }
 
                         one->SetLineColor(kBlack);
                         one->SetLineStyle(kDashed);

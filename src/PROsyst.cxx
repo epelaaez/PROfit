@@ -89,8 +89,8 @@ namespace PROfit {
                     ret.spline_hi.push_back(spline_hi[idx]);
                     ret.spline_lo.push_back(spline_lo[idx]);
                     ret.spline_binnings.push_back(spline_binnings[idx]);
-                    tmp_priors(n_splines) = spline_priors(idx);
-                    tmp_centers(n_splines) = spline_centers(idx);
+                    tmp_priors(ret.n_splines) = spline_priors(idx);
+                    tmp_centers(ret.n_splines) = spline_centers(idx);
                     ++ret.n_splines;
                     break;
                 case SystType::Covariance:
@@ -105,8 +105,8 @@ namespace PROfit {
                     break;
             }
         }
-        ret.spline_priors = tmp_priors.segment(0, n_splines);
-        ret.spline_centers = tmp_centers.segment(0, n_splines);
+        ret.spline_priors = tmp_priors.segment(0, ret.n_splines);
+        ret.spline_centers = tmp_centers.segment(0, ret.n_splines);
         ret.fractional_covariance = ret.covmat.size() ? ret.SumMatrices()
             : Eigen::MatrixXf::Constant(fractional_covariance.rows(), fractional_covariance.cols(), 0.0f);
         ret.other_index = other_index;
@@ -128,8 +128,8 @@ namespace PROfit {
                     ret.spline_hi.push_back(spline_hi[idx]);
                     ret.spline_lo.push_back(spline_lo[idx]);
                     ret.spline_binnings.push_back(spline_binnings[idx]);
-                    tmp_priors(n_splines) = spline_priors(idx);
-                    tmp_centers(n_splines) = spline_centers(idx);
+                    tmp_priors(ret.n_splines) = spline_priors(idx);
+                    tmp_centers(ret.n_splines) = spline_centers(idx);
                     ++ret.n_splines;
                     break;
                 case SystType::Covariance:
@@ -144,8 +144,8 @@ namespace PROfit {
                     break;
             }
         }
-        ret.spline_priors = tmp_priors.segment(0, n_splines);
-        ret.spline_centers = tmp_centers.segment(0, n_splines);
+        ret.spline_priors = tmp_priors.segment(0, ret.n_splines);
+        ret.spline_centers = tmp_centers.segment(0, ret.n_splines);
         ret.fractional_covariance = ret.covmat.size() ? ret.SumMatrices()
             : Eigen::MatrixXf::Constant(fractional_covariance.rows(), fractional_covariance.cols(), 0.0f);
         ret.other_index = other_index;
