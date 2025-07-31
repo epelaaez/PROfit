@@ -323,7 +323,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
             
             while(pBinO){
 
-                expected_attrs = {"min","max","nbins","edges","unit"};
+                expected_attrs = {"min","max","nbins","edges","unit","plot"};
                 for (const tinyxml2::XMLAttribute* attr = pBinO->FirstAttribute(); attr; attr = attr->Next()) {
                     std::string name = attr->Name();
                     if (std::find(expected_attrs.begin(), expected_attrs.end(), name) == expected_attrs.end()) {
