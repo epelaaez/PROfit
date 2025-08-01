@@ -552,6 +552,15 @@ namespace PROfit{
                         p2.Draw();
                     }
 
+
+                    TText *t = new TText();
+                    t->SetNDC();                
+                    t->SetTextFont(42);                          
+                    t->SetTextSize(0.03);      
+                    t->SetTextAlign(33);        
+                    std::string pv = "PROfit v"+std::string(PROJECT_VERSION_STR);
+                    t->DrawText(0.895, 0.955, pv.c_str()); 
+
                     c.Print(filename.c_str());
 
                     ++global_channel_index;
