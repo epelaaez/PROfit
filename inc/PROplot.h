@@ -15,6 +15,7 @@
 #include "PROtocall.h"
 #include "PROseed.h"
 #include "PROcess.h"
+#include "PROversion.h"
 
 // Root includes
 #include "TAttLine.h"
