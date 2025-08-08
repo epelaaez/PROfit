@@ -17,10 +17,6 @@ namespace PROfit {
             log<LOG_DEBUG>(L"%1% || syst mode: %2%") % __func__ % syst.mode.c_str();
             if(syst.mode == "spline" || syst.mode == "norm") {
                 FillSpline(syst);
-                spline_names.push_back(syst.systname); 
-                spline_lo.push_back(syst.knobval[0]);
-                spline_hi.push_back(syst.knobval.back());
-                spline_binnings.push_back(syst.binning);
                 ++n_splines;
             } else if(syst.mode == "covariance") {
                 this->CreateMatrix(syst);
@@ -578,6 +574,10 @@ namespace PROfit {
         }
         syst_map[syst.systname] = {splines.size(), SystType::Spline};
         splines.push_back(spline_coeffs);
+        spline_names.push_back(syst.systname); 
+        spline_lo.push_back(knobvals[0]);
+        spline_hi.push_back(knobvals.back());
+        spline_binnings.push_back(syst.binning);
     }
 
     float PROsyst::GetSplineShift(int spline_num, float shift , int bin) const {
