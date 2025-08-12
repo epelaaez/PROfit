@@ -6,7 +6,7 @@
 using namespace PROfit;
 
 
-PROpoisson::PROpoisson(const std::string tag, const PROconfig &conin, const PROpeller &pin, const PROsyst *systin, const PROmodel &modelin, const PROdata &datain, EvalStrategy strat, std::vector<float> physics_param_fixed) : PROmetric(), model_tag(tag), config(conin), peller(pin), syst(systin), model(modelin), data(datain), strat(strat), physics_param_fixed(physics_param_fixed), correlated_systematics(false) {
+PROpoisson::PROpoisson(const std::string tag, const PROconfig &conin, const PROpeller &pin, const PROsyst *systin, const PROmodel &modelin, const PROdata &datain, EvalStrategy strat, bool shape_only, std::vector<float> physics_param_fixed) : PROmetric(), model_tag(tag), config(conin), peller(pin), syst(systin), model(modelin), data(datain), strat(strat), shape_only(shape_only), physics_param_fixed(physics_param_fixed), correlated_systematics(false) {
     last_value = 0.0; last_param = Eigen::VectorXf::Zero(model.nparams+syst->GetNSplines()); 
     fixed_index = -999;
 
@@ -76,7 +76,9 @@ float PROpoisson::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &grad
     
     PROspec result = FillRecoSpectra(config, peller, *syst, model, param, strat == BinnedChi2);
 
-    const Eigen::VectorXf &vdata = data.Spec();
+    const Eigen::VectorXf vdata = shape_only 
+        ? data.Spec() * result.Spec().array().sum() / data.Spec().array().sum()
+        : data.Spec();
     const Eigen::VectorXf vmc = CollapseMatrix(config, result.Spec());
     float poisson = 2 * (vmc.array() - vdata.array() + vdata.array() * (vdata.array() / vmc.array()).log()).sum();
     float pull = Pull(subvector2);
@@ -98,7 +100,9 @@ float PROpoisson::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &grad
             Eigen::VectorXf subvector2 = tmpParams.segment(nparams - nsyst, nsyst);
             PROspec result = FillRecoSpectra(config, peller, *syst, model, tmpParams, strat != EventByEvent);
 
-            const Eigen::VectorXf &vdata = data.Spec();
+            const Eigen::VectorXf vdata = shape_only 
+                ? data.Spec() * result.Spec().array().sum() / data.Spec().array().sum()
+                : data.Spec();
             const Eigen::VectorXf vmc = CollapseMatrix(config, result.Spec());
             float poisson = 2 * (vmc.array() - vdata.array() + vdata.array() * (vdata.array() / vmc.array()).log()).sum();
             float pull = Pull(subvector2);

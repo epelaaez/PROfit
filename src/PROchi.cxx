@@ -8,7 +8,7 @@
 using namespace PROfit;
 
 
-PROchi::PROchi(const std::string tag, const PROconfig &conin, const PROpeller &pin, const PROsyst *systin, const PROmodel &modelin, const PROdata &datain, EvalStrategy strat, std::vector<float> physics_param_fixed) : PROmetric(), model_tag(tag), config(conin), peller(pin), syst(systin), model(modelin), data(datain), strat(strat), physics_param_fixed(physics_param_fixed), correlated_systematics(false) {
+PROchi::PROchi(const std::string tag, const PROconfig &conin, const PROpeller &pin, const PROsyst *systin, const PROmodel &modelin, const PROdata &datain, EvalStrategy strat, bool shape_only, std::vector<float> physics_param_fixed) : PROmetric(), model_tag(tag), config(conin), peller(pin), syst(systin), model(modelin), data(datain), strat(strat), shape_only(shape_only), physics_param_fixed(physics_param_fixed), correlated_systematics(false) {
     last_value = 0.0; last_param = Eigen::VectorXf::Zero(model.nparams+syst->GetNSplines()); 
     fixed_index = -999;
 
@@ -62,7 +62,6 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
     return PROchi::operator()(param, gradient, true);
 }
 
-
 float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient, bool rungradient){
     size_t nparams = model.nparams+syst->GetNSplines();
     size_t nsyst = syst->GetNSplines();
@@ -79,9 +78,11 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
     Eigen::MatrixXf full_covariance = diag*(syst->fractional_covariance)*diag;
     
     Eigen::MatrixXf collapsed_full_covariance = CollapseMatrix(config, full_covariance); 
+    if(shape_only)
+        collapsed_stat_covariance = (data.Spec() * result.Spec().array().sum() / data.Spec().array().sum()).matrix().asDiagonal();
     inverted_collapsed_full_covariance = (collapsed_stat_covariance+ collapsed_full_covariance).inverse();
 
-    Eigen::VectorXf delta  = CollapseMatrix(config,result.Spec()) - data.Spec();
+    Eigen::VectorXf delta  = CollapseMatrix(config,result.Spec()) - (shape_only ? data.Spec() * result.Spec().array().sum() / data.Spec().array().sum() : data.Spec());
     float pull = Pull(subvector2);
     float covar_portion = (delta.transpose())*inverted_collapsed_full_covariance*(delta);
     float value = covar_portion + pull;
@@ -107,10 +108,12 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
             Eigen::MatrixXf full_covariance = diag*(syst->fractional_covariance)*diag;
             
             Eigen::MatrixXf collapsed_full_covariance = CollapseMatrix(config, full_covariance); 
+            if(shape_only)
+                collapsed_stat_covariance = (data.Spec() * result.Spec().array().sum() / data.Spec().array().sum()).matrix().asDiagonal();
             inverted_collapsed_full_covariance = (collapsed_stat_covariance+ collapsed_full_covariance).inverse();
            
             // Calculate Chi^2  value
-            Eigen::VectorXf delta  = CollapseMatrix(config,result.Spec()) - data.Spec(); 
+            Eigen::VectorXf delta  = CollapseMatrix(config,result.Spec()) - (shape_only ? data.Spec() * result.Spec().array().sum() / data.Spec().array().sum() : data.Spec());
 
             float pull = Pull(subvector2);
             float dmsq_penalty = 0;
