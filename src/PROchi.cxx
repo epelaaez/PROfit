@@ -145,6 +145,9 @@ float PROchi::getSingleChannelChi(size_t global_channel_index) {
 
     log<LOG_DEBUG>(L"%1% || channel index (glob: %2%, local: %3% ) nbin %4% and startBin %5% ") % __func__ % global_channel_index % config.GetLocalChannelIndex(global_channel_index) % nbin % startBin;
 
+    if(shape_only)
+        collapsed_stat_covariance = (data.Spec() * cv.Spec().array().sum() / data.Spec().array().sum()).matrix().asDiagonal();
+
     Eigen::MatrixXf inverted_collapsed_full_covariance(nbin,nbin);
     //only calculate a syst covariance if we have any covariance parameters as defined in the xml
     if(syst->GetNCovar()){
@@ -164,7 +167,7 @@ float PROchi::getSingleChannelChi(size_t global_channel_index) {
         inverted_collapsed_full_covariance = (sub_collapsed_stat_covariance).inverse();
     }
 
-    Eigen::VectorXf delta  = (CollapseMatrix(config, cv.Spec()) - data.Spec()).segment(startBin,nbin);
+    Eigen::VectorXf delta  = CollapseMatrix(config, cv.Spec()) - (shape_only ? data.Spec() * cv.Spec().array().sum() / data.Spec().array().sum() : data.Spec()).segment(startBin, nbin);
     //float pull = Pull(subvector2);
     float covar_portion = (delta.transpose())*inverted_collapsed_full_covariance*(delta);
     float value = covar_portion;//pull;

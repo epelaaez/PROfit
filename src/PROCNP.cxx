@@ -179,12 +179,16 @@ float PROCNP::getSingleChannelChi(size_t global_channel_index) {
 
     Eigen::MatrixXf inverted_collapsed_full_covariance(nbin,nbin);
 
+    Eigen::VectorXf normddata = shape_only
+        ? data.Spec() * cv.Spec().array().sum() / data.Spec().array().sum()
+        : data.Spec();
+    Eigen::MatrixXf collapsed_stat_covariance = Eigen::MatrixXf::Zero(data.Spec().size(), data.Spec().size());
+    Eigen::VectorXf collapsed_cv = CollapseMatrix(config, cv.Spec());
+    for(long i = 0; i < data.Spec().size(); ++i)
+        collapsed_stat_covariance(i,i) = data.Spec()(i) == 0 ? collapsed_cv(i)/2 :
+            3 / (1.0 / normddata(i) + 2.0 / collapsed_cv(i));
 
-    Eigen::MatrixXf collapsed_data_stat_covariance = (data.Spec().array().matrix().asDiagonal());
-    collapsed_data_stat_covariance = collapsed_data_stat_covariance.block(startBin,startBin,nbin,nbin);
-    Eigen::MatrixXf mc_stat_covariance = cv.Spec().array().matrix().asDiagonal();
-    Eigen::MatrixXf collapsed_mc_stat_covariance = CollapseMatrix(config, mc_stat_covariance).block(startBin,startBin,nbin,nbin);
-    Eigen::MatrixXf sub_collapsed_stat_covariance = 3 * (collapsed_data_stat_covariance.inverse() + 2 * collapsed_mc_stat_covariance.inverse()).inverse();
+    Eigen::MatrixXf sub_collapsed_stat_covariance = collapsed_stat_covariance.block(startBin, startBin, nbin, nbin);
 
     //only calculate a syst covariance if we have any covariance parameters as defined in the xml
     if(syst->GetNCovar()){
@@ -202,7 +206,7 @@ float PROCNP::getSingleChannelChi(size_t global_channel_index) {
         inverted_collapsed_full_covariance = (sub_collapsed_stat_covariance).inverse();
     }
 
-    Eigen::VectorXf delta  = (CollapseMatrix(config, cv.Spec()) - data.Spec()).segment(startBin,nbin);
+    Eigen::VectorXf delta  = (CollapseMatrix(config, cv.Spec()) - normddata).segment(startBin,nbin);
     //float pull = Pull(subvector2);
     float covar_portion = (delta.transpose())*inverted_collapsed_full_covariance*(delta);
     float value = covar_portion;//pull;
