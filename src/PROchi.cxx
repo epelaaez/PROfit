@@ -79,10 +79,10 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
     
     Eigen::MatrixXf collapsed_full_covariance = CollapseMatrix(config, full_covariance); 
     if(shape_only)
-        collapsed_stat_covariance = (data.Spec() * result.Spec().array().sum() / data.Spec().array().sum()).matrix().asDiagonal();
+        collapsed_stat_covariance = ( data.Normalize(config,result)).matrix().asDiagonal();
     inverted_collapsed_full_covariance = (collapsed_stat_covariance+ collapsed_full_covariance).inverse();
 
-    Eigen::VectorXf delta  = CollapseMatrix(config,result.Spec()) - (shape_only ? data.Spec() * result.Spec().array().sum() / data.Spec().array().sum() : data.Spec());
+    Eigen::VectorXf delta  = CollapseMatrix(config,result.Spec()) - (shape_only ? data.Normalize(config,result) : data.Spec());
     float pull = Pull(subvector2);
     float covar_portion = (delta.transpose())*inverted_collapsed_full_covariance*(delta);
     float value = covar_portion + pull;
@@ -109,11 +109,11 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
             
             Eigen::MatrixXf collapsed_full_covariance = CollapseMatrix(config, full_covariance); 
             if(shape_only)
-                collapsed_stat_covariance = (data.Spec() * result.Spec().array().sum() / data.Spec().array().sum()).matrix().asDiagonal();
+                collapsed_stat_covariance = (data.Normalize(config,result)).matrix().asDiagonal();
             inverted_collapsed_full_covariance = (collapsed_stat_covariance+ collapsed_full_covariance).inverse();
            
             // Calculate Chi^2  value
-            Eigen::VectorXf delta  = CollapseMatrix(config,result.Spec()) - (shape_only ? data.Spec() * result.Spec().array().sum() / data.Spec().array().sum() : data.Spec());
+            Eigen::VectorXf delta  = CollapseMatrix(config,result.Spec()) - (shape_only ? data.Normalize(config,result) : data.Spec());
 
             float pull = Pull(subvector2);
             float dmsq_penalty = 0;
@@ -146,7 +146,7 @@ float PROchi::getSingleChannelChi(size_t global_channel_index) {
     log<LOG_DEBUG>(L"%1% || channel index (glob: %2%, local: %3% ) nbin %4% and startBin %5% ") % __func__ % global_channel_index % config.GetLocalChannelIndex(global_channel_index) % nbin % startBin;
 
     if(shape_only)
-        collapsed_stat_covariance = (data.Spec() * cv.Spec().array().sum() / data.Spec().array().sum()).matrix().asDiagonal();
+        collapsed_stat_covariance = (data.Normalize(config,cv)).matrix().asDiagonal();
 
     Eigen::MatrixXf inverted_collapsed_full_covariance(nbin,nbin);
     //only calculate a syst covariance if we have any covariance parameters as defined in the xml
@@ -167,7 +167,7 @@ float PROchi::getSingleChannelChi(size_t global_channel_index) {
         inverted_collapsed_full_covariance = (sub_collapsed_stat_covariance).inverse();
     }
 
-    Eigen::VectorXf delta  = CollapseMatrix(config, cv.Spec()) - (shape_only ? data.Spec() * cv.Spec().array().sum() / data.Spec().array().sum() : data.Spec()).segment(startBin, nbin);
+    Eigen::VectorXf delta  = CollapseMatrix(config, cv.Spec()) - (shape_only ? data.Normalize(config,cv) : data.Spec()).segment(startBin, nbin);
     //float pull = Pull(subvector2);
     float covar_portion = (delta.transpose())*inverted_collapsed_full_covariance*(delta);
     float value = covar_portion;//pull;

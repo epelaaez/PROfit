@@ -77,7 +77,7 @@ float PROpoisson::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &grad
     PROspec result = FillRecoSpectra(config, peller, *syst, model, param, strat == BinnedChi2);
 
     const Eigen::VectorXf vdata = shape_only 
-        ? data.Spec() * result.Spec().array().sum() / data.Spec().array().sum()
+        ? data.Normalize(config,result)
         : data.Spec();
     const Eigen::VectorXf vmc = CollapseMatrix(config, result.Spec());
     float poisson = 2 * (vmc.array() - vdata.array() + vdata.array() * (vdata.array() / vmc.array()).log()).sum();
@@ -101,7 +101,7 @@ float PROpoisson::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &grad
             PROspec result = FillRecoSpectra(config, peller, *syst, model, tmpParams, strat != EventByEvent);
 
             const Eigen::VectorXf vdata = shape_only 
-                ? data.Spec() * result.Spec().array().sum() / data.Spec().array().sum()
+                ? data.Normalize(config,result)
                 : data.Spec();
             const Eigen::VectorXf vmc = CollapseMatrix(config, result.Spec());
             float poisson = 2 * (vmc.array() - vdata.array() + vdata.array() * (vdata.array() / vmc.array()).log()).sum();
@@ -132,7 +132,7 @@ float PROpoisson::getSingleChannelChi(size_t channel_index) {
 
     //const Eigen::VectorXf &vdata = data.Spec().segment(startBin, nbin);
     const Eigen::VectorXf vdata = (shape_only 
-        ? data.Spec() * cv.Spec().array().sum() / data.Spec().array().sum()
+        ? data.Normalize(config,cv)
         : data.Spec()).segment(startBin, nbin);
     const Eigen::VectorXf vmc = CollapseMatrix(config, cv.Spec()).segment(startBin, nbin);
     float poisson = 2 * (vmc.array() - vdata.array() + vdata.array() * (vdata.array() / vmc.array()).log()).sum();
