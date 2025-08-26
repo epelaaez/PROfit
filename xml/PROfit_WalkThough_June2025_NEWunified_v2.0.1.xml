@@ -6,23 +6,15 @@
 <detector name="ICARUS" />
 
 <channel name="numu" unit="Reconstructed Neutrino Energy [GeV]">
-    <bins unit = "RecoE" min="0.4" max="3.0" nbins ="13"/>
-    <bins unit = "True L/E" min="0" max="3" nbins="250"/>
-    <bins unit="True E [GeV]" min="0.4" max="2" nbins="16"/>
+    <bins unit = "RecoE" edges="0.0 0.4 0.5 0.6 0.7 0.8 0.9 1.0 1.5 2.0 2.5 3" />
+    <bins unit = "True L/E" min="0" max="3" nbins="250" plot="false"/>
+    <bins unit = "True E [GeV]" min="0" max="3" nbins="20"/>
     <subchannel name="cc" plotname="#nu_{#mu} CC" color="#99CCFF"/>
-    <subchannel name="nc" plotname="#nu_{#mu} NC" color="#FF6666"/>
-</channel>
-
-<channel name="nue" unit="Reconstructed Neutrino Energy [GeV]">
-    <bins unit = "RecoE" min="0.4" max="3.0" nbins ="10"/>
-    <bins unit = "True L/E" min="0" max="3" nbins="20"/>
-    <bins unit="True E [GeV]" min="0.4" max="2" nbins="8"/>
-    <subchannel name="cc" plotname="#nu_{e} CC" color="#33CC33"/>
 </channel>
 
 <variation_list>
     <!-- INlcude MC stats, uncomment out to remove -->
-    <allowlist type="mcstat" plotname="MC Stats" ></allowlist>
+    <allowlist type="mcstat" plotname="MC Stats" >mcstats</allowlist>
 
     <!--systs from multisigmaTree should have type spline-->
     <!--systs from multisimTree should have type covariance-->
@@ -48,8 +40,8 @@
     <!>
     <!--use EITHER CCRESVariationResponse OR MaCCRES + MvCCRES-->
     <!-- <allowlist type="covariance" plotname="CCRESVariationResponse">GENIEReWeight_SBN_v1_multisim_CCRESVariationResponse</allowlist> -->
-    <allowlist type="spline" binning="var1" plotname="MaCCRES">GENIEReWeight_SBN_v1_multisigma_MaCCRES</allowlist>
-    <allowlist type="spline"  binning="var1" plotname="MvCCRES">GENIEReWeight_SBN_v1_multisigma_MvCCRES</allowlist>
+    <allowlist type="spline" binning="var0" plotname="MaCCRES">GENIEReWeight_SBN_v1_multisigma_MaCCRES</allowlist>
+    <allowlist type="spline"  binning="var0" plotname="MvCCRES">GENIEReWeight_SBN_v1_multisigma_MvCCRES</allowlist>
     <!>
     <!--use EITHER NCRESVariationResponse OR MaNCRES + MvNCRES-->
     <allowlist type="covariance" plotname="NCRESVariationResponse">GENIEReWeight_SBN_v1_multisim_NCRESVariationResponse</allowlist>
@@ -82,9 +74,9 @@
     <allowlist type="spline" plotname="MFP_N">GENIEReWeight_SBN_v1_multisigma_MFP_N</allowlist>-->
     <!>
     <!--important systs that we want to treat as spline systs-->
-    <allowlist type="spline"  binning="var1" plotname="RPA_CCQE">GENIEReWeight_SBN_v1_multisigma_RPA_CCQE</allowlist>
-    <allowlist type="spline"  binning="var1" plotname="CoulombCCQE">GENIEReWeight_SBN_v1_multisigma_CoulombCCQE</allowlist>
-    <allowlist type="spline"  binning="var1" plotname="NormCCMEC">GENIEReWeight_SBN_v1_multisigma_NormCCMEC</allowlist>
+    <allowlist type="spline"  binning="var0" plotname="RPA_CCQE">GENIEReWeight_SBN_v1_multisigma_RPA_CCQE</allowlist>
+    <allowlist type="spline"  binning="var0" plotname="CoulombCCQE">GENIEReWeight_SBN_v1_multisigma_CoulombCCQE</allowlist>
+    <allowlist type="spline"  binning="var0" plotname="NormCCMEC">GENIEReWeight_SBN_v1_multisigma_NormCCMEC</allowlist>
     <!--<allowlist type="covariance" plotname="RPA_CCQE">GENIEReWeight_SBN_v1_multisim_RPA_CCQE</allowlist>
     <allowlist type="covariance" plotname="CoulombCCQE">GENIEReWeight_SBN_v1_multisim_CoulombCCQE</allowlist>
     <allowlist type="covariance" plotname="NormCCMEC">GENIEReWeight_SBN_v1_multisim_NormCCMEC</allowlist>-->
@@ -126,13 +118,13 @@
     <allowlist type="spline" plotname="NonRESBGvpNC2pi">GENIEReWeight_SBN_v1_multisigma_NonRESBGvpNC2pi</allowlist>-->
     <!>
     <!--other spline systs from multisigmaTree-->
-    <allowlist type="spline"  binning="var1" plotname="FrCEx_N">GENIEReWeight_SBN_v1_multisigma_FrCEx_N</allowlist>
-    <allowlist type="spline"  binning="var1" plotname="FrCEx_pi">GENIEReWeight_SBN_v1_multisigma_FrCEx_pi</allowlist>
+    <allowlist type="spline"  binning="var0" plotname="FrCEx_N">GENIEReWeight_SBN_v1_multisigma_FrCEx_N</allowlist>
+    <allowlist type="spline"  binning="var0" plotname="FrCEx_pi">GENIEReWeight_SBN_v1_multisigma_FrCEx_pi</allowlist>
     <!--<allowlist type="spline" plotname="VecFFCCQEshape">GENIEReWeight_SBN_v1_multisigma_VecFFCCQEshape</allowlist>-->
-    <allowlist type="spline"  binning="var1" plotname="DecayAngMEC">GENIEReWeight_SBN_v1_multisigma_DecayAngMEC</allowlist>
+    <allowlist type="spline"  binning="var0" plotname="DecayAngMEC">GENIEReWeight_SBN_v1_multisigma_DecayAngMEC</allowlist>
     <!--<allowlist type="spline" plotname="Theta_Delta2Npi">GENIEReWeight_SBN_v1_multisigma_Theta_Delta2Npi</allowlist>-->
     <!--<allowlist type="spline" plotname="ThetaDelta2NRad">GENIEReWeight_SBN_v1_multisigma_ThetaDelta2NRad</allowlist>-->
-    <allowlist type="spline"  binning="var1" plotname="XSecShape_CCMEC">GENIEReWeight_SBNNuSyst_GENIE_multisigma_XSecShape_CCMEC</allowlist>
+    <allowlist type="spline"  binning="var0" plotname="XSecShape_CCMEC">GENIEReWeight_SBNNuSyst_GENIE_multisigma_XSecShape_CCMEC</allowlist>
     <!>
     <!-- use all flux covariance systs from multisimTree-->
     <allowlist type="covariance">expskin_Flux</allowlist>  
@@ -152,8 +144,8 @@
 
     <!--Extra normalization systematics-->
     <!-- norm is a inter-detector uncorrelated, intra-detector correlated spline-->
-    <!--<allowlist type="norm" binning="var0" plotname="SBNDNorm">nu_ICARUS:0.02</allowlist>
-    <allowlist type="norm" binning="var0" plotname="ICARUSNorm">nu_SBND:0.02</allowlist>-->
+    <allowlist type="norm" binning="var0" plotname="SBNDNorm">nu_ICARUS:0.02</allowlist>
+    <allowlist type="norm" binning="var0" plotname="ICARUSNorm">nu_SBND:0.02</allowlist>
     <!-- flat is a inter-detector uncorrelated, intra-detector uncorrelated diagonal covartiance matrix-->
     <!--<allowlist type="flat" binning="var0" plotname="ICARUSNorm">nu_SBND:0.02</allowlist>-->
     <!-- <allowlist type="norm" plotname="FiducialVol">nu_ICARUS:0.01</allowlist> -->
@@ -162,37 +154,18 @@
 <model tag="numudis">
     <rule index="0" name="No Osc"/>
     <rule index="1" name="Numu Disapp"/>
+    <parameter variable_index = "1" name="L/E"/>
 </model>
 
 <plotpot value="1e18"/>
 
-<MCFile treename="events/selectedNu" filename="/exp/sbnd/data/users/markross/PROfit_Data/Tutorial2025/sbnd_testfiles.list" scale = "1.0" pot="1e18"> 
+<MCFile treename="events/selectedNu" filename="/home/mark/work/PROfit_Dev/working_dir/Tutorial2025/sbnd_testfile_1.root" scale = "1.0" pot="1e18"> 
     <friend treename="events/multisigmaTree" />
     <friend treename="events/multisimTree" />
     <branch
         associated_subchannel = "nu_SBND_numu_cc"
         model_rule            = "1"
-        additional_weight     = "0.9*CC*(truePDG == 14 || truePDG == -14)"
-        >
-        <variable>recoE</variable>
-        <variable>trueL/(trueE*1000.0)</variable>
-        <variable>trueE</variable>
-    </branch>
-
-    <branch
-        associated_subchannel = "nu_SBND_numu_nc"
-        model_rule            = "0"
-        additional_weight     = "!CC"
-        >
-        <variable>recoE</variable>
-        <variable>trueL/(trueE*1000.0)</variable>
-        <variable>trueE</variable>
-    </branch>
-
-    <branch
-        associated_subchannel = "nu_SBND_nue_cc"
-        model_rule            = "0"
-        additional_weight     = "0.1*CC*(truePDG == 14 || truePDG == -14)"
+        additional_weight     = "0.9*CC*(truePDG == 14 || truePDG == -14)*(recoE>0)"
         >
         <variable>recoE</variable>
         <variable>trueL/(trueE*1000.0)</variable>
@@ -202,33 +175,13 @@
 </MCFile>
 
 
-<MCFile treename="events/selectedNu" filename="/exp/sbnd/data/users/markross/PROfit_Data/Tutorial2025/icarus_testfiles.list" scale = "1.0" pot="1e19"> 
+<MCFile treename="events/selectedNu" filename="/home/mark/work/PROfit_Dev/working_dir/Tutorial2025/icarus_testfile_2.root" scale = "1.0" pot="1e19"> 
     <friend treename="events/multisigmaTree" />
     <friend treename="events/multisimTree" />
     <branch
         associated_subchannel = "nu_ICARUS_numu_cc"
         model_rule            = "1"
-        additional_weight     = "0.7*CC*(truePDG == 14 || truePDG == -14)"
-        >
-        <variable>recoE</variable>
-        <variable>trueL/(trueE*1000.0)</variable>
-        <variable>trueE</variable>
-    </branch>
-
-    <branch
-        associated_subchannel = "nu_ICARUS_numu_nc"
-        model_rule            = "0"
-        additional_weight     = "!CC"
-        >
-        <variable>recoE</variable>
-        <variable>trueL/(trueE*1000.0)</variable>
-        <variable>trueE</variable>
-    </branch>
-
-    <branch
-        associated_subchannel = "nu_ICARUS_nue_cc"
-        model_rule            = "0"
-        additional_weight     = "0.1*CC*(truePDG == 14 || truePDG == -14)"
+        additional_weight     = "0.9*CC*(truePDG == 14 || truePDG == -14)*(recoE>0)"
         >
         <variable>recoE</variable>
         <variable>trueL/(trueE*1000.0)</variable>
