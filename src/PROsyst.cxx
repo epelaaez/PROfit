@@ -594,9 +594,9 @@ PROspec PROsyst::GetSplineShiftedSpectrum(const PROconfig& config, const PROpell
     int nbins = config.m_num_variable_bins_total[other_index];
     int binning = spline_binnings[syst_map.at(name).first];
     PROspec ret(nbins);
-    for(size_t i = 0; i < prop.variable_values.size(); ++i) {
-        const int spline_bin = prop.variable_bin_indices[i][binning];
-        const int reco_bin =  prop.variable_bin_indices[i][other_index];
+    for(size_t i = 0; i < prop.NEvent(); ++i) {
+        const int spline_bin = prop.VariableBinIndex(binning, i);
+        const int reco_bin = prop.VariableBinIndex(other_index, i);
         ret.Fill(reco_bin, GetSplineShift(name, shift, spline_bin) * prop.added_weights[i]);
     }
     return ret;
@@ -606,9 +606,9 @@ PROspec PROsyst::GetSplineShiftedSpectrum(const PROconfig& config, const PROpell
     int nbins = config.m_num_variable_bins_total[other_index];
     int binning = spline_binnings[syst_num];
     PROspec ret(nbins);
-    for(size_t i = 0; i < prop.variable_values.size(); ++i) {
-        const int spline_bin = prop.variable_bin_indices[i][binning];
-        const int reco_bin = prop.variable_bin_indices[i][other_index];
+    for(size_t i = 0; i < prop.NEvent(); ++i) {
+        const int spline_bin = prop.VariableBinIndex(binning, i);
+        const int reco_bin = prop.VariableBinIndex(other_index, i);
         ret.Fill(reco_bin, GetSplineShift(syst_num, shift, spline_bin) * prop.added_weights[i]);
     }
     return ret;
@@ -618,12 +618,12 @@ PROspec PROsyst::GetSplineShiftedSpectrum(const PROconfig& config, const PROpell
     assert(names.size() == shifts.size());
     int nbins = config.m_num_variable_bins_total[other_index];
     PROspec ret(nbins);
-    for(size_t i = 0; i < prop.variable_values.size(); ++i) {
-        const int reco_bin = prop.variable_bin_indices[i][other_index];
+    for(size_t i = 0; i < prop.NEvent(); ++i) {
+        const int reco_bin = prop.VariableBinIndex(other_index, i);
         float weight = 1;
         for(size_t j = 0; j < names.size(); ++j) {
             int binning = spline_binnings[syst_map.at(names[j]).first];
-            const int spline_bin = prop.variable_bin_indices[i][binning];
+            const int spline_bin = prop.VariableBinIndex(binning, i);
             weight *= GetSplineShift(names[j], shifts[j], spline_bin);
         }
         ret.Fill(reco_bin, weight * prop.added_weights[i]);
@@ -635,12 +635,12 @@ PROspec PROsyst::GetSplineShiftedSpectrum(const PROconfig& config, const PROpell
     assert(syst_nums.size() == shifts.size());
     int nbins = config.m_num_variable_bins_total[other_index];
     PROspec ret(nbins);
-    for(size_t i = 0; i < prop.variable_values.size(); ++i) {
-        const int reco_bin = prop.variable_bin_indices[i][other_index];
+    for(size_t i = 0; i < prop.NEvent(); ++i) {
+        const int reco_bin = prop.VariableBinIndex(other_index, i);
         float weight = 1;
         for(size_t j = 0; j < syst_nums.size(); ++j) {
             int binning = spline_binnings[syst_nums[j]];
-            const int spline_bin = prop.variable_bin_indices[i][binning];
+            const int spline_bin = prop.VariableBinIndex(binning, i);
             weight *= GetSplineShift(syst_nums[j], shifts[j], spline_bin);
         }
         ret.Fill(reco_bin, weight * prop.added_weights[i]);
@@ -652,12 +652,12 @@ PROspec PROsyst::GetSplineShiftedSpectrum(const PROconfig& config, const PROpell
     assert(shifts.size() == splines.size());
     int nbins = config.m_num_variable_bins_total[other_index];
     PROspec ret(nbins);
-    for(size_t i = 0; i < prop.variable_values.size(); ++i) {
-        const int reco_bin = prop.variable_bin_indices[i][other_index];
+    for(size_t i = 0; i < prop.NEvent(); ++i) {
+        const int reco_bin = prop.VariableBinIndex(other_index, i);
         float weight = 1;
         for(size_t j = 0; j < shifts.size(); ++j) {
             int binning = spline_binnings[j];
-            const int spline_bin = prop.variable_bin_indices[i][binning];
+            const int spline_bin = prop.VariableBinIndex(binning, i);
             weight *= GetSplineShift(j, shifts[j], spline_bin);
         }
         ret.Fill(reco_bin, weight * prop.added_weights[i]);
