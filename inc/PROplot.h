@@ -103,7 +103,7 @@ namespace PROfit{
 
             //TODO: Only works with 1 mode/detector/channel
             cv = CollapseMatrix(config, cv);
-            std::vector<float> edges = config.GetChannelVariableBinEdges(0,config.i_prime);
+            std::vector<float> edges = config.GetChannelVariableBins(0,config.i_prime).Edges();
             std::vector<float> centers;
             for(size_t i = 0; i < edges.size() - 1; ++i)
                 centers.push_back((edges[i+1] + edges[i])/2);

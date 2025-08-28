@@ -252,14 +252,18 @@ namespace PROfit {
                 //}
                 int other_count = 0;
                 for(const auto &name: branch_variable->variable_names) {
-                    branch_variable->branch_variable_formulas.push_back(std::make_shared<TTreeFormula>(("branch_variable_form_"+std::to_string(fid) +"_" + std::to_string(ib)+"_"+std::to_string(other_count)).c_str(), name.c_str(), chains[fid]));
+                    branch_variable->branch_variable_formulas.push_back(std::make_shared<ROOTFormula>(
+                        "branch_variable_form_"+std::to_string(fid) +"_" + std::to_string(ib)+"_"+std::to_string(other_count),
+                        name, chains[fid]));
                     other_count++;
                 }
 
 
                 //grab monte carlo weight
                 if(inconfig.m_mcgen_additional_weight_bool[fid][ib]){
-                    branch_variable->branch_monte_carlo_weight_formula  =  std::make_shared<TTreeFormula>(("branch_add_weight_"+std::to_string(fid)+"_" + std::to_string(ib)).c_str(),inconfig.m_mcgen_additional_weight_name[fid][ib].c_str(),chains[fid]);
+                    branch_variable->branch_monte_carlo_weight_formula = std::make_shared<ROOTFormula>(
+                        "branch_add_weight_"+std::to_string(fid)+"_" + std::to_string(ib),
+                        inconfig.m_mcgen_additional_weight_name[fid][ib], chains[fid]);
                     log<LOG_INFO>(L"%1% || Setting up additional monte carlo weight for this branch: %2%") % __func__ %  inconfig.m_mcgen_additional_weight_name[fid][ib].c_str();
                 }
 
@@ -441,7 +445,7 @@ namespace PROfit {
                         size_t ic = inconfig.GetLocalChannelIndexFromGlobalSubchannelIndex(is);     
 
                         size_t start = inconfig.GetGlobalVariableBinStart(is,iv); 
-                        for(size_t b = 0; b < inconfig.m_channel_variable_num_bins[ic][iv] ; b++){
+                        for(size_t b = 0; b < inconfig.m_channel_variable_bins[ic][iv].NBins(); b++) {
                             flatbins.push_back((int)(start+b));
                         }
                     }
@@ -516,7 +520,7 @@ namespace PROfit {
             for(size_t im = 0; im < inconfig.m_num_modes; im++){
                 for(size_t id =0; id < inconfig.m_num_detectors; id++){
                     for(size_t ic = 0; ic < inconfig.m_num_channels; ic++){
-                        const std::vector<float> &edges = inconfig.m_channel_variable_bin_edges.at(ic)[i];
+                        const std::vector<float> &edges = inconfig.m_channel_variable_bins.at(ic)[i].Edges(); // TODO: handle N-dim?
                         for(size_t sc = 0; sc < inconfig.m_num_subchannels.at(ic); sc++){
                             for(size_t j = 0; j < edges.size() - 1; ++j){
                                 inprop.variable_midbin.back()(LE_bin++) = (edges[j+1] + edges[j])/2;
@@ -584,22 +588,20 @@ namespace PROfit {
                 }
                 chains[fid]->GetEntry(i);
 
+                // update the branches to the current event
+                for(int ib = 0; ib != num_branch; ++ib) {
 
+                    if(inconfig.m_mcgen_additional_weight_bool[fid][ib]){
+                        branches[ib]->branch_monte_carlo_weight_formula->LoadEvent(i);
+                    }
+                    for(auto &b: branches[ib]->branch_variable_formulas) {
+                         b->LoadEvent(i);
+                    }
+                }
+                
+                // Refresh the systematics loaders
                 if (chains[fid]->GetTreeNumber() != currentTreeNumber) {
                     currentTreeNumber = chains[fid]->GetTreeNumber();
-
-
-                    for(int ib = 0; ib != num_branch; ++ib) {
-
-                        if(inconfig.m_mcgen_additional_weight_bool[fid][ib]){
-                            branches[ib]->branch_monte_carlo_weight_formula->GetNdata();
-                            branches[ib]->branch_monte_carlo_weight_formula->UpdateFormulaLeaves();
-                        }
-                        for(auto &b: branches[ib]->branch_variable_formulas) {
-                            b->GetNdata();
-                            b->UpdateFormulaLeaves();
-                        }
-                    }
 
                     for(size_t is = 0; is != total_num_systematics; ++is){
                         if(syst_vector[0][is].HasWeightFormula()){
@@ -614,17 +616,14 @@ namespace PROfit {
                         bool isActive = chains[fid]->GetBranchStatus(branchName);
                         log<LOG_DEBUG>(L"%1% || BRANCH %2% is %3%") % __func__ % branchName % (isActive ? "active" : "inactive");
                     }
-
-
                 }
 
-                //grab additional weight for systematics
+                // grab additional weight for systematics
                 for(size_t is = 0; is != total_num_systematics; ++is){
                     if(syst_vector[0][is].HasWeightFormula()){
                         sys_weight_value[is] = sys_weight_formula[is]->EvalInstance();
                     }
                 }
-
 
                 //branch loop
                 for(int ib = 0; ib != num_branch; ++ib) {
@@ -734,13 +733,17 @@ namespace PROfit {
 
                 int other_count = 0;
                 for(const auto &name: branch_variable->variable_names) {
-                    branch_variable->branch_variable_formulas.push_back(std::make_shared<TTreeFormula>(("branch_variabler_form_"+std::to_string(fid) +"_" + std::to_string(ib)+"_"+std::to_string(other_count)).c_str(), name.c_str(), trees[fid]));
+                    branch_variable->branch_variable_formulas.push_back(std::make_shared<ROOTFormula>(
+                        "branch_variabler_form_"+std::to_string(fid) +"_" + std::to_string(ib)+"_"+std::to_string(other_count),
+                        name, trees[fid]));
                     other_count++;
                 }
 
                 //grab monte carlo weight
                 if(inconfig.m_mcgen_additional_weight_bool[fid][ib]){
-                    branch_variable->branch_monte_carlo_weight_formula  =  std::make_shared<TTreeFormula>(("branch_add_weight_"+std::to_string(fid)+"_" + std::to_string(ib)).c_str(),inconfig.m_mcgen_additional_weight_name[fid][ib].c_str(),trees[fid]);
+                    branch_variable->branch_monte_carlo_weight_formula  =  std::make_shared<ROOTFormula>(
+                        "branch_add_weight_"+std::to_string(fid)+"_" + std::to_string(ib),
+                        inconfig.m_mcgen_additional_weight_name[fid][ib], trees[fid]);
                     log<LOG_INFO>(L"%1% || Setting up additional monte carlo weight for this branch: %2%") % __func__ %  inconfig.m_mcgen_additional_weight_name[fid][ib].c_str();
                 }
 
@@ -775,7 +778,7 @@ namespace PROfit {
 
                 //branch loop
                 for(int ib = 0; ib != num_branch; ++ib) {
-                    std::vector<float> vars = branches[ib]->GetVariables();
+                    std::vector<BranchVariable::Value> vars = branches[ib]->GetVariables();
                     float additional_weight = branches[ib]->GetMonteCarloWeight();
                     additional_weight *= pot_scale[fid];
 
@@ -805,7 +808,7 @@ namespace PROfit {
 
 
         int total_num_sys = syst_vector[0].size(); 
-        std::vector<float> vars = branch->GetVariables();
+        std::vector<BranchVariable::Value> vars = branch->GetVariables();
 
         int run_syst = branch->GetIncludeSystematics();
         float mc_weight = branch->GetMonteCarloWeight();
@@ -829,7 +832,7 @@ namespace PROfit {
         // Save the variables
         for (unsigned i_var = 0; i_var < inprop.NVariable(); i_var++) {
             inprop.variable_bin_indices[i_var].push_back(var_bin_indices[i_var]);
-            inprop.variable_values[i_var].push_back(vars[i_var]);
+            inprop.variable_values[i_var].push_back(vars[i_var].first());
         }
 
         for(size_t io = 0; io < inconfig.m_num_variables; ++io) {

@@ -59,11 +59,11 @@ void PROspec::QuickFill(int bin_index, float weight){
     return;
 }
 
-TH1D PROspec::toTH1D_Collapsed(const PROconfig &inconfig, int channel_index, size_t var_index) const {
+TH1D PROspec::toTH1D_Collapsed(const PROconfig &inconfig, int channel_index, size_t var_index, int dim) const {
     int global_bin_start = inconfig.GetCollapsedGlobalVariableBinStart(channel_index,var_index);
     //set up hist specs
-    int nbins = inconfig.m_channel_variable_num_bins[channel_index][inconfig.i_prime];
-    const std::vector<float>& bin_edges = inconfig.GetChannelVariableBinEdges(channel_index,var_index);
+    int nbins = inconfig.m_channel_variable_bins[channel_index][var_index].NBinsAlong(dim);
+    const std::vector<float>& bin_edges = inconfig.m_channel_variable_bins[channel_index][var_index].Edges(dim);
     std::string hist_name = inconfig.m_channel_names[channel_index];
     std::string xaxis_title = inconfig.m_channel_units[channel_index];
 
@@ -82,13 +82,13 @@ TH1D PROspec::toTH1D_Collapsed(const PROconfig &inconfig, int channel_index, siz
 }
 
 
-TH1D PROspec::toTH1D(PROconfig const & inconfig, int subchannel_index, int other_index) const{
+TH1D PROspec::toTH1D(PROconfig const & inconfig, int subchannel_index, int other_index, int dim) const{
     int global_bin_start = inconfig.GetGlobalVariableBinStart(subchannel_index, other_index);
     int channel_index = inconfig.GetLocalChannelIndexFromGlobalSubchannelIndex(subchannel_index);
 
     //set up hist specs
-    int nbins =  inconfig.m_channel_variable_num_bins[channel_index][other_index];
-    const std::vector<float>& bin_edges =  inconfig.GetChannelVariableBinEdges(channel_index, other_index);
+    int nbins = inconfig.m_channel_variable_bins[channel_index][other_index].NBinsAlong(dim);
+    const std::vector<float>& bin_edges = inconfig.m_channel_variable_bins[channel_index][other_index].Edges(dim);
     std::string hist_name = inconfig.m_fullnames[subchannel_index];
     std::string xaxis_title =  inconfig.m_channel_variable_units[channel_index][other_index];
 
@@ -104,9 +104,9 @@ TH1D PROspec::toTH1D(PROconfig const & inconfig, int subchannel_index, int other
 }
 
 
-TH1D PROspec::toTH1D(const PROconfig& inconfig, const std::string& subchannel_fullname, int other_index) const{
+TH1D PROspec::toTH1D(const PROconfig& inconfig, const std::string& subchannel_fullname, int other_index, int dim) const{
     int subchannel_index = inconfig.GetSubchannelIndex(subchannel_fullname);
-    return this->toTH1D(inconfig, subchannel_index, other_index);
+    return this->toTH1D(inconfig, subchannel_index, other_index, dim);
 }
 
 

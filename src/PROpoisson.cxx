@@ -121,7 +121,7 @@ float PROpoisson::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &grad
 float PROpoisson::getSingleChannelChi(size_t channel_index,size_t var_index) {
     PROspec cv = FillCVSpectra(config, peller,strat == BinnedChi2);
 
-    size_t nbin =  config.m_channel_variable_num_bins[channel_index][var_index];
+    size_t nbin = config.m_channel_variable_bins[channel_index][var_index].NBins();
     size_t startBin = config.GetCollapsedGlobalVariableBinStart(channel_index,var_index);
 
 

@@ -4,25 +4,20 @@
 namespace PROfit{
 
 
-    int FindLocalVariableBin(const PROconfig &inconfig, float other_value, int channel_index, int other_index) {
+    int FindLocalVariableBin(const PROconfig &inconfig, const BranchVariable::Value &other_value, int channel_index, int other_index) {
         //find local bin 
-        const std::vector<float>& bin_edges = inconfig.GetChannelVariableBinEdges(channel_index, other_index);
-        auto pos_iter = std::upper_bound(bin_edges.begin(), bin_edges.end(), other_value);
-
-        //over/under-flow, don't care for now
-        if(pos_iter == bin_edges.end() || pos_iter == bin_edges.begin()){
-            log<LOG_DEBUG>(L"%1% || For Variable index : %2% ") % __func__ % other_index;
-            log<LOG_DEBUG>(L"%1% || Value: %2% is in underflow or overflow bins, return bin of -1") % __func__ % other_value;
-            log<LOG_DEBUG>(L"%1% || Channel %2% has bin lower edge: %3% and bin upper edge: %4%") % __func__ % channel_index % *bin_edges.begin() % bin_edges.back();
-            return -1; 
+        const PROconfig::Binning &bins = inconfig.GetChannelVariableBins(channel_index, other_index);
+        int ret = bins.Bin(other_value);
+        if (ret == -1) {
+            log<LOG_DEBUG>(L"%1% || Channel index : %2% Variable index : %3% returned under or overflow") % __func__ % channel_index % other_index;
         }
-        return pos_iter - bin_edges.begin() - 1; 
+        return ret;
     }
 
-    int FindGlobalVariableBin(const PROconfig &inconfig, float other_value, int subchannel_index, int other_index) {
+    int FindGlobalVariableBin(const PROconfig &inconfig, const BranchVariable::Value &other_value, int subchannel_index, int other_index) {
         int global_bin_start = inconfig.GetGlobalVariableBinStart(subchannel_index, other_index);
         int channel_index = inconfig.GetLocalChannelIndexFromGlobalSubchannelIndex(subchannel_index);
-        if(inconfig.GetChannelNVariableBins(channel_index, other_index) == 0){
+        if (inconfig.GetChannelVariableBins(channel_index, other_index).NBins() == 0) {
             log<LOG_ERROR>(L"%1% || Subchannel %2% does not have other bins") % __func__ % subchannel_index;
             log<LOG_ERROR>(L"%1% || Return global bin of -1") % __func__ ;
             return -1;
@@ -32,7 +27,7 @@ namespace PROfit{
     }
 
 
-    int FindGlobalVariableBin(const PROconfig &inconfig, float other_value, const std::string& subchannel_fullname, int other_index) {
+    int FindGlobalVariableBin(const PROconfig &inconfig, const BranchVariable::Value &other_value, const std::string& subchannel_fullname, int other_index) {
         int subchannel_index = inconfig.GetSubchannelIndex(subchannel_fullname);
         return FindGlobalVariableBin(inconfig, other_value, subchannel_index, other_index);
     }
@@ -114,8 +109,8 @@ namespace PROfit{
                         for(size_t io = 0; io < inconfig.m_num_variables; ++io) {
 
                             int nstart = inconfig.GetGlobalVariableBinStart(global_subchannel_index1,io);
-                            int nbin = inconfig.GetChannelNVariableBins(local_channel_index1,io);
-                            std::vector<float> edges = inconfig.GetChannelVariableBinEdges (local_channel_index1,io);
+                            int nbin = inconfig.GetChannelVariableBins(local_channel_index1,io).NBins();
+                            std::vector<float> edges = inconfig.GetChannelVariableBins(local_channel_index1,io).Edges();
                             log<LOG_INFO>(L"%1% ||  ---  Vartiable %2%  || nstart %3% nbin %4% ") % __func__ % io %nstart % nbin ;
                             log<LOG_INFO>(L"%1% ||  --- -- Edges %2% ") % __func__ % edges ;
                         }
