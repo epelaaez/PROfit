@@ -238,6 +238,8 @@ namespace PROfit{
 
               // Project an input index across the full binning to a 1D index across the input dimension
               size_t ProjectIndex(size_t ind, size_t dim) const;
+              Eigen::VectorXf ProjectSpectra(const Eigen::VectorXf &in, size_t dim) const;
+              Eigen::VectorXf ProjectSpectraErrors(const Eigen::VectorXf &in, size_t dim) const;
 
               // Bin an input value
               int Bin(const std::vector<float> &v) const;

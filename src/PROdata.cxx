@@ -57,9 +57,14 @@ TH1D PROdata::toTH1D(const PROconfig &inconfig, int global_channel_index, int ot
     //fill 1D hist
     TH1D hSpec(hist_name.c_str(),hist_name.c_str(), nbins, &bin_edges[0]); 
     hSpec.GetXaxis()->SetTitle(xaxis_title.c_str());
+
+    // Project spectra along this axis
+    Eigen::VectorXf spec_dim = inconfig.m_channel_variable_bins[local_channel_index][other_index].ProjectSpectra(spec(Eigen::seqN(global_bin_start, nbins-1)), dim);
+    Eigen::VectorXf error_dim = inconfig.m_channel_variable_bins[local_channel_index][other_index].ProjectSpectraErrors(error(Eigen::seqN(global_bin_start, nbins-1)), dim);
+
     for(int i = 1; i <= nbins; ++i){
-        hSpec.SetBinContent(i, spec(global_bin_start + i -1));
-        hSpec.SetBinError(i, error(global_bin_start + i -1));
+        hSpec.SetBinContent(i, spec_dim(i -1));
+        hSpec.SetBinError(i, error_dim(i -1));
     }
 
     return hSpec;

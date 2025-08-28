@@ -1686,6 +1686,32 @@ size_t PROconfig::Binning::ProjectIndex(size_t ind, size_t dim) const {
     return (ind % stride) / div;
 }
 
+Eigen::VectorXf PROconfig::Binning::ProjectSpectra(const Eigen::VectorXf &in, size_t dim) const {
+    Eigen::VectorXf ret = Eigen::VectorXf::Zero(NBinsAlong(dim)-1);
+    if (in.size() != NBins() - 1) {
+        log<LOG_ERROR>(L"%1% || Mismatch between input spectrum length (%2%) and number of bins (%3%). Returning 0's.") % __func__ % in.size() % (NBins()-1); 
+        return ret;
+    }
+    for (unsigned i = 0; i < in.size(); i++) {
+      ret(ProjectIndex(i, dim)) += in(i);
+    }
+
+    return ret;
+}
+
+Eigen::VectorXf PROconfig::Binning::ProjectSpectraErrors(const Eigen::VectorXf &in, size_t dim) const {
+    Eigen::VectorXf ret = Eigen::VectorXf::Zero(NBinsAlong(dim)-1);
+    if (in.size() != NBins() - 1) {
+        log<LOG_ERROR>(L"%1% || Mismatch between input spectrum length (%2%) and number of bins (%3%). Returning 0's.") % __func__ % in.size() % (NBins()-1); 
+        return ret;
+    }
+    for (unsigned i = 0; i < in.size(); i++) {
+      ret(ProjectIndex(i, dim)) += in(i)*in(i); // sum of squares
+    }
+
+    return ret.array().sqrt();
+}
+
 // Bin an input value
 int PROconfig::Binning::Bin(const std::vector<float> &v) const {
     if (NDim() == 0) return 0;

@@ -186,7 +186,10 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
         std::vector<Eigen::VectorXf> specs;
         std::uniform_int_distribution<uint32_t> dseed(0, std::numeric_limits<uint32_t>::max());
         for(size_t i = 0; i < nerrorsample; ++i){
-            specs.push_back(FillSystRandomThrow(config, prop, syst, dseed(PROseed::global_rng), other_index).Spec());
+            // throw systs, and project along the zero-dimension
+            Eigen::VectorXf var = FillSystRandomThrow(config, prop, syst, dseed(PROseed::global_rng), other_index).Spec();
+            Eigen::VectorXf var_proj = config.GetChannelVariableBins(0, other_index).ProjectSpectra(var, 0);
+            specs.push_back(var_proj);
 
         }
         //specs.push_back(CollapseMatrix(config, FillSystRandomThrow(config, prop, syst).Spec()));
