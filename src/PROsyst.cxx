@@ -17,10 +17,6 @@ namespace PROfit {
             log<LOG_DEBUG>(L"%1% || syst mode: %2%") % __func__ % syst.mode.c_str();
             if(syst.mode == "spline" || syst.mode == "norm") {
                 FillSpline(syst);
-                spline_names.push_back(syst.systname); 
-                spline_lo.push_back(syst.knobval.front());
-                spline_hi.push_back(syst.knobval.back());
-                spline_binnings.push_back(syst.binning);
                 ++n_splines;
             } else if(syst.mode == "covariance") {
                 this->CreateMatrix(syst);
@@ -34,11 +30,19 @@ namespace PROfit {
         }
 
         spline_priors = Eigen::VectorXf::Constant(n_splines, 1);
+        spline_centers = Eigen::VectorXf::Constant(n_splines, 0);
         for(const auto &[name, prior]: config.m_mcgen_variation_prior) {
             auto it = std::find(spline_names.begin(), spline_names.end(), name);
             if(it != std::end(spline_names)) {
                 size_t idx = std::distance(std::begin(spline_names), it);
                 spline_priors(idx) = prior;
+            }
+        }
+        for(const auto &[name, center]: config.m_mcgen_variation_prior_centers) {
+            auto it = std::find(spline_names.begin(), spline_names.end(), name);
+            if(it != std::end(spline_names)) {
+                size_t idx = std::distance(std::begin(spline_names), it);
+                spline_centers(idx) = center;
             }
         }
 
@@ -69,20 +73,28 @@ namespace PROfit {
         PROsyst ret;
         log<LOG_DEBUG>(L"%1% | Creating a subset with a list of %2% systematics.") % __func__ % systs.size();
         Eigen::VectorXf tmp_priors = spline_priors;
+        Eigen::VectorXf tmp_centers = spline_centers;
         for(const std::string &name: systs) {
             log<LOG_DEBUG>(L"%1% | Looking up systematic %2% from subset list.") % __func__ % name.c_str();
             const auto &[idx, stype] = syst_map.at(name);
             switch(stype) {
                 case SystType::Spline:
-                    ret.syst_map[name] = std::make_pair(ret.splines.size(), SystType::Spline);
-                    ret.spline_names.push_back(name);
-                    ret.splines.push_back(splines[idx]);
-                    ret.spline_hi.push_back(spline_hi[idx]);
-                    ret.spline_lo.push_back(spline_lo[idx]);
-                    ret.spline_binnings.push_back(spline_binnings[idx]);
-                    tmp_priors(n_splines) = spline_priors(idx);
-                    ++ret.n_splines;
-                    break;
+                    {
+                        ret.syst_map[name] = std::make_pair(ret.splines.size(), SystType::Spline);
+                        ret.spline_names.push_back(name);
+                        Spline spline_copy;//Create explicit deep copy of the Spline
+                        spline_copy.bins = splines[idx].bins;
+                        spline_copy.segments_per_bin = splines[idx].segments_per_bin;
+                        spline_copy.segments = splines[idx].segments;  // vector copy
+                        ret.splines.push_back(std::move(spline_copy));
+                        ret.spline_hi.push_back(spline_hi[idx]);
+                        ret.spline_lo.push_back(spline_lo[idx]);
+                        ret.spline_binnings.push_back(spline_binnings[idx]);
+                        tmp_priors(ret.n_splines) = spline_priors(idx);
+                        tmp_centers(ret.n_splines) = spline_centers(idx);
+                        ++ret.n_splines;
+                        break;
+                        }
                 case SystType::Covariance:
                     ret.syst_map[name] = std::make_pair(ret.covmat.size(), SystType::Covariance);
                     ret.covar_names.push_back(name);
@@ -95,7 +107,8 @@ namespace PROfit {
                     break;
             }
         }
-        ret.spline_priors = tmp_priors.segment(0, n_splines);
+        ret.spline_priors = tmp_priors.segment(0, ret.n_splines);
+        ret.spline_centers = tmp_centers.segment(0, ret.n_splines);
         ret.fractional_covariance = ret.covmat.size() ? ret.SumMatrices()
             : Eigen::MatrixXf::Constant(fractional_covariance.rows(), fractional_covariance.cols(), 0.0f);
         ret.other_index = other_index;
@@ -105,20 +118,28 @@ namespace PROfit {
     PROsyst PROsyst::excluding(const std::vector<std::string> &systs) const {
         PROsyst ret;
         Eigen::VectorXf tmp_priors = spline_priors;
+        Eigen::VectorXf tmp_centers = spline_centers;
         for(const auto &[name, spair]: syst_map) {
             if(std::find(systs.begin(), systs.end(), name) != systs.end()) continue;
             const auto &[idx, stype] = spair;
             switch(stype) {
                 case SystType::Spline:
-                    ret.syst_map[name] = std::make_pair(ret.splines.size(), SystType::Spline);
-                    ret.spline_names.push_back(name);
-                    ret.splines.push_back(splines[idx]);
-                    ret.spline_hi.push_back(spline_hi[idx]);
-                    ret.spline_lo.push_back(spline_lo[idx]);
-                    ret.spline_binnings.push_back(spline_binnings[idx]);
-                    tmp_priors(n_splines) = spline_priors(idx);
-                    ++ret.n_splines;
-                    break;
+                    {
+                        ret.syst_map[name] = std::make_pair(ret.splines.size(), SystType::Spline);
+                        ret.spline_names.push_back(name);
+                        Spline spline_copy;//Create explicit deep copy of the Spline
+                        spline_copy.bins = splines[idx].bins;
+                        spline_copy.segments_per_bin = splines[idx].segments_per_bin;
+                        spline_copy.segments = splines[idx].segments;  // vector copy
+                        ret.splines.push_back(std::move(spline_copy));
+                        ret.spline_hi.push_back(spline_hi[idx]);
+                        ret.spline_lo.push_back(spline_lo[idx]);
+                        ret.spline_binnings.push_back(spline_binnings[idx]);
+                        tmp_priors(ret.n_splines) = spline_priors(idx);
+                        tmp_centers(ret.n_splines) = spline_centers(idx);
+                        ++ret.n_splines;
+                        break;
+                    }
                 case SystType::Covariance:
                     ret.syst_map[name] = std::make_pair(ret.covmat.size(), SystType::Covariance);
                     ret.covar_names.push_back(name);
@@ -131,7 +152,8 @@ namespace PROfit {
                     break;
             }
         }
-        ret.spline_priors = tmp_priors.segment(0, n_splines);
+        ret.spline_priors = tmp_priors.segment(0, ret.n_splines);
+        ret.spline_centers = tmp_centers.segment(0, ret.n_splines);
         ret.fractional_covariance = ret.covmat.size() ? ret.SumMatrices()
             : Eigen::MatrixXf::Constant(fractional_covariance.rows(), fractional_covariance.cols(), 0.0f);
         ret.other_index = other_index;
@@ -141,6 +163,7 @@ namespace PROfit {
     PROsyst PROsyst::allsplines2cov(const PROconfig &config, const PROpeller &prop, uint32_t seed) const {
         PROsyst ret;
         for(const auto &[name, spair]: syst_map) {
+
             const auto &[idx, stype] = spair;
             switch(stype) {
                 case SystType::Spline: {
@@ -470,7 +493,6 @@ float PROsyst::GetSplineShift(int spline_num, float shift, int bin) const {
     const Spline& spline = splines[spline_num];
     if (bin < 0 || bin >= spline.bins) return -1;
 
-
     // Find the right segment with egments are sorted by knob value
     int offset = bin * spline.segments_per_bin;
     const SplineSegment* segs = &spline.segments[offset];
@@ -489,23 +511,30 @@ void PROsyst::FillSpline(const SystStruct& syst) {
     ratios.reserve(syst.p_multi_spec.size());
     float cv_integral = syst.p_cv->Spec().sum();
 
+
     bool found0 = false;
+    std::vector<float> knobvals;
     for (size_t i = 0; i < syst.p_multi_spec.size(); ++i) {
         if (syst.knobval[i] > 0 && !found0) {
             ratios.push_back(*syst.p_cv / *syst.p_cv);
+            knobvals.push_back(0);
             found0 = true;
         }
         if (syst.knobval[i] == 0) found0 = true;
 
         float mod = shape_only ? cv_integral / syst.p_multi_spec[i]->Spec().sum() : 1.0;
         ratios.push_back(((*syst.p_multi_spec[i]) * mod) / *syst.p_cv);
+        knobvals.push_back(syst.knobval[i]);
     }
-    if (!found0) ratios.push_back(*syst.p_cv / *syst.p_cv);
+    if (!found0) {
+        ratios.push_back(*syst.p_cv / *syst.p_cv);
+        knobvals.push_back(0);
+    }
 
     int nbins = syst.p_cv->GetNbins();
     Spline spline;
     spline.bins = nbins;
-    spline.segments_per_bin = syst.knobval.size(); 
+    spline.segments_per_bin = knobvals.size(); 
 
     std::vector<SplineSegment> all_segments;
 
@@ -528,9 +557,9 @@ void PROsyst::FillSpline(const SystStruct& syst) {
         if (ratios.size() < 3) {
             const float y1 = ratios[0].GetBinContent(i);
             const float y2 = ratios[1].GetBinContent(i);
-            const float slope = (y2 - y1) / (syst.knobval[1] - syst.knobval[0]);
-            bin_segments.push_back(SplineSegment{(float)(-syst.knobval[1]), {y2, -slope, 0, 0}});
-            bin_segments.push_back(SplineSegment{(float)syst.knobval[0], {slope * (float)syst.knobval[0] + y1, slope, 0, 0}});
+            const float slope = (y2 - y1) / (knobvals[1] - knobvals[0]);
+            bin_segments.push_back(SplineSegment{(float)(-knobvals[1]), {y2, -slope, 0, 0}});
+            bin_segments.push_back(SplineSegment{(float)knobvals[0], {slope * (float)knobvals[0] + y1, slope, 0, 0}});
         } else {
             {
                 const float y1 = ratios[0].GetBinContent(i);
@@ -541,7 +570,7 @@ void PROsyst::FillSpline(const SystStruct& syst) {
                                         {-2, 2, -1},
                                         {1, 0, 0}};
                 const Eigen::Vector3f res = m * v;
-                bin_segments.push_back(SplineSegment{(float)syst.knobval[0], {res(2), res(1), res(0), 0}});
+                bin_segments.push_back(SplineSegment{(float)knobvals[0], {res(2), res(1), res(0), 0}});
             }
             for (unsigned int shiftIdx = 1; shiftIdx < ratios.size() - 2; ++shiftIdx) {
                 const float y0 = ratios[shiftIdx - 1].GetBinContent(i);
@@ -554,9 +583,9 @@ void PROsyst::FillSpline(const SystStruct& syst) {
                                         {0, 0, 1, 0},
                                         {1, 0, 0, 0}};
                 const Eigen::Vector4f res = m * v;
-                float knobval = syst.knobval[shiftIdx];
+                float knobval = knobvals[shiftIdx];
                 if (!found0 && knobval >= 0)
-                    knobval = syst.knobval[shiftIdx] == 1 ? 0 : syst.knobval[shiftIdx - 1];
+                    knobval = knobvals[shiftIdx] == 1 ? 0 : knobvals[shiftIdx - 1];
                 bin_segments.push_back(SplineSegment{knobval, {res(3), res(2), res(1), res(0)}});
             }
             {
@@ -568,19 +597,24 @@ void PROsyst::FillSpline(const SystStruct& syst) {
                                          {0, 0, 1},
                                          {1, 0, 0}};
                 const Eigen::Vector3f resp = mp * vp;
-                bin_segments.push_back(SplineSegment{(float)syst.knobval[syst.knobval.size() - 2], {resp(2), resp(1), resp(0), 0}});
+                bin_segments.push_back(SplineSegment{(float)knobvals[knobvals.size() - 2], {resp(2), resp(1), resp(0), 0}});
             }
         }
 
         all_segments.insert(all_segments.end(), bin_segments.begin(), bin_segments.end());
     }
 
-    // If all bins have the same number of segments, keep as syst.knobval.size(); else update
+    // If all bins have the same number of segments, keep as knobvals.size(); else update
     spline.segments_per_bin = all_segments.size() / nbins;
     spline.segments = std::move(all_segments);
 
     syst_map[syst.systname] = {splines.size(), SystType::Spline};
     splines.push_back(std::move(spline));
+    spline_names.push_back(syst.systname);
+    spline_lo.push_back(knobvals[0]);
+    spline_hi.push_back(knobvals.back());
+    spline_binnings.push_back(syst.binning);
+
 }
 float PROsyst::GetSplineShift(std::string name, float shift, int bin) const {
     if(syst_map.count(name) == 0) {

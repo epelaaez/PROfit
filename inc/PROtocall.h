@@ -6,6 +6,8 @@
 #include <unordered_map>
 #include <string>
 #include <iomanip>
+#include <stdexcept>
+
 // PROfit include 
 #include "PROlog.h"
 #include "PROconfig.h"
@@ -60,6 +62,8 @@ namespace PROfit{
       out <<std::fixed<< std::setprecision(n) << a_value;
       return out.str();
     }
+
+    Eigen::MatrixXf ComputeSquareRootCovariance(const Eigen::MatrixXf& covariance, bool use_ldlt = true, float svd_tol = -1.0);
 
 };
 
