@@ -1035,7 +1035,7 @@ int main(int argc, char* argv[])
         }
 
         std::string filename = final_output_tag+"_fractional_systematics.pdf";
-        plotPriorFractionalSystematicBreakdown(config, spec, allcovsyst, filename);
+        plotPriorFractionalSystematicBreakdown(config, other_cvs[config.i_prime], allcovsyst, filename,config.i_prime);
         
         std::vector<std::map<std::string, std::unique_ptr<TH1D>>> other_hists;
         for(size_t io = 0; io < config.m_num_variables; ++io) {

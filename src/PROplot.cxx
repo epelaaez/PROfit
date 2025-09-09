@@ -618,7 +618,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
     }
 
 
-    int plotPriorFractionalSystematicBreakdown(const PROconfig &config, const PROspec &spec, const PROsyst &allsplinesyst, std::string filename) {
+    int plotPriorFractionalSystematicBreakdown(const PROconfig &config, const PROspec &spec, const PROsyst &allsplinesyst, std::string filename, int other_index) {
         //Input PROsyst needs to be the allsplinesyst for now
 
         std::vector<int> colors = {
@@ -700,9 +700,9 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
 
                     int padIndex = 1;
 
-                    std::vector<float> bin_edges = config.GetChannelBinEdges(global_channel_index);
-                    size_t binstart = config.GetCollapsedGlobalBinStart(global_channel_index);
-                    size_t nbins = config.m_channel_num_bins[channel];
+                    std::vector<float> bin_edges = config.GetChannelVariableBinEdges(global_channel_index,other_index);
+                    size_t binstart = config.GetCollapsedGlobalVariableBinStart(global_channel_index,other_index);
+                    size_t nbins = config.m_channel_variable_num_bins[channel][other_index];
                     std::vector<int> channel_bins(nbins);
                     std::iota(channel_bins.begin(), channel_bins.end(), binstart);
 
