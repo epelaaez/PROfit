@@ -84,7 +84,7 @@ bool PROconfig::SameChannels(const PROconfig &one, const PROconfig &two) {
         }
 
         for (size_t jdim = 0; jdim < one.m_channel_variable_bins[one.i_prime][i].NDim(); jdim++) {
-            for (size_t k = 0; k < one.m_channel_variable_bins[one.i_prime][i].NBinsAlong(jdim)+1; k++) {
+            for (size_t k = 0; k < one.m_channel_variable_bins[one.i_prime][i].NBinEdgesAlong(jdim); k++) {
                 if(one.m_channel_variable_bins[one.i_prime][i].Edges(jdim)[k] != two.m_channel_variable_bins[two.i_prime][i].Edges(jdim)[k]) {
                     log<LOG_WARNING>(L"%1% || Found different bin edge for bin %2% in channel %3% dimension %4%. %5% vs %6%")
                         % __func__ % k % i % jdim % one.m_channel_variable_bins[one.i_prime][i].Edges(jdim)[k] % two.m_channel_variable_bins[two.i_prime][i].Edges(jdim)[k];
@@ -1677,36 +1677,48 @@ size_t PROconfig::Binning::NBins() const {
 // Project an input index across the full binning to a 1D index across the input dimension
 size_t PROconfig::Binning::ProjectIndex(size_t ind, size_t dim) const {
     size_t div = 1;
-    size_t stride = NBinsAlong(dim) - 1;
+    size_t stride = NBinsAlong(dim);
     for (unsigned i_vec = NDim()-1; i_vec > dim; i_vec--) {
-        div *= NBinsAlong(i_vec) - 1;
-        stride *= NBinsAlong(i_vec) - 1;
+        div *= NBinsAlong(i_vec);
+        stride *= NBinsAlong(i_vec);
     }
 
     return (ind % stride) / div;
 }
 
 Eigen::VectorXf PROconfig::Binning::ProjectSpectra(const Eigen::VectorXf &in, size_t dim) const {
-    Eigen::VectorXf ret = Eigen::VectorXf::Zero(NBinsAlong(dim)-1);
-    if (in.size() != NBins() - 1) {
-        log<LOG_ERROR>(L"%1% || Mismatch between input spectrum length (%2%) and number of bins (%3%). Returning 0's.") % __func__ % in.size() % (NBins()-1); 
-        return ret;
+    if (in.size() % NBins() != 0) {
+        log<LOG_ERROR>(L"%1% || Mismatch between input spectrum length (%2%) and number of bins (%3%). Returning empty array.") % __func__ % in.size() % NBins();
+        return Eigen::VectorXf();
     }
+    // This should be equal to num_detectors * num_subchannels. TODO: check?
+    unsigned n_copies = in.size() / NBins();
+
+    Eigen::VectorXf ret = Eigen::VectorXf::Zero(NBinsAlong(dim)*n_copies);
+
     for (unsigned i = 0; i < in.size(); i++) {
-      ret(ProjectIndex(i, dim)) += in(i);
+      unsigned i_copy = i / NBins();
+      unsigned i_bin = i % NBins();
+      ret(ProjectIndex(i_bin, dim) + i_copy*NBinsAlong(dim)) += in(i);
     }
 
     return ret;
 }
 
 Eigen::VectorXf PROconfig::Binning::ProjectSpectraErrors(const Eigen::VectorXf &in, size_t dim) const {
-    Eigen::VectorXf ret = Eigen::VectorXf::Zero(NBinsAlong(dim)-1);
-    if (in.size() != NBins() - 1) {
-        log<LOG_ERROR>(L"%1% || Mismatch between input spectrum length (%2%) and number of bins (%3%). Returning 0's.") % __func__ % in.size() % (NBins()-1); 
-        return ret;
+    if (in.size() % NBins() != 0) {
+        log<LOG_ERROR>(L"%1% || Mismatch between input spectrum length (%2%) and number of bins (%3%). Returning empty array.") % __func__ % in.size() % NBins();
+        return Eigen::VectorXf();
     }
+    // This should be equal to num_detectors * num_subchannels. TODO: check?
+    unsigned n_copies = in.size() / NBins();
+
+    Eigen::VectorXf ret = Eigen::VectorXf::Zero(NBinsAlong(dim)*n_copies);
+
     for (unsigned i = 0; i < in.size(); i++) {
-      ret(ProjectIndex(i, dim)) += in(i)*in(i); // sum of squares
+      unsigned i_copy = i / NBins();
+      unsigned i_bin = i % NBins();
+      ret(ProjectIndex(i_bin, dim) + i_copy*NBinsAlong(dim)) += in(i)*in(i); // sum of squares
     }
 
     return ret.array().sqrt();
@@ -1735,7 +1747,7 @@ int PROconfig::Binning::Bin(const std::vector<float> &v) const {
         }
 
         ret += local_bin * stride;
-        stride *= NBinsAlong(i_vec) - 1;
+        stride *= NBinsAlong(i_vec);
     }
     return ret;
 }

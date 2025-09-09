@@ -48,7 +48,7 @@ TH1D PROdata::toTH1D(const PROconfig &inconfig, int global_channel_index, int ot
     int global_bin_start =  inconfig.GetCollapsedGlobalVariableBinStart(global_channel_index, other_index);
     //set up hist specs
     int nbins = inconfig.m_channel_variable_bins[local_channel_index][other_index].NBinsAlong(dim);
-    const std::vector<float>& bin_edges =  inconfig.m_channel_variable_bins[local_channel_index][other_index].Edges();
+    std::vector<float> bin_edges =  inconfig.m_channel_variable_bins[local_channel_index][other_index].Edges();
     std::string hist_name = inconfig.m_channel_names[local_channel_index] + " Data";
     std::string xaxis_title =  inconfig.m_channel_variable_units[local_channel_index][other_index];
 
@@ -59,8 +59,8 @@ TH1D PROdata::toTH1D(const PROconfig &inconfig, int global_channel_index, int ot
     hSpec.GetXaxis()->SetTitle(xaxis_title.c_str());
 
     // Project spectra along this axis
-    Eigen::VectorXf spec_dim = inconfig.m_channel_variable_bins[local_channel_index][other_index].ProjectSpectra(spec(Eigen::seqN(global_bin_start, nbins-1)), dim);
-    Eigen::VectorXf error_dim = inconfig.m_channel_variable_bins[local_channel_index][other_index].ProjectSpectraErrors(error(Eigen::seqN(global_bin_start, nbins-1)), dim);
+    Eigen::VectorXf spec_dim = inconfig.m_channel_variable_bins[local_channel_index][other_index].ProjectSpectra(spec(Eigen::seqN(global_bin_start, nbins)), dim);
+    Eigen::VectorXf error_dim = inconfig.m_channel_variable_bins[local_channel_index][other_index].ProjectSpectraErrors(error(Eigen::seqN(global_bin_start, nbins)), dim);
 
     for(int i = 1; i <= nbins; ++i){
         hSpec.SetBinContent(i, spec_dim(i -1));

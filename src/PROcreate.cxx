@@ -520,7 +520,7 @@ namespace PROfit {
             for(size_t im = 0; im < inconfig.m_num_modes; im++){
                 for(size_t id =0; id < inconfig.m_num_detectors; id++){
                     for(size_t ic = 0; ic < inconfig.m_num_channels; ic++){
-                        const std::vector<float> &edges = inconfig.m_channel_variable_bins.at(ic)[i].Edges(); // TODO: handle N-dim?
+                        std::vector<float> edges = inconfig.m_channel_variable_bins.at(ic)[i].Edges(); // TODO: handle N-dim?
                         for(size_t sc = 0; sc < inconfig.m_num_subchannels.at(ic); sc++){
                             for(size_t j = 0; j < edges.size() - 1; ++j){
                                 inprop.variable_midbin.back()(LE_bin++) = (edges[j+1] + edges[j])/2;
