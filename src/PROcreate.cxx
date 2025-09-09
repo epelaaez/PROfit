@@ -585,7 +585,7 @@ namespace PROfit {
             }
 
             // loop over all entries
-            size_t to_print = nevents / 5;
+            size_t to_print = nevents > 5 ? nevents / 5 : 1;
             if(to_print>50000)to_print=50000;
             int currentTreeNumber = -1;
 
@@ -873,8 +873,11 @@ namespace PROfit {
                     size_t u = 0;
                     for(; u < var_syst_objs.front()->knobval.size(); ++u)
                         if(var_syst_objs.front()->knobval[u] == var_syst_objs.front()->knob_index[is]) break;
+                    
+                    float w = static_cast<float>(map_iter->second->at(is));
+                    if(std::isnan(w) || std::isinf(w)) w = 1;
                     for(auto so: var_syst_objs)
-                        so->FillUniverse(u, spline_bin, mc_weight * additional_weight * static_cast<float>(map_iter->second->at(is)));
+                        so->FillUniverse(u, spline_bin, mc_weight * additional_weight * w);
                 }
 
                 continue;
