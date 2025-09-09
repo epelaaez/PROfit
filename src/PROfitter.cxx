@@ -40,6 +40,13 @@ std::vector<int> sorted_indices(const std::vector<float>& vec) {
 }
 
 float PROfitter::Fit(PROmetric &metric, const Eigen::VectorXf &seed_pt ) {
+    const std::vector<Eigen::VectorXf> seed_points = seed_pt.size() > 0 ? std::vector<Eigen::VectorXf>{seed_pt} : std::vector<Eigen::VectorXf>{};
+    return Fit(metric, seed_points);
+
+}
+
+float PROfitter::Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed_points ) {
+
     std::mt19937 rng;
     rng.seed(seed);
     std::normal_distribution<float> d;
@@ -60,10 +67,12 @@ float PROfitter::Fit(PROmetric &metric, const Eigen::VectorXf &seed_pt ) {
             }
         }
     }
-    if(seed_pt.norm()>0){
+    if(seed_points.size()>0 && seed_points.front().size()>0){
         log<LOG_INFO>(L"%1% || Seed point passed in. Being included.") % __func__  ;
-        std::vector<float> std_vec(seed_pt.data(), seed_pt.data() + seed_pt.size());
-        latin_samples.push_back(std_vec);
+        for(auto & pt: seed_points){
+            std::vector<float> std_vec(pt.data(), pt.data() + pt.size());
+            latin_samples.push_back(std_vec);
+        }
     }else{
         log<LOG_INFO>(L"%1% || No seed point passed in. ") % __func__  ;
     }
@@ -157,13 +166,15 @@ float PROfitter::Fit(PROmetric &metric, const Eigen::VectorXf &seed_pt ) {
 
 
     int fudge = 0;
-    if(seed_pt.norm()>0){
-        fudge = 1;
+    if(seed_points.size()>0 && seed_points.front().size()>0){
+        fudge = seed_points.size();
         log<LOG_INFO>(L"%1% || Starting local fit of seed point. ") % __func__ ;
 
-        for (size_t attempt = 1; attempt <= fitconfig.n_max_local_retries; ++attempt) {
-            try {
-                x = seed_pt;
+        for(size_t s = 0; s < seed_points.size();s++){
+            for (size_t attempt = 1; attempt <= fitconfig.n_max_local_retries; ++attempt) {
+                try {
+
+                    x = seed_points.at(s);
                 log<LOG_INFO>(L"%1% || Starting local minimization attempt %2%/%3%") % __func__ % attempt % fitconfig.n_max_local_retries;
                 niter = solver.minimize(metric, x, fx, lb, ub);
                 chi2s_localfits.push_back(fx);
@@ -196,6 +207,7 @@ float PROfitter::Fit(PROmetric &metric, const Eigen::VectorXf &seed_pt ) {
 
 
         }
+    }
     }
 
 

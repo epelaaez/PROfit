@@ -62,6 +62,7 @@ float PROCNP::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
 
 
 float PROCNP::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient, bool rungradient){
+    call_count++;
 
     //size_t nparams = model->nparams+syst->GetNSplines();
     //size_t nsyst = syst->GetNSplines();

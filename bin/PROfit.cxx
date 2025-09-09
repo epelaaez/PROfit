@@ -716,8 +716,12 @@ int main(int argc, char* argv[])
         c.Print((final_output_tag+"_postfit_correlation_matrix_nuisance_only.pdf").c_str());
         log<LOG_INFO>(L"%1% ||  Beginning full PROfile ") % __func__;
 
+        std::vector<Eigen::VectorXf> seeds = {best_fit};//to be updated to v1.1.5 harmoincs
         PROfile profile(config, metric_to_use->GetSysts(), metric_to_use->GetModel(), *metric_to_use, myseed, scanFitConfig, 
-                final_output_tag+"_PROfile", chi2, !systs_only_profile, nthread, best_fit,
+                final_output_tag+"_PROfile", chi2, !systs_only_profile, nthread, seeds,
+                systs_only_profile ? systparams : allparams);
+        profile.Plot(config, metric_to_use->GetSysts(), metric_to_use->GetModel(), *metric_to_use, myseed,
+                final_output_tag+"_PROfile", !systs_only_profile, best_fit,
                 systs_only_profile ? systparams : allparams);
         TFile fout((final_output_tag+"_PROfile.root").c_str(), "RECREATE");
         profile.onesig.Write("one_sigma_errs");
