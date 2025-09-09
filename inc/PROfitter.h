@@ -174,12 +174,12 @@ namespace PROfit {
                 }else if(param_name == "MCMC-Burnin") {
                     MCMCburn = value;
                     if(MCMCburn < 1) {
-                        log<LOG_WARNING>(L"%1% || Warning: Running without any burnin for MCMC.");
+                        log<LOG_WARNING>(L"%1% || Warning: Running without any burnin for MCMC.") % __func__ ;
                     }
                 }else if(param_name == "MCMC-Iterations") {
                     MCMCiter = value;
                     if(MCMCiter < 1) {
-                        log<LOG_ERROR>(L"%1% || Requested to run MCMC with no iterations.");
+                        log<LOG_ERROR>(L"%1% || Requested to run MCMC with no iterations.") % __func__ ;
                     }
                 } else {
                     log<LOG_WARNING>(L"%1% || Unrecognized LBFGSB parameter %2%. Will ignore.") 
