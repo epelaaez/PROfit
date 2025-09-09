@@ -39,7 +39,12 @@ PROchi::PROchi(const std::string tag, const PROconfig &conin, const PROpeller &p
         prior_covariance = systin->spline_priors.asDiagonal() * prior_covariance * systin->spline_priors.asDiagonal();
     }
     
-    collapsed_stat_covariance = data.Spec().array().matrix().asDiagonal();
+    // GP: What do you do if the MC has 0 events in a bin?
+    //     Proposed solution (hack?) here. Set the error to 1. This will return
+    //     the correct answer if there are no data events in the bin. It is a bit
+    //     iffier if there are data events in the bin, we may want to implement some
+    //     error handling there.
+    collapsed_stat_covariance = data.Spec().array().cwiseMax(1).matrix().asDiagonal();
 }
 
 float PROchi::Pull(const Eigen::VectorXf &systs) {
