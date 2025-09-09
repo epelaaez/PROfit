@@ -438,7 +438,7 @@ namespace PROfit {
 
         //check for nan and infinite
         if(!in_matrix.allFinite()){
-            log<LOG_WARNING>(L"%1% || Matrix has Nan or non-finite values.") % __func__ ;
+            log<LOG_DEBUG>(L"%1% || Matrix has Nan or non-finite values.") % __func__ ;
             return false;
         }
         return true;
