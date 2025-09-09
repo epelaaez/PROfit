@@ -47,6 +47,10 @@ using namespace PROfit;
 log_level_t GLOBAL_LEVEL = LOG_INFO;
 std::wostream *OSTREAM = &wcout;
 
+std::wofstream LOG_FILE_STREAM;
+bool LOGGING_TO_FILE = false;
+
+
 int main(int argc, char* argv[])
 {
     gStyle->SetOptStat(0);
@@ -179,11 +183,10 @@ int main(int argc, char* argv[])
     //Parse inputs. 
     CLI11_PARSE(app, argc, argv);
 
-    std::wofstream log_out;
     if(log_file != "") {
-        log_out.open(log_file);
-        OSTREAM = &log_out;
+        log_impl::EnableFileLogging(log_file);
     }
+
 
     log<LOG_INFO>(L" %1% ") % getIcon().c_str()  ;
     std::string final_output_tag =analysis_tag +"_"+output_tag;
