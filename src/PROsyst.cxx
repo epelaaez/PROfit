@@ -79,16 +79,22 @@ namespace PROfit {
             const auto &[idx, stype] = syst_map.at(name);
             switch(stype) {
                 case SystType::Spline:
-                    ret.syst_map[name] = std::make_pair(ret.splines.size(), SystType::Spline);
-                    ret.spline_names.push_back(name);
-                    ret.splines.push_back(splines[idx]);
-                    ret.spline_hi.push_back(spline_hi[idx]);
-                    ret.spline_lo.push_back(spline_lo[idx]);
-                    ret.spline_binnings.push_back(spline_binnings[idx]);
-                    tmp_priors(ret.n_splines) = spline_priors(idx);
-                    tmp_centers(ret.n_splines) = spline_centers(idx);
-                    ++ret.n_splines;
-                    break;
+                    {
+                        ret.syst_map[name] = std::make_pair(ret.splines.size(), SystType::Spline);
+                        ret.spline_names.push_back(name);
+                        Spline spline_copy;//Create explicit deep copy of the Spline
+                        spline_copy.bins = splines[idx].bins;
+                        spline_copy.segments_per_bin = splines[idx].segments_per_bin;
+                        spline_copy.segments = splines[idx].segments;  // vector copy
+                        ret.splines.push_back(std::move(spline_copy));
+                        ret.spline_hi.push_back(spline_hi[idx]);
+                        ret.spline_lo.push_back(spline_lo[idx]);
+                        ret.spline_binnings.push_back(spline_binnings[idx]);
+                        tmp_priors(ret.n_splines) = spline_priors(idx);
+                        tmp_centers(ret.n_splines) = spline_centers(idx);
+                        ++ret.n_splines;
+                        break;
+                        }
                 case SystType::Covariance:
                     ret.syst_map[name] = std::make_pair(ret.covmat.size(), SystType::Covariance);
                     ret.covar_names.push_back(name);
@@ -118,16 +124,22 @@ namespace PROfit {
             const auto &[idx, stype] = spair;
             switch(stype) {
                 case SystType::Spline:
-                    ret.syst_map[name] = std::make_pair(ret.splines.size(), SystType::Spline);
-                    ret.spline_names.push_back(name);
-                    ret.splines.push_back(splines[idx]);
-                    ret.spline_hi.push_back(spline_hi[idx]);
-                    ret.spline_lo.push_back(spline_lo[idx]);
-                    ret.spline_binnings.push_back(spline_binnings[idx]);
-                    tmp_priors(ret.n_splines) = spline_priors(idx);
-                    tmp_centers(ret.n_splines) = spline_centers(idx);
-                    ++ret.n_splines;
-                    break;
+                    {
+                        ret.syst_map[name] = std::make_pair(ret.splines.size(), SystType::Spline);
+                        ret.spline_names.push_back(name);
+                        Spline spline_copy;//Create explicit deep copy of the Spline
+                        spline_copy.bins = splines[idx].bins;
+                        spline_copy.segments_per_bin = splines[idx].segments_per_bin;
+                        spline_copy.segments = splines[idx].segments;  // vector copy
+                        ret.splines.push_back(std::move(spline_copy));
+                        ret.spline_hi.push_back(spline_hi[idx]);
+                        ret.spline_lo.push_back(spline_lo[idx]);
+                        ret.spline_binnings.push_back(spline_binnings[idx]);
+                        tmp_priors(ret.n_splines) = spline_priors(idx);
+                        tmp_centers(ret.n_splines) = spline_centers(idx);
+                        ++ret.n_splines;
+                        break;
+                    }
                 case SystType::Covariance:
                     ret.syst_map[name] = std::make_pair(ret.covmat.size(), SystType::Covariance);
                     ret.covar_names.push_back(name);
@@ -480,7 +492,6 @@ namespace PROfit {
 float PROsyst::GetSplineShift(int spline_num, float shift, int bin) const {
     const Spline& spline = splines[spline_num];
     if (bin < 0 || bin >= spline.bins) return -1;
-
 
     // Find the right segment with egments are sorted by knob value
     int offset = bin * spline.segments_per_bin;

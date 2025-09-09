@@ -101,7 +101,7 @@ float PROCNP::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
                 L"mc spec: %5%\ndata spec: %6%")
             % __func__ % covar_portion % pull % delta % CollapseMatrix(config, result.Spec())
             % data.Spec();
-        abort();
+                throw std::runtime_error("CNP chi2 is nan.");
     }
 
 

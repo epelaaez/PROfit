@@ -295,18 +295,11 @@ int main(int argc, char* argv[])
     PROseed myseed(nthread, global_seed);
     std::uniform_int_distribution<uint32_t> dseed(0, std::numeric_limits<uint32_t>::max());
 
-    //Pysics parameter input
-    Eigen::VectorXf pparams = Eigen::VectorXf::Constant(model->nparams + variable_systs[config.i_prime].GetNSplines(), 0);
-    Eigen::VectorXf CVpparams = Eigen::VectorXf::Constant(model->nparams + variable_systs[config.i_prime].GetNSplines(), 0);
-    for(long i = 0; i < osc_param_vector.size(); ++i) {
-        pparams(i) = osc_param_vector(i);
-        CVpparams(i) = model->default_val(i);
-    }
-
+    
     //Spline injection studies
     Eigen::VectorXf allparams = Eigen::VectorXf::Constant(model->nparams + variable_systs[config.i_prime].GetNSplines(), 0);
     Eigen::VectorXf systparams = Eigen::VectorXf::Constant(variable_systs[config.i_prime].GetNSplines(), 0);
-    for(size_t i = 0; i < model->nparams; ++i) allparams(i) = pparams(i);
+    for(size_t i = 0; i < model->nparams; ++i) allparams(i) = osc_param_vector(i);
     for(const auto& [name, shift]: injected_systs) {
         log<LOG_INFO>(L"%1% || Injected syst: %2% shifted by %3%") % __func__ % name.c_str() % shift;
 
@@ -469,6 +462,14 @@ int main(int argc, char* argv[])
             for(PROsyst &syst: variable_systs)
                 syst = syst.excluding(systs_to_exclude);
         }
+    }
+
+    //Pysics parameter input
+    Eigen::VectorXf pparams = Eigen::VectorXf::Constant(model->nparams + variable_systs[config.i_prime].GetNSplines(), 0);
+    Eigen::VectorXf CVpparams = Eigen::VectorXf::Constant(model->nparams + variable_systs[config.i_prime].GetNSplines(), 0);
+    for(long i = 0; i < osc_param_vector.size(); ++i) {
+        pparams(i) = osc_param_vector(i);
+        CVpparams(i) = model->default_val(i);
     }
 
     log<LOG_INFO>(L"%1% || Starting from fit preset :  %2%.")% __func__ % fit_preset.c_str();
