@@ -247,7 +247,9 @@ namespace PROfit{
               int Bin(const BranchVariable::Value &v) const {return Bin(v.v);}
 
               // number of bins along a dimension
-              size_t NBinsAlong(unsigned dim) const {return bin_edges[dim].size();}
+              size_t NBinsAlong(unsigned dim) const {return (bin_edges[dim].size() == 0) ? 0 : bin_edges[dim].size()-1;}
+              // number of bin edges along a dimension
+              size_t NBinEdgesAlong(unsigned dim) const {return bin_edges[dim].size();}
               // return edges along a dimension
               std::vector<float> Edges(unsigned dim = 0) const {return bin_edges[dim];}
               // return widths along a dimension
