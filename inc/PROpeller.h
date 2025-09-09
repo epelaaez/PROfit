@@ -118,6 +118,8 @@ namespace PROfit{
 
             std::vector<float> added_weights;
             std::vector<int>   model_rule;
+            // Vector of variable values and bin indices.
+            // Outer vector is per-variable, inner vector is per-event 
             std::vector<std::vector<int>> variable_bin_indices;
             std::vector<std::vector<float>> variable_values;
             std::vector<Eigen::VectorXf> variable_mc_stat_err;
@@ -125,6 +127,15 @@ namespace PROfit{
             PROhistStorage variable_hist_storage;
 
             uint32_t           hash;
+
+            // Helper functions to access variable values + bin indices.
+            // The user can equally directly access the values, the function 
+            // is here to make it explicit how values are ordered in the vector
+            float VariableValue(size_t i_variable, size_t i_event) const {return variable_values[i_variable][i_event];}
+            int VariableBinIndex(size_t i_variable, size_t i_event) const {return variable_bin_indices[i_variable][i_event];}
+
+            size_t NVariable() const {return variable_values.size();}
+            size_t NEvent() const {return added_weights.size();}
 
 
             // boost serialize save to file
@@ -200,10 +211,10 @@ namespace PROfit{
                         }
                     }
                     //And then the unbinned weights
-                    for (size_t i = 0; i < added_weights.size(); ++i) {
+                    for (size_t i = 0; i < NEvent(); ++i) {
                         for(size_t io =0; io<inconfig.m_num_variables; io++){
                             if(io>0)break;//Hmm, we scale of the reco and not other bins. That seems fine, but might want to rethink
-                            int bin = variable_bin_indices[i][io];
+                            int bin = VariableBinIndex(io, i);
                             if (std::find(scaleotherbins[io].begin(), scaleotherbins[io].end(), bin) != scaleotherbins[io].end()) {
                                 added_weights[i] *= value;
                             }

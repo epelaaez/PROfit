@@ -21,9 +21,9 @@ namespace PROfit {
                 }
             }
         } else {
-            for(size_t i = 0; i<inprop.variable_bin_indices.size(); ++i){
+            for(size_t i = 0; i<inprop.NEvent(); ++i){
                 float add_w = inprop.added_weights[i]; 
-                myspectrum.Fill(inprop.variable_bin_indices[i][var_index], add_w);
+                myspectrum.Fill(inprop.VariableBinIndex(var_index, i), add_w);
             }
         }
         return myspectrum;
@@ -104,15 +104,15 @@ namespace PROfit {
                 }
             }
         } else {
-            for(size_t i = 0; i<inprop.variable_values.size(); ++i){
-                float oscw  =  inmodel.model_functions[inprop.model_rule[i]](phys, inprop.variable_values[i][inmodel.ivar]);
+            for(size_t i = 0; i<inprop.NEvent(); ++i){
+                float oscw  =  inmodel.model_functions[inprop.model_rule[i]](phys, inprop.VariableValue(inmodel.ivar, i));
                 float add_w = inprop.added_weights[i]; 
-                const int reco_bin = inprop.variable_bin_indices[i][var_index];
+                const int reco_bin = inprop.VariableBinIndex(var_index, i);
 
                 float systw = 1;
                 for(int j = 0; j < shifts.size(); ++j) {
                     int binning = insyst.spline_binnings[j];
-                    const int spline_bin = inprop.variable_bin_indices[i][binning];
+                    const int spline_bin = inprop.VariableBinIndex(binning, i);
                     systw *= insyst.GetSplineShift(j, shifts[j], spline_bin);
                 }
                 float finalw = oscw * systw * add_w;
@@ -140,7 +140,7 @@ namespace PROfit {
                 float hist_w = 1.0 ;
 
                 //Figure out what subchannel the event is in
-                size_t subchan = inconfig.GetSubchannelIndexFromVariableGlobalBin(inprop.variable_bin_indices[i][i_osc_tmp],i_osc_tmp);
+                size_t subchan = inconfig.GetSubchannelIndexFromVariableGlobalBin(inprop.VariableBinIndex(i_osc_tmp, i), i_osc_tmp);
                 std::string name = inconfig.m_fullnames[subchan];
 
                 //Put name for ICARUS study here. How to handle more generically?
@@ -165,16 +165,16 @@ namespace PROfit {
                 }
             }
         } else {
-            for(size_t i = 0; i<inprop.variable_values.size(); ++i){
+            for(size_t i = 0; i<inprop.NEvent(); ++i){
 
                 float oscw  = phys.size() != 0 ? 
-                    inmodel.model_functions[inprop.model_rule[i]](phys, inprop.variable_values[i][inconfig.i_prime]) :
+                    inmodel.model_functions[inprop.model_rule[i]](phys, inprop.VariableValue(inmodel.ivar, i)) :
                     1;	
                 float add_w = inprop.added_weights[i];
                 float hist_w = 1.0 ;
 
                 //Figure out what subchannel the event is in
-                size_t subchan = inconfig.GetSubchannelIndexFromVariableGlobalBin(inprop.variable_bin_indices[i][i_osc_tmp],i_osc_tmp);
+                size_t subchan = inconfig.GetSubchannelIndexFromVariableGlobalBin(inprop.VariableBinIndex(i_osc_tmp, i), i_osc_tmp);
                 std::string name = inconfig.m_fullnames[subchan];
 
                 //Put name for ICARUS study here. How to handle more generically?
@@ -190,7 +190,7 @@ namespace PROfit {
                 }
 
                 float finalw = oscw * add_w * hist_w;
-                myspectrum.Fill(inprop.variable_bin_indices[i][inconfig.i_prime], finalw);
+                myspectrum.Fill(inprop.VariableBinIndex(inconfig.i_prime, i), finalw);
             }
         }
         return myspectrum;
@@ -215,18 +215,18 @@ namespace PROfit {
             throwC(i) = d(rng);
 
 
-        for(size_t i = 0; i<inprop.variable_values.size(); ++i){
+        for(size_t i = 0; i<inprop.NEvent(); ++i){
             float add_w = inprop.added_weights[i]; 
             float systw = 1;
             for(size_t j = 0; j < throws.size(); ++j) {
                 int binning = insyst.spline_binnings[j];
-                const int spline_bin =  inprop.variable_bin_indices[i][binning];
+                const int spline_bin = inprop.VariableBinIndex(binning, i);
                 systw *= insyst.GetSplineShift(j, throws[j], spline_bin);
             }
-            if(inprop.variable_bin_indices[i][other_index] >= 0) {
+            if(inprop.VariableBinIndex(other_index, i) >= 0) {
                 float finalw = systw * add_w;
-                spec(inprop.variable_bin_indices[i][other_index]) += finalw;
-                cvspec(inprop.variable_bin_indices[i][other_index]) += add_w;
+                spec(inprop.VariableBinIndex(other_index, i)) += finalw;
+                cvspec(inprop.VariableBinIndex(other_index, i)) += add_w;
             }
         }
 
@@ -268,13 +268,13 @@ namespace PROfit {
                 }
             }
         } else {
-            for(size_t i = 0; i<inprop.variable_values.size(); ++i){
+            for(size_t i = 0; i<inprop.NEvent(); ++i){
                 float add_w = inprop.added_weights[i]; 
-                const int spline_bin = inprop.variable_bin_indices[i][binning];
+                const int spline_bin = inprop.VariableBinIndex(binning, i);
                 float systw = insyst.GetSplineShift(spline, spline_throw, spline_bin);
                 float finalw = systw * add_w;
-                if(inprop.variable_bin_indices[i][other_index] >= 0) {
-                    spec(inprop.variable_bin_indices[i][other_index]) += finalw;
+                if (inprop.VariableBinIndex(other_index, i) >= 0) {
+                    spec(inprop.VariableBinIndex(other_index, i)) += finalw;
                 }
             }
         }
