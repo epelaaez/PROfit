@@ -47,7 +47,8 @@ TH1D PROdata::toTH1D(const PROconfig &inconfig, int global_channel_index, int ot
 
     int global_bin_start =  inconfig.GetCollapsedGlobalVariableBinStart(global_channel_index, other_index);
     //set up hist specs
-    int nbins = inconfig.m_channel_variable_bins[local_channel_index][other_index].NBinsAlong(dim);
+    int nbins_tot = inconfig.m_channel_variable_bins[local_channel_index][other_index].NBins();
+    int nbins_dim = inconfig.m_channel_variable_bins[local_channel_index][other_index].NBinsAlong(dim);
     std::vector<float> bin_edges =  inconfig.m_channel_variable_bins[local_channel_index][other_index].Edges();
     std::string hist_name = inconfig.m_channel_names[local_channel_index] + " Data";
     std::string xaxis_title =  inconfig.m_channel_variable_units[local_channel_index][other_index];
@@ -55,14 +56,14 @@ TH1D PROdata::toTH1D(const PROconfig &inconfig, int global_channel_index, int ot
 
     log<LOG_DEBUG>(L"%1% || in F ") % __func__ ;
     //fill 1D hist
-    TH1D hSpec(hist_name.c_str(),hist_name.c_str(), nbins, &bin_edges[0]); 
+    TH1D hSpec(hist_name.c_str(),hist_name.c_str(), nbins_dim, &bin_edges[0]); 
     hSpec.GetXaxis()->SetTitle(xaxis_title.c_str());
 
     // Project spectra along this axis
-    Eigen::VectorXf spec_dim = inconfig.m_channel_variable_bins[local_channel_index][other_index].ProjectSpectra(spec(Eigen::seqN(global_bin_start, nbins)), dim);
-    Eigen::VectorXf error_dim = inconfig.m_channel_variable_bins[local_channel_index][other_index].ProjectSpectraErrors(error(Eigen::seqN(global_bin_start, nbins)), dim);
+    Eigen::VectorXf spec_dim = inconfig.m_channel_variable_bins[local_channel_index][other_index].ProjectSpectra(spec(Eigen::seqN(global_bin_start, nbins_tot)), dim);
+    Eigen::VectorXf error_dim = inconfig.m_channel_variable_bins[local_channel_index][other_index].ProjectSpectraErrors(error(Eigen::seqN(global_bin_start, nbins_tot)), dim);
 
-    for(int i = 1; i <= nbins; ++i){
+    for(int i = 1; i <= nbins_dim; ++i){
         hSpec.SetBinContent(i, spec_dim(i -1));
         hSpec.SetBinError(i, error_dim(i -1));
     }
