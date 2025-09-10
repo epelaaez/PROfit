@@ -110,7 +110,7 @@ float PROfitter::Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed
     log<LOG_INFO>(L"%1% || Will swarm with %2% swarm points chis of %3% ") % __func__ % fitconfig.n_swarm_particles % swarm_string.c_str();
 
     PROswarm PSO(metric, rng, swarm_start_points, lb, ub , fitconfig.n_swarm_iterations);
-    PSO.runSwarm(metric, rng);
+    PSO.runSwarm(metric, rng, fitconfig);
 
     Eigen::VectorXf x;  
 
@@ -293,7 +293,9 @@ int PROfitter::calcFreqSeedPoints(PROmetric &metric) {
 
     //staggered test points, focus on active refion for efficiency
     float s1=0.0, s2=1.5;
-    float w1=0.1, w2=0.01, w3 =0.05;
+    float w2= fabs(s2-s1)/float(fitconfig.harmonic_num_test_points);
+    float w1=w2*10.0; 
+    float w3 =w2*5.0;
     std::vector<float> test_p;
     for (float val = lb(osc_par); val <= s1; val += w1) test_p.push_back(val);
     for (float val = s1 + w2; val <= s2; val += w2) test_p.push_back(val);
@@ -328,9 +330,7 @@ int PROfitter::calcFreqSeedPoints(PROmetric &metric) {
     }
 
     //#STEP 2 From the scan above, find local minima in freq
-    float chi2_drop_param = 0.5;
-    float min_dist_minima_param = 0.025;
-    std::vector<std::pair<float,float>> minima = findSignificantMinima(chipos, chivalues,  chi2_drop_param, min_dist_minima_param, true);
+    std::vector<std::pair<float,float>> minima = findSignificantMinima(chipos, chivalues, true);
 
 
 
@@ -400,11 +400,11 @@ int PROfitter::calcFreqSeedPoints(PROmetric &metric) {
     freq_seed_values.push_back(chibf);
 
     log<LOG_INFO>(L"%1% || ##################  ") %__func__;
-    log<LOG_INFO>(L"%1% || We have calculated %2% frequency seed points in total, plus 1 for global BF. Checking norm for differences! ") %__func__% freq_seed_values.size();
+    log<LOG_DEBUG>(L"%1% || We have calculated %2% frequency seed points in total, plus 1 for global BF. Checking norm for differences! ") %__func__% freq_seed_values.size();
 
     std::vector<bool> keep(freq_seed_values.size(), true);
-    float norm_tol = 1e-4;  
-    float chi_tol = 1e-6;   
+    float norm_tol = fitconfig.harmonic_seed_norm_tolerance; 
+    float chi_tol = fitconfig.harmonic_seed_chi_tolerence;    
 
     for(size_t p = 0; p < freq_seed_values.size(); p++){
         if(!keep[p]) continue;  // needa to skip if already marked for del
@@ -416,15 +416,15 @@ int PROfitter::calcFreqSeedPoints(PROmetric &metric) {
             float chiq = freq_seed_values.at(q);
             float normpq = (freq_seed_points.at(p) - freq_seed_points.at(q)).norm();
 
-            log<LOG_INFO>(L"%1% || NORM freq seed (%2%,%3%) is : %4%, chi_diff: %5%") % __func__ % p % q % normpq % std::abs(chip - chiq);
+            log<LOG_DEBUG>(L"%1% || NORM freq seed (%2%,%3%) is : %4%, chi_diff: %5%") % __func__ % p % q % normpq % std::abs(chip - chiq);
 
             if(normpq < norm_tol && std::abs(chip - chiq) < chi_tol) {
                 if(chip <= chiq) {
                     keep[q] = false;
-                    log<LOG_INFO>(L"%1% || Removing duplicate %2% (keeping %3%)") % __func__ % q % p;
+                    log<LOG_DEBUG>(L"%1% || Removing duplicate %2% (keeping %3%)") % __func__ % q % p;
                 } else {
                     keep[p] = false;
-                    log<LOG_INFO>(L"%1% || Removing duplicate %2% (keeping %3%)") % __func__ % p % q;
+                    log<LOG_DEBUG>(L"%1% || Removing duplicate %2% (keeping %3%)") % __func__ % p % q;
                 }
             }
         }
@@ -460,20 +460,15 @@ int PROfitter::calcFreqSeedPoints(PROmetric &metric) {
     return freq_seed_values.size();
 }
 
-std::vector<std::pair<float, float>> PROfitter::findSignificantMinima(  const std::vector<float>& x_values,const std::vector<float>& y_values,     
-        float in_prominence_threshold ,  float in_min_spacing_log ,     bool use_log_spacing ){
+std::vector<std::pair<float, float>> PROfitter::findSignificantMinima(  const std::vector<float>& x_values,const std::vector<float>& y_values,  bool use_log_spacing ){
 
 
     std::vector<std::pair<float, float>> minima;  
-    float prominence_threshold = in_prominence_threshold;
-    float min_spacing_log = in_min_spacing_log;
+    float prominence_threshold = fitconfig.harmonic_prominence_threshold;
+    float min_spacing_log = fitconfig.harmonic_min_spacing_log;
 
-    int att =0;
-    int minmin = 4;
-    int maxmin = 15;
-    while(minima.size()< minmin || minima.size()>maxmin){
+    while(minima.size()< fitconfig.harmonic_min_num_seeds || minima.size()>fitconfig.harmonic_max_num_seeds){
         //while(minima.size()==0 || minima.size()>15){
-        att++;
         if(x_values.size() != y_values.size() || x_values.size() < 3) {
             return minima;
         }
@@ -533,13 +528,11 @@ std::vector<std::pair<float, float>> PROfitter::findSignificantMinima(  const st
             }
         }
 
-        if(minima.size()<minmin){
-            prominence_threshold = prominence_threshold*0.95;
-            //min_spacing_log = min_spacing_log*0.9;
+        if(minima.size()<fitconfig.harmonic_min_num_seeds){
+            prominence_threshold = prominence_threshold*(1.0-fitconfig.harmonic_prominence_threshold_shift);
         }
-        if(minima.size()>maxmin){
-            prominence_threshold = prominence_threshold*1.05;
-            //min_spacing_log = min_spacing_log*1.1;
+        if(minima.size()>fitconfig.harmonic_max_num_seeds){
+            prominence_threshold = prominence_threshold*(1.0+fitconfig.harmonic_prominence_threshold_shift);
         }
         log<LOG_DEBUG>(L"%1% || Minima.size() (%2%) prom %3% minspace %4% ") %__func__% minima.size() % prominence_threshold % min_spacing_log;
         log<LOG_DEBUG>(L"%1% || X (%2%) ") %__func__% x_values;
@@ -548,10 +541,10 @@ std::vector<std::pair<float, float>> PROfitter::findSignificantMinima(  const st
             log<LOG_DEBUG>(L"%1% || Min (%2%, %3%)  ") %__func__% m.first % m.second;
         }
 
-        if(prominence_threshold<1e-6){
-            min_spacing_log = min_spacing_log*0.95;
+        if(prominence_threshold<10*fitconfig.harmonic_prominence_threshold_minimum){
+            min_spacing_log = min_spacing_log*(1.0-fitconfig.harmonic_prominence_threshold_shift);
         }
-        if(prominence_threshold<1e-7){
+        if(prominence_threshold<fitconfig.harmonic_prominence_threshold_minimum){
             return minima;
         }
     }

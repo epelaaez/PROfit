@@ -62,6 +62,7 @@ int main(int argc, char* argv[])
     std::string analysis_tag = "PROfit";
     std::string output_tag = "v1";
     std::string chi2 = "PROchi";
+    bool show_fit_help = false;
     bool eventbyevent=false;
     bool shapeonly = false;
     bool rateonly = false;
@@ -120,7 +121,8 @@ int main(int argc, char* argv[])
     app.add_option("--scale", scale_arg, "Scale detector POT by a given value.");
     app.add_option("--syst-list", syst_list, "Override list of systematics to use (note: all systs must be in the xml).");
     app.add_option("--exclude-systs", systs_excluded, "List of systematics to exclude.")->excludes("--syst-list"); 
-    app.add_option("--fit-options", global_fit_options, "Parameters for single, detailed global best fit LBFGSB. See PROfitter.h for available settings.");
+    app.add_option("--fit-options", global_fit_options, "Parameters for single, detailed global best fit LBFGSB. See PROfitter.h or run --fit-help for available settings.");
+    app.add_flag("--fit-help", show_fit_help, "Show detailed help for all fitting parameters (L-BFGS-B, PSO, MCMC, etc.)");
     app.add_option("--scan-fit-options", scan_fit_options, "Parameters for simpier, multiple best fits in PROfile/surface LBFGSB.");
     app.add_option("-p,--preset", fit_preset, "Preset fitting params. Available `fast`, `good` and `overkill` .");
     app.add_option("-f, --rwfile", reweights_file, "File containing histograms for reweighting");
@@ -182,6 +184,11 @@ int main(int argc, char* argv[])
 
     //Parse inputs. 
     CLI11_PARSE(app, argc, argv);
+
+    if(show_fit_help) {
+        PROfit::PROfitterConfig::PrintHelp();
+        return 0;
+    }
 
     if(log_file != "") {
         log_impl::EnableFileLogging(log_file);

@@ -67,13 +67,14 @@ namespace PROfit{
                 }//
             }
 
-            void runSwarm(PROmetric &metric,std::mt19937 &gen ) {
-                const float inertia_w_start = 0.9; 
-                const float inertia_w_end = 0.6; 
-                const float cognitive_w = 2.0; 
-                const float social_w = 2.0; 
-                const size_t max_stagnant_iterations =50;
-                const float  convergence_threshold = 1e-4;
+            void runSwarm(PROmetric &metric,std::mt19937 &gen , PROfitterConfig &fitconfig ) {
+               
+                const float inertia_w_start = fitconfig.swarm_inertia_start; 
+                const float inertia_w_end = fitconfig.swarm_inertia_end; 
+                const float cognitive_w = fitconfig.swarm_cognitive_score; 
+                const float social_w = fitconfig.swarm_social_score; 
+                const size_t max_stagnant_iterations =fitconfig.n_swarm_max_stagnent_iterations;
+                const float  convergence_threshold = fitconfig.swarm_convergence_theshold;
                 size_t stagnant_iterations = 0;
                 float previous_best_chi = global_best_chi;
 
