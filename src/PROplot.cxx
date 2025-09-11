@@ -227,7 +227,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
 
         Eigen::VectorXf bf_spec;
         if(best_fit) {
-            bf_spec =  CollapseMatrix(config, best_fit->Spec(), other_index);
+            bf_spec = config.GetChannelVariableBins(0, other_index).ProjectSpectra(CollapseMatrix(config, best_fit->Spec(), other_index), 0);
         }
 
         std::string ytitle = bool(opt&PlotOptions::AreaNormalized)
