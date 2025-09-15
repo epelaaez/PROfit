@@ -194,24 +194,33 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
 
         Eigen::VectorXf cv =  CollapseMatrix(config, FillCVSpectra(config, prop, true, other_index).Spec(), other_index);
 
-        std::vector<float> edges = config.GetChannelVariableBinEdges(0, other_index);
+        std::vector<float> edges;//= config.GetChannelVariableBinEdges(0, other_index);
         log<LOG_DEBUG>(L"%1% || For other var %2% the cv is %3% and the edges are %4%") % __func__ % other_index % cv % edges;
-        std::vector<float> centers;
+    
+        size_t global_channel_index = 0;
+        for(size_t mode = 0; mode < config.m_num_modes; ++mode) {
+            for(size_t det = 0; det < config.m_num_detectors; ++det) {
+                for(size_t channel = 0; channel < config.m_num_channels; ++channel) {
+                    std::vector<float> tedges =  config.GetChannelVariableBinEdges(global_channel_index, other_index);
+                    for(auto &p:tedges)  edges.push_back(p);
+                }
+            }
+        }
+
         size_t nerrorsample = 5000;
-        for(size_t i = 0; i < edges.size() - 1; ++i)
-            centers.push_back((edges[i+1] + edges[i])/2);
+        
         std::vector<Eigen::VectorXf> specs;
         std::uniform_int_distribution<uint32_t> dseed(0, std::numeric_limits<uint32_t>::max());
+        
+        //Fills already collapsed
         for(size_t i = 0; i < nerrorsample; ++i){
             specs.push_back(FillSystRandomThrow(config, prop, syst, dseed(PROseed::global_rng), other_index).Spec());
-
         }
-        //specs.push_back(CollapseMatrix(config, FillSystRandomThrow(config, prop, syst).Spec()));
+
         TH1D tmphist("th", "", cv.size(), edges.data());
         for(int i = 0; i < cv.size(); ++i)
             tmphist.SetBinContent(i+1, cv(i));
         if(scale) tmphist.Scale(1, "width");
-        //std::unique_ptr<TGraphAsymmErrors> ret = std::make_unique<TGraphAsymmErrors>(cv.size(), centers.data(), cv.data());
         std::unique_ptr<TGraphAsymmErrors> ret = std::make_unique<TGraphAsymmErrors>(&tmphist);
         for(int i = 0; i < cv.size(); ++i) {
             std::vector<float> binconts(nerrorsample);
