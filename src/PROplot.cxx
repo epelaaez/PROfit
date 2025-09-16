@@ -202,6 +202,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
             for(size_t det = 0; det < config.m_num_detectors; ++det) {
                 for(size_t channel = 0; channel < config.m_num_channels; ++channel) {
                     std::vector<float> tedges =  config.GetChannelVariableBinEdges(global_channel_index, other_index);
+                    global_channel_index++;
                     for(auto &p:tedges)  edges.push_back(p);
                 }
             }
@@ -398,7 +399,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                         int channel_start =  config.GetCollapsedGlobalVariableBinStart(global_channel_index, other_index);
                         for(size_t bin = 0; bin < channel_nbins; ++bin) {
                             float scale = 1.0;
-                            if(bool(opt&PlotOptions::AreaNormalized)) {
+                            if(bool(opt&PlotOptions::AreaNormalized) || bool(opt&PlotOptions::BinWidthScaled)) {
                                 scale = post_channel_errband->GetPointY(bin) / (*posterrband)->GetPointY(bin+channel_start);
                             }
                             post_channel_errband->SetPointEYhigh(bin, scale*(*posterrband)->GetErrorYhigh(bin+channel_start));
@@ -410,7 +411,6 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                         post_channel_errband->SetLineWidth(1);
                         //leg->AddEntry(post_channel_errband, "post-fit #pm 1#sigma", "f");
                     }
-
                     TH1D data_hist;
                     if(data) {
 

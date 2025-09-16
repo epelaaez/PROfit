@@ -74,16 +74,16 @@ namespace PROfit{
     int plotPriorFractionalSystematicBreakdown(const PROconfig &config, const PROspec &spec, const PROsyst &allsplinesyst, std::string filename, int var_index = 0);
 
     template<class T, class P>
-    std::unique_ptr<TGraphAsymmErrors> getMCMCErrorBand(Metropolis<T, P> met, size_t burnin, size_t iterations, const PROconfig &config, const PROpeller &prop, PROmetric &metric, const Eigen::VectorXf &best_fit, std::vector<TH1D> &posteriors, Eigen::MatrixXf &post_covar, bool scale = false) {
+    std::unique_ptr<TGraphAsymmErrors> getMCMCErrorBand(Metropolis<T, P> met, size_t burnin, size_t iterations, const PROconfig &config, const PROpeller &prop, PROmetric &metric, const Eigen::VectorXf &best_fit, std::vector<TH1D> &posteriors, Eigen::MatrixXf &post_covar,  bool scale = false,int var_index=0) {
             for(size_t i = 0; i < metric.GetSysts().GetNSplines(); ++i)
                 posteriors.emplace_back("", (";"+config.m_mcgen_variation_plotname_map.at(metric.GetSysts().spline_names[i])).c_str(), 60, -3, 3);
 
-            Eigen::VectorXf cv = FillSpectra(config, prop, metric.GetSysts(), metric.GetModel(), best_fit, true, config.i_prime).Spec();
+            Eigen::VectorXf cv = FillSpectra(config, prop, metric.GetSysts(), metric.GetModel(), best_fit, true, var_index).Spec();
             Eigen::MatrixXf L; 
             if(metric.GetSysts().GetNCovar() > 0) L = metric.GetSysts().DecomposeFractionalCovariance(config, cv);
-            else L = Eigen::MatrixXf::Zero(config.m_num_variable_bins_total_collapsed[config.i_prime], config.m_num_variable_bins_total_collapsed[config.i_prime]);
+            else L = Eigen::MatrixXf::Zero(config.m_num_variable_bins_total_collapsed[var_index], config.m_num_variable_bins_total_collapsed[var_index]);
             std::normal_distribution<float> nd;
-            Eigen::VectorXf throws = Eigen::VectorXf::Constant(config.m_num_variable_bins_total_collapsed[config.i_prime], 0);
+            Eigen::VectorXf throws = Eigen::VectorXf::Constant(config.m_num_variable_bins_total_collapsed[var_index], 0);
 
             int nspline = metric.GetSysts().GetNSplines();
             int nphys = metric.GetModel().nparams;
@@ -93,9 +93,9 @@ namespace PROfit{
             std::vector<Eigen::VectorXf> specs;
             const auto action = [&](const Eigen::VectorXf &value) {
                 accepted += 1;
-                for(size_t i = 0; i < config.m_num_variable_bins_total_collapsed[config.i_prime]; ++i)
+                for(size_t i = 0; i < config.m_num_variable_bins_total_collapsed[var_index]; ++i)
                     throws(i) = nd(PROseed::global_rng);
-                specs.push_back(CollapseMatrix(config, FillSpectra(config, prop, metric.GetSysts(), metric.GetModel(), value, true,config.i_prime).Spec())+L*throws);
+                specs.push_back(CollapseMatrix(config, FillSpectra(config, prop, metric.GetSysts(), metric.GetModel(), value, true,var_index).Spec())+L*throws);
                 for(size_t i = 0; i < metric.GetSysts().GetNSplines(); ++i)
                     posteriors[i].Fill(value(i+nphys));
                 Eigen::VectorXf splines = value.segment(nphys, nspline);
@@ -110,12 +110,21 @@ namespace PROfit{
             post_covar /= accepted;
             log<LOG_INFO>(L"%1% || Acceptance rate %2%") % __func__ % ((float)accepted / iterations);
 
-            //TODO: Only works with 1 mode/detector/channel
             cv = CollapseMatrix(config, cv);
-            std::vector<float> edges = config.GetChannelVariableBinEdges(0,config.i_prime);
-            std::vector<float> centers;
-            for(size_t i = 0; i < edges.size() - 1; ++i)
-                centers.push_back((edges[i+1] + edges[i])/2);
+
+            std::vector<float> edges;
+            size_t global_channel_index = 0;
+            for(size_t mode = 0; mode < config.m_num_modes; ++mode) {
+                for(size_t det = 0; det < config.m_num_detectors; ++det) {
+                    for(size_t channel = 0; channel < config.m_num_channels; ++channel) {
+                        std::vector<float> tedges =  config.GetChannelVariableBinEdges(global_channel_index, var_index);
+                        global_channel_index++;
+                        for(auto &p:tedges)  edges.push_back(p);
+                    }
+                }
+            }
+
+
             TH1D tmphist("th", "", cv.size(), edges.data());
             for(int i = 0; i < cv.size(); ++i)
                 tmphist.SetBinContent(i+1, cv(i));
