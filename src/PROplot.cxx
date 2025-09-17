@@ -273,8 +273,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
 
                     Eigen::VectorXf bf_spec;
                     if(best_fit) {
-                        //bf_spec = config.GetChannelVariableBins(global_channel_index, other_index).ProjectSpectra(CollapseMatrix(config, best_fit->Spec(), other_index), 0);
-                        bf_spec =CollapseMatrix(config, best_fit->Spec(), other_index);//TODO, get N-dim compatability?
+                        bf_spec = CollapseMatrix(config, best_fit->Spec(), other_index);//TODO, get N-dim compatability?
                     }
 
                     size_t channel_nbins = config.m_channel_variable_bins[channel][other_index].NBinsAlong(0);
@@ -379,8 +378,10 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                     TH1D bf_hist(("bf"+std::to_string(global_channel_index)).c_str(), "", channel_nbins, edges.data());
                     if(best_fit) {
                         int channel_start =  config.GetCollapsedGlobalVariableBinStart(global_channel_index, other_index);
+                        size_t total_bins = config.GetChannelVariableBins(global_channel_index, other_index).NBins();
+                        Eigen::VectorXf this_bf_spec = config.GetChannelVariableBins(global_channel_index, other_index).ProjectSpectra(bf_spec(Eigen::seqN(channel_start, total_bins)), 0);
                         for(size_t bin = 0; bin < channel_nbins; ++bin) {
-                            bf_hist.SetBinContent(bin+1, bf_spec(bin+channel_start));
+                            bf_hist.SetBinContent(bin+1, bf_spec(bin));
                         }
                         //bf_hist.SetLineColor(TColor::GetColor(234, 67, 53)); // pastel red
                         bf_hist.SetLineColor(bfcol); 
