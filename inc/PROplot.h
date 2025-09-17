@@ -110,49 +110,42 @@ namespace PROfit{
             log<LOG_INFO>(L"%1% || Acceptance rate %2%") % __func__ % ((float)accepted / iterations);
 
             cv = CollapseMatrix(config, cv);
-
-            std::vector<float> centers;
-            size_t global_channel_index = 0;
-            for(size_t mode = 0; mode < config.m_num_modes; ++mode) {
-                for(size_t det = 0; det < config.m_num_detectors; ++det) {
-                    for(size_t channel = 0; channel < config.m_num_channels; ++channel) {
-                        std::vector<float> tedges =  config.GetChannelVariableBins(global_channel_index, var_index).Edges();
-                        global_channel_index++;
-                        for(size_t p=0; p<tedges.size(); p++){
-                            if(p<tedges.size()-1){
-                                centers.push_back((tedges[p+1]+tedges[p])/2.0);
-                            }
+ 
+        std::vector<float> centers;
+        size_t global_channel_index = 0;
+        for(size_t mode = 0; mode < config.m_num_modes; ++mode) {
+            for(size_t det = 0; det < config.m_num_detectors; ++det) {
+                for(size_t channel = 0; channel < config.m_num_channels; ++channel) {
+                    std::vector<float> tedges =  config.GetChannelVariableBins(global_channel_index, var_index).Edges();
+                    global_channel_index++;
+                    for(size_t p=0; p<tedges.size(); p++){
+                        if(p<tedges.size()-1){
+                            centers.push_back((tedges[p+1]+tedges[p])/2.0);
                         }
-                        
                     }
+                    
                 }
             }
-
-           // TH1D tmphist("th", "", cv.size(), edges.data());
-           // for(int i = 0; i < cv.size(); ++i)
-           //     tmphist.SetBinContent(i+1, cv(i));
-           // if(scale) tmphist.Scale(1, "width");
-           // std::unique_ptr<TGraphAsymmErrors> ret = std::make_unique<TGraphAsymmErrors>(&tmphist);
-           PROerrorbar ebar(cv.size());
-            for(int i = 0; i < cv.size(); ++i) {
-
-                std::vector<float> binconts(specs.size());
-                for(size_t j = 0; j < specs.size(); ++j) {
-                    binconts[j] = specs[j](i);
-                }
-                if(!binconts.size()) continue;
-                float scale_factor = scale ? 1.0/config.collapsed_bin_widths.at(var_index)(i) :  1.0;
-                if(std::isnan(scale_factor)) scale_factor = 1;
-                std::sort(binconts.begin(), binconts.end());
-                float ehi = std::abs((binconts[0.84*specs.size()] - cv(i))*scale_factor);
-                float elo = std::abs((cv(i) - binconts[0.16*specs.size()])*scale_factor);
-                ebar.error_up(i) =  ehi;
-                ebar.error_down(i) =  elo;
-                ebar.error_point(i) = centers.at(i)*scale_factor;
-                log<LOG_DEBUG>(L"%1% || ErrorBand bin %2% %3% %4% %5% %6% ") % __func__ % i % cv(i) % ehi % elo % scale_factor ;
-            }
-            return ebar;
         }
+
+        PROerrorbar ebar(cv.size());
+        for(int i = 0; i < cv.size(); ++i) {
+            std::vector<float> binconts(specs.size());
+            for(size_t j = 0; j < specs.size(); ++j) {
+                binconts[j] = specs[j](i);
+            }
+            float scale_factor = scale ? 1.0/config.collapsed_bin_widths.at(var_index)(i) :  1.0;
+            if(std::isnan(scale_factor)) scale_factor = 1;
+            std::sort(binconts.begin(), binconts.end());
+            float ehi = std::abs((binconts[int(0.840*specs.size())] - cv(i))*scale_factor);
+            float elo = std::abs((cv(i) - binconts[int(0.160*specs.size())])*scale_factor);
+            ebar.error_up(i) =  ehi;
+            ebar.error_down(i) =  elo;
+            ebar.error_point(i) = cv(i)*scale_factor;
+            log<LOG_DEBUG>(L"%1% || ErrorBand bin %2% %3% %4% %5% %6% ") % __func__ % i % cv(i) % ehi % elo % scale_factor ;
+        }
+        return ebar;
+    }
 
 
 };

@@ -258,10 +258,6 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
         std::map<std::string, std::unique_ptr<TH1D>> cvhists;
         if(cv) cvhists = getCVHists(*cv, config, (bool)(opt & PlotOptions::BinWidthScaled), other_index);
 
-        Eigen::VectorXf bf_spec;
-        if(best_fit) {
-            bf_spec = config.GetChannelVariableBins(0, other_index).ProjectSpectra(CollapseMatrix(config, best_fit->Spec(), other_index), 0);
-        }
 
         std::string ytitle = bool(opt&PlotOptions::AreaNormalized)
             ? "Area Normalized"
@@ -274,6 +270,13 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
         for(size_t mode = 0; mode < config.m_num_modes; ++mode) {
             for(size_t det = 0; det < config.m_num_detectors; ++det) {
                 for(size_t channel = 0; channel < config.m_num_channels; ++channel) {
+
+                    Eigen::VectorXf bf_spec;
+                    if(best_fit) {
+                        //bf_spec = config.GetChannelVariableBins(global_channel_index, other_index).ProjectSpectra(CollapseMatrix(config, best_fit->Spec(), other_index), 0);
+                        bf_spec =CollapseMatrix(config, best_fit->Spec(), other_index);//TODO, get N-dim compatability?
+                    }
+
                     size_t channel_nbins = config.m_channel_variable_bins[channel][other_index].NBinsAlong(0);
                     std::vector<float> edges = config.m_channel_variable_bins[channel][other_index].Edges();
                     std::string xtitle = config.m_channel_variable_units[channel][other_index];
@@ -358,7 +361,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                         for(size_t bin = 0; bin < channel_nbins; ++bin) {
                             float scale = 1.0;
 
-                            //log<LOG_DEBUG>(L"%1% || PARK IN bin %2% channel_nbins %3% channel_start %4% bin+channel_start %5% erriorN %6%") % __func__ % bin % channel_nbins % int(bin+channel_start) % errband->error_point.size();
+                            //log<LOG_DEBUG>(L"%1% || PARK IN bin %2% channel_nbins %3% channel_start %4% bin+channel_start %5% erriorN %6%") % __func__ % bin % channel_nbins % channel_start % int(bin+channel_start) % errband->error_point.size();
                             if(bool(opt&PlotOptions::AreaNormalized) || bool(opt&PlotOptions::BinWidthScaled)) {
                                 scale = channel_errband->GetPointY(bin) / errband->error_point(bin+channel_start);
                             }
