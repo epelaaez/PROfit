@@ -58,8 +58,32 @@ namespace PROfit{
       std::string associated_systematic;
       bool central_value;
 
-      std::shared_ptr<TTreeFormula> branch_monte_carlo_weight_formula = nullptr;
-      std::vector<std::shared_ptr<TTreeFormula>> branch_variable_formulas;
+      // Return type from a BranchVariable. Can be a single number or a list
+      struct Value {
+          std::vector<float> v;
+
+          Value() {}
+          Value(const std::vector<float> &v): v(v) {}
+          Value(float v): v({v}) {}
+
+          // Coerce the Value object into a single number
+          float first() {return v[0];}
+          size_t size() {return v.size();}
+      };
+
+      // Interface for loading data from an input. 
+      // Define this as abstract so we can load data from different inputs 
+      // in the future
+      class Formula {
+        public:
+          virtual Value EvalInstance() = 0;
+          virtual void LoadEvent(unsigned evtno) = 0;
+          virtual std::string FormulaName() const = 0;
+          virtual ~Formula() {}
+      };
+
+      std::shared_ptr<Formula> branch_monte_carlo_weight_formula = nullptr;
+      std::vector<std::shared_ptr<Formula>> branch_variable_formulas;
 
       int model_rule;
       int include_systematics;
@@ -97,17 +121,36 @@ namespace PROfit{
       float GetMonteCarloWeight() const{
 	if(branch_monte_carlo_weight_formula){ 
 
-	  return (float)branch_monte_carlo_weight_formula->EvalInstance();
+	  return branch_monte_carlo_weight_formula->EvalInstance().first();
 	}
 	return 1.0;
       }
 
-      template<typename T=float>
-    std::vector<T> GetVariables() const;
+      std::vector<BranchVariable::Value> GetVariables() const {
+          std::vector<BranchVariable::Value> ret;
+          for(const auto &formula: branch_variable_formulas) {
+              ret.push_back(formula->EvalInstance());
+          }
+          return ret;
+      }
 
 
     };
 
+
+    // Implementation of Formula interface for ROOT TTree, TTreeFormula based input
+    class ROOTFormula: public BranchVariable::Formula {
+      public:
+        ROOTFormula(const std::string &name, const std::string &formula, TTree *t);
+        BranchVariable::Value EvalInstance() override;
+        void LoadEvent(unsigned eventno) override;
+        std::string FormulaName() const override;
+        virtual ~ROOTFormula() {}
+
+      private:
+        std::vector<std::unique_ptr<TTreeFormula>> fs;
+        int treeNumber;
+    };
  
 
     /* 
@@ -181,6 +224,38 @@ namespace PROfit{
 
             static bool SameChannels(const PROconfig &one, const PROconfig &two);
 
+            // Helper object. Represents a general binning in N dimensions
+            struct Binning {
+              std::vector<std::vector<float>> bin_edges;
+              Binning() {}
+              Binning(const std::vector<std::vector<float>> &b): bin_edges(b) {}
+              Binning(const std::vector<float> &b): bin_edges({b}) {}
+
+              // Helper functions
+              size_t NDim() const {return bin_edges.size();}
+              // Total number of bins
+              size_t NBins() const;
+
+              // Project an input index across the full binning to a 1D index across the input dimension
+              size_t ProjectIndex(size_t ind, size_t dim) const;
+              Eigen::VectorXf ProjectSpectra(const Eigen::VectorXf &in, size_t dim) const;
+              Eigen::VectorXf ProjectSpectraErrors(const Eigen::VectorXf &in, size_t dim) const;
+
+              // Bin an input value
+              int Bin(const std::vector<float> &v) const;
+              int Bin(float v) const {return Bin(std::vector<float>({v}));}
+              int Bin(const BranchVariable::Value &v) const {return Bin(v.v);}
+
+              // number of bins along a dimension
+              size_t NBinsAlong(unsigned dim) const {return (bin_edges[dim].size() == 0) ? 0 : bin_edges[dim].size()-1;}
+              // number of bin edges along a dimension
+              size_t NBinEdgesAlong(unsigned dim) const {return bin_edges[dim].size();}
+              // return edges along a dimension
+              std::vector<float> Edges(unsigned dim = 0) const {return bin_edges[dim];}
+              // return widths along a dimension
+              std::vector<float> Widths(unsigned dim = 0) const;
+            };
+
             std::string m_xmlname;	
             float m_plot_pot;
             std::vector<std::string> m_fullnames;
@@ -196,9 +271,7 @@ namespace PROfit{
 
             // New
             std::vector<bool> m_channel_variable_plot_bool;
-            std::vector<std::vector<size_t>> m_channel_variable_num_bins;
-            std::vector<std::vector<std::vector<float>>> m_channel_variable_bin_edges;
-            std::vector<std::vector<std::vector<float>>> m_channel_variable_bin_widths;
+            std::vector<std::vector<PROconfig::Binning>> m_channel_variable_bins;
 
             //the xml names are the way we track which channels and subchannels we want to use later
             std::vector<std::string> m_mode_names; 			
@@ -321,9 +394,6 @@ namespace PROfit{
             size_t GetLocalChannelIndexFromGlobalChannelIndex(size_t global_channel_index) const; 
 
 
-            /* Function: given channel index, return number of other bins for this channel and other var*/
-            size_t GetChannelNVariableBins(size_t channel_index, size_t other_index) const;
-
             /* Function: given subchannel global index, return corresponding global bin start
              * Note: global bin index start from 0, not 1
              */
@@ -332,8 +402,7 @@ namespace PROfit{
             size_t GetCollapsedGlobalVariableBinStart(size_t channel_index, size_t other_index) const;
 
             /* Function: given channel index, return list of bin edges for this channel */
-            const std::vector<float>& GetChannelVariableBinEdges(size_t channel_index, size_t other_index) const;
-
+            const Binning& GetChannelVariableBins(size_t channel_index, size_t other_index) const;
 
             /* Function: Hex to int*/
             int HexToROOTColor(const std::string& hexColor) const;
@@ -343,23 +412,5 @@ namespace PROfit{
                     
 
     };
-
-
-    //----------- BELOW: Definition of BranchVariable templated member function. Please don't move it elsewhere !! ---------------
-    //----------- BELOW: Definition of BranchVariable templated member function. Please don't move it elsewhere !! ---------------
-    //----------- BELOW: Definition of BranchVariable templated member function. Please don't move it elsewhere !! ---------------
-
-    template <typename T>
-        std::vector<T> BranchVariable::GetVariables() const {
-            std::vector<T> ret;
-            for(const auto &formula: branch_variable_formulas) {
-                ret.push_back(formula->EvalInstance());
-            }
-            return ret;
-        }
-
-
-    //----------- ABOVE: Definition of BranchVariable templated member function. END ---------------
-
 }
 #endif

@@ -247,7 +247,7 @@ float PROCNP::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
 float PROCNP::getSingleChannelChi(size_t global_channel_index,size_t var_index) {
     PROspec cv = FillCVSpectra(config, peller,strat == BinnedChi2);
 
-    size_t nbin =  config.m_channel_variable_num_bins[config.GetLocalChannelIndexFromGlobalChannelIndex(global_channel_index)][var_index];
+    size_t nbin = config.m_channel_variable_bins[config.GetLocalChannelIndexFromGlobalChannelIndex(global_channel_index)][var_index].NBins();
     size_t startBin = config.GetCollapsedGlobalVariableBinStart(global_channel_index,var_index);
 
 

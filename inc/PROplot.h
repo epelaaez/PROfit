@@ -117,12 +117,13 @@ namespace PROfit{
             for(size_t mode = 0; mode < config.m_num_modes; ++mode) {
                 for(size_t det = 0; det < config.m_num_detectors; ++det) {
                     for(size_t channel = 0; channel < config.m_num_channels; ++channel) {
-                        std::vector<float> tedges =  config.GetChannelVariableBinEdges(global_channel_index, var_index);
+                        std::vector<float> tedges =  config.GetChannelVariableBin(global_channel_index, var_index).Edges();
                         global_channel_index++;
                         for(auto &p:tedges)  edges.push_back(p);
                     }
                 }
             }
+
 
 
             TH1D tmphist("th", "", cv.size(), edges.data());

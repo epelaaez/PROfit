@@ -190,7 +190,7 @@ namespace PROfit{
                             size_t is = inconfig.GetSubchannelIndex(name);     
                             size_t ic = inconfig.GetLocalChannelIndexFromGlobalSubchannelIndex(is); 
                             size_t start = inconfig.GetGlobalVariableBinStart(is,io); 
-                            for(size_t b = 0; b < inconfig.m_channel_variable_num_bins[io][ic] ; b++){
+                            for(size_t b = 0; b < inconfig.m_channel_variable_bins[io][ic].NBins(); b++){
                                 tmpbins.push_back((int)(start+b));
                             }
                         }

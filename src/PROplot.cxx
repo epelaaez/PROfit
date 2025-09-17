@@ -192,16 +192,15 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
         //TODO: Only works with 1 mode/detector/channel
         
 
-        Eigen::VectorXf cv =  CollapseMatrix(config, FillCVSpectra(config, prop, true, other_index).Spec(), other_index);
+        Eigen::VectorXf cv = config.GetChannelVariableBins(0, other_index).ProjectSpectra(CollapseMatrix(config, FillCVSpectra(config, prop, true, other_index).Spec(), other_index), 0);
 
-        std::vector<float> edges;//= config.GetChannelVariableBinEdges(0, other_index);
         log<LOG_DEBUG>(L"%1% || For other var %2% the cv is %3% and the edges are %4%") % __func__ % other_index % cv % edges;
     
         size_t global_channel_index = 0;
         for(size_t mode = 0; mode < config.m_num_modes; ++mode) {
             for(size_t det = 0; det < config.m_num_detectors; ++det) {
                 for(size_t channel = 0; channel < config.m_num_channels; ++channel) {
-                    std::vector<float> tedges =  config.GetChannelVariableBinEdges(global_channel_index, other_index);
+                    std::vector<float> tedges =  config.GetChannelVariableBins(global_channel_index, other_index).Edges();
                     global_channel_index++;
                     for(auto &p:tedges)  edges.push_back(p);
                 }
@@ -215,7 +214,12 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
         
         //Fills already collapsed
         for(size_t i = 0; i < nerrorsample; ++i){
-            specs.push_back(FillSystRandomThrow(config, prop, syst, dseed(PROseed::global_rng), other_index).Spec());
+            //specs.push_back(FillSystRandomThrow(config, prop, syst, dseed(PROseed::global_rng), other_index).Spec());
+            // throw systs, and project along the zero-dimension
+            Eigen::VectorXf var = FillSystRandomThrow(config, prop, syst, dseed(PROseed::global_rng), other_index).Spec();
+            Eigen::VectorXf var_proj = config.GetChannelVariableBins(0, other_index).ProjectSpectra(var, 0);
+            specs.push_back(var_proj);
+
         }
 
         TH1D tmphist("th", "", cv.size(), edges.data());
@@ -251,7 +255,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
 
         Eigen::VectorXf bf_spec;
         if(best_fit) {
-            bf_spec =  CollapseMatrix(config, best_fit->Spec(), other_index);
+            bf_spec = config.GetChannelVariableBins(0, other_index).ProjectSpectra(CollapseMatrix(config, best_fit->Spec(), other_index), 0);
         }
 
         std::string ytitle = bool(opt&PlotOptions::AreaNormalized)
@@ -265,8 +269,8 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
         for(size_t mode = 0; mode < config.m_num_modes; ++mode) {
             for(size_t det = 0; det < config.m_num_detectors; ++det) {
                 for(size_t channel = 0; channel < config.m_num_channels; ++channel) {
-                    size_t channel_nbins = config.m_channel_variable_num_bins[channel][other_index];
-                    std::vector<float> edges =  config.GetChannelVariableBinEdges(global_channel_index, other_index);
+                    size_t channel_nbins = config.m_channel_variable_bins[channel][other_index].NBinsAlong(0);
+                    std::vector<float> edges = config.m_channel_variable_bins[channel][other_index].Edges();
                     std::string xtitle = config.m_channel_variable_units[channel][other_index];
 
                     Color_t bfcol = TColor::GetColor(234, 67, 53);//ncie red
@@ -709,7 +713,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
 
                     int padIndex = 1;
 
-                    std::vector<float> bin_edges = config.GetChannelVariableBinEdges(global_channel_index,other_index);
+                    std::vector<float> bin_edges = config.GetChannelVariableBins(global_channel_index,other_index).Edges();
                     size_t binstart = config.GetCollapsedGlobalVariableBinStart(global_channel_index,other_index);
                     size_t nbins = config.m_channel_variable_num_bins[channel][other_index];
                     std::vector<int> channel_bins(nbins);
