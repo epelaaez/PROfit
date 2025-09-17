@@ -42,24 +42,30 @@ void PROdata::QuickFill(int bin_index, float weight){
     return;
 }
 
-TH1D PROdata::toTH1D(const PROconfig &inconfig, int global_channel_index, int other_index) const {
+TH1D PROdata::toTH1D(const PROconfig &inconfig, int global_channel_index, int other_index, int dim) const {
     int local_channel_index = inconfig.GetLocalChannelIndexFromGlobalChannelIndex(global_channel_index);
 
     int global_bin_start =  inconfig.GetCollapsedGlobalVariableBinStart(global_channel_index, other_index);
     //set up hist specs
-    int nbins =  inconfig.m_channel_variable_num_bins[local_channel_index][other_index];
-    const std::vector<float>& bin_edges =  inconfig.GetChannelVariableBinEdges(local_channel_index, other_index);
+    int nbins_tot = inconfig.m_channel_variable_bins[local_channel_index][other_index].NBins();
+    int nbins_dim = inconfig.m_channel_variable_bins[local_channel_index][other_index].NBinsAlong(dim);
+    std::vector<float> bin_edges =  inconfig.m_channel_variable_bins[local_channel_index][other_index].Edges();
     std::string hist_name = inconfig.m_channel_names[local_channel_index] + " Data";
     std::string xaxis_title =  inconfig.m_channel_variable_units[local_channel_index][other_index];
 
 
     log<LOG_DEBUG>(L"%1% || in F ") % __func__ ;
     //fill 1D hist
-    TH1D hSpec(hist_name.c_str(),hist_name.c_str(), nbins, &bin_edges[0]); 
+    TH1D hSpec(hist_name.c_str(),hist_name.c_str(), nbins_dim, &bin_edges[0]); 
     hSpec.GetXaxis()->SetTitle(xaxis_title.c_str());
-    for(int i = 1; i <= nbins; ++i){
-        hSpec.SetBinContent(i, spec(global_bin_start + i -1));
-        hSpec.SetBinError(i, error(global_bin_start + i -1));
+
+    // Project spectra along this axis
+    Eigen::VectorXf spec_dim = inconfig.m_channel_variable_bins[local_channel_index][other_index].ProjectSpectra(spec(Eigen::seqN(global_bin_start, nbins_tot)), dim);
+    Eigen::VectorXf error_dim = inconfig.m_channel_variable_bins[local_channel_index][other_index].ProjectSpectraErrors(error(Eigen::seqN(global_bin_start, nbins_tot)), dim);
+
+    for(int i = 1; i <= nbins_dim; ++i){
+        hSpec.SetBinContent(i, spec_dim(i -1));
+        hSpec.SetBinError(i, error_dim(i -1));
     }
 
     return hSpec;

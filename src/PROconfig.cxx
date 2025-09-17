@@ -4,6 +4,8 @@
 #include <cstdlib>
 #include <ctype.h>
 #include <numeric>
+#include "TTree.h"
+#include "TTreeFormula.h"
 using namespace PROfit;
 
 
@@ -70,16 +72,24 @@ bool PROconfig::SameChannels(const PROconfig &one, const PROconfig &two) {
                 % __func__ % one.m_channel_names[i].c_str() % two.m_channel_names[i].c_str();
             return false;
         }
-        if(one.m_channel_variable_num_bins[one.i_prime][i] != two.m_channel_variable_num_bins[two.i_prime][i]) {
+        if(one.m_channel_variable_bins[one.i_prime][i].NBins() != two.m_channel_variable_bins[two.i_prime][i].NBins()) {
             log<LOG_WARNING>(L"%1% || Found different number of channel bins %2% vs %3%")
-                % __func__ % one.m_channel_variable_num_bins[one.i_prime][i] % two.m_channel_variable_num_bins[two.i_prime][i];
+                % __func__ % one.m_channel_variable_bins[one.i_prime][i].NBins() % two.m_channel_variable_bins[two.i_prime][i].NBins();
             return false;
         }
-        for(size_t j = 0; j < one.m_channel_variable_num_bins[one.i_prime][i]+1; ++j) {
-            if(one.m_channel_variable_bin_edges[one.i_prime][i][j] != two.m_channel_variable_bin_edges[two.i_prime][i][j]) {
-                log<LOG_WARNING>(L"%1% || Found different bin edge for bin %2% in channel %3%. %4% vs %5%")
-                    % __func__ % j % one.m_channel_names[i].c_str() % one.m_channel_variable_bin_edges[one.i_prime][i][j] % two.m_channel_variable_bin_edges[two.i_prime][i][j];
-                return false;
+        if (one.m_channel_variable_bins[one.i_prime][i].NDim() != two.m_channel_variable_bins[two.i_prime][i].NDim()) {
+            log<LOG_WARNING>(L"%1% || Found different number of channel variable dimensions %2% vs %3%")
+                % __func__ % one.m_channel_variable_bins[one.i_prime][i].NDim() % two.m_channel_variable_bins[two.i_prime][i].NDim();
+            return false;
+        }
+
+        for (size_t jdim = 0; jdim < one.m_channel_variable_bins[one.i_prime][i].NDim(); jdim++) {
+            for (size_t k = 0; k < one.m_channel_variable_bins[one.i_prime][i].NBinEdgesAlong(jdim); k++) {
+                if(one.m_channel_variable_bins[one.i_prime][i].Edges(jdim)[k] != two.m_channel_variable_bins[two.i_prime][i].Edges(jdim)[k]) {
+                    log<LOG_WARNING>(L"%1% || Found different bin edge for bin %2% in channel %3% dimension %4%. %5% vs %6%")
+                        % __func__ % k % i % jdim % one.m_channel_variable_bins[one.i_prime][i].Edges(jdim)[k] % two.m_channel_variable_bins[two.i_prime][i].Edges(jdim)[k];
+                    return false;
+                }
             }
         }
     }
@@ -315,12 +325,92 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
             log<LOG_DEBUG>(L"%1% || Loading Channel %2% with   ") % __func__ % m_channel_names.back().c_str() ;
 
-            tinyxml2::XMLElement *pBinO = pChan->FirstChildElement("bins");
-            m_channel_variable_num_bins.push_back({});
-            m_channel_variable_bin_edges.push_back({});
-            m_channel_variable_bin_widths.push_back({});
+            m_channel_variable_bins.push_back({});
             m_channel_variable_units.push_back({});
             
+
+            tinyxml2::XMLElement *pBin2DO = pChan->FirstChildElement("bins2D"); // 2D Bins
+            while(pBin2DO){
+                const char* omin_x = pBin2DO->Attribute("minx");
+                const char* omax_x = pBin2DO->Attribute("maxx");
+                const char* onbins_x = pBin2DO->Attribute("nbinsx");
+                const char* oedges_x = pBin2DO->Attribute("edgesx");
+
+                const char* omin_y = pBin2DO->Attribute("miny");
+                const char* omax_y = pBin2DO->Attribute("maxy");
+                const char* onbins_y = pBin2DO->Attribute("nbinsy");
+                const char* oedges_y = pBin2DO->Attribute("edgesy");
+
+                const char* ounits = pBin2DO->Attribute("unit");
+                const char* oplot = pBin2DO->Attribute("plot");
+
+                if((omin_x == NULL && omax_x == NULL && onbins_x == NULL && oedges_x == NULL) ||
+                   (omin_y == NULL && omax_y == NULL && onbins_y == NULL && oedges_y == NULL)) {
+                    log<LOG_DEBUG>(L"%1% || This variable has a NO other binning (or attribute min,max,nbins)  ") % __func__ ;
+                    m_channel_variable_bins.back().push_back(PROconfig::Binning());
+                    m_channel_variable_units.back().push_back("");
+                    m_channel_variable_plot_bool.push_back(true);
+                }else{
+                    log<LOG_DEBUG>(L"%1% || This variable has an Variable Binning.   ") % __func__  ;
+
+                    if(oplot == NULL || std::string(oplot)=="true"){
+                        m_channel_variable_plot_bool.push_back(true);
+                    }else{
+                        m_channel_variable_plot_bool.push_back(false);
+                    }
+
+                    std::vector<float> binedge_x;
+                    // use edges if defined, otherwise use min-max-nbins 
+                    if(oedges_x != NULL){
+                        std::stringstream other_iss(oedges_x);
+                        float number;
+                        while (other_iss >> number){
+                            binedge_x.push_back(number);
+                        }
+                        log<LOG_DEBUG>(L"%1% || This 2D variable has a Variable Binning in X with  %2% bins, Edges defined as %3%    ") % __func__ % binedge_x.size() % binedge_x;
+                    }else{
+                        float minp = strtod(omin_x, &end);
+                        float maxp = strtod(omax_x, &end);
+                        int nbinsp = (int)strtod(onbins_x, &end);
+                        float step = (maxp-minp)/(float)nbinsp;
+                        for(int i=0; i<nbinsp; i++){
+                            binedge_x.push_back(minp+i*step);
+                        }
+                        binedge_x.push_back(maxp);
+                        log<LOG_DEBUG>(L"%1% || This 2D variable has a Variable Binning in X with min %2%, max %3% and nbins %4%   ") % __func__ % minp % maxp % nbinsp ;
+                        log<LOG_DEBUG>(L"%1% || Which corresponds to edges %2%   ") % __func__ % binedge_x ;
+                    }
+
+                    std::vector<float> binedge_y;
+                    // use edges if defined, otherwise use min-max-nbins 
+                    if(oedges_y != NULL){
+                        std::stringstream other_iss(oedges_y);
+                        float number;
+                        while (other_iss >> number){
+                            binedge_y.push_back(number);
+                        }
+                        log<LOG_DEBUG>(L"%1% || This 2D variable has a Variable Binning in X with  %2% bins, Edges defined as %3%    ") % __func__ % binedge_y.size() % binedge_y;
+                    }else{
+                        float minp = strtod(omin_y, &end);
+                        float maxp = strtod(omax_y, &end);
+                        int nbinsp = (int)strtod(onbins_y, &end);
+                        float step = (maxp-minp)/(float)nbinsp;
+                        for(int i=0; i<nbinsp; i++){
+                            binedge_y.push_back(minp+i*step);
+                        }
+                        binedge_y.push_back(maxp);
+                        log<LOG_DEBUG>(L"%1% || This 2D variable has a Variable Binning in X with min %2%, max %3% and nbins %4%   ") % __func__ % minp % maxp % nbinsp ;
+                        log<LOG_DEBUG>(L"%1% || Which corresponds to edges %2%   ") % __func__ % binedge_y ;
+                    }
+
+                    m_channel_variable_bins.back().push_back(PROconfig::Binning(std::vector<std::vector<float>>({binedge_x, binedge_y})));
+                    m_channel_variable_units.back().push_back(ounits ? ounits : "");
+                }
+                pBin2DO = pBin2DO->NextSiblingElement("bins2D");
+            }
+            // 3D bins? 
+
+            tinyxml2::XMLElement *pBinO = pChan->FirstChildElement("bins"); // 1D Bins
             while(pBinO){
 
                 expected_attrs = {"min","max","nbins","edges","unit","plot"};
@@ -341,16 +431,13 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 const char* oplot = pBinO->Attribute("plot");
                 if(omin==NULL && omax==NULL && onbins==NULL && oedges == NULL) {
                     log<LOG_DEBUG>(L"%1% || This variable has a NO other binning (or attribute min,max,nbins)  ") % __func__ ;
-                    m_channel_variable_num_bins.back().push_back(0);
-                    m_channel_variable_bin_edges.back().push_back(std::vector<float>());
-                    m_channel_variable_bin_widths.back().push_back(std::vector<float>());
+                    m_channel_variable_bins.back().push_back(PROconfig::Binning());
                     m_channel_variable_units.back().push_back("");
                     m_channel_variable_plot_bool.push_back(true);
                 }else{
                     log<LOG_DEBUG>(L"%1% || This variable has an Variable Binning.   ") % __func__  ;
 
-                    int nbinsp;
-                    std::vector<float> binedge, binwidth;
+                    std::vector<float> binedge;
 
                     if(oplot == NULL || std::string(oplot)=="true"){
                         m_channel_variable_plot_bool.push_back(true);
@@ -365,41 +452,29 @@ int PROconfig::LoadFromXML(const std::string &filename){
                         while (other_iss >> number){
                             binedge.push_back(number);
                         }
-
-                        nbinsp = binedge.size() - 1;
-                        for(int i = 0; i != nbinsp; ++i){
-                            binwidth.push_back(binedge[i+1] - binedge[i]);
-                        }
-
-                        log<LOG_DEBUG>(L"%1% || This variable has a Variable Binning with  %2% bins, Edges defined as %3%    ") % __func__ % nbinsp % binedge ;
+                        log<LOG_DEBUG>(L"%1% || This variable has a Variable Binning with  %2% bins, Edges defined as %3%    ") % __func__ % binedge.size() % binedge ;
                     }else{
                         float minp = strtod(omin, &end);
                         float maxp = strtod(omax, &end);
-                        nbinsp = (int)strtod(onbins, &end);
+                        int nbinsp = (int)strtod(onbins, &end);
                         float step = (maxp-minp)/(float)nbinsp;
                         for(int i=0; i<nbinsp; i++){
                             binedge.push_back(minp+i*step);
                         }
                         binedge.push_back(maxp);
-                        binwidth.resize(nbinsp, step);
                         log<LOG_DEBUG>(L"%1% || This variable has a Variable Binning with min %2%, max %3% and nbins %4%   ") % __func__ % minp % maxp % nbinsp ;
                         log<LOG_DEBUG>(L"%1% || Which corresponds to edges %2%   ") % __func__ % binedge ;
                     }
 
-                    m_channel_variable_num_bins.back().push_back(nbinsp);
-                    m_channel_variable_bin_edges.back().push_back(binedge);
-                    m_channel_variable_bin_widths.back().push_back(binwidth);
+                    m_channel_variable_bins.back().push_back({binedge});
                     m_channel_variable_units.back().push_back(ounits ? ounits : "");
                 }
                 pBinO = pBinO->NextSiblingElement("bins");
             }
+
             if(m_bool_rate_only ){
-                m_channel_variable_num_bins[i_prime] = {1};
-                std::vector<float> binedges = m_channel_variable_bin_edges.back()[i_prime];
-                std::vector<float> counting_exp_bin = {binedges.front(), binedges.back()};
-                m_channel_variable_bin_edges.back()[i_prime] = {counting_exp_bin};
-                std::vector<float> counting_exp_width = {binedges.front()-binedges.back()};
-                m_channel_variable_bin_widths.back()[i_prime] = {counting_exp_width};
+                std::vector<float> edges = m_channel_variable_bins.back()[i_prime].Edges();
+                m_channel_variable_bins.back()[i_prime] = std::vector<float>({ edges.front(), edges.back()});
             }
 
             // Now loop over all this channels subchanels. Not the names must be UNIQUE!!
@@ -466,7 +541,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
         }
     }//end channel loop
     // Assume all channels have the same number of "other" vars
-    m_num_variables = m_channel_variable_bin_edges[0].size();
+    m_num_variables = m_channel_variable_bins[0].size();
     m_num_variable_bins_total = std::vector<size_t>(m_num_variables, 0);
     m_num_variable_bins_total_collapsed = std::vector<size_t>(m_num_variables, 0);
     m_num_variable_bins_mode_block = std::vector<size_t>(m_num_variables, 0);
@@ -681,9 +756,22 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
 
                 //Load all variables
-                tinyxml2::XMLElement *pVariable;
-                pVariable = pBranch->FirstChildElement("variable");
+                tinyxml2::XMLElement *pVariable2D;
+                // variable2D's and variable's are, for now, handled identically at config. 
+                // (The parsing of the input string is done by the Formula class constructed at runtime).
+                // This may change in the future, so keep the blocks separate
+                pVariable2D = pBranch->FirstChildElement("variable2D"); // 2D variable
                 int  nvar = 0;
+                while(pVariable2D){
+                    std::string var_text = std::string(pVariable2D->GetText());
+                    log<LOG_DEBUG>(L"%1% || Setting branch Variable num %2%, Formula: %3%") %__func__ % nvar % var_text.c_str();
+                    TEMP_branch_variables.back()->AddVariable(var_text);
+                    nvar++;
+                    pVariable2D = pVariable2D->NextSiblingElement("variable2D");
+                } // 3D variable?
+
+                tinyxml2::XMLElement *pVariable;
+                pVariable = pBranch->FirstChildElement("variable"); // 1D variable
                 while(pVariable){
                     std::string var_text = std::string(pVariable->GetText());
                     log<LOG_DEBUG>(L"%1% || Setting branch Variable num %2%, Formula: %3%") %__func__ % nvar % var_text.c_str();
@@ -691,6 +779,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                     nvar++;
                     pVariable = pVariable->NextSiblingElement("variable");
                 }
+
                 if(nvar == 0){
                     log<LOG_ERROR>(L"%1% || ERROR: Need at least 1 variable passed in. You passed zero ") % __func__;
                     log<LOG_ERROR>(L"Terminating.");
@@ -700,8 +789,6 @@ int PROconfig::LoadFromXML(const std::string &filename){
                     log<LOG_ERROR>(L"%1% || ERROR: They need to be the same for now, Sorry. ") % __func__;
                     log<LOG_ERROR>(L"Terminating.");
                     exit(EXIT_FAILURE);
-
-
                 }
                         
 
@@ -1163,8 +1250,8 @@ void PROconfig::CalcTotalBins(){
     log<LOG_INFO>(L"%1% || calculating number of bins involved") % __func__;
     for(size_t i = 0; i != m_num_channels; ++i){
         for(size_t io = 0; io < m_num_variables; ++io) {
-            m_num_variable_bins_detector_block[io] += m_num_subchannels[i]*m_channel_variable_num_bins[i][io];
-            m_num_variable_bins_detector_block_collapsed[io] += m_channel_variable_num_bins[i][io];
+            m_num_variable_bins_detector_block[io] += m_num_subchannels[i]*m_channel_variable_bins[i][io].NBins();
+            m_num_variable_bins_detector_block_collapsed[io] += m_channel_variable_bins[i][io].NBins();
         }
     }
 
@@ -1180,6 +1267,27 @@ void PROconfig::CalcTotalBins(){
 
     log<LOG_INFO>(L"%1% || Generating Index maps for convienance") % __func__;
     this->generate_index_map();
+
+    //some internal cals
+    
+    for(size_t io = 0; io < m_num_variables; ++io) {
+        std::vector<float> tmp;
+        int global_channel_index=0;
+        for(size_t mode = 0; mode < m_num_modes; ++mode) {
+            for(size_t det = 0; det < m_num_detectors; ++det) {
+                for(size_t channel = 0; channel < m_num_channels; ++channel) {
+                    std::vector<float> widths =  GetChannelVariableBins(global_channel_index, io).Widths();
+                    global_channel_index++;
+                    tmp.insert(tmp.end(), widths.begin(), widths.end());
+                }
+            }
+        }
+        Eigen::VectorXf coll_bin_widths = Eigen::Map<Eigen::VectorXf>(tmp.data(),tmp.size());
+        collapsed_bin_widths.push_back(coll_bin_widths);
+        log<LOG_INFO>(L"%1% || On variable %2% bin widths are size %3% and  %4% ") % __func__ % io % coll_bin_widths.size() % coll_bin_widths;
+
+    }
+
     return;
 }
 
@@ -1214,7 +1322,7 @@ size_t PROconfig::GetCollapsedGlobalVariableBinStart(size_t channel_index, size_
         exit(EXIT_FAILURE);
     }    
     size_t index = 0;
-    for(size_t i = 0; i < channel_index; ++i) index += m_channel_variable_num_bins[GetLocalChannelIndexFromGlobalChannelIndex(i)][other_index];
+    for(size_t i = 0; i < channel_index; ++i) index += m_channel_variable_bins[GetLocalChannelIndexFromGlobalChannelIndex(i)][other_index].NBins();
     return index;
 }
 
@@ -1229,11 +1337,7 @@ size_t PROconfig::GetLocalChannelIndexFromGlobalChannelIndex(size_t global_chann
     return global_channel_index%m_num_channels; 
 }
 
-
-
-
-size_t PROconfig::GetChannelNVariableBins(size_t channel_index, size_t other_index) const{
-
+const PROconfig::Binning& PROconfig::GetChannelVariableBins(size_t channel_index, size_t other_index) const {
     if(channel_index >= m_num_channels*m_num_modes*m_num_detectors) {
         size_t tot= m_num_channels*m_num_modes*m_num_detectors;
         log<LOG_ERROR>(L"%1% || Given channel index: %2% is out of bound") % __func__ % channel_index;
@@ -1241,25 +1345,8 @@ size_t PROconfig::GetChannelNVariableBins(size_t channel_index, size_t other_ind
         log<LOG_ERROR>(L"Terminating.");
         exit(EXIT_FAILURE);
     }
-    return m_channel_variable_num_bins[GetLocalChannelIndexFromGlobalChannelIndex(channel_index)][other_index];
-
+    return m_channel_variable_bins[GetLocalChannelIndexFromGlobalChannelIndex(channel_index)][other_index];
 }
-
-const std::vector<float>& PROconfig::GetChannelVariableBinEdges(size_t channel_index, size_t other_index) const{
-
-    if(channel_index >= m_num_channels*m_num_modes*m_num_detectors) {
-        size_t tot= m_num_channels*m_num_modes*m_num_detectors;
-        log<LOG_ERROR>(L"%1% || Given channel index: %2% is out of bound") % __func__ % channel_index;
-        log<LOG_ERROR>(L"%1% || Total number of channels : %2%") % __func__ % tot;
-        log<LOG_ERROR>(L"Terminating.");
-        exit(EXIT_FAILURE);
-    }
-
-    return m_channel_variable_bin_edges[GetLocalChannelIndexFromGlobalChannelIndex(channel_index)][other_index];
-
-}
-
-
 
 //------------ Start of private function ------------------
 //------------ Start of private function ------------------
@@ -1309,9 +1396,7 @@ void PROconfig::remove_unused_channel(){
         log<LOG_DEBUG>(L"%1% || Found unused channels!! Clean the messs up...") % __func__;
 
         //update channel-related info
-        std::vector<std::vector<size_t>> temp_channel_num_other_bins(m_num_channels);
-        std::vector<std::vector<std::vector<float>>> temp_channel_other_bin_edges(m_num_channels);
-        std::vector<std::vector<std::vector<float>>> temp_channel_other_bin_widths(m_num_channels);
+        std::vector<std::vector<Binning>> temp_channel_other_bins(m_num_channels);
 
         std::vector<std::string> temp_channel_names(m_num_channels);
         std::vector<std::string> temp_channel_plotnames(m_num_channels);
@@ -1323,9 +1408,7 @@ void PROconfig::remove_unused_channel(){
                 temp_channel_plotnames[chan_index] = m_channel_plotnames[i];
                 temp_channel_units[chan_index] = m_channel_units[i];
 
-                temp_channel_num_other_bins[chan_index] = m_channel_variable_num_bins[i];
-                temp_channel_other_bin_edges[chan_index] = m_channel_variable_bin_edges[i];
-                temp_channel_other_bin_widths[chan_index] = m_channel_variable_bin_widths[i];
+                temp_channel_other_bins[chan_index] = m_channel_variable_bins[i];
                 temp_channel_other_units[chan_index] = m_channel_variable_units[i];
 
                 ++chan_index;
@@ -1552,14 +1635,14 @@ void PROconfig::generate_index_map(){
                     m_vec_channel_index.push_back(ic);
 
                     for(size_t io = 0; io < m_num_variables; ++io) {
-                        size_t global_variable_index = mode_variable_start[io] + detector_variable_start[io] + channel_variable_start[io] + sc*m_channel_variable_num_bins[ic][io];
+                        size_t global_variable_index = mode_variable_start[io] + detector_variable_start[io] + channel_variable_start[io] + sc*m_channel_variable_bins[ic][io].NBins();
                         m_vec_global_variable_index_start[io].push_back(global_variable_index);
                     }
 
                     ++global_subchannel_index;
                 }
                 for(size_t io = 0; io < m_num_variables; ++io) {
-                    channel_variable_start[io] += m_channel_variable_num_bins[ic][io]*m_num_subchannels[ic];
+                    channel_variable_start[io] += m_channel_variable_bins[ic][io].NBins()*m_num_subchannels[ic];
                 }
             }
         }
@@ -1625,20 +1708,20 @@ void PROconfig::construct_variable_collapsing_matrices(){
         for(size_t ic =0; ic != m_num_channels; ++ic){
 
             //first, build matrix for each channel block
-            size_t total_num_bins_channel = m_num_subchannels[ic] * m_channel_variable_num_bins[ic][io];
+            size_t total_num_bins_channel = m_num_subchannels[ic] * m_channel_variable_bins[ic][io].NBins();
 
-            Eigen::MatrixXf channel_collapser = Eigen::MatrixXf::Zero(total_num_bins_channel, m_channel_variable_num_bins[ic][io]);
-            for(size_t col = 0; col != m_channel_variable_num_bins[ic][io]; ++col){
+            Eigen::MatrixXf channel_collapser = Eigen::MatrixXf::Zero(total_num_bins_channel, m_channel_variable_bins[ic][io].NBins());
+            for(size_t col = 0; col != m_channel_variable_bins[ic][io].NBins(); ++col){
                 for(size_t subch = 0; subch != m_num_subchannels[ic]; ++subch){
-                    size_t row = subch * m_channel_variable_num_bins[ic][io] + col;
+                    size_t row = subch * m_channel_variable_bins[ic][io].NBins() + col;
                     channel_collapser(row, col) = 1.0;
                 }
             }
 
             // now, copy this matrix to detector block
-            block_collapser(Eigen::seqN(channel_row_start, total_num_bins_channel), Eigen::seqN(channel_col_start, m_channel_variable_num_bins[ic][io])) = channel_collapser;
+            block_collapser(Eigen::seqN(channel_row_start, total_num_bins_channel), Eigen::seqN(channel_col_start, m_channel_variable_bins[ic][io].NBins())) = channel_collapser;
             channel_row_start += total_num_bins_channel;
-            channel_col_start += m_channel_variable_num_bins[ic][io];
+            channel_col_start += m_channel_variable_bins[ic][io].NBins();
         }
 
         //okay! now stuff every detector block size_to the final collapse matrix
@@ -1686,9 +1769,11 @@ uint32_t PROconfig::CalcHash() const{
     };
 
     unique_string << vecToString(m_fullnames);
-    for (const auto& vec1 : m_channel_variable_bin_edges){
+    for (const auto& vec1 : m_channel_variable_bins){
         for (const auto& vec2 : vec1){ 
-            unique_string << vecToString(vec2);
+            for (const auto& vec3 : vec2.bin_edges) {
+              unique_string << vecToString(vec3);
+            }
         }
     }
     for (const auto& vec : m_mcgen_additional_weight_name) 
@@ -1717,4 +1802,144 @@ uint32_t PROconfig::CalcHash() const{
     return hash;
 }
 
+ROOTFormula::ROOTFormula(const std::string &name, const std::string &formula, TTree *t) {
+    std::stringstream formula_reader(formula);
+    // split the formula at a "," into multiple values
+    std::string this_formula;
+    while(std::getline(formula_reader, this_formula, ',')) {
+        fs.push_back(std::make_unique<TTreeFormula>(name.c_str(), this_formula.c_str(), t));
+    }
+    treeNumber = -1;
+}
 
+BranchVariable::Value ROOTFormula::EvalInstance() {
+    BranchVariable::Value ret;
+    for (const std::unique_ptr<TTreeFormula> &f: fs) {
+        ret.v.push_back(f->EvalInstance());
+    }
+    return ret;
+}
+
+void ROOTFormula::LoadEvent(unsigned eventno) {
+    (void) eventno; // unused
+    if (fs.size() == 0) return;
+
+    const TTree *tree = fs[0]->GetTree();
+
+    int this_tree_number = tree->GetTreeNumber();
+
+    // if we're on a new tree, refresh the formulas
+    if (this_tree_number != treeNumber) {
+        treeNumber = this_tree_number;
+        for (const std::unique_ptr<TTreeFormula> &f: fs) {
+            f->GetNdata();
+            f->UpdateFormulaLeaves();
+        }
+    }
+}
+
+std::string ROOTFormula::FormulaName() const {
+    std::string ret;
+    bool delim = false;
+    for (const std::unique_ptr<TTreeFormula> &f: fs) {
+        if (delim) ret += ',';
+        ret += f->PrintValue();
+        delim = true;
+    }
+    return ret;
+}
+
+size_t PROconfig::Binning::NBins() const {
+    if (bin_edges.size() == 0) return 0;
+    size_t ret = 1;
+    for (const std::vector<float> &b: bin_edges) {
+        if (b.size() < 2) return 0;
+        ret *= (b.size() - 1);
+    }
+    return ret;
+}
+
+// Project an input index across the full binning to a 1D index across the input dimension
+size_t PROconfig::Binning::ProjectIndex(size_t ind, size_t dim) const {
+    size_t div = 1;
+    size_t stride = NBinsAlong(dim);
+    for (unsigned i_vec = NDim()-1; i_vec > dim; i_vec--) {
+        div *= NBinsAlong(i_vec);
+        stride *= NBinsAlong(i_vec);
+    }
+
+    return (ind % stride) / div;
+}
+
+Eigen::VectorXf PROconfig::Binning::ProjectSpectra(const Eigen::VectorXf &in, size_t dim) const {
+    if (in.size() % NBins() != 0) {
+        log<LOG_ERROR>(L"%1% || Mismatch between input spectrum length (%2%) and number of bins (%3%). Returning empty array.") % __func__ % in.size() % NBins();
+        return Eigen::VectorXf();
+    }
+    // This should be equal to num_detectors * num_subchannels. TODO: check?
+    unsigned n_copies = in.size() / NBins();
+
+    Eigen::VectorXf ret = Eigen::VectorXf::Zero(NBinsAlong(dim)*n_copies);
+
+    for (unsigned i = 0; i < in.size(); i++) {
+      unsigned i_copy = i / NBins();
+      unsigned i_bin = i % NBins();
+      ret(ProjectIndex(i_bin, dim) + i_copy*NBinsAlong(dim)) += in(i);
+    }
+
+    return ret;
+}
+
+Eigen::VectorXf PROconfig::Binning::ProjectSpectraErrors(const Eigen::VectorXf &in, size_t dim) const {
+    if (in.size() % NBins() != 0) {
+        log<LOG_ERROR>(L"%1% || Mismatch between input spectrum length (%2%) and number of bins (%3%). Returning empty array.") % __func__ % in.size() % NBins();
+        return Eigen::VectorXf();
+    }
+    // This should be equal to num_detectors * num_subchannels. TODO: check?
+    unsigned n_copies = in.size() / NBins();
+
+    Eigen::VectorXf ret = Eigen::VectorXf::Zero(NBinsAlong(dim)*n_copies);
+
+    for (unsigned i = 0; i < in.size(); i++) {
+      unsigned i_copy = i / NBins();
+      unsigned i_bin = i % NBins();
+      ret(ProjectIndex(i_bin, dim) + i_copy*NBinsAlong(dim)) += in(i)*in(i); // sum of squares
+    }
+
+    return ret.array().sqrt();
+}
+
+// Bin an input value
+int PROconfig::Binning::Bin(const std::vector<float> &v) const {
+    if (NDim() == 0) return 0;
+
+    if (v.size() != NDim()) {
+        log<LOG_ERROR>(L"%1% || Mismatch between input variable dimensions (%2%) and bin dimensions (%3%). Returning -1.") % __func__ % v.size() % NDim(); 
+        return -1;
+    }
+
+    size_t ret = 0;
+    size_t stride = 1;
+    for (int i_vec = NDim()-1; i_vec >=0; i_vec--) {
+        const std::vector<float> &thisbin = bin_edges[i_vec];
+        auto pos_iter = std::upper_bound(thisbin.begin(), thisbin.end(), v[i_vec]);
+        size_t local_bin = pos_iter - thisbin.begin() - 1;
+
+        if(pos_iter == thisbin.end() || pos_iter == thisbin.begin()){
+            log<LOG_DEBUG>(L"%1% || Value: %2% in Dim: %3% is in underflow or overflow bins, return bin of -1") % __func__ % v[i_vec] % i_vec;
+            log<LOG_DEBUG>(L"%1% || Binning has bin lower edge: %2% and bin upper edge: %3%") % __func__ % thisbin.front() % thisbin.back();
+            return -1;
+        }
+
+        ret += local_bin * stride;
+        stride *= NBinsAlong(i_vec);
+    }
+    return ret;
+}
+
+// return widths along a dimension
+std::vector<float> PROconfig::Binning::Widths(unsigned dim) const {
+    std::vector<float> ret;
+    for (int i = 0; i < (int)bin_edges[dim].size() - 1; i++) ret.push_back(bin_edges[dim][i+1] - bin_edges[dim][i]);
+    return ret;
+}

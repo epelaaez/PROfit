@@ -62,28 +62,27 @@ namespace PROfit{
 
 
 
-    void plot_channels(const std::string &filename, const PROconfig &config, std::optional<PROspec> cv, std::optional<PROspec> best_fit, std::optional<PROdata> data, std::optional<TGraphAsymmErrors*> errband, std::optional<TGraphAsymmErrors*> posterrband, std::vector<TPaveText> &texts, PlotOptions opt = PlotOptions::Default, int var_index = 0);
+    void plot_channels(const std::string &filename, const PROconfig &config, std::optional<PROspec> cv, std::optional<PROspec> best_fit, std::optional<PROdata> data, std::optional<PROerrorbar> errband, std::optional<PROerrorbar> posterrband, std::vector<TPaveText> &texts, PlotOptions opt = PlotOptions::Default, int var_index = 0);
 
     //some helper functions for PROplot
     std::map<std::string, std::unique_ptr<TH1D>> getCVHists(const PROspec & spec, const PROconfig& inconfig, bool scale = false, int var_index = 0);
     std::map<std::string, std::unique_ptr<TH2D>> covarianceTH2D(const PROsyst &syst, const PROconfig &config, const PROspec &cv);
     std::map<std::string, std::vector<std::pair<std::unique_ptr<TGraph>,std::unique_ptr<TGraph>>>> getSplineGraphs(const PROsyst &systs, const PROconfig &config);
-
-    std::unique_ptr<TGraphAsymmErrors> getErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, bool scale = false, int var_index = 0);
+    PROerrorbar getErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, bool scale = false, int other_index = 0);
 
     int plotPriorFractionalSystematicBreakdown(const PROconfig &config, const PROspec &spec, const PROsyst &allsplinesyst, std::string filename, int var_index = 0);
 
     template<class T, class P>
-    std::unique_ptr<TGraphAsymmErrors> getMCMCErrorBand(Metropolis<T, P> met, size_t burnin, size_t iterations, const PROconfig &config, const PROpeller &prop, PROmetric &metric, const Eigen::VectorXf &best_fit, std::vector<TH1D> &posteriors, Eigen::MatrixXf &post_covar, bool scale = false) {
+    PROerrorbar getMCMCErrorBand(Metropolis<T, P> met, size_t burnin, size_t iterations, const PROconfig &config, const PROpeller &prop, PROmetric &metric, const Eigen::VectorXf &best_fit, std::vector<TH1D> &posteriors, Eigen::MatrixXf &post_covar,  bool scale = false,int var_index=0) {
             for(size_t i = 0; i < metric.GetSysts().GetNSplines(); ++i)
                 posteriors.emplace_back("", (";"+config.m_mcgen_variation_plotname_map.at(metric.GetSysts().spline_names[i])).c_str(), 60, -3, 3);
 
-            Eigen::VectorXf cv = FillSpectra(config, prop, metric.GetSysts(), metric.GetModel(), best_fit, true, config.i_prime).Spec();
+            Eigen::VectorXf cv = FillSpectra(config, prop, metric.GetSysts(), metric.GetModel(), best_fit, true, var_index).Spec();
             Eigen::MatrixXf L; 
             if(metric.GetSysts().GetNCovar() > 0) L = metric.GetSysts().DecomposeFractionalCovariance(config, cv);
-            else L = Eigen::MatrixXf::Zero(config.m_num_variable_bins_total_collapsed[config.i_prime], config.m_num_variable_bins_total_collapsed[config.i_prime]);
+            else L = Eigen::MatrixXf::Zero(config.m_num_variable_bins_total_collapsed[var_index], config.m_num_variable_bins_total_collapsed[var_index]);
             std::normal_distribution<float> nd;
-            Eigen::VectorXf throws = Eigen::VectorXf::Constant(config.m_num_variable_bins_total_collapsed[config.i_prime], 0);
+            Eigen::VectorXf throws = Eigen::VectorXf::Constant(config.m_num_variable_bins_total_collapsed[var_index], 0);
 
             int nspline = metric.GetSysts().GetNSplines();
             int nphys = metric.GetModel().nparams;
@@ -93,9 +92,9 @@ namespace PROfit{
             std::vector<Eigen::VectorXf> specs;
             const auto action = [&](const Eigen::VectorXf &value) {
                 accepted += 1;
-                for(size_t i = 0; i < config.m_num_variable_bins_total_collapsed[config.i_prime]; ++i)
+                for(size_t i = 0; i < config.m_num_variable_bins_total_collapsed[var_index]; ++i)
                     throws(i) = nd(PROseed::global_rng);
-                specs.push_back(CollapseMatrix(config, FillSpectra(config, prop, metric.GetSysts(), metric.GetModel(), value, true,config.i_prime).Spec())+L*throws);
+                specs.push_back(CollapseMatrix(config, FillSpectra(config, prop, metric.GetSysts(), metric.GetModel(), value, true,var_index).Spec())+L*throws);
                 for(size_t i = 0; i < metric.GetSysts().GetNSplines(); ++i)
                     posteriors[i].Fill(value(i+nphys));
                 Eigen::VectorXf splines = value.segment(nphys, nspline);
@@ -110,34 +109,43 @@ namespace PROfit{
             post_covar /= accepted;
             log<LOG_INFO>(L"%1% || Acceptance rate %2%") % __func__ % ((float)accepted / iterations);
 
-            //TODO: Only works with 1 mode/detector/channel
             cv = CollapseMatrix(config, cv);
-            std::vector<float> edges = config.GetChannelVariableBinEdges(0,config.i_prime);
-            std::vector<float> centers;
-            for(size_t i = 0; i < edges.size() - 1; ++i)
-                centers.push_back((edges[i+1] + edges[i])/2);
-            TH1D tmphist("th", "", cv.size(), edges.data());
-            for(int i = 0; i < cv.size(); ++i)
-                tmphist.SetBinContent(i+1, cv(i));
-            if(scale) tmphist.Scale(1, "width");
-            std::unique_ptr<TGraphAsymmErrors> ret = std::make_unique<TGraphAsymmErrors>(&tmphist);
-            for(int i = 0; i < cv.size(); ++i) {
-                std::vector<float> binconts(specs.size());
-                for(size_t j = 0; j < specs.size(); ++j) {
-                    binconts[j] = specs[j](i);
+ 
+        std::vector<float> centers;
+        size_t global_channel_index = 0;
+        for(size_t mode = 0; mode < config.m_num_modes; ++mode) {
+            for(size_t det = 0; det < config.m_num_detectors; ++det) {
+                for(size_t channel = 0; channel < config.m_num_channels; ++channel) {
+                    std::vector<float> tedges =  config.GetChannelVariableBins(global_channel_index, var_index).Edges();
+                    global_channel_index++;
+                    for(size_t p=0; p<tedges.size(); p++){
+                        if(p<tedges.size()-1){
+                            centers.push_back((tedges[p+1]+tedges[p])/2.0);
+                        }
+                    }
+                    
                 }
-                if(!binconts.size()) continue;
-                float scale_factor = tmphist.GetBinContent(i+1)/cv(i);
-                if(std::isnan(scale_factor)) scale_factor = 1;
-                std::sort(binconts.begin(), binconts.end());
-                float ehi = std::abs((binconts[0.84*specs.size()] - cv(i))*scale_factor);
-                float elo = std::abs((cv(i) - binconts[0.16*specs.size()])*scale_factor);
-                ret->SetPointEYhigh(i, ehi);
-                ret->SetPointEYlow(i, elo);
-                log<LOG_DEBUG>(L"%1% || ErrorBand bin %2% %3% %4% %5% %6% %7%") % __func__ % i % cv(i) % ehi % elo % scale_factor % tmphist.GetBinContent(i+1);
             }
-            return ret;
         }
+
+        PROerrorbar ebar(cv.size());
+        for(int i = 0; i < cv.size(); ++i) {
+            std::vector<float> binconts(specs.size());
+            for(size_t j = 0; j < specs.size(); ++j) {
+                binconts[j] = specs[j](i);
+            }
+            float scale_factor = scale ? 1.0/config.collapsed_bin_widths.at(var_index)(i) :  1.0;
+            if(std::isnan(scale_factor)) scale_factor = 1;
+            std::sort(binconts.begin(), binconts.end());
+            float ehi = std::abs((binconts[int(0.840*specs.size())] - cv(i))*scale_factor);
+            float elo = std::abs((cv(i) - binconts[int(0.160*specs.size())])*scale_factor);
+            ebar.error_up(i) =  ehi;
+            ebar.error_down(i) =  elo;
+            ebar.error_point(i) = cv(i)*scale_factor;
+            log<LOG_DEBUG>(L"%1% || ErrorBand bin %2% %3% %4% %5% %6% ") % __func__ % i % cv(i) % ehi % elo % scale_factor ;
+        }
+        return ebar;
+    }
 
 
 };

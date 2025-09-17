@@ -39,7 +39,12 @@ PROchi::PROchi(const std::string tag, const PROconfig &conin, const PROpeller &p
         prior_covariance = systin->spline_priors.asDiagonal() * prior_covariance * systin->spline_priors.asDiagonal();
     }
     
-    collapsed_stat_covariance = data.Spec().array().matrix().asDiagonal();
+    // GP: What do you do if the MC has 0 events in a bin?
+    //     Proposed solution (hack?) here. Set the error to 1. This will return
+    //     the correct answer if there are no data events in the bin. It is a bit
+    //     iffier if there are data events in the bin, we may want to implement some
+    //     error handling there.
+    collapsed_stat_covariance = data.Spec().array().cwiseMax(1).matrix().asDiagonal();
 }
 
 float PROchi::Pull(const Eigen::VectorXf &systs) {
@@ -146,7 +151,7 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
 float PROchi::getSingleChannelChi(size_t global_channel_index, size_t var_index) {
     PROspec cv = FillCVSpectra(config, peller,strat == BinnedChi2);
 
-    size_t nbin =  config.m_channel_variable_num_bins[config.GetLocalChannelIndexFromGlobalChannelIndex(global_channel_index)][config.i_prime];
+    size_t nbin = config.m_channel_variable_bins[config.GetLocalChannelIndexFromGlobalChannelIndex(global_channel_index)][config.i_prime].NBins();
     size_t startBin = config.GetCollapsedGlobalVariableBinStart(global_channel_index, var_index);
 
 

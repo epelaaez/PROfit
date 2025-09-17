@@ -322,7 +322,7 @@ namespace PROfit {
 
 
             size_t start = config.GetGlobalVariableBinStart(is, other_index);
-            for(size_t b = 0; b < config.m_channel_variable_num_bins[ic][other_index] ; b++){
+            for(size_t b = 0; b < config.m_channel_variable_bins[ic][other_index].NBins(); b++) {
                 fracM(start+b,start+b)=flat_percent*flat_percent;
                 flatbins.push_back(start+b);
             }
@@ -438,7 +438,7 @@ namespace PROfit {
 
         //check for nan and infinite
         if(!in_matrix.allFinite()){
-            log<LOG_WARNING>(L"%1% || Matrix has Nan or non-finite values.") % __func__ ;
+            log<LOG_DEBUG>(L"%1% || Matrix has Nan or non-finite values.") % __func__ ;
             return false;
         }
         return true;
