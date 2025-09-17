@@ -225,12 +225,6 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
 
         }
 
-        //TH1D tmphist("th", "", cv.size(), edges.data());
-        //for(int i = 0; i < cv.size(); ++i)
-        //    tmphist.SetBinContent(i+1, cv(i));
-        //if(scale) tmphist.Scale(1, "width");
-        //std::unique_ptr<TGraphAsymmErrors> ret = std::make_unique<TGraphAsymmErrors>(&tmphist);
-
         PROerrorbar ebar(cv.size());
         for(int i = 0; i < cv.size(); ++i) {
             std::vector<float> binconts(nerrorsample);
@@ -559,7 +553,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                                 : bf_hist.GetBinContent(i+1);
                             float rat = numerator/denonminator;
                             if(isnan(rat)) rat = 1;
-                            ratio->SetBinError(i+1, 1.0 / sqrt(numerator));
+                            ratio->SetBinError(i+1, data_hist.GetBinError(i+1)/denonminator);
                             ratio->SetBinContent(i+1, rat);
                             one->SetBinContent(i+1, 1.0);
                             ratio_err->SetPointEYhigh(i, ratio_err->GetErrorYhigh(i)/ratio_err->GetPointY(i));
