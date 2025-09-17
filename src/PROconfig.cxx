@@ -1927,7 +1927,7 @@ int PROconfig::Binning::Bin(const std::vector<float> &v) const {
 
         if(pos_iter == thisbin.end() || pos_iter == thisbin.begin()){
             log<LOG_DEBUG>(L"%1% || Value: %2% in Dim: %3% is in underflow or overflow bins, return bin of -1") % __func__ % v[i_vec] % i_vec;
-            log<LOG_DEBUG>(L"%1% || Binning has bin lower edge: %3% and bin upper edge: %4%") % __func__ % thisbin.front() % thisbin.back();
+            log<LOG_DEBUG>(L"%1% || Binning has bin lower edge: %2% and bin upper edge: %3%") % __func__ % thisbin.front() % thisbin.back();
             return -1;
         }
 
