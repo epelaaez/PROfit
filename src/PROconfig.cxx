@@ -1267,6 +1267,27 @@ void PROconfig::CalcTotalBins(){
 
     log<LOG_INFO>(L"%1% || Generating Index maps for convienance") % __func__;
     this->generate_index_map();
+
+    //some internal cals
+    
+    for(size_t io = 0; io < m_num_variables; ++io) {
+        std::vector<float> tmp;
+        int global_channel_index=0;
+        for(size_t mode = 0; mode < m_num_modes; ++mode) {
+            for(size_t det = 0; det < m_num_detectors; ++det) {
+                for(size_t channel = 0; channel < m_num_channels; ++channel) {
+                    std::vector<float> widths =  GetChannelVariableBins(global_channel_index, io).Widths();
+                    global_channel_index++;
+                    tmp.insert(tmp.end(), widths.begin(), widths.end());
+                }
+            }
+        }
+        Eigen::VectorXf coll_bin_widths = Eigen::Map<Eigen::VectorXf>(tmp.data(),tmp.size());
+        collapsed_bin_widths.push_back(coll_bin_widths);
+        log<LOG_INFO>(L"%1% || On variable %2% bin widths are size %3% and  %4% ") % __func__ % io % coll_bin_widths.size() % coll_bin_widths;
+
+    }
+
     return;
 }
 

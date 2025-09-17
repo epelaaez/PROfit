@@ -299,6 +299,7 @@ namespace PROfit{
             std::vector<size_t> m_num_variable_bins_total_collapsed; 
 
             std::vector<Eigen::MatrixXf> variable_collapsing_matrices; 
+            std::vector<Eigen::VectorXf> collapsed_bin_widths;
 
             //This section entirely for montecarlo generation of a covariance matrix or PROspec 
             bool m_write_out_variation;

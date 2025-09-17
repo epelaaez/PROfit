@@ -676,7 +676,7 @@ int main(int argc, char* argv[])
 
         log<LOG_INFO>(L"%1% || Starting global getErrorBand() ") % __func__;
         Metropolis mh_pre(prior_only_target{*metric_to_use}, adaptive_proposal(*metric_to_use, dseed(PROseed::global_rng), fixed_pars), best_fit, dseed(PROseed::global_rng));
-        std::unique_ptr<TGraphAsymmErrors> err_band = 
+        PROerrorbar  err_band = 
             MCMC_prefit_errors
             ? getMCMCErrorBand(mh_pre, fitconfig.MCMCburn, fitconfig.MCMCiter, config, prop, *metric_to_use, best_fit, priors, prior_covariance, binwidth_scale,config.i_prime)
             : getErrorBand(config, prop, variable_systs[config.i_prime], binwidth_scale,config.i_prime);
@@ -684,7 +684,7 @@ int main(int argc, char* argv[])
         //Metropolis mh_post(simple_target{*metric_to_use}, simple_proposal(*metric_to_use, dseed(PROseed::global_rng), 0.2, fixed_pars), best_fit, dseed(PROseed::global_rng));
         Metropolis mh_post(simple_target{*metric_to_use}, adaptive_proposal(*metric_to_use, dseed(PROseed::global_rng), fixed_pars), best_fit, dseed(PROseed::global_rng));
         log<LOG_INFO>(L"%1% || Starting global getPostFitErrorBand() ") % __func__;
-        std::unique_ptr<TGraphAsymmErrors> post_err_band = getMCMCErrorBand(mh_post, fitconfig.MCMCburn, fitconfig.MCMCiter, config, prop, *metric_to_use, best_fit, posteriors, spline_covariance, binwidth_scale,config.i_prime);
+        PROerrorbar post_err_band = getMCMCErrorBand(mh_post, fitconfig.MCMCburn, fitconfig.MCMCiter, config, prop, *metric_to_use, best_fit, posteriors, spline_covariance, binwidth_scale,config.i_prime);
 
         std::vector<TPaveText> texts;
         TPaveText chi2text(0.55, 0.50, 0.85, 0.58, "NDC");
@@ -698,7 +698,7 @@ int main(int argc, char* argv[])
         PlotOptions opt = PlotOptions::DataPostfitRatio;
         if(binwidth_scale) opt |= PlotOptions::BinWidthScaled;
         if(area_normalized) opt |= PlotOptions::AreaNormalized;
-        plot_channels((final_output_tag+"_PROfile_hists.pdf"), config, cv, bf, data, err_band.get(), post_err_band.get(), texts, opt);
+        plot_channels((final_output_tag+"_PROfile_hists.pdf"), config, cv, bf, data, err_band, post_err_band, texts, opt);
 
         TCanvas c;
         c.Print((final_output_tag+"_postfit_posteriors.pdf[").c_str());
@@ -736,8 +736,8 @@ int main(int argc, char* argv[])
         TFile fout((final_output_tag+"_PROfile.root").c_str(), "RECREATE");
         profile.onesig.Write("one_sigma_errs");
         pre_hist.Write("cv");
-        err_band->Write("prefit_errband");
-        post_err_band->Write("postfit_errband");
+        //err_band->Write("prefit_errband");
+        //post_err_band->Write("postfit_errband");
         post_hist.Write("best_fit");
 
         //***********************************************************************
@@ -1205,12 +1205,12 @@ int main(int argc, char* argv[])
         }
 
 
-        std::vector<std::unique_ptr<TGraphAsymmErrors>> other_err_bands;
+        std::vector<PROerrorbar> other_err_bands;
         for(size_t io = 0; io < config.m_num_variables; ++io) {
             if(!config.m_channel_variable_plot_bool.at(io))continue;// For now skip the L/E 250 bin. 
             other_err_bands.push_back(getErrorBand(config, prop, variable_systs[io], binwidth_scale, io));
             plot_channels(final_output_tag+"_PROplot_other_"+std::to_string(io)+"_ErrorBand.pdf", config, other_cvs[io], {}, variable_data[io], 
-                    other_err_bands.back().get(), {}, other_channel_chitexts[io], opt | PlotOptions::DataMCRatio, io);
+                    other_err_bands.back(), {}, other_channel_chitexts[io], opt | PlotOptions::DataMCRatio, io);
         }
 
 
@@ -1278,7 +1278,7 @@ int main(int argc, char* argv[])
         //err_band->Write("err_band");
         io = 0;
         for(const auto &band: other_err_bands)
-            band->Write(("other_"+std::to_string(io++)+"_err_band").c_str());
+            //band->Write(("other_"+std::to_string(io++)+"_err_band").c_str());
 
 
         if((with_splines)) {

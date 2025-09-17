@@ -188,25 +188,31 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
 
     return spline_graphs;
 }
-    std::unique_ptr<TGraphAsymmErrors> getErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, bool scale, int other_index) {
-        //TODO: Only works with 1 mode/detector/channel
+    PROerrorbar getErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, bool scale, int other_index) {
         
 
-        Eigen::VectorXf cv = config.GetChannelVariableBins(0, other_index).ProjectSpectra(CollapseMatrix(config, FillCVSpectra(config, prop, true, other_index).Spec(), other_index), 0);
+        Eigen::VectorXf cv = CollapseMatrix(config, FillCVSpectra(config, prop, true, other_index).Spec(), other_index);
 
-        log<LOG_DEBUG>(L"%1% || For other var %2% the cv is %3% and the edges are %4%") % __func__ % other_index % cv % edges;
-    
+   
+        std::vector<float> centers;
         size_t global_channel_index = 0;
         for(size_t mode = 0; mode < config.m_num_modes; ++mode) {
             for(size_t det = 0; det < config.m_num_detectors; ++det) {
                 for(size_t channel = 0; channel < config.m_num_channels; ++channel) {
                     std::vector<float> tedges =  config.GetChannelVariableBins(global_channel_index, other_index).Edges();
                     global_channel_index++;
-                    for(auto &p:tedges)  edges.push_back(p);
+                    for(size_t p=0; p<tedges.size(); p++){
+                        if(p<tedges.size()-1){
+                            centers.push_back((tedges[p+1]+tedges[p])/2.0);
+                        }
+                    }
+                    
                 }
             }
         }
 
+        log<LOG_DEBUG>(L"%1% || PARK cv is %2% and the centers are %3%") % __func__ %  cv.size() % centers.size();
+        log<LOG_DEBUG>(L"%1% || For other var %2% the cv is %3% and the centers are %4%") % __func__ % other_index % cv % centers;
         size_t nerrorsample = 5000;
         
         std::vector<Eigen::VectorXf> specs;
@@ -214,39 +220,38 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
         
         //Fills already collapsed
         for(size_t i = 0; i < nerrorsample; ++i){
-            //specs.push_back(FillSystRandomThrow(config, prop, syst, dseed(PROseed::global_rng), other_index).Spec());
-            // throw systs, and project along the zero-dimension
             Eigen::VectorXf var = FillSystRandomThrow(config, prop, syst, dseed(PROseed::global_rng), other_index).Spec();
-            Eigen::VectorXf var_proj = config.GetChannelVariableBins(0, other_index).ProjectSpectra(var, 0);
-            specs.push_back(var_proj);
+            specs.push_back(var);
 
         }
 
-        TH1D tmphist("th", "", cv.size(), edges.data());
-        for(int i = 0; i < cv.size(); ++i)
-            tmphist.SetBinContent(i+1, cv(i));
-        if(scale) tmphist.Scale(1, "width");
-        std::unique_ptr<TGraphAsymmErrors> ret = std::make_unique<TGraphAsymmErrors>(&tmphist);
+        //TH1D tmphist("th", "", cv.size(), edges.data());
+        //for(int i = 0; i < cv.size(); ++i)
+        //    tmphist.SetBinContent(i+1, cv(i));
+        //if(scale) tmphist.Scale(1, "width");
+        //std::unique_ptr<TGraphAsymmErrors> ret = std::make_unique<TGraphAsymmErrors>(&tmphist);
+
+        PROerrorbar ebar(cv.size());
         for(int i = 0; i < cv.size(); ++i) {
             std::vector<float> binconts(nerrorsample);
             for(size_t j = 0; j < nerrorsample; ++j) {
                 binconts[j] = specs[j](i);
             }
-            float scale_factor = tmphist.GetBinContent(i+1)/cv(i);
+            float scale_factor = scale ? 1.0/config.collapsed_bin_widths.at(other_index)(i) :  1.0;
             if(std::isnan(scale_factor)) scale_factor = 1;
             std::sort(binconts.begin(), binconts.end());
             float ehi = std::abs((binconts[5*840] - cv(i))*scale_factor);
             float elo = std::abs((cv(i) - binconts[5*160])*scale_factor);
-            ret->SetPointEYhigh(i, ehi);
-            ret->SetPointEYlow(i, elo);
-
-            log<LOG_DEBUG>(L"%1% || ErrorBand bin %2% %3% %4% %5% %6% %7%") % __func__ % i % cv(i) % ehi % elo % scale_factor % tmphist.GetBinContent(i+1);
+            ebar.error_up(i) =  ehi;
+            ebar.error_down(i) =  elo;
+            ebar.error_point(i) = cv(i)*scale_factor;
+            log<LOG_DEBUG>(L"%1% || ErrorBand bin %2% %3% %4% %5% %6% ") % __func__ % i % cv(i) % ehi % elo % scale_factor ;
         }
-        return ret;
+        return ebar;
     }
 
 
-    void plot_channels(const std::string &filename, const PROconfig &config, std::optional<PROspec> cv, std::optional<PROspec> best_fit, std::optional<PROdata> data, std::optional<TGraphAsymmErrors*> errband, std::optional<TGraphAsymmErrors*> posterrband, std::vector<TPaveText> &texts, PlotOptions opt, int other_index) {
+    void plot_channels(const std::string &filename, const PROconfig &config, std::optional<PROspec> cv, std::optional<PROspec> best_fit, std::optional<PROdata> data, std::optional<PROerrorbar> errband, std::optional<PROerrorbar> posterrband, std::vector<TPaveText> &texts, PlotOptions opt, int other_index) {
         TCanvas c;
         c.Print((filename+"[").c_str());
 
@@ -352,11 +357,13 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
 
                         for(size_t bin = 0; bin < channel_nbins; ++bin) {
                             float scale = 1.0;
+
+                            //log<LOG_DEBUG>(L"%1% || PARK IN bin %2% channel_nbins %3% channel_start %4% bin+channel_start %5% erriorN %6%") % __func__ % bin % channel_nbins % int(bin+channel_start) % errband->error_point.size();
                             if(bool(opt&PlotOptions::AreaNormalized) || bool(opt&PlotOptions::BinWidthScaled)) {
-                                scale = channel_errband->GetPointY(bin) / (*errband)->GetPointY(bin+channel_start);
+                                scale = channel_errband->GetPointY(bin) / errband->error_point(bin+channel_start);
                             }
-                            channel_errband->SetPointEYhigh(bin, scale*(*errband)->GetErrorYhigh(bin+channel_start));
-                            channel_errband->SetPointEYlow(bin, scale*(*errband)->GetErrorYlow(bin+channel_start));
+                            channel_errband->SetPointEYhigh(bin, scale*(errband->error_up(bin+channel_start)));
+                            channel_errband->SetPointEYlow(bin, scale*(errband->error_down(bin+channel_start)));
                         }
                         channel_errband->SetFillStyle(3144);
                         //channel_errband->SetFillColorAlpha(kGray+2, 0.2);
@@ -404,10 +411,10 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                         for(size_t bin = 0; bin < channel_nbins; ++bin) {
                             float scale = 1.0;
                             if(bool(opt&PlotOptions::AreaNormalized) || bool(opt&PlotOptions::BinWidthScaled)) {
-                                scale = post_channel_errband->GetPointY(bin) / (*posterrband)->GetPointY(bin+channel_start);
+                                scale = post_channel_errband->GetPointY(bin) / (posterrband->error_point(bin+channel_start));
                             }
-                            post_channel_errband->SetPointEYhigh(bin, scale*(*posterrband)->GetErrorYhigh(bin+channel_start));
-                            post_channel_errband->SetPointEYlow(bin, scale*(*posterrband)->GetErrorYlow(bin+channel_start));
+                            post_channel_errband->SetPointEYhigh(bin, scale*(posterrband->error_up(bin+channel_start)));
+                            post_channel_errband->SetPointEYlow(bin, scale*(posterrband->error_down(bin+channel_start)));
                         }
                         post_channel_errband->SetFillColor(bfcol);
                         post_channel_errband->SetFillStyle(3254);
@@ -715,7 +722,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
 
                     std::vector<float> bin_edges = config.GetChannelVariableBins(global_channel_index,other_index).Edges();
                     size_t binstart = config.GetCollapsedGlobalVariableBinStart(global_channel_index,other_index);
-                    size_t nbins = config.m_channel_variable_num_bins[channel][other_index];
+                    size_t nbins = config.m_channel_variable_bins[channel][other_index].NBins();
                     std::vector<int> channel_bins(nbins);
                     std::iota(channel_bins.begin(), channel_bins.end(), binstart);
 

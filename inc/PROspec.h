@@ -32,6 +32,17 @@ namespace PROfit{
      *  The toRoot/toTH1Dnot implemented. Do we need them?
      * */
 
+    struct PROerrorbar {
+            Eigen::VectorXf error_down;
+            Eigen::VectorXf error_up;
+            Eigen::VectorXf error_point;
+            PROerrorbar(size_t size){
+                error_down = Eigen::VectorXf::Zero(size);
+                error_up = Eigen::VectorXf::Zero(size);
+                error_point = Eigen::VectorXf::Zero(size);
+            };
+    };
+
     class PROspec {
 
         private:

@@ -623,19 +623,7 @@ namespace PROfit {
                     currentTreeNumber = chains[fid]->GetTreeNumber();
 
 
-                /* removed duyring ndmin merge? */
-                    for(int ib = 0; ib != num_branch; ++ib) {
-
-                        if(inconfig.m_mcgen_additional_weight_bool[fid][ib]){
-                            branches[ib]->branch_monte_carlo_weight_formula->UpdateFormulaLeaves();
-                            branches[ib]->branch_monte_carlo_weight_formula->GetNdata();
-                        }
-                        for(auto &b: branches[ib]->branch_variable_formulas) {
-                            b->UpdateFormulaLeaves();
-                            b->GetNdata();
-                        }
-                    }//tohere
-                    for(size_t is = 0; is != total_num_systematics; ++is){
+                   for(size_t is = 0; is != total_num_systematics; ++is){
                         if(syst_vector[0][is].HasWeightFormula()){
                             sys_weight_formula[is]->UpdateFormulaLeaves();
                             sys_weight_formula[is]->GetNdata();	
