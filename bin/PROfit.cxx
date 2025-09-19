@@ -1168,7 +1168,15 @@ int main(int argc, char* argv[])
             matrices = covarianceTH2D(variable_systs[config.i_prime], config, other_cvs[config.i_prime]);
             c.Print((final_output_tag+"_PROplot_Covar.pdf" + "[").c_str(), "pdf");
             for(const auto &[name, mat]: matrices) {
+
                 mat->Draw("colz");
+                TText *t = new TText();
+                t->SetNDC();                
+                t->SetTextFont(42);                          
+                t->SetTextSize(0.03);      
+                t->SetTextAlign(33);        
+                std::string pv = "PROfit v"+std::string(PROJECT_VERSION_STR);
+                t->DrawText(0.895, 0.955, pv.c_str()); 
                 c.Print((final_output_tag+"_PROplot_Covar.pdf").c_str(), "pdf");
             }
             c.Print((final_output_tag+"_PROplot_Covar.pdf" + "]").c_str(), "pdf");
