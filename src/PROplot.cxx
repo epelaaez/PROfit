@@ -316,7 +316,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                         TPad p2d("p2d", "p2d", 0, 0, 1, 1);
                         p2d.cd();
                         cv_hist->SetTitle(hist_title.c_str());
-                        cv_hist->Draw("lego");
+                        cv_hist->Draw("colz");
                         c.cd();
                         p2d.Draw();
                         c.Print(filename.c_str());
@@ -324,12 +324,14 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                     }
 
 
+                    size_t channel_nbins = config.m_channel_variable_bins[channel][other_index].NBinsAlong(0);
                     Eigen::VectorXf bf_spec;
                     if(best_fit) {
-                        bf_spec = CollapseMatrix(config, best_fit->Spec(), other_index);//TODO, get N-dim compatability?
+                        bf_spec = config.GetChannelVariableBins(0, other_index).ProjectSpectra(CollapseMatrix(config, best_fit->Spec(), other_index), 0);//TODO, get N-dim compatability?                        
+                        log<LOG_DEBUG>(L"%1% || full_bf_spec %2%: ") % __func__ % best_fit->Spec();
                     }
 
-                    size_t channel_nbins = config.m_channel_variable_bins[channel][other_index].NBinsAlong(0);
+
                     std::vector<float> edges = config.m_channel_variable_bins[channel][other_index].Edges();
                     std::string xtitle = config.m_channel_variable_units[channel][other_index];
 
@@ -408,7 +410,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                     TGraphAsymmErrors *channel_errband = NULL;
                     if(errband) {
                         channel_errband = new TGraphAsymmErrors(&cv_hist);
-                        int channel_start =  config.GetCollapsedGlobalVariableBinStart(global_channel_index, other_index);
+                        // int channel_start =  config.GetCollapsedGlobalVariableBinStart(global_channel_index, other_index);
 
                         for(size_t bin = 0; bin < channel_nbins; ++bin) {
                             float scale = 1.0;
@@ -430,11 +432,10 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
 
                     TH1D bf_hist(("bf"+std::to_string(global_channel_index)).c_str(), "", channel_nbins, edges.data());
                     if(best_fit) {
-                        int channel_start =  config.GetCollapsedGlobalVariableBinStart(global_channel_index, other_index);
+                        // int channel_start =  config.GetCollapsedGlobalVariableBinStart(global_channel_index, other_index);
                         size_t total_bins = config.GetChannelVariableBins(global_channel_index, other_index).NBins();
-                        Eigen::VectorXf this_bf_spec = config.GetChannelVariableBins(global_channel_index, other_index).ProjectSpectra(bf_spec(Eigen::seqN(channel_start, total_bins)), 0);
-                        for(size_t bin = 0; bin < channel_nbins; ++bin) {
-                            bf_hist.SetBinContent(bin+1, bf_spec(bin));
+                        for(size_t bin = 0; bin < channel_nbins; bin++) {
+                            bf_hist.SetBinContent(bin+1, bf_spec(bin+channel_start));
                         }
                         //bf_hist.SetLineColor(TColor::GetColor(234, 67, 53)); // pastel red
                         bf_hist.SetLineColor(bfcol); 
@@ -464,7 +465,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                     TGraphAsymmErrors *post_channel_errband = NULL;
                     if(posterrband) {
                         post_channel_errband = new TGraphAsymmErrors(&bf_hist);
-                        int channel_start =  config.GetCollapsedGlobalVariableBinStart(global_channel_index, other_index);
+                        // int channel_start =  config.GetCollapsedGlobalVariableBinStart(global_channel_index, other_index);
                         for(size_t bin = 0; bin < channel_nbins; ++bin) {
                             float scale = 1.0;
                             if(bool(opt&PlotOptions::AreaNormalized) || bool(opt&PlotOptions::BinWidthScaled)) {
@@ -688,6 +689,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                     c.Print(filename.c_str());
 
                     ++global_channel_index;
+                    channel_start += config.m_channel_variable_bins[channel][other_index].NBinsAlong(0);
                 }
             }
         }
