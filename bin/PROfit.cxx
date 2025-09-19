@@ -45,6 +45,8 @@
 using namespace PROfit;
 
 log_level_t GLOBAL_LEVEL = LOG_INFO;
+log_level_t FILE_LEVEL = LOG_INFO;  
+
 std::wostream *OSTREAM = &wcout;
 
 std::wofstream LOG_FILE_STREAM;
@@ -108,6 +110,7 @@ int main(int argc, char* argv[])
     //Global Arguments for all PROfit enables subcommands.
     app.add_option("-x,--xml", xmlname, "Input PROfit XML configuration file.")->required();
     app.add_option("-v,--verbosity", GLOBAL_LEVEL, "Verbosity Level [1-4]->[Error,Warning,Info,Debug].")->default_val(GLOBAL_LEVEL);
+    app.add_option("-w,--file-verbosity", FILE_LEVEL, "File (log) Verbosity Level [1-4]->[Error,Warning,Info,Debug].")->default_val(static_cast<log_level_t>(-1));
     app.add_option("-t,--tag", analysis_tag, "Analysis Tag used for output identification.")->default_str("PROfit");
     app.add_option("-o,--output",output_tag,"Additional output filename quantifier")->default_str("v1");
     app.add_option("-n, --nthread",   nthread, "Number of threads to parallelize over.")->default_val(1);
@@ -191,20 +194,22 @@ int main(int argc, char* argv[])
     }
 
     if(log_file != "") {
-        log_impl::EnableFileLogging(log_file);
+       
+        if(FILE_LEVEL == static_cast<log_level_t>(-1)) {
+            FILE_LEVEL = GLOBAL_LEVEL;
+        }
+
+        log_impl::EnableFileLogging(log_file,FILE_LEVEL);
     }
 
 
-    log<LOG_INFO>(L" %1% ") % getIcon().c_str()  ;
+    log<LOG_WARNING>(L" %1% ") % getIcon().c_str()  ;
     std::string final_output_tag =analysis_tag +"_"+output_tag;
 
-
-
-
-    log<LOG_INFO>(L"%1% || ##################################################################") % __func__  ;
-    log<LOG_INFO>(L"%1% || ####################### PROfit version v%2% ######################") % __func__ % PROJECT_VERSION_STR ;
-    log<LOG_INFO>(L"%1% || ##################################################################") % __func__  ;
-    log<LOG_INFO>(L"%1% || PROfit commandline input arguments. xml: %2%, tag: %3%, output %4%, nthread: %5% ") % __func__ % xmlname.c_str() % analysis_tag.c_str() % output_tag.c_str() % nthread ;
+    log<LOG_WARNING>(L"%1% || ##################################################################") % __func__  ;
+    log<LOG_WARNING>(L"%1% || ####################### PROfit version v%2% ######################") % __func__ % PROJECT_VERSION_STR ;
+    log<LOG_WARNING>(L"%1% || ##################################################################") % __func__  ;
+    log<LOG_WARNING>(L"%1% || PROfit commandline input arguments. xml: %2%, tag: %3%, output %4%, nthread: %5% ") % __func__ % xmlname.c_str() % analysis_tag.c_str() % output_tag.c_str() % nthread ;
 
     //Initilize configuration from the XML;
     PROconfig config(xmlname, rateonly);
@@ -555,6 +560,7 @@ int main(int argc, char* argv[])
         size_t nparams = metric_to_use->nParams();
         size_t nphys = metric_to_use->GetModel().nparams;
         PROfitter fitter(metric_to_use->UpperBound(), metric_to_use->LowerBound(), fitconfig);
+        metric_to_use->setBounds(metric_to_use->UpperBound(), metric_to_use->LowerBound());
 
         log<LOG_INFO>(L"%1% || ########### Starting Global Best Fit Minimizing ############") % __func__;
 
@@ -764,6 +770,7 @@ int main(int argc, char* argv[])
 
             }
             PROfitter fitter(ub, lb, fitconfig);
+            metric->setBounds(lb, ub);
 
             log<LOG_INFO>(L"%1% || ########### Starting Global Best Fit Minimizing ############") % __func__;
 
