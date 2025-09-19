@@ -45,8 +45,6 @@
 using namespace PROfit;
 
 log_level_t GLOBAL_LEVEL = LOG_INFO;
-log_level_t FILE_LEVEL = LOG_INFO;  
-
 std::wostream *OSTREAM = &wcout;
 
 std::wofstream LOG_FILE_STREAM;
@@ -110,7 +108,6 @@ int main(int argc, char* argv[])
     //Global Arguments for all PROfit enables subcommands.
     app.add_option("-x,--xml", xmlname, "Input PROfit XML configuration file.")->required();
     app.add_option("-v,--verbosity", GLOBAL_LEVEL, "Verbosity Level [1-4]->[Error,Warning,Info,Debug].")->default_val(GLOBAL_LEVEL);
-    app.add_option("-w,--file-verbosity", FILE_LEVEL, "File (log) Verbosity Level [1-4]->[Error,Warning,Info,Debug].")->default_val(static_cast<log_level_t>(-1));
     app.add_option("-t,--tag", analysis_tag, "Analysis Tag used for output identification.")->default_str("PROfit");
     app.add_option("-o,--output",output_tag,"Additional output filename quantifier")->default_str("v1");
     app.add_option("-n, --nthread",   nthread, "Number of threads to parallelize over.")->default_val(1);
@@ -194,22 +191,20 @@ int main(int argc, char* argv[])
     }
 
     if(log_file != "") {
-       
-        if(FILE_LEVEL == static_cast<log_level_t>(-1)) {
-            FILE_LEVEL = GLOBAL_LEVEL;
-        }
-
-        log_impl::EnableFileLogging(log_file,FILE_LEVEL);
+        log_impl::EnableFileLogging(log_file);
     }
 
 
-    log<LOG_WARNING>(L" %1% ") % getIcon().c_str()  ;
+    log<LOG_INFO>(L" %1% ") % getIcon().c_str()  ;
     std::string final_output_tag =analysis_tag +"_"+output_tag;
 
-    log<LOG_WARNING>(L"%1% || ##################################################################") % __func__  ;
-    log<LOG_WARNING>(L"%1% || ####################### PROfit version v%2% ######################") % __func__ % PROJECT_VERSION_STR ;
-    log<LOG_WARNING>(L"%1% || ##################################################################") % __func__  ;
-    log<LOG_WARNING>(L"%1% || PROfit commandline input arguments. xml: %2%, tag: %3%, output %4%, nthread: %5% ") % __func__ % xmlname.c_str() % analysis_tag.c_str() % output_tag.c_str() % nthread ;
+
+
+
+    log<LOG_INFO>(L"%1% || ##################################################################") % __func__  ;
+    log<LOG_INFO>(L"%1% || ####################### PROfit version v%2% ######################") % __func__ % PROJECT_VERSION_STR ;
+    log<LOG_INFO>(L"%1% || ##################################################################") % __func__  ;
+    log<LOG_INFO>(L"%1% || PROfit commandline input arguments. xml: %2%, tag: %3%, output %4%, nthread: %5% ") % __func__ % xmlname.c_str() % analysis_tag.c_str() % output_tag.c_str() % nthread ;
 
     //Initilize configuration from the XML;
     PROconfig config(xmlname, rateonly);
@@ -560,7 +555,6 @@ int main(int argc, char* argv[])
         size_t nparams = metric_to_use->nParams();
         size_t nphys = metric_to_use->GetModel().nparams;
         PROfitter fitter(metric_to_use->UpperBound(), metric_to_use->LowerBound(), fitconfig);
-        metric_to_use->setBounds(metric_to_use->UpperBound(), metric_to_use->LowerBound());
 
         log<LOG_INFO>(L"%1% || ########### Starting Global Best Fit Minimizing ############") % __func__;
 
@@ -770,7 +764,6 @@ int main(int argc, char* argv[])
 
             }
             PROfitter fitter(ub, lb, fitconfig);
-            metric->setBounds(lb, ub);
 
             log<LOG_INFO>(L"%1% || ########### Starting Global Best Fit Minimizing ############") % __func__;
 
@@ -1061,7 +1054,7 @@ int main(int argc, char* argv[])
         
         std::vector<std::map<std::string, std::unique_ptr<TH1D>>> other_hists;
         for(size_t io = 0; io < config.m_num_variables; ++io) {
-            other_hists.push_back(getCVHists(other_cvs[io], config, binwidth_scale, io));
+            other_hists.push_back(getCV1DHists(other_cvs[io], config, binwidth_scale, io));
         }
 
         TCanvas c;
@@ -1070,7 +1063,7 @@ int main(int argc, char* argv[])
             c.Print((final_output_tag +"_PROplot_Osc.pdf"+ "[").c_str(), "pdf");
 
             PROspec osc_spec = FillSpectra(config, prop, variable_systs[config.i_prime], *model, pparams, !eventbyevent,config.i_prime );
-            std::map<std::string, std::unique_ptr<TH1D>> osc_hists = getCVHists(osc_spec, config, binwidth_scale);
+            std::map<std::string, std::unique_ptr<TH1D>> osc_hists = getCV1DHists(osc_spec, config, binwidth_scale);
             size_t global_subchannel_index = 0;
             for(size_t im = 0; im < config.m_num_modes; im++){
                 for(size_t id =0; id < config.m_num_detectors; id++){
@@ -1267,7 +1260,7 @@ int main(int argc, char* argv[])
 
         if((osc_params.size())) {
             PROspec osc_spec = FillSpectra(config, prop, variable_systs[config.i_prime], *model, pparams, !eventbyevent,config.i_prime);
-            std::map<std::string, std::unique_ptr<TH1D>> osc_hists = getCVHists(osc_spec, config, binwidth_scale);
+            std::map<std::string, std::unique_ptr<TH1D>> osc_hists = getCV1DHists(osc_spec, config, binwidth_scale);
             fout.mkdir("Osc_hists");
             fout.cd("Osc_hists");
             for(const auto &[name, hist]: osc_hists) {

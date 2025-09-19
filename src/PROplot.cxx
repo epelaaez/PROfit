@@ -316,7 +316,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                         TPad p2d("p2d", "p2d", 0, 0, 1, 1);
                         p2d.cd();
                         cv_hist->SetTitle(hist_title.c_str());
-                        cv_hist->Draw("colz");
+                        cv_hist->Draw("lego");
                         c.cd();
                         p2d.Draw();
                         c.Print(filename.c_str());

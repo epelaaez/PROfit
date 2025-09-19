@@ -113,12 +113,46 @@ TH1D PROspec::toTH1D(PROconfig const & inconfig, int subchannel_index, int other
     return hSpec;
 }
 
+TH2D PROspec::toTH2D(PROconfig const & inconfig, int subchannel_index, int other_index, int dim) const{
+    int global_bin_start = inconfig.GetGlobalVariableBinStart(subchannel_index, other_index);
+    int channel_index = inconfig.GetLocalChannelIndexFromGlobalSubchannelIndex(subchannel_index);
+
+    //set up hist specs
+    std::vector<float> bin_edges = inconfig.m_channel_variable_bins[channel_index][other_index].Edges(dim);
+    std::string hist_name = inconfig.m_fullnames[subchannel_index];
+    std::string xaxis_title =  inconfig.m_channel_variable_units[channel_index][other_index];
+
+    // 2D binning info
+    size_t channel_nbins_x = inconfig.m_channel_variable_bins[channel_index][other_index].NBinsAlong(0);
+    std::vector<float> edges_x = inconfig.m_channel_variable_bins[channel_index][other_index].Edges(0);
+    size_t channel_nbins_y = inconfig.m_channel_variable_bins[channel_index][other_index].NBinsAlong(1);
+    std::vector<float> edges_y = inconfig.m_channel_variable_bins[channel_index][other_index].Edges(1);
+
+    size_t nbins_tot = channel_nbins_x * channel_nbins_y;
+    Eigen::VectorXf spec_2d = spec(Eigen::seqN(global_bin_start, nbins_tot));
+
+    TH2D hSpec(hist_name.c_str(),hist_name.c_str(), channel_nbins_x, edges_x.data(), channel_nbins_y, edges_y.data());
+    hSpec.GetXaxis()->SetTitle(xaxis_title.c_str());
+
+    for(int xbin = 0; xbin < channel_nbins_x; xbin++){
+        for(int ybin = 0; ybin < channel_nbins_y; ybin++){
+            int arg = xbin*channel_nbins_y+ybin;
+            hSpec.SetBinContent(xbin+1, ybin, spec_2d(xbin*channel_nbins_y+ybin));
+        }
+    }
+
+    return hSpec;
+}
 
 TH1D PROspec::toTH1D(const PROconfig& inconfig, const std::string& subchannel_fullname, int other_index, int dim) const{
     int subchannel_index = inconfig.GetSubchannelIndex(subchannel_fullname);
     return this->toTH1D(inconfig, subchannel_index, other_index, dim);
 }
 
+TH2D PROspec::toTH2D(const PROconfig& inconfig, const std::string& subchannel_fullname, int other_index, int dim) const{
+    int subchannel_index = inconfig.GetSubchannelIndex(subchannel_fullname);
+    return this->toTH2D(inconfig, subchannel_index, other_index, dim);
+}
 
 void PROspec::toROOT(const PROconfig& inconfig, const std::string& output_name){
 

@@ -281,6 +281,7 @@ namespace PROfit{
             std::vector<std::string> m_detector_plotnames; 		
 
             std::vector<std::string> m_channel_names; 		
+            std::vector<int> m_variable_dims; 		
             std::vector<std::string> m_channel_plotnames; 		
             std::vector<std::string> m_channel_units; 		
 

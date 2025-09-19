@@ -19,6 +19,7 @@ PROconfig::PROconfig(const std::string &xml, bool rate_only):
     m_num_variable_bins_detector_block(0),
     m_num_variable_bins_mode_block(0),
     m_num_variable_bins_total(0),
+    m_variable_dims(0),
     m_num_variable_bins_detector_block_collapsed(0),
     m_num_variable_bins_mode_block_collapsed(0),
     m_num_variable_bins_total_collapsed(0),
@@ -292,6 +293,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
         while(pChan){
             // Read in how many bins this channel uses
 
+            bool got_dim = false;
             const char* channel_name= pChan->Attribute("name");
             if(channel_name==NULL){
                 log<LOG_ERROR>(L"%1% || ERROR: Need all channels to have names in xml.@ line %2% in %3% ") % __func__ % __LINE__  % __FILE__;
@@ -331,6 +333,10 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
             tinyxml2::XMLElement *pBin2DO = pChan->FirstChildElement("bins2D"); // 2D Bins
             while(pBin2DO){
+                if(got_dim == false){
+                    m_variable_dims.push_back(2);
+                    got_dim = true;
+                }
                 const char* omin_x = pBin2DO->Attribute("minx");
                 const char* omax_x = pBin2DO->Attribute("maxx");
                 const char* onbins_x = pBin2DO->Attribute("nbinsx");
@@ -412,6 +418,10 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
             tinyxml2::XMLElement *pBinO = pChan->FirstChildElement("bins"); // 1D Bins
             while(pBinO){
+                if(got_dim == false){
+                    m_variable_dims.push_back(1);
+                    got_dim = true;
+                }
 
                 expected_attrs = {"min","max","nbins","edges","unit","plot"};
                 for (const tinyxml2::XMLAttribute* attr = pBinO->FirstAttribute(); attr; attr = attr->Next()) {
@@ -1399,12 +1409,14 @@ void PROconfig::remove_unused_channel(){
         std::vector<std::vector<Binning>> temp_channel_other_bins(m_num_channels);
 
         std::vector<std::string> temp_channel_names(m_num_channels);
+        std::vector<int> temp_variable_dims(m_num_channels);
         std::vector<std::string> temp_channel_plotnames(m_num_channels);
         std::vector<std::string> temp_channel_units(m_num_channels);
         std::vector<std::vector<std::string>> temp_channel_other_units(m_num_channels);
         for(size_t i=0, chan_index = 0; i< m_channel_bool.size(); ++i){
             if(m_channel_bool[i]){
                 temp_channel_names[chan_index] = m_channel_names[i];
+                temp_variable_dims[chan_index] = m_variable_dims[i];
                 temp_channel_plotnames[chan_index] = m_channel_plotnames[i];
                 temp_channel_units[chan_index] = m_channel_units[i];
 
@@ -1418,6 +1430,7 @@ void PROconfig::remove_unused_channel(){
         m_channel_names = temp_channel_names;
         m_channel_plotnames = temp_channel_plotnames;
         m_channel_units = temp_channel_units;
+        m_variable_dims = temp_variable_dims;
     }
 
     {
