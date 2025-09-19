@@ -14,7 +14,7 @@
 using namespace std;
 
 /*
- * Logging for PROfit contained in this quick wrapper for easy command line or globel set verbosity
+ * Logging for PROfit contained in this quick wrapper for easy command line or global set verbosity
  */
 enum log_level_t {
     LOG_CRITICAL = 0,
@@ -24,7 +24,9 @@ enum log_level_t {
     LOG_DEBUG = 4
 };
 
-extern log_level_t GLOBAL_LEVEL;
+// Separate verbosity levels for console and file
+extern log_level_t GLOBAL_LEVEL;        // Console verbosity
+extern log_level_t FILE_LEVEL;          // File verbosity (defaults to same as GLOBAL_LEVEL)
 extern std::wostream *OSTREAM;
 
 extern std::wofstream LOG_FILE_STREAM;
@@ -32,35 +34,56 @@ extern bool LOGGING_TO_FILE;
 
 namespace log_impl {
 
-    inline void EnableFileLogging(const std::string& filename) {
+    inline void EnableFileLogging(const std::string& filename, log_level_t file_verbosity = static_cast<log_level_t>(-1)) {
         if(LOG_FILE_STREAM.is_open()) {
             LOG_FILE_STREAM.close();
         }
         LOG_FILE_STREAM.open(filename);
         LOGGING_TO_FILE = LOG_FILE_STREAM.is_open();
+        
+        // If file_verbosity is not explicitly set (-1), use GLOBAL_LEVEL
+        if(file_verbosity == static_cast<log_level_t>(-1)) {
+            FILE_LEVEL = GLOBAL_LEVEL;
+        } else {
+            FILE_LEVEL = file_verbosity;
+        }
+        
         if(!LOGGING_TO_FILE) {
             std::wcerr << L"WARNING: Failed to open log file: " << filename.c_str() << std::endl;
+        } else {
+            std::wcout << L"INFO: Logging to file " << filename.c_str() 
+                      << L" with verbosity " << FILE_LEVEL 
+                      << L" (console verbosity: " << GLOBAL_LEVEL << L")" << std::endl;
         }
     }
 
+    // New function to set file verbosity independently
+    inline void SetFileVerbosity(log_level_t level) {
+        FILE_LEVEL = level;
+    }
+
+    // New function to set console verbosity
+    inline void SetConsoleVerbosity(log_level_t level) {
+        GLOBAL_LEVEL = level;
+    }
 
     class formatted_log_t {
         public:
             formatted_log_t( log_level_t level, const wchar_t* msg ) : level(level), fmt(msg) {}
             ~formatted_log_t() {
-                // GLOBAL_LEVEL is a global variable and could be changed at runtime
-                // Any customization could be here
+                // Check against console verbosity
                 if ( level <= GLOBAL_LEVEL ) {
                     // Output to primary stream (usually wcout)
                     *OSTREAM << level << L" " << fmt << endl;
-
-                    if(LOGGING_TO_FILE && LOG_FILE_STREAM.is_open()) {
-                        LOG_FILE_STREAM << level << L" " << fmt << endl;
-                        LOG_FILE_STREAM.flush(); 
-                    }
                 }
 
+                // Check against file verbosity (can be different from console)
+                if(LOGGING_TO_FILE && LOG_FILE_STREAM.is_open() && level <= FILE_LEVEL) {
+                    LOG_FILE_STREAM << level << L" " << fmt << endl;
+                    LOG_FILE_STREAM.flush(); 
+                }
             }        
+            
             template <typename T> 
                 formatted_log_t& operator %(T value) {
                     fmt % value;
@@ -131,6 +154,7 @@ namespace log_impl {
             return *this;
         }
 }//namespace log_impl
+
 // Helper function. Class formatted_log_t will not be used directly.
 template <log_level_t level>
 log_impl::formatted_log_t log(const wchar_t* msg) {
