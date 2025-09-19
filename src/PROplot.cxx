@@ -3,7 +3,7 @@
 namespace PROfit{
 
 
-    std::map<std::string, std::unique_ptr<TH1D>> getCVHists(const PROspec &spec, const PROconfig& inconfig, bool scale, int other_index) {
+    std::map<std::string, std::unique_ptr<TH1D>> getCV1DHists(const PROspec &spec, const PROconfig& inconfig, bool scale, int other_index) {
         std::map<std::string, std::unique_ptr<TH1D>> hists;  
 
         size_t global_subchannel_index = 0;
@@ -25,6 +25,35 @@ namespace PROfit{
                         log<LOG_DEBUG>(L"%1% || Printot %2% %3% %4% %5% %6% : Integral %7% ") % __func__ % global_channel_index % global_subchannel_index % subchannel_name.c_str() % sc % ic % hists[subchannel_name]->Integral();
                         ++global_subchannel_index;
                     }//end subchan
+                    ++global_channel_index;
+                }//end chan
+            }//end det
+        }//end mode
+        return hists;
+    }
+
+    std::map<std::string, std::unique_ptr<TH2D>> getCV2DHists(const PROspec &spec, const PROconfig& inconfig, bool scale, int other_index) {
+        std::map<std::string, std::unique_ptr<TH2D>> hists;
+
+        size_t global_subchannel_index = 0;
+        size_t global_channel_index = 0;
+        for(size_t im = 0; im < inconfig.m_num_modes; im++){
+            for(size_t id =0; id < inconfig.m_num_detectors; id++){
+                for(size_t ic = 0; ic < inconfig.m_num_channels; ic++){
+                    for(size_t sc = 0; sc < inconfig.m_num_subchannels[ic]; sc++){
+                        if(inconfig.m_variable_dims.at(ic) == 2){
+                            const std::string& subchannel_name  = inconfig.m_fullnames[global_subchannel_index];
+                            const std::string& color = inconfig.m_subchannel_colors[ic][sc];
+                            int rcolor = color == "NONE" ? kRed - 7 : inconfig.HexToROOTColor(color);
+                            //std::unique_ptr<TH1D> htmp = std::make_unique<TH1D>(spec.toTH1D(inconfig, global_subchannel_index, other_index));
+                            std::unique_ptr<TH2D> htmp = std::make_unique<TH2D>(spec.toTH2D(inconfig, global_subchannel_index, other_index));
+                            if(scale) htmp->Scale(1,"width");
+                            hists[subchannel_name] = std::move(htmp);
+
+                            log<LOG_DEBUG>(L"%1% || Printot %2% %3% %4% %5% %6% : Integral %7% ") % __func__ % global_channel_index % global_subchannel_index % subchannel_name.c_str() % sc % ic % hists[subchannel_name]->Integral();
+                            }
+                        ++global_subchannel_index;
+                        }//end subchan
                     ++global_channel_index;
                 }//end chan
             }//end det
@@ -249,9 +278,12 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
         TCanvas c;
         c.Print((filename+"[").c_str());
 
-        std::map<std::string, std::unique_ptr<TH1D>> cvhists;
-        if(cv) cvhists = getCVHists(*cv, config, (bool)(opt & PlotOptions::BinWidthScaled), other_index);
-
+        std::map<std::string, std::unique_ptr<TH1D>> cv1dhists;
+        std::map<std::string, std::unique_ptr<TH2D>> cv2dhists;
+        if(cv){
+            cv1dhists = getCV1DHists(*cv, config, (bool)(opt & PlotOptions::BinWidthScaled), other_index);
+            cv2dhists = getCV2DHists(*cv, config, (bool)(opt & PlotOptions::BinWidthScaled), other_index);
+        }
 
         std::string ytitle = bool(opt&PlotOptions::AreaNormalized)
             ? "Area Normalized"
@@ -260,10 +292,37 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
             : "Events";
 
         size_t global_subchannel_index = 0;
+        size_t global_subchannel_index_2d = 0;
         size_t global_channel_index = 0;
+        int channel_start = 0;
         for(size_t mode = 0; mode < config.m_num_modes; ++mode) {
             for(size_t det = 0; det < config.m_num_detectors; ++det) {
                 for(size_t channel = 0; channel < config.m_num_channels; ++channel) {
+                    if(config.m_variable_dims.at(channel) == 2){
+                        std::string joined_title = config.m_channel_variable_units[channel][other_index];
+                        string del = ",";
+                        auto pos = joined_title.find(del);
+                        std::string xtitle2d = joined_title.substr(0, pos);
+                        std::string ytitle2d = joined_title.erase(0, pos + del.length());
+
+                        std::string hist_title = config.m_detector_plotnames[det]  + " "+ config.m_channel_plotnames[channel]+";"+xtitle2d+";"+ytitle2d;
+
+
+                        std::vector<float> edges_x = config.m_channel_variable_bins[channel][other_index].Edges(0);
+                        size_t channel_nbins_y = config.m_channel_variable_bins[channel][other_index].NBinsAlong(1);
+                        std::vector<float> edges_y = config.m_channel_variable_bins[channel][other_index].Edges(1);
+                        const std::string& subchannel_name  = config.m_fullnames[global_subchannel_index_2d];
+                        TH2D* cv_hist = cv2dhists[subchannel_name].get();
+                        TPad p2d("p2d", "p2d", 0, 0, 1, 1);
+                        p2d.cd();
+                        cv_hist->SetTitle(hist_title.c_str());
+                        cv_hist->Draw("colz");
+                        c.cd();
+                        p2d.Draw();
+                        c.Print(filename.c_str());
+                        global_subchannel_index_2d += config.m_num_subchannels[channel];
+                    }
+
 
                     Eigen::VectorXf bf_spec;
                     if(best_fit) {
@@ -311,15 +370,15 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                         for(size_t subchannel = 0; subchannel < config.m_num_subchannels[channel]; ++subchannel){
                             const std::string& subchannel_name  = config.m_fullnames[global_subchannel_index];
                             if(bool(opt&PlotOptions::CVasStack)) {
-                                cvstack->Add(cvhists[subchannel_name].get());
+                                cvstack->Add(cv1dhists[subchannel_name].get());
                                 subplots.push_back({subchannel_name, config.m_subchannel_plotnames[channel][subchannel].c_str()});
                             }
-                            cv_hist.Add(cvhists[subchannel_name].get());
+                            cv_hist.Add(cv1dhists[subchannel_name].get());
                             ++global_subchannel_index;
                         }
                         if(bool(opt&PlotOptions::CVasStack)) {
                             for(size_t sc = subplots.size(); sc > 0; --sc)
-                                leg->AddEntry(cvhists[subplots[sc-1].first].get(), subplots[sc-1].second ,"f");
+                                leg->AddEntry(cv1dhists[subplots[sc-1].first].get(), subplots[sc-1].second ,"f");
                         }
                         if(bool(opt&PlotOptions::AreaNormalized)) {
                             float integral = cv_hist.Integral();
