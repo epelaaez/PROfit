@@ -196,9 +196,9 @@ namespace PROfit {
         return myspectrum;
     }
 
-    PROspec FillSystRandomThrow(const PROconfig &inconfig, const PROpeller &inprop, const PROsyst &insyst, uint32_t seed, int other_index) {
-        int nbins = inconfig.m_num_variable_bins_total[other_index],
-        nbins_collapsed = inconfig.m_num_variable_bins_total_collapsed[other_index];
+    PROspec FillSystRandomThrow(const PROconfig &inconfig, const PROpeller &inprop, const PROsyst &insyst, uint32_t seed, int var_index) {
+        int nbins = inconfig.m_num_variable_bins_total[var_index],
+        nbins_collapsed = inconfig.m_num_variable_bins_total_collapsed[var_index];
         Eigen::VectorXf spec = Eigen::VectorXf::Constant(nbins, 0);
         Eigen::VectorXf cvspec = Eigen::VectorXf::Constant(nbins, 0);
 
@@ -218,29 +218,60 @@ namespace PROfit {
         for(int i = 0; i < nbins_collapsed; i++)
             throwC(i) = d_cov(rng);
 
+        bool binned = true;//dont want to faf around with event by event here lets be honst
+        if (binned){
+            Eigen::VectorXf systw = Eigen::VectorXf::Constant(nbins, 1);
+            for(size_t i = 0; i < throws.size(); ++i) {
+                int binning = insyst.spline_binnings[i];
 
-        for(size_t i = 0; i<inprop.NEvent(); ++i){
-            float add_w = inprop.added_weights[i]; 
-            float systw = 1;
-            for(size_t j = 0; j < throws.size(); ++j) {
-                int binning = insyst.spline_binnings[j];
-                const int spline_bin = inprop.VariableBinIndex(binning, i);
-                systw *= insyst.GetSplineShift(j, throws[j], spline_bin);
+                //const Eigen::MatrixXf &hist = inprop.variable_hist_storage(binning,var_index);
+                //direct access with inprop.variable_hist_storage(binning,var_index,j,k)
+                for(size_t k = 0; k < inconfig.m_num_variable_bins_total[var_index]; ++k) {
+                    if(binning == var_index){
+                        systw(k) *= insyst.GetSplineShift(i, throws.at(i), k);
+                    }
+                    else {
+                        float val = 0, unweighted = 0;
+                        for(long int j = 0; j < inconfig.m_num_variable_bins_total[binning]; ++j) {
+                            float binsystw = insyst.GetSplineShift(i, throws.at(i), j);
+                            val += binsystw * inprop.variable_hist_storage(binning,var_index,j, k);
+                            unweighted += inprop.variable_hist_storage(binning,var_index,j, k);
+                        }
+                        if(unweighted > 0) systw(k) *= val/unweighted;
+                    }
+                }
             }
-            if(inprop.VariableBinIndex(other_index, i) >= 0) {
-                float finalw = systw * add_w;
-                spec(inprop.VariableBinIndex(other_index, i)) += finalw;
-                cvspec(inprop.VariableBinIndex(other_index, i)) += add_w;
+            for(long int i = 0; i < inconfig.m_num_variable_bins_total[var_index]; ++i) {
+                for(int k = 0; k < nbins; ++k) {
+                    spec(k) += systw(k) * inprop.variable_hist_storage(var_index,var_index,i, k);
+                    cvspec(k) += inprop.variable_hist_storage(var_index,var_index,i, k);
+                }
+            }
+
+        }else{//currently never run
+            for(size_t i = 0; i<inprop.NEvent(); ++i){
+                float add_w = inprop.added_weights[i]; 
+                float systw = 1;
+                for(size_t j = 0; j < throws.size(); ++j) {
+                    int binning = insyst.spline_binnings[j];
+                    const int spline_bin = inprop.VariableBinIndex(binning, i);
+                    systw *= insyst.GetSplineShift(j, throws[j], spline_bin);
+                }
+                if(inprop.VariableBinIndex(var_index, i) >= 0) {
+                    float finalw = systw * add_w;
+                    spec(inprop.VariableBinIndex(var_index, i)) += finalw;
+                    cvspec(inprop.VariableBinIndex(var_index, i)) += add_w;
+                }
             }
         }
 
         if(insyst.GetNCovar() == 0) {
-            Eigen::VectorXf final_spec = CollapseMatrix(inconfig, spec, other_index);
+            Eigen::VectorXf final_spec = CollapseMatrix(inconfig, spec, var_index);
             return PROspec(final_spec, final_spec.array().sqrt());
         }
 
         Eigen::MatrixXf decomp_cov = insyst.DecomposeFractionalCovariance(inconfig, cvspec);
-        Eigen::VectorXf collapsed_spec = CollapseMatrix(inconfig, spec, other_index);
+        Eigen::VectorXf collapsed_spec = CollapseMatrix(inconfig, spec, var_index);
         Eigen::VectorXf final_spec = collapsed_spec + decomp_cov * throwC;
 
         //std::vector<float> stdVec(final_spec.data(), final_spec.data() + final_spec.size());
@@ -260,7 +291,8 @@ namespace PROfit {
         float spline_throw = d(rng);
         int binning = insyst.spline_binnings[spline];
 
-        if(other_index == (int)inconfig.i_prime) {
+        bool binned = true;//dont want to faf around with event by event here lets be honst
+        if (binned){
             const Eigen::MatrixXf &hist = inprop.variable_hist_storage(binning,other_index);
             for(long int i = 0; i < hist.rows(); ++i) {
                 float systw = 1.0;
