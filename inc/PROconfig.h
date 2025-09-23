@@ -257,7 +257,7 @@ namespace PROfit{
             };
 
             std::string m_xmlname;	
-            float m_plot_pot;
+            std::vector<double> m_det_pot;
             std::vector<std::string> m_fullnames;
 
             size_t m_num_detectors;

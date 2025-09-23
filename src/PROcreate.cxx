@@ -670,9 +670,7 @@ namespace PROfit {
     }
 
     std::vector<PROdata> CreatePROdata(const PROconfig& inconfig){
-        float spec_pot = inconfig.m_plot_pot;
         log<LOG_INFO>(L"%1% || Start generating data spectrum") % __func__ ;
-        log<LOG_INFO>(L"%1% || Spectrum will be generated with %2% POT") % __func__ % spec_pot;
 
         int num_files = inconfig.m_num_mcgen_files;
         log<LOG_DEBUG>(L"%1% || Starting to read file and build spectrum!") % __func__ ;
@@ -698,14 +696,6 @@ namespace PROfit {
             }
             log<LOG_INFO>(L"%1% || Total Entries: %2%") % __func__ %  nentries[fid];
 
-            //calculate POT scale factor
-            if(inconfig.m_mcgen_pot.at(fid) != -1){
-                pot_scale[fid] = spec_pot/inconfig.m_mcgen_pot.at(fid);
-            }
-            pot_scale[fid] *= inconfig.m_mcgen_scale[fid];
-            log<LOG_INFO>(L"%1% || File POT: %2%, additional scale: %3%") % __func__ %  inconfig.m_mcgen_pot.at(fid) % inconfig.m_mcgen_scale[fid];
-            log<LOG_INFO>(L"%1% || POT scale factor: %2%") % __func__ %  pot_scale[fid];
-
             //first, grab friend trees
             if (inconfig.m_mcgen_numfriends[fid]>0){
                 auto mcgen_file_friend_treename_iter = inconfig.m_mcgen_file_friend_treename_map.find(fn);
@@ -729,6 +719,23 @@ namespace PROfit {
             for(int ib = 0; ib != num_branch; ++ib) {
 
                 std::shared_ptr<BranchVariable> branch_variable = inconfig.m_branch_variables[fid][ib];
+
+                //calculate POT scale factor                  
+                const std::string& subchannel_name = inconfig.m_branch_variables[fid][ib]->associated_hist;
+                int subchannel_index = inconfig.GetSubchannelIndex(subchannel_name);
+                int channel_group = subchannel_index / std::accumulate(inconfig.m_num_subchannels.begin(), inconfig.m_num_subchannels.end(), 0);
+                int det = channel_group % inconfig.m_num_detectors;
+
+                float spec_pot = inconfig.m_det_pot[det];
+                //log<LOG_INFO>(L"%1% || Spectrum will be generated with %2% POT") % __func__ % spec_pot;
+                
+                if(inconfig.m_mcgen_pot.at(fid) != -1){
+                    pot_scale[fid] = spec_pot/inconfig.m_mcgen_pot.at(fid);
+                }
+                pot_scale[fid] *= inconfig.m_mcgen_scale[fid];
+                log<LOG_INFO>(L"%1% || Branch POT: %2%, additional scale: %3%") % __func__ %  inconfig.m_mcgen_pot.at(fid) % inconfig.m_mcgen_scale[fid];
+                log<LOG_INFO>(L"%1% || POT scale factor: %2%") % __func__ %  pot_scale[fid];
+
 
                 //quick check that this branch associated subchannel is in the known chanels;
                 int is_valid_subchannel = 0;
@@ -832,7 +839,11 @@ namespace PROfit {
 
         int run_syst = branch->GetIncludeSystematics();
         float mc_weight = branch->GetMonteCarloWeight();
-        mc_weight *= inconfig.m_plot_pot / mcpot;
+
+        int channel_group = subchannel_index / std::accumulate(inconfig.m_num_subchannels.begin(), inconfig.m_num_subchannels.end(), 0);
+        int det = channel_group % inconfig.m_num_detectors;
+
+        mc_weight *= inconfig.m_det_pot[det] / mcpot;
 
 
         int model_rule = branch->GetModelRule();
