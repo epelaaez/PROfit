@@ -6,7 +6,7 @@
 using namespace PROfit;
 
 
-PROpoisson::PROpoisson(const std::string tag, const PROconfig &conin, const PROpeller &pin, const PROsyst *systin, const PROmodel &modelin, const PROdata &datain, EvalStrategy strat, std::vector<float> physics_param_fixed) : PROmetric(), model_tag(tag), config(conin), peller(pin), syst(systin), model(modelin), data(datain), strat(strat), physics_param_fixed(physics_param_fixed), correlated_systematics(false) {
+PROpoisson::PROpoisson(const std::string tag, const PROconfig &conin, const PROpeller &pin, const PROsyst *systin, const PROmodel &modelin, const PROdata &datain, EvalStrategy strat, bool shape_only, std::vector<float> physics_param_fixed) : PROmetric(), model_tag(tag), config(conin), peller(pin), syst(systin), model(modelin), data(datain), strat(strat), shape_only(shape_only), physics_param_fixed(physics_param_fixed), correlated_systematics(false) {
     last_value = 0.0; last_param = Eigen::VectorXf::Zero(model.nparams+syst->GetNSplines()); 
     fixed_index = -999;
 
@@ -75,7 +75,9 @@ float PROpoisson::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &grad
     
     PROspec result = FillSpectra(config, peller, *syst, model, param, strat == BinnedChi2);
 
-    const Eigen::VectorXf &vdata = data.Spec();
+    const Eigen::VectorXf vdata = shape_only 
+        ? data.Normalize(config,result)
+        : data.Spec();
     const Eigen::VectorXf vmc = CollapseMatrix(config, result.Spec());
     float poisson = 2 * (vmc.array() - vdata.array() + vdata.array() * (vdata.array() / vmc.array()).log()).sum();
     float pull = Pull(subvector2);
@@ -97,7 +99,9 @@ float PROpoisson::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &grad
             Eigen::VectorXf subvector2 = tmpParams.segment(nparams - nsyst, nsyst);
             PROspec result = FillSpectra(config, peller, *syst, model, tmpParams, strat != EventByEvent);
 
-            const Eigen::VectorXf &vdata = data.Spec();
+            const Eigen::VectorXf vdata = shape_only 
+                ? data.Normalize(config,result)
+                : data.Spec();
             const Eigen::VectorXf vmc = CollapseMatrix(config, result.Spec());
             float poisson = 2 * (vmc.array() - vdata.array() + vdata.array() * (vdata.array() / vmc.array()).log()).sum();
             float pull = Pull(subvector2);
@@ -125,7 +129,10 @@ float PROpoisson::getSingleChannelChi(size_t channel_index,size_t var_index) {
     size_t startBin = config.GetCollapsedGlobalVariableBinStart(channel_index,var_index);
 
 
-    const Eigen::VectorXf &vdata = data.Spec().segment(startBin, nbin);
+    //const Eigen::VectorXf &vdata = data.Spec().segment(startBin, nbin);
+    const Eigen::VectorXf vdata = (shape_only 
+        ? data.Normalize(config,cv)
+        : data.Spec()).segment(startBin, nbin);
     const Eigen::VectorXf vmc = CollapseMatrix(config, cv.Spec()).segment(startBin, nbin);
     float poisson = 2 * (vmc.array() - vdata.array() + vdata.array() * (vdata.array() / vmc.array()).log()).sum();
     //float pull = Pull(subvector2);
