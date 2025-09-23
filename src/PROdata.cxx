@@ -42,28 +42,30 @@ void PROdata::QuickFill(int bin_index, float weight){
     return;
 }
 
-TH1D PROdata::toTH1D(const PROconfig &inconfig, int global_channel_index, int other_index) const {
-    int local_channel_index = inconfig.GetLocalChannelIndex(global_channel_index);
+TH1D PROdata::toTH1D(const PROconfig &inconfig, int global_channel_index, int other_index, int dim) const {
+    int local_channel_index = inconfig.GetLocalChannelIndexFromGlobalChannelIndex(global_channel_index);
 
-    log<LOG_DEBUG>(L"%1% || in A ") % __func__ ;
-    int global_bin_start = other_index < 0 ? inconfig.GetCollapsedGlobalBinStart(global_channel_index) : inconfig.GetCollapsedGlobalOtherBinStart(global_channel_index, other_index);
+    int global_bin_start =  inconfig.GetCollapsedGlobalVariableBinStart(global_channel_index, other_index);
     //set up hist specs
-    log<LOG_DEBUG>(L"%1% || in B ") % __func__ ;
-    int nbins = other_index < 0 ? inconfig.m_channel_num_bins[local_channel_index] : inconfig.m_channel_num_other_bins[local_channel_index][other_index];
-    log<LOG_DEBUG>(L"%1% || in C ") % __func__ ;
-    const std::vector<float>& bin_edges = other_index < 0 ? inconfig.GetChannelBinEdges(local_channel_index) : inconfig.GetChannelOtherBinEdges(local_channel_index, other_index);
-    log<LOG_DEBUG>(L"%1% || in D tt %2% of %3%  with chan in %4%") % __func__ % local_channel_index % inconfig.m_channel_names.size() % global_channel_index;
+    int nbins_tot = inconfig.m_channel_variable_bins[local_channel_index][other_index].NBins();
+    int nbins_dim = inconfig.m_channel_variable_bins[local_channel_index][other_index].NBinsAlong(dim);
+    std::vector<float> bin_edges =  inconfig.m_channel_variable_bins[local_channel_index][other_index].Edges();
     std::string hist_name = inconfig.m_channel_names[local_channel_index] + " Data";
-    log<LOG_DEBUG>(L"%1% || in E ") % __func__ ;
-    std::string xaxis_title = other_index < 0 ? inconfig.m_channel_units[local_channel_index] : inconfig.m_channel_other_units[local_channel_index][other_index];
+    std::string xaxis_title =  inconfig.m_channel_variable_units[local_channel_index][other_index];
+
 
     log<LOG_DEBUG>(L"%1% || in F ") % __func__ ;
     //fill 1D hist
-    TH1D hSpec(hist_name.c_str(),hist_name.c_str(), nbins, &bin_edges[0]); 
+    TH1D hSpec(hist_name.c_str(),hist_name.c_str(), nbins_dim, &bin_edges[0]); 
     hSpec.GetXaxis()->SetTitle(xaxis_title.c_str());
-    for(int i = 1; i <= nbins; ++i){
-        hSpec.SetBinContent(i, spec(global_bin_start + i -1));
-        hSpec.SetBinError(i, error(global_bin_start + i -1));
+
+    // Project spectra along this axis
+    Eigen::VectorXf spec_dim = inconfig.m_channel_variable_bins[local_channel_index][other_index].ProjectSpectra(spec(Eigen::seqN(global_bin_start, nbins_tot)), dim);
+    Eigen::VectorXf error_dim = inconfig.m_channel_variable_bins[local_channel_index][other_index].ProjectSpectraErrors(error(Eigen::seqN(global_bin_start, nbins_tot)), dim);
+
+    for(int i = 1; i <= nbins_dim; ++i){
+        hSpec.SetBinContent(i, spec_dim(i -1));
+        hSpec.SetBinError(i, error_dim(i -1));
     }
 
     return hSpec;

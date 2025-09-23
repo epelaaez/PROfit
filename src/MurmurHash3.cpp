@@ -25,7 +25,7 @@
 
 #define BIG_CONSTANT(x) (x)
 
-// Other compilers
+// Variable compilers
 
 #else	// defined(_MSC_VER)
 

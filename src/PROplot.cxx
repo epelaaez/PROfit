@@ -42,20 +42,20 @@ namespace PROfit{
         Eigen::MatrixXf collapsed_cv_inv_diag = collapsed_cv.asDiagonal().inverse();
         Eigen::MatrixXf collapsed_frac_cov = collapsed_cv_inv_diag * collapsed_full_covariance * collapsed_cv_inv_diag;
 
-        std::unique_ptr<TH2D> cov_hist = std::make_unique<TH2D>("cov", "Fractional Covariance Matrix;Bin # ;Bin #", config.m_num_bins_total, 0, config.m_num_bins_total, config.m_num_bins_total, 0, config.m_num_bins_total);
-        std::unique_ptr<TH2D> collapsed_cov_hist = std::make_unique<TH2D>("ccov", "Collapsed Fractional Covariance Matrix;Bin # ;Bin #", config.m_num_bins_total_collapsed, 0, config.m_num_bins_total_collapsed, config.m_num_bins_total_collapsed, 0, config.m_num_bins_total_collapsed);
+        std::unique_ptr<TH2D> cov_hist = std::make_unique<TH2D>("cov", "Fractional Covariance Matrix;Bin # ;Bin #", config.m_num_variable_bins_total[config.i_prime], 0, config.m_num_variable_bins_total[config.i_prime], config.m_num_variable_bins_total[config.i_prime], 0, config.m_num_variable_bins_total[config.i_prime]);
+        std::unique_ptr<TH2D> collapsed_cov_hist = std::make_unique<TH2D>("ccov", "Collapsed Fractional Covariance Matrix;Bin # ;Bin #", config.m_num_variable_bins_total_collapsed[config.i_prime], 0, config.m_num_variable_bins_total_collapsed[config.i_prime], config.m_num_variable_bins_total_collapsed[config.i_prime], 0, config.m_num_variable_bins_total_collapsed[config.i_prime]);
 
-        std::unique_ptr<TH2D> cor_hist = std::make_unique<TH2D>("cor", "Correlation Matrix;Bin # ;Bin #", config.m_num_bins_total, 0, config.m_num_bins_total, config.m_num_bins_total, 0, config.m_num_bins_total);
-        std::unique_ptr<TH2D> collapsed_cor_hist = std::make_unique<TH2D>("ccor", "Collapsed Correlation Matrix;Bin # ;Bin #", config.m_num_bins_total_collapsed, 0, config.m_num_bins_total_collapsed, config.m_num_bins_total_collapsed, 0, config.m_num_bins_total_collapsed);
+        std::unique_ptr<TH2D> cor_hist = std::make_unique<TH2D>("cor", "Correlation Matrix;Bin # ;Bin #", config.m_num_variable_bins_total[config.i_prime], 0, config.m_num_variable_bins_total[config.i_prime], config.m_num_variable_bins_total[config.i_prime], 0, config.m_num_variable_bins_total[config.i_prime]);
+        std::unique_ptr<TH2D> collapsed_cor_hist = std::make_unique<TH2D>("ccor", "Collapsed Correlation Matrix;Bin # ;Bin #", config.m_num_variable_bins_total[config.i_prime], 0, config.m_num_variable_bins_total_collapsed[config.i_prime], config.m_num_variable_bins_total_collapsed[config.i_prime], 0, config.m_num_variable_bins_total_collapsed[config.i_prime]);
 
-        for(size_t i = 0; i < config.m_num_bins_total; ++i)
-            for(size_t j = 0; j < config.m_num_bins_total; ++j){
+        for(size_t i = 0; i < config.m_num_variable_bins_total[config.i_prime]; ++i)
+            for(size_t j = 0; j < config.m_num_variable_bins_total[config.i_prime]; ++j){
                 cov_hist->SetBinContent(i+1,j+1,fractional_cov(i,j));
                 cor_hist->SetBinContent(i+1,j+1,fractional_cov(i,j)/(sqrt(fractional_cov(i,i))*sqrt(fractional_cov(j,j))));
             }
 
-        for(size_t i = 0; i < config.m_num_bins_total_collapsed; ++i)
-            for(size_t j = 0; j < config.m_num_bins_total_collapsed; ++j){
+        for(size_t i = 0; i < config.m_num_variable_bins_total_collapsed[config.i_prime]; ++i)
+            for(size_t j = 0; j < config.m_num_variable_bins_total_collapsed[config.i_prime]; ++j){
                 collapsed_cov_hist->SetBinContent(i+1,j+1,collapsed_frac_cov(i,j));
                 collapsed_cor_hist->SetBinContent(i+1,j+1,collapsed_frac_cov(i,j)/(sqrt(collapsed_frac_cov(i,i))*sqrt(collapsed_frac_cov(j,j))));
             }
@@ -80,10 +80,10 @@ namespace PROfit{
             const Eigen::MatrixXf &covar = syst.GrabMatrix(name);
             const Eigen::MatrixXf &corr = syst.GrabCorrMatrix(name);
 
-            std::unique_ptr<TH2D> cov_h = std::make_unique<TH2D>(("cov"+name).c_str(), (name+" Fractional Covariance;Bin # ;Bin #").c_str(), config.m_num_bins_total, 0, config.m_num_bins_total, config.m_num_bins_total, 0, config.m_num_bins_total);
-            std::unique_ptr<TH2D> corr_h = std::make_unique<TH2D>(("cor"+name).c_str(), (name+" Correlation;Bin # ;Bin #").c_str(), config.m_num_bins_total, 0, config.m_num_bins_total, config.m_num_bins_total, 0, config.m_num_bins_total);
-            for(size_t i = 0; i < config.m_num_bins_total; ++i){
-                for(size_t j = 0; j < config.m_num_bins_total; ++j){
+            std::unique_ptr<TH2D> cov_h = std::make_unique<TH2D>(("cov"+name).c_str(), (name+" Fractional Covariance;Bin # ;Bin #").c_str(), config.m_num_variable_bins_total[config.i_prime], 0, config.m_num_variable_bins_total[config.i_prime], config.m_num_variable_bins_total[config.i_prime], 0, config.m_num_variable_bins_total[config.i_prime]);
+            std::unique_ptr<TH2D> corr_h = std::make_unique<TH2D>(("cor"+name).c_str(), (name+" Correlation;Bin # ;Bin #").c_str(), config.m_num_variable_bins_total[config.i_prime], 0, config.m_num_variable_bins_total[config.i_prime], config.m_num_variable_bins_total[config.i_prime], 0, config.m_num_variable_bins_total[config.i_prime]);
+            for(size_t i = 0; i < config.m_num_variable_bins_total[config.i_prime]; ++i){
+                for(size_t j = 0; j < config.m_num_variable_bins_total[config.i_prime]; ++j){
                     cov_h->SetBinContent(i+1,j+1,covar(i,j));
                     corr_h->SetBinContent(i+1,j+1,corr(i,j));
                 }
@@ -101,20 +101,17 @@ namespace PROfit{
 
         return ret;
     }
-
+/*
     std::map<std::string, std::vector<std::pair<std::unique_ptr<TGraph>,std::unique_ptr<TGraph>>>> 
         getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
             std::map<std::string, std::vector<std::pair<std::unique_ptr<TGraph>,std::unique_ptr<TGraph>>>> spline_graphs;
 
             for(size_t i = 0; i < systs.GetNSplines(); ++i) {
                 const std::string &name = systs.spline_names[i];
-                const PROsyst::Spline &spline = systs.GrabSpline(name);
+                const Spline &spline = systs.GrabSpline(name);
                 //using Spline = std::vector<std::vector<std::pair<float, std::array<float, 4>>>>;
                 std::vector<std::pair<std::unique_ptr<TGraph>,std::unique_ptr<TGraph>>> bin_graphs;
-                size_t nbins = 
-                    systs.spline_binnings[i] == -2 ? config.m_num_truebins_total :
-                    systs.spline_binnings[i] == -1 ? config.m_num_bins_total
-                    : config.m_num_other_bins_total[systs.spline_binnings[i]];
+                size_t nbins =  config.m_num_variable_bins_total[systs.spline_binnings[i]];
                 bin_graphs.reserve(nbins);
 
                 for(size_t j = 0; j < nbins; ++j) {
@@ -143,59 +140,118 @@ namespace PROfit{
 
             return spline_graphs;
         }
+*/
+std::map<std::string, std::vector<std::pair<std::unique_ptr<TGraph>, std::unique_ptr<TGraph>>>>
+getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
+    std::map<std::string, std::vector<std::pair<std::unique_ptr<TGraph>, std::unique_ptr<TGraph>>>> spline_graphs;
 
-    std::unique_ptr<TGraphAsymmErrors> getErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, bool scale, int other_index) {
-        //TODO: Only works with 1 mode/detector/channel
-        Eigen::VectorXf cv = other_index < 0 ? CollapseMatrix(config, FillCVSpectrum(config, prop, true).Spec()) :
-            CollapseMatrix(config, FillOtherCVSpectrum(config, prop, other_index).Spec(), other_index);
-        std::vector<float> edges = other_index < 0 ? config.GetChannelBinEdges(0) : config.GetChannelOtherBinEdges(0, other_index);
-        log<LOG_DEBUG>(L"%1% || For other var %2% the cv is %3% and the edges are %4%")
-            % __func__ % other_index % cv % edges;
+    for (size_t i = 0; i < systs.GetNSplines(); ++i) {
+        const std::string &name = systs.spline_names[i];
+        const Spline &spline = systs.GrabSpline(name);
+        std::vector<std::pair<std::unique_ptr<TGraph>, std::unique_ptr<TGraph>>> bin_graphs;
+        size_t nbins = config.m_num_variable_bins_total.at(systs.spline_binnings[i]);
+        int nsegs = spline.segments_per_bin;
+        bin_graphs.reserve(nbins);
+
+        for (size_t j = 0; j < nbins; ++j) {
+            std::unique_ptr<TGraph> curve = std::make_unique<TGraph>();
+            std::unique_ptr<TGraph> fixed_pts = std::make_unique<TGraph>();
+
+            // Access the segment range for this bin
+            size_t seg_offset = j * nsegs;
+
+            for (int k = 0; k < nsegs; ++k) {
+                const SplineSegment &seg = spline.segments[seg_offset + k];
+                float lo = seg.knot;
+                std::array<float, 4> coeffs = seg.coeffs;
+                // Determine hi for this segment
+                float hi;
+                if (k < nsegs - 1) {
+                    hi = spline.segments[seg_offset + k + 1].knot;
+                } else {
+                    hi = systs.spline_hi[i];
+                }
+                auto fn = [coeffs](float shift) {
+                    return coeffs[0] + coeffs[1] * shift + coeffs[2] * shift * shift + coeffs[3] * shift * shift * shift;
+                };
+                fixed_pts->SetPoint(fixed_pts->GetN(), lo, fn(0));
+                if (k == nsegs - 1)
+                    fixed_pts->SetPoint(fixed_pts->GetN(), hi, fn(hi - lo));
+                float width = (hi - lo) / 20.0f;
+                for (int l = 0; l < 20; ++l)
+                    curve->SetPoint(curve->GetN(), lo + l * width, fn(l * width));
+            }
+            bin_graphs.push_back(std::make_pair(std::move(fixed_pts), std::move(curve)));
+        }
+        spline_graphs[name] = std::move(bin_graphs);
+    }
+
+    return spline_graphs;
+}
+    PROerrorbar getErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, bool scale, int other_index) {
+        
+
+        Eigen::VectorXf cv = CollapseMatrix(config, FillCVSpectra(config, prop, true, other_index).Spec(), other_index);
+
+   
         std::vector<float> centers;
+        size_t global_channel_index = 0;
+        for(size_t mode = 0; mode < config.m_num_modes; ++mode) {
+            for(size_t det = 0; det < config.m_num_detectors; ++det) {
+                for(size_t channel = 0; channel < config.m_num_channels; ++channel) {
+                    std::vector<float> tedges =  config.GetChannelVariableBins(global_channel_index, other_index).Edges();
+                    global_channel_index++;
+                    for(size_t p=0; p<tedges.size(); p++){
+                        if(p<tedges.size()-1){
+                            centers.push_back((tedges[p+1]+tedges[p])/2.0);
+                        }
+                    }
+                    
+                }
+            }
+        }
+
+        log<LOG_DEBUG>(L"%1% || PARK cv is %2% and the centers are %3%") % __func__ %  cv.size() % centers.size();
+        log<LOG_DEBUG>(L"%1% || For other var %2% the cv is %3% and the centers are %4%") % __func__ % other_index % cv % centers;
         size_t nerrorsample = 5000;
-        for(size_t i = 0; i < edges.size() - 1; ++i)
-            centers.push_back((edges[i+1] + edges[i])/2);
+        
         std::vector<Eigen::VectorXf> specs;
         std::uniform_int_distribution<uint32_t> dseed(0, std::numeric_limits<uint32_t>::max());
-        for(size_t i = 0; i < nerrorsample; ++i)
-            specs.push_back(FillSystRandomThrow(config, prop, syst, dseed(PROseed::global_rng), other_index).Spec());
-        //specs.push_back(CollapseMatrix(config, FillSystRandomThrow(config, prop, syst).Spec()));
-        TH1D tmphist("th", "", cv.size(), edges.data());
-        for(int i = 0; i < cv.size(); ++i)
-            tmphist.SetBinContent(i+1, cv(i));
-        if(scale) tmphist.Scale(1, "width");
-        //std::unique_ptr<TGraphAsymmErrors> ret = std::make_unique<TGraphAsymmErrors>(cv.size(), centers.data(), cv.data());
-        std::unique_ptr<TGraphAsymmErrors> ret = std::make_unique<TGraphAsymmErrors>(&tmphist);
+        
+        //Fills already collapsed
+        for(size_t i = 0; i < nerrorsample; ++i){
+            Eigen::VectorXf var = FillSystRandomThrow(config, prop, syst, dseed(PROseed::global_rng), other_index).Spec();
+            specs.push_back(var);
+
+        }
+
+        PROerrorbar ebar(cv.size());
         for(int i = 0; i < cv.size(); ++i) {
             std::vector<float> binconts(nerrorsample);
             for(size_t j = 0; j < nerrorsample; ++j) {
                 binconts[j] = specs[j](i);
             }
-            float scale_factor = tmphist.GetBinContent(i+1)/cv(i);
+            float scale_factor = scale ? 1.0/config.collapsed_bin_widths.at(other_index)(i) :  1.0;
             if(std::isnan(scale_factor)) scale_factor = 1;
             std::sort(binconts.begin(), binconts.end());
             float ehi = std::abs((binconts[5*840] - cv(i))*scale_factor);
             float elo = std::abs((cv(i) - binconts[5*160])*scale_factor);
-            ret->SetPointEYhigh(i, ehi);
-            ret->SetPointEYlow(i, elo);
-
-            log<LOG_DEBUG>(L"%1% || ErrorBand bin %2% %3% %4% %5% %6% %7%") % __func__ % i % cv(i) % ehi % elo % scale_factor % tmphist.GetBinContent(i+1);
+            ebar.error_up(i) =  ehi;
+            ebar.error_down(i) =  elo;
+            ebar.error_point(i) = cv(i)*scale_factor;
+            log<LOG_DEBUG>(L"%1% || ErrorBand bin %2% %3% %4% %5% %6% ") % __func__ % i % cv(i) % ehi % elo % scale_factor ;
         }
-        return ret;
+        return ebar;
     }
 
 
-    void plot_channels(const std::string &filename, const PROconfig &config, std::optional<PROspec> cv, std::optional<PROspec> best_fit, std::optional<PROdata> data, std::optional<TGraphAsymmErrors*> errband, std::optional<TGraphAsymmErrors*> posterrband, std::vector<TPaveText> &texts, PlotOptions opt, int other_index) {
+    void plot_channels(const std::string &filename, const PROconfig &config, std::optional<PROspec> cv, std::optional<PROspec> best_fit, std::optional<PROdata> data, std::optional<PROerrorbar> errband, std::optional<PROerrorbar> posterrband, std::vector<TPaveText> &texts, PlotOptions opt, int other_index) {
         TCanvas c;
         c.Print((filename+"[").c_str());
 
         std::map<std::string, std::unique_ptr<TH1D>> cvhists;
         if(cv) cvhists = getCVHists(*cv, config, (bool)(opt & PlotOptions::BinWidthScaled), other_index);
 
-        Eigen::VectorXf bf_spec;
-        if(best_fit) {
-            bf_spec = other_index < 0 ? CollapseMatrix(config, best_fit->Spec()) : CollapseMatrix(config, best_fit->Spec(), other_index);
-        }
 
         std::string ytitle = bool(opt&PlotOptions::AreaNormalized)
             ? "Area Normalized"
@@ -208,14 +264,20 @@ namespace PROfit{
         for(size_t mode = 0; mode < config.m_num_modes; ++mode) {
             for(size_t det = 0; det < config.m_num_detectors; ++det) {
                 for(size_t channel = 0; channel < config.m_num_channels; ++channel) {
-                    size_t channel_nbins = other_index < 0 ? config.m_channel_num_bins[channel] : config.m_channel_num_other_bins[channel][other_index];
+
+                    Eigen::VectorXf bf_spec;
+                    if(best_fit) {
+                        bf_spec = CollapseMatrix(config, best_fit->Spec(), other_index);//TODO, get N-dim compatability?
+                    }
+
+                    size_t channel_nbins = config.m_channel_variable_bins[channel][other_index].NBinsAlong(0);
+                    std::vector<float> edges = config.m_channel_variable_bins[channel][other_index].Edges();
+                    std::string xtitle = config.m_channel_variable_units[channel][other_index];
 
                     Color_t bfcol = TColor::GetColor(234, 67, 53);//ncie red
                     Color_t cvcol =  TColor::GetColor(66, 103, 210);//nice blue :)
                     if(!best_fit)cvcol=kBlack;
 
-                    std::vector<float> edges = other_index < 0 ? config.GetChannelBinEdges(0) : config.GetChannelOtherBinEdges(0, other_index);
-                    std::string xtitle = other_index < 0 ? config.m_channel_units[channel] : config.m_channel_other_units[channel][other_index];
                     std::string hist_title = config.m_detector_plotnames[det]  + " "+ config.m_channel_plotnames[channel]+";"+xtitle+";"+ytitle;
                     //std::unique_ptr<TLegend> leg = std::make_unique<TLegend>(0.11,0.75,0.89,0.89); 4
                     std::unique_ptr<TLegend> leg = std::make_unique<TLegend>(0.38,0.69,0.89,0.89);
@@ -287,15 +349,17 @@ namespace PROfit{
                     TGraphAsymmErrors *channel_errband = NULL;
                     if(errband) {
                         channel_errband = new TGraphAsymmErrors(&cv_hist);
-                        int channel_start = other_index < 0 ? config.GetCollapsedGlobalBinStart(global_channel_index) : config.GetCollapsedGlobalOtherBinStart(global_channel_index, other_index);
+                        int channel_start =  config.GetCollapsedGlobalVariableBinStart(global_channel_index, other_index);
 
                         for(size_t bin = 0; bin < channel_nbins; ++bin) {
                             float scale = 1.0;
-                            if(bool(opt&PlotOptions::AreaNormalized)) {
-                                scale = channel_errband->GetPointY(bin) / (*errband)->GetPointY(bin+channel_start);
+
+                            //log<LOG_DEBUG>(L"%1% || PARK IN bin %2% channel_nbins %3% channel_start %4% bin+channel_start %5% erriorN %6%") % __func__ % bin % channel_nbins % channel_start % int(bin+channel_start) % errband->error_point.size();
+                            if(bool(opt&PlotOptions::AreaNormalized) || bool(opt&PlotOptions::BinWidthScaled)) {
+                                scale = channel_errband->GetPointY(bin) / errband->error_point(bin+channel_start);
                             }
-                            channel_errband->SetPointEYhigh(bin, scale*(*errband)->GetErrorYhigh(bin+channel_start));
-                            channel_errband->SetPointEYlow(bin, scale*(*errband)->GetErrorYlow(bin+channel_start));
+                            channel_errband->SetPointEYhigh(bin, scale*(errband->error_up(bin+channel_start)));
+                            channel_errband->SetPointEYlow(bin, scale*(errband->error_down(bin+channel_start)));
                         }
                         channel_errband->SetFillStyle(3144);
                         //channel_errband->SetFillColorAlpha(kGray+2, 0.2);
@@ -307,9 +371,11 @@ namespace PROfit{
 
                     TH1D bf_hist(("bf"+std::to_string(global_channel_index)).c_str(), "", channel_nbins, edges.data());
                     if(best_fit) {
-                        int channel_start = other_index < 0 ? config.GetCollapsedGlobalBinStart(global_channel_index) : config.GetCollapsedGlobalOtherBinStart(global_channel_index, other_index);
+                        int channel_start =  config.GetCollapsedGlobalVariableBinStart(global_channel_index, other_index);
+                        size_t total_bins = config.GetChannelVariableBins(global_channel_index, other_index).NBins();
+                        Eigen::VectorXf this_bf_spec = config.GetChannelVariableBins(global_channel_index, other_index).ProjectSpectra(bf_spec(Eigen::seqN(channel_start, total_bins)), 0);
                         for(size_t bin = 0; bin < channel_nbins; ++bin) {
-                            bf_hist.SetBinContent(bin+1, bf_spec(bin+channel_start));
+                            bf_hist.SetBinContent(bin+1, bf_spec(bin));
                         }
                         //bf_hist.SetLineColor(TColor::GetColor(234, 67, 53)); // pastel red
                         bf_hist.SetLineColor(bfcol); 
@@ -339,14 +405,14 @@ namespace PROfit{
                     TGraphAsymmErrors *post_channel_errband = NULL;
                     if(posterrband) {
                         post_channel_errband = new TGraphAsymmErrors(&bf_hist);
-                        int channel_start = other_index < 0 ? config.GetCollapsedGlobalBinStart(global_channel_index) : config.GetCollapsedGlobalOtherBinStart(global_channel_index, other_index);
+                        int channel_start =  config.GetCollapsedGlobalVariableBinStart(global_channel_index, other_index);
                         for(size_t bin = 0; bin < channel_nbins; ++bin) {
                             float scale = 1.0;
-                            if(bool(opt&PlotOptions::AreaNormalized)) {
-                                scale = post_channel_errband->GetPointY(bin) / (*posterrband)->GetPointY(bin+channel_start);
+                            if(bool(opt&PlotOptions::AreaNormalized) || bool(opt&PlotOptions::BinWidthScaled)) {
+                                scale = post_channel_errband->GetPointY(bin) / (posterrband->error_point(bin+channel_start));
                             }
-                            post_channel_errband->SetPointEYhigh(bin, scale*(*posterrband)->GetErrorYhigh(bin+channel_start));
-                            post_channel_errband->SetPointEYlow(bin, scale*(*posterrband)->GetErrorYlow(bin+channel_start));
+                            post_channel_errband->SetPointEYhigh(bin, scale*(posterrband->error_up(bin+channel_start)));
+                            post_channel_errband->SetPointEYlow(bin, scale*(posterrband->error_down(bin+channel_start)));
                         }
                         post_channel_errband->SetFillColor(bfcol);
                         post_channel_errband->SetFillStyle(3254);
@@ -354,7 +420,6 @@ namespace PROfit{
                         post_channel_errband->SetLineWidth(1);
                         //leg->AddEntry(post_channel_errband, "post-fit #pm 1#sigma", "f");
                     }
-
                     TH1D data_hist;
                     if(data) {
 
@@ -489,7 +554,7 @@ namespace PROfit{
                                 : bf_hist.GetBinContent(i+1);
                             float rat = numerator/denonminator;
                             if(isnan(rat)) rat = 1;
-                            ratio->SetBinError(i+1, 1.0 / sqrt(numerator));
+                            ratio->SetBinError(i+1, data_hist.GetBinError(i+1)/denonminator);
                             ratio->SetBinContent(i+1, rat);
                             one->SetBinContent(i+1, 1.0);
                             ratio_err->SetPointEYhigh(i, ratio_err->GetErrorYhigh(i)/ratio_err->GetPointY(i));
@@ -571,7 +636,7 @@ namespace PROfit{
     }
 
 
-    int plotPriorFractionalSystematicBreakdown(const PROconfig &config, const PROspec &spec, const PROsyst &allsplinesyst, std::string filename) {
+    int plotPriorFractionalSystematicBreakdown(const PROconfig &config, const PROspec &spec, const PROsyst &allsplinesyst, std::string filename, int other_index) {
         //Input PROsyst needs to be the allsplinesyst for now
 
         std::vector<int> colors = {
@@ -653,9 +718,9 @@ namespace PROfit{
 
                     int padIndex = 1;
 
-                    std::vector<float> bin_edges = config.GetChannelBinEdges(global_channel_index);
-                    size_t binstart = config.GetCollapsedGlobalBinStart(global_channel_index);
-                    size_t nbins = config.m_channel_num_bins[channel];
+                    std::vector<float> bin_edges = config.GetChannelVariableBins(global_channel_index,other_index).Edges();
+                    size_t binstart = config.GetCollapsedGlobalVariableBinStart(global_channel_index,other_index);
+                    size_t nbins = config.m_channel_variable_bins[channel][other_index].NBins();
                     std::vector<int> channel_bins(nbins);
                     std::iota(channel_bins.begin(), channel_bins.end(), binstart);
 

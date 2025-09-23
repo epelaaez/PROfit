@@ -21,6 +21,7 @@
 // PROfit
 #include "PROconfig.h"
 #include "PROserial.h"
+#include "PROtocall.h"
 #include "PROspec.h"
 
 namespace PROfit{
@@ -57,11 +58,16 @@ public:
     //Constructors
     PROdata():nbins(0) {}
     PROdata(const Eigen::VectorXf &in_spec, const Eigen::VectorXf &in_error) : nbins(in_spec.size()), spec(in_spec), error(in_error){}
+    PROdata(const PROconfig &c, const PROspec &s): 
+      nbins(s.Spec().size()),
+      spec(CollapseMatrix(c, s.Spec())),
+      error(CollapseMatrix(c, Eigen::VectorXf(s.Error().array().square().matrix())).array().sqrt())
+   {} 
 
     /* Function: create PROspec of given size */
     PROdata(size_t num_bins);
 
-    TH1D toTH1D(const PROconfig& inconfig, int channel_index, int other_index = -1) const;
+    TH1D toTH1D(const PROconfig& inconfig, int channel_index, int other_index = -1, int dim = 0) const;
 
     void toROOT(const PROconfig& inconfig, const std::string& output_name);
 

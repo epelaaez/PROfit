@@ -3,6 +3,7 @@ from pybind11.setup_helpers import Pybind11Extension, build_ext
 import subprocess
 import os
 import pathlib
+import sys
 
 def readme():
     with open('README.md') as f:
@@ -42,7 +43,8 @@ def localinc():
 def locallib():
     dirs = [
         "{CMAKE_INSTALL}lib",
-	"{CMAKE_INSTALL}lib64"
+	"{CMAKE_INSTALL}lib64",
+	"/opt/homebrew/lib"
     ]
     return dirs
 
@@ -120,7 +122,7 @@ ext_modules = [
         ['pybind/profit.cxx'],
         include_dirs=usrinc() + localinc() + rootinc() + numpyinc(),
         library_dirs=locallib() + rootlib(),
-        libraries=["Core", "PROfitLib", "tinyxml2", "TreePlayer"],
+        libraries=["Core", "PROfitLib", "tinyxml2", "TreePlayer", "boost_serialization"],
         language='c++',
         cxx_std=17
     )

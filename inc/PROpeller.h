@@ -9,7 +9,75 @@
 #include <vector>
 #include <chrono>
 namespace PROfit{
+    class PROhistStorage {
+        private:
+            size_t n_vars = 0;
+            std::vector<Eigen::MatrixXf> data;
 
+            // Only stores when i <= j
+            size_t compute_index(size_t i, size_t j) const {
+                return (i * n_vars) - (i * (i - 1)) / 2 + (j - i);
+            }
+
+            friend class boost::serialization::access;
+
+            template<class Archive>
+                void serialize(Archive& ar, const unsigned int version) {
+                    (void)version;
+                    ar & n_vars;
+
+                    if (Archive::is_loading::value) {
+                        if (n_vars > 0) {
+                            data.resize(n_vars * (n_vars + 1) / 2);
+                        } else {
+                            data.clear();
+                        }
+                    }
+
+                    if (n_vars > 0) {
+                        for (auto& mat : data) {
+                            ar & mat;
+                        }
+                    }
+                }
+        public:
+            PROhistStorage() {}  
+            PROhistStorage(size_t n) {init(n);}
+
+            void init(size_t n) { n_vars = n;data.resize(n * (n + 1) / 2);}
+
+
+            //Grab whole matrix
+            Eigen::Ref<const Eigen::MatrixXf> operator()(size_t i, size_t j) const {
+                if (i <= j) {
+                    return data[compute_index(i, j)]; 
+                } else {
+                    return data[compute_index(j, i)].transpose();
+                }
+            }
+
+            //element
+            float operator()(size_t rowvar, size_t colvar, size_t l, size_t m) const {
+                if (rowvar <= colvar) {
+                    return data[compute_index(rowvar, colvar)](l, m);
+                } else {
+                    return data[compute_index(colvar, rowvar)](m, l); 
+                }
+            }
+
+
+            // Direct access for setting (must use i <= j)
+            Eigen::MatrixXf& set(size_t i, size_t j) {
+                if (i > j){
+                    log<LOG_ERROR>(L"%1% || If your seeing this, something went wrong. dont access PROhistStorage out of order.") % __func__;
+                    exit(EXIT_FAILURE);
+                }
+                return data[compute_index(i, j)];
+            }
+
+
+            size_t size() const { return n_vars; }
+    };
 
     /*Class: The PROpeller, which moves the analysis forward. A class to keep all MC events for oscllation event-by-event.
     */
@@ -17,25 +85,17 @@ namespace PROfit{
 
         private:
             friend class boost::serialization::access;
-            int nevents;
 
             // Serialization function for boost that will allow for save state of propeller
             template <class Archive>
                 void serialize(Archive& ar, [[maybe_unused]] const unsigned int version) {
-                    ar & nevents;
-                    ar & pcosth;
-                    ar & pmom;
-                    ar & trueLE;
                     ar & added_weights;
-                    ar & bin_indices;
                     ar & model_rule;
-                    ar & true_bin_indices;
-                    ar & other_bin_indices;
-                    ar & hist;
-                    ar & other_hists;
-                    ar & histLE;
-                    ar & mcStatErr;
-                    ar & otherMCStatErr;
+                    ar & variable_mc_stat_err;
+                    ar & variable_bin_indices;
+                    ar & variable_hist_storage;
+                    ar & variable_midbin;
+                    ar & variable_values;
                     ar & hash;
                 }
 
@@ -43,42 +103,40 @@ namespace PROfit{
 
             //Empty Constructor
             PROpeller(){
-                nevents = -1;
-                pmom.clear();
-                pcosth.clear();
-                trueLE.clear();
+                variable_values.clear();
                 added_weights.clear();
-                bin_indices.clear();
                 model_rule.clear();
-                true_bin_indices.clear();
                 hash = -1;
             };
 
             /*Function: Primary Constructor from raw std::vectors of MC values */ 
-            PROpeller(const PROconfig &config, std::vector<float> &intruth, std::vector<float> &inpmom, std::vector<float> &inpcosth, std::vector<float> &inadded_weights, std::vector<int> &inbin_indices, std::vector<int> &inmodel_rule, std::vector<int> &intrue_bin_indices) : trueLE(intruth), added_weights(inadded_weights), bin_indices(inbin_indices), model_rule(inmodel_rule), true_bin_indices(intrue_bin_indices), pmom(inpmom), pcosth(inpcosth) {
-                nevents = trueLE.size();
-                hist = Eigen::MatrixXf::Constant(config.m_num_truebins_total, config.m_num_bins_total, 0);
-                for(size_t i = 0; i < bin_indices.size(); ++i)
-                    hist(true_bin_indices[i], bin_indices[i]) += added_weights[i];
-                hash = config.hash;
+            PROpeller( std::vector<std::vector<float>> &invars, std::vector<float> &inadded_weights,  std::vector<int> &inmodel_rule) :  added_weights(inadded_weights),  model_rule(inmodel_rule), variable_values(invars){
+                //for(size_t i = 0; i < bin_indices.size(); ++i)
             };
 
             /* the Core MC is saved in these vectors.*/
 
-            std::vector<float> trueLE;
             std::vector<float> added_weights;
-            std::vector<int>   bin_indices;        /*Precalculated Bin index*/
             std::vector<int>   model_rule;
-            std::vector<int>   true_bin_indices;
-            std::vector<float> pmom;
-            std::vector<float> pcosth;
-            std::vector<std::vector<int>> other_bin_indices;
-            Eigen::MatrixXf    hist;
-            std::vector<Eigen::MatrixXf> other_hists;
-            Eigen::VectorXf    histLE;
-            Eigen::VectorXf    mcStatErr;
-            std::vector<Eigen::VectorXf> otherMCStatErr;
+            // Vector of variable values and bin indices.
+            // Outer vector is per-variable, inner vector is per-event 
+            std::vector<std::vector<int>> variable_bin_indices;
+            std::vector<std::vector<float>> variable_values;
+            std::vector<Eigen::VectorXf> variable_mc_stat_err;
+            std::vector<Eigen::VectorXf> variable_midbin;
+            PROhistStorage variable_hist_storage;
+
             uint32_t           hash;
+
+            // Helper functions to access variable values + bin indices.
+            // The user can equally directly access the values, the function 
+            // is here to make it explicit how values are ordered in the vector
+            float VariableValue(size_t i_variable, size_t i_event) const {return variable_values[i_variable][i_event];}
+            int VariableBinIndex(size_t i_variable, size_t i_event) const {return variable_bin_indices[i_variable][i_event];}
+
+            size_t NVariable() const {return variable_values.size();}
+            size_t NEvent() const {return added_weights.size();}
+
 
             // boost serialize save to file
             void save(const std::string& filename) const {
@@ -103,8 +161,8 @@ namespace PROfit{
             }
 
             // Scale detector weights for POT studies
-            void scale(const PROconfig &inconfig, std::map<std::string, float> scaling){
-                for (const auto& [detector, value] : scaling) {
+            void scale(const PROconfig &inconfig, std::map<std::string, float> scaling_map){
+                for (const auto& [detector, value] : scaling_map) {
 
                     if (value <= 0.0f) {
                         log<LOG_ERROR>(L"%1% || Scale factor %2% for '%3%' is invalid. Must be > 0.")
@@ -124,36 +182,15 @@ namespace PROfit{
 
                     log<LOG_INFO>(L"%1% || %2% . ") % __func__  % scalenames;
 
-                    std::vector<int> scalerecobins;
-                    for(auto &name: scalenames){
-                        size_t is = inconfig.GetSubchannelIndex(name);     
-                        size_t ic = inconfig.GetChannelIndex(is); 
-
-                        size_t start = inconfig.GetGlobalBinStart(is); 
-                        for(size_t b = 0; b < inconfig.m_channel_num_bins[ic] ; b++){
-                            scalerecobins.push_back((int)(start+b));
-                        }
-                    }
-
-                    std::vector<int> scaletruebins;
-                    for(auto &name: scalenames){
-                        size_t is = inconfig.GetSubchannelIndex(name);     
-                        size_t ic = inconfig.GetChannelIndex(is); 
-                        size_t start = inconfig.GetGlobalTrueBinStart(is); 
-                        for(size_t b = 0; b < inconfig.m_channel_num_truebins[ic] ; b++){
-                            scaletruebins.push_back((int)(start+b));
-                        }
-                    }
-
 
                     std::vector<std::vector<int>> scaleotherbins;
-                    for(size_t io =0; io<inconfig.m_num_other_vars; io++){
+                    for(size_t io =0; io<inconfig.m_num_variables; io++){
                         std::vector<int> tmpbins;
                         for(auto &name: scalenames){
                             size_t is = inconfig.GetSubchannelIndex(name);     
-                            size_t ic = inconfig.GetChannelIndex(is); 
-                            size_t start = inconfig.GetGlobalOtherBinStart(is,io); 
-                            for(size_t b = 0; b < inconfig.m_channel_num_other_bins[io][ic] ; b++){
+                            size_t ic = inconfig.GetLocalChannelIndexFromGlobalSubchannelIndex(is); 
+                            size_t start = inconfig.GetGlobalVariableBinStart(is,io); 
+                            for(size_t b = 0; b < inconfig.m_channel_variable_bins[io][ic].NBins(); b++){
                                 tmpbins.push_back((int)(start+b));
                             }
                         }
@@ -162,34 +199,27 @@ namespace PROfit{
                     }
 
 
-                    log<LOG_INFO>(L"%1% || and scales reco bins  %2% and true bins %3%.") % __func__  %  scalerecobins %  scaletruebins;
-
-                    for (int r : scaletruebins) {
-                        for (int c : scalerecobins) {
-                            hist(r, c) *= value;
-                        }
-                    }
-
-
-                    for(size_t io =0; io<inconfig.m_num_other_vars; io++){
-                        for (int o : scaleotherbins[io]) {
-                            for (int r : scalerecobins) {
-                                (other_hists[io])(o, r) *= value;
+                    //Scale the binned bits first
+                    for(size_t io =0; io<inconfig.m_num_variables; io++){
+                        for(size_t jo =io; jo<inconfig.m_num_variables; jo++){
+                            log<LOG_INFO>(L"%1% || and scales other bins  %2% .") % __func__  %  scaleotherbins[io];
+                            for (int o : scaleotherbins[io]) {
+                                for (int j : scaleotherbins[jo]) {
+                                    variable_hist_storage.set(io,jo)(o, j) *= value;
+                                }
                             }
                         }
                     }
-                    //mcStarErr is only used for calculating fractional error later. Fractional does not change. 
-                    //for (int c : scalerecobins) {
-                    //    mcStatErr(c) *= value;
-                    //}
-
-                    for (size_t i = 0; i < added_weights.size(); ++i) {
-                        int bin = bin_indices[i];
-                        if (std::find(scalerecobins.begin(), scalerecobins.end(), bin) != scalerecobins.end()) {
-                            added_weights[i] *= value;
+                    //And then the unbinned weights
+                    for (size_t i = 0; i < NEvent(); ++i) {
+                        for(size_t io =0; io<inconfig.m_num_variables; io++){
+                            if(io>0)break;//Hmm, we scale of the reco and not other bins. That seems fine, but might want to rethink
+                            int bin = VariableBinIndex(io, i);
+                            if (std::find(scaleotherbins[io].begin(), scaleotherbins[io].end(), bin) != scaleotherbins[io].end()) {
+                                added_weights[i] *= value;
+                            }
                         }
                     }
-
 
                     log<LOG_INFO>(L"%1% || Applied %2% scaling for '%3%'")
                         % __func__ % value % detector.c_str();
