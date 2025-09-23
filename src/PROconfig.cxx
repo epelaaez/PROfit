@@ -11,7 +11,7 @@ using namespace PROfit;
 
 PROconfig::PROconfig(const std::string &xml, bool rate_only): 
     m_xmlname(xml), 
-    m_plot_pot(1.0),
+    m_det_pot(),
     m_num_detectors(0),
     m_num_channels(0),
     m_num_modes(0),
@@ -120,11 +120,11 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
     tinyxml2::XMLHandle hDoc(&doc);
 
-    tinyxml2::XMLElement *pMode, *pDet, *pChan, *pPOT;
+    tinyxml2::XMLElement *pMode, *pDet, *pChan;
 
     //Temp usage
     i_prime=0;
-    std::vector<std::string> allowed_elements = {"mode", "detector", "channel", "plotpot", "MCFile","WeightMaps","model","variation_list","correlation","varied_spectrum", "ShapeOnlyUncertainty"   };
+    std::vector<std::string> allowed_elements = {"mode", "detector", "channel", "MCFile","WeightMaps","model","variation_list","correlation","varied_spectrum", "ShapeOnlyUncertainty"   };
     for (tinyxml2::XMLElement* elem = doc.FirstChildElement(); elem; elem = elem->NextSiblingElement()) {
         std::string name = elem->Name();
         if (std::find(allowed_elements.begin(), allowed_elements.end(), name) == allowed_elements.end()) {
@@ -146,29 +146,6 @@ int PROconfig::LoadFromXML(const std::string &filename){
     pMode = doc.FirstChildElement("mode");
     pDet =  doc.FirstChildElement("detector");
     pChan = doc.FirstChildElement("channel");
-    pPOT = doc.FirstChildElement("plotpot");
-
-
-    while(pPOT){
-
-        //check for known attributes
-        const std::vector<std::string> expected_attrs = {"value"};
-        for (const tinyxml2::XMLAttribute* attr = pPOT->FirstAttribute(); attr; attr = attr->Next()) {
-            std::string name = attr->Name();
-            if (std::find(expected_attrs.begin(), expected_attrs.end(), name) == expected_attrs.end()) {
-                log<LOG_ERROR>(L"%1% || ERROR! Attribute [%2%] in the <plotpot> element is not expected.") % __func__ % name.c_str()  ;
-                log<LOG_ERROR>(L"%1% || -- Check spelling: allowed attributes are %2%") % __func__ % expected_attrs ;
-                throw std::invalid_argument(std::string("<plotpot> attribute not allowed : ") + name);
-            }
-        }
-
-        const char* inplotpot = pPOT->Attribute("value");
-        if(inplotpot){
-            m_plot_pot = strtod(inplotpot,&end);
-        }
-        pPOT = pPOT->NextSiblingElement("plotpot");
-    }
-
 
     if(!pMode){
         log<LOG_ERROR>(L"%1% || ERROR: Need at least 1 mode defined in xml.@ line %2% in %3% ") % __func__ % __LINE__  % __FILE__;
@@ -229,7 +206,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
         while(pDet){
 
-            const std::vector<std::string> expected_attrs = {"name","plotname","use"};
+            const std::vector<std::string> expected_attrs = {"name","plotname","use","pot"};
             for (const tinyxml2::XMLAttribute* attr = pDet->FirstAttribute(); attr; attr = attr->Next()) {
                 std::string name = attr->Name();
                 if (std::find(expected_attrs.begin(), expected_attrs.end(), name) == expected_attrs.end()) {
@@ -262,6 +239,15 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 m_detector_bool.push_back(true);
             else
                 m_detector_bool.push_back(false);
+
+            const char* detector_pot= pDet->Attribute("pot");
+            if (detector_pot == nullptr) {
+                log<LOG_ERROR>(L"%1% || ERROR: Need POT defined for detector @ line %2% in %3% ") % __func__ % __LINE__  % __FILE__;
+                log<LOG_ERROR>(L"Terminating.");
+                exit(EXIT_FAILURE);
+            } else {
+                m_det_pot.push_back(std::strtod(detector_pot,&end));
+            }
 
             pDet = pDet->NextSiblingElement("detector");
             log<LOG_DEBUG>(L"%1% || Loading Det %2%  ") % __func__ % m_detector_names.back().c_str();
