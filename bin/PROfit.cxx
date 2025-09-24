@@ -198,7 +198,7 @@ int main(int argc, char* argv[])
             FILE_LEVEL = GLOBAL_LEVEL;
         }
 
-        log_impl::EnableFileLogging(log_file);
+        log_impl::EnableFileLogging(log_file, FILE_LEVEL);
     }
 
 
