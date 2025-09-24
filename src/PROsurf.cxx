@@ -316,7 +316,8 @@ std::vector<surfOut> PROsurf::PointHelper(const PROfitterConfig &fitconfig, std:
         ub(x_idx) = multi_physics_params[i].grid_val[1];
         lb(y_idx) = multi_physics_params[i].grid_val[0];
         ub(y_idx) = multi_physics_params[i].grid_val[0];
-
+        
+        local_metric->setBounds(lb,ub);
 
         PROfitter fitter(ub, lb, fitconfig, seed+i);
         if(i!=start){
