@@ -71,6 +71,10 @@ public:
 
     void toROOT(const PROconfig& inconfig, const std::string& output_name);
 
+    /* Function to normalize PROdata per subchannel to a given PROspec*/
+    Eigen::VectorXf Normalize(const PROconfig &inconfig, const PROspec &target_spec) const;
+
+
     void plotSpectrum(const PROconfig& inconfig, const std::string& output_name) const;
 
     /* Function: fill given bin with provided weight 

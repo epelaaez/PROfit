@@ -510,14 +510,14 @@ int main(int argc, char* argv[])
     //Metrics are for i_prime only for now
     PROmetric *metric, *null_metric;
     if(chi2 == "PROchi") {
-        metric = new PROchi("", config, prop, &(variable_systs[config.i_prime]), *model, data, eventbyevent ? PROmetric::EventByEvent : PROmetric::BinnedChi2);
-        null_metric = new PROchi("", config, prop, &(variable_systs[config.i_prime]), *null_model, data, eventbyevent ? PROmetric::EventByEvent : PROmetric::BinnedChi2);
+        metric = new PROchi("", config, prop, &(variable_systs[config.i_prime]), *model, data, eventbyevent ? PROmetric::EventByEvent : PROmetric::BinnedChi2,shapeonly);
+        null_metric = new PROchi("", config, prop, &(variable_systs[config.i_prime]), *null_model, data, eventbyevent ? PROmetric::EventByEvent : PROmetric::BinnedChi2,shapeonly);
     } else if(chi2 == "PROCNP") {
-        metric = new PROCNP("", config, prop, &(variable_systs[config.i_prime]), *model, data, eventbyevent ? PROmetric::EventByEvent : PROmetric::BinnedChi2);
-        null_metric = new PROCNP("", config, prop, &(variable_systs[config.i_prime]), *null_model, data, eventbyevent ? PROmetric::EventByEvent : PROmetric::BinnedChi2);
+        metric = new PROCNP("", config, prop, &(variable_systs[config.i_prime]), *model, data, eventbyevent ? PROmetric::EventByEvent : PROmetric::BinnedChi2,shapeonly);
+        null_metric = new PROCNP("", config, prop, &(variable_systs[config.i_prime]), *null_model, data, eventbyevent ? PROmetric::EventByEvent : PROmetric::BinnedChi2,shapeonly);
     } else if(chi2 == "Poisson") {
-        metric = new PROpoisson("", config, prop, &(variable_systs[config.i_prime]), *model, data, eventbyevent ? PROmetric::EventByEvent : PROmetric::BinnedChi2);
-        null_metric = new PROpoisson("", config, prop, &(variable_systs[config.i_prime]), *null_model, data, eventbyevent ? PROmetric::EventByEvent : PROmetric::BinnedChi2);
+        metric = new PROpoisson("", config, prop, &(variable_systs[config.i_prime]), *model, data, eventbyevent ? PROmetric::EventByEvent : PROmetric::BinnedChi2,shapeonly);
+        null_metric = new PROpoisson("", config, prop, &(variable_systs[config.i_prime]), *null_model, data, eventbyevent ? PROmetric::EventByEvent : PROmetric::BinnedChi2,shapeonly);
     } else {
         log<LOG_ERROR>(L"%1% || Unrecognized chi2 function %2%") % __func__ % chi2.c_str();
         abort();
@@ -1170,7 +1170,15 @@ int main(int argc, char* argv[])
             matrices = covarianceTH2D(variable_systs[config.i_prime], config, other_cvs[config.i_prime]);
             c.Print((final_output_tag+"_PROplot_Covar.pdf" + "[").c_str(), "pdf");
             for(const auto &[name, mat]: matrices) {
+
                 mat->Draw("colz");
+                TText *t = new TText();
+                t->SetNDC();                
+                t->SetTextFont(42);                          
+                t->SetTextSize(0.03);      
+                t->SetTextAlign(33);        
+                std::string pv = "PROfit v"+std::string(PROJECT_VERSION_STR);
+                t->DrawText(0.895, 0.955, pv.c_str()); 
                 c.Print((final_output_tag+"_PROplot_Covar.pdf").c_str(), "pdf");
             }
             c.Print((final_output_tag+"_PROplot_Covar.pdf" + "]").c_str(), "pdf");

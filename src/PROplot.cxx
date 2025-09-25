@@ -491,8 +491,8 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                         data_hist.SetMarkerSize(1);
                         std::string dat_str = "Data: ";
                         std::ostringstream oss;
-                        int exponent = static_cast<int>(std::log10(std::abs(config.m_plot_pot)));
-                        float mantissa = config.m_plot_pot/ std::pow(10, exponent);
+                        int exponent = static_cast<int>(std::log10(std::abs(config.m_det_pot[det])));
+                        float mantissa = config.m_det_pot[det]/ std::pow(10, exponent);
                         oss << std::fixed << std::setprecision(2) << mantissa << "x10^{" << exponent << "} POT";
                         dat_str+= oss.str();
                         leg->AddEntry(&data_hist,dat_str.c_str(), "lp");
