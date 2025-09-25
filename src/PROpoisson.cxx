@@ -71,6 +71,11 @@ float PROpoisson::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &grad
 
     // Get Spectra from FillSpectra
     Eigen::VectorXf subvector1 = param.segment(0, nparams - nsyst);
+    if(model.model_constraint){
+        if(!model.model_constraint(subvector1)){
+            return 1e10;
+        }
+    }
     Eigen::VectorXf subvector2 = param.segment(nparams - nsyst, nsyst);
     
     PROspec result = FillSpectra(config, peller, *syst, model, param, strat == BinnedChi2);

@@ -72,6 +72,14 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
     size_t nsyst = syst->GetNSplines();
     //log<LOG_DEBUG>(L"%1% || nparams is %2%, nsyst is %3% ") % __func__ % nparams % nsyst;    
 
+    Eigen::VectorXf subvector1 = param.segment(0, model.nparams);
+    //log<LOG_DEBUG>(L"%1% || Created physics subvector with size %2%") % __func__ % subvector1.size();
+    if(model.model_constraint){
+        if(!model.model_constraint(subvector1)){
+            return 1e10;
+        }
+    }
+
     // Get Spectra from FillSpectra
     Eigen::VectorXf subvector2 = param.segment(nparams - nsyst, nsyst);
     

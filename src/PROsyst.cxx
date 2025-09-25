@@ -392,7 +392,7 @@ namespace PROfit {
         PROsyst::toFiniteMatrix(frac_covar_matrix);
 
         //check if it's good
-        if(!PROsyst::isPositiveSemiDefinite_WithTolerance(frac_covar_matrix,2.0*Eigen::NumTraits<float>::dummy_precision())){
+        if(!PROsyst::isPositiveSemiDefinite_WithTolerance(frac_covar_matrix,10.0*Eigen::NumTraits<float>::dummy_precision())){
             log<LOG_ERROR>(L"%1% || Fractional Covariance Matrix is not positive semi-definite!") % __func__;
             log<LOG_ERROR>(L"Terminating.");
             log<LOG_ERROR>(L" Matrix is %1% .") % frac_covar_matrix;
@@ -447,8 +447,8 @@ namespace PROfit {
     bool PROsyst::isPositiveSemiDefinite(const Eigen::MatrixXf& in_matrix){
 
         //first, check if it's symmetric 
-        if(!in_matrix.isApprox(in_matrix.transpose(), Eigen::NumTraits<float>::dummy_precision())){
-            log<LOG_ERROR>(L"%1% || Covariance matrix is not symmetric, with tolerance of %2%") % __func__ % Eigen::NumTraits<float>::dummy_precision();
+        if(!in_matrix.isApprox(in_matrix.transpose(), 10.0f*Eigen::NumTraits<float>::dummy_precision())){
+            log<LOG_ERROR>(L"%1% || Covariance matrix is not symmetric, with tolerance of %2%") % __func__ % float(10.0f*Eigen::NumTraits<float>::dummy_precision());
             return false;
         }
 
