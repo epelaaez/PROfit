@@ -69,7 +69,7 @@ float PROCNP::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
 
     // Get Spectra from FillSpectra
     Eigen::VectorXf subvector1 = param.segment(0, model.nparams);
-    //log<LOG_DEBUG>(L"%1% || Created physics subvector with size %2%") % __func__ % subvector1.size();
+    log<LOG_DEBUG>(L"%1% || Created physics subvector with size %2%") % __func__ % subvector1.size();
      if(model.model_constraint){
         if(!model.model_constraint(subvector1)){
             return 1e10;
