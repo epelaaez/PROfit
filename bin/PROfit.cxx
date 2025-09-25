@@ -1228,7 +1228,7 @@ int main(int argc, char* argv[])
         std::vector<PROerrorbar> other_err_bands;
         for(size_t io = 0; io < config.m_num_variables; ++io) {
             if(!config.m_channel_variable_plot_bool.at(io))continue;// For now skip the L/E 250 bin. 
-            other_err_bands.push_back(getErrorBand(config, prop, variable_systs[io], binwidth_scale, io));
+            other_err_bands.push_back(getErrorBand(config, prop, variable_systs[io], other_cvs[io], binwidth_scale, io));
             plot_channels(final_output_tag+"_PROplot_other_"+std::to_string(io)+"_ErrorBand.pdf", config, other_cvs[io], {}, variable_data[io], 
                     other_err_bands.back(), {}, other_channel_chitexts[io], opt | PlotOptions::DataMCRatio, io);
         }
