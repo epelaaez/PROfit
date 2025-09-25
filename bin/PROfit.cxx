@@ -686,7 +686,7 @@ int main(int argc, char* argv[])
         PROerrorbar  err_band = 
             MCMC_prefit_errors
             ? getMCMCErrorBand(mh_pre, fitconfig.MCMCburn, fitconfig.MCMCiter, config, prop, *metric_to_use, best_fit, priors, prior_covariance, binwidth_scale,config.i_prime)
-            : getErrorBand(config, prop, variable_systs[config.i_prime], binwidth_scale,config.i_prime);
+            : getErrorBand(config, prop, variable_systs[config.i_prime], cv, binwidth_scale,config.i_prime);
 
         //Metropolis mh_post(simple_target{*metric_to_use}, simple_proposal(*metric_to_use, dseed(PROseed::global_rng), 0.2, fixed_pars), best_fit, dseed(PROseed::global_rng));
         Metropolis mh_post(simple_target{*metric_to_use}, adaptive_proposal(*metric_to_use, dseed(PROseed::global_rng), fixed_pars), best_fit, dseed(PROseed::global_rng));

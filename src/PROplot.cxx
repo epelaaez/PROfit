@@ -188,11 +188,9 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
 
     return spline_graphs;
 }
-    PROerrorbar getErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, bool scale, int other_index) {
+    PROerrorbar getErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROspec &cv_spec, bool scale, int other_index) {
         
-
-        Eigen::VectorXf cv = CollapseMatrix(config, FillCVSpectra(config, prop, true, other_index).Spec(), other_index);
-
+        Eigen::VectorXf cv = CollapseMatrix(config, cv_spec.Spec(), other_index);
    
         std::vector<float> centers;
         size_t global_channel_index = 0;

@@ -234,11 +234,12 @@ public:
         default_val = Eigen::VectorXf(3);
         lb << -2, -std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity();
         ub << 2, 0, 0;
-        default_val << -std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity();
+        //default_val << -std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity();
+        default_val << -2, -8, -8;
     };
 
     int UnitarityConstraint(const Eigen::VectorXf &v){
-        return   (v(1)+v(2)<=1 ? 1 : 0);      
+        return   (v(1)+v(2)<1 ? 1 : 0);      
     }
 
     float Pmue(float dmsq, float Ue4sq, float Um4sq, float le) const{
