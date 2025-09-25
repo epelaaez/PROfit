@@ -24,6 +24,7 @@ public:
     std::vector<std::string> pretty_param_names;
     Eigen::VectorXf lb, ub, default_val;
     std::vector<std::function<float(const Eigen::VectorXf&, float)>> model_functions;
+    std::function<int(const Eigen::VectorXf&)> model_constraint;
     std::vector<std::vector<Eigen::MatrixXf>> hists; //2D hists for binned oscilattion, one for each model function, and the N-variables 
                                         //Todo: make this a vector of length n_variables, and fill them all. For now 1 is "special". 
 };
@@ -205,6 +206,8 @@ public:
         }
         ivar = parameter_map.at("L/E");
 
+        //constraints
+        model_constraint = [this](const Eigen::VectorXf &v){return this->UnitarityConstraint(v);};
 
 
          size_t nvar = prop.variable_mc_stat_err.size();
@@ -233,6 +236,10 @@ public:
         ub << 2, 0, 0;
         default_val << -std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity();
     };
+
+    int UnitarityConstraint(const Eigen::VectorXf &v){
+        return   (v(1)+v(2)<=1 ? 1 : 0);      
+    }
 
     float Pmue(float dmsq, float Ue4sq, float Um4sq, float le) const{
         dmsq = std::pow(10.0f, dmsq);
