@@ -189,7 +189,10 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
     return spline_graphs;
 }
     PROerrorbar getErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROspec &cv_spec, bool scale, int other_index) {
-        
+       // cv_spec.Print();
+       //    log<LOG_INFO>(L"%1% ||ARSE %2% ") % __func__ % cv_spec.Spec();
+       //     log<LOG_INFO>(L"%1% ||AddressSE %2% ") % __func__ % &cv_spec;
+
         Eigen::VectorXf cv = CollapseMatrix(config, cv_spec.Spec(), other_index);
    
         std::vector<float> centers;

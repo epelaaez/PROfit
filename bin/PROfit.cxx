@@ -664,6 +664,7 @@ int main(int argc, char* argv[])
 
         std::string hname = "#chi^{2}/ndf = " + to_string(chi2) + "/" + to_string(config.m_num_variable_bins_total_collapsed[config.i_prime]);
         //PROspec cv = FillCVSpectra(config, prop, true);//fullosc
+        PROspec cv1 = FillSpectra(config, prop, variable_systs[config.i_prime],*model,CVpparams, !eventbyevent, 0);
         PROspec cv = FillSpectra(config, prop, metric_to_use->GetSysts(), metric_to_use->GetModel(), CVpparams , true);
         PROspec bf = FillSpectra(config, prop, metric_to_use->GetSysts(), metric_to_use->GetModel(), best_fit, true);
         TH1D post_hist("ph", hname.c_str(), config.m_num_variable_bins_total_collapsed[config.i_prime], config.m_channel_variable_bins[config.i_prime][0].Edges().data());
@@ -683,6 +684,9 @@ int main(int argc, char* argv[])
 
         log<LOG_INFO>(L"%1% || Starting global getErrorBand() ") % __func__;
         Metropolis mh_pre(prior_only_target{*metric_to_use}, adaptive_proposal(*metric_to_use, dseed(PROseed::global_rng), fixed_pars), best_fit, dseed(PROseed::global_rng));
+        //log<LOG_INFO>(L"%1% ||ARSOut %2% ") % __func__ % cv.Spec();
+        //log<LOG_INFO>(L"%1% || address %2%") % __func__ % &cv;
+
         PROerrorbar  err_band = 
             MCMC_prefit_errors
             ? getMCMCErrorBand(mh_pre, fitconfig.MCMCburn, fitconfig.MCMCiter, config, prop, *metric_to_use, best_fit, priors, prior_covariance, binwidth_scale,config.i_prime)

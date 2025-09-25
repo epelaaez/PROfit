@@ -233,7 +233,7 @@ public:
         ub = Eigen::VectorXf(3);
         default_val = Eigen::VectorXf(3);
         lb << -2, -std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity();
-        ub << 2, 0, 0;
+        ub << 2, -1e-3, -1e-3;
         //default_val << -std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity();
         default_val << -2, -8, -8;
     };
