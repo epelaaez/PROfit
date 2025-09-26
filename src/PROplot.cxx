@@ -221,7 +221,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
         
         //Fills already collapsed
         for(size_t i = 0; i < nerrorsample; ++i){
-            Eigen::VectorXf var = FillSystRandomThrow(config, prop, syst, dseed(PROseed::global_rng), other_index).Spec();
+            Eigen::VectorXf var = FillSystRandomThrow(config, prop, syst, cv_spec, dseed(PROseed::global_rng), other_index).Spec();
             specs.push_back(var);
 
         }

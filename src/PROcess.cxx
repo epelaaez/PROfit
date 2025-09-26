@@ -196,11 +196,10 @@ namespace PROfit {
         return myspectrum;
     }
 
-    PROspec FillSystRandomThrow(const PROconfig &inconfig, const PROpeller &inprop, const PROsyst &insyst, uint32_t seed, int var_index) {
+    PROspec FillSystRandomThrow(const PROconfig &inconfig, const PROpeller &inprop, const PROsyst &insyst, const PROspec &cvspec, uint32_t seed, int var_index) {
         int nbins = inconfig.m_num_variable_bins_total[var_index],
         nbins_collapsed = inconfig.m_num_variable_bins_total_collapsed[var_index];
         Eigen::VectorXf spec = Eigen::VectorXf::Constant(nbins, 0);
-        Eigen::VectorXf cvspec = Eigen::VectorXf::Constant(nbins, 0);
 
 
         // TODO: We should think about centralizing rng in a thread-safe/thread-aware way
@@ -244,7 +243,6 @@ namespace PROfit {
             for(long int i = 0; i < inconfig.m_num_variable_bins_total[var_index]; ++i) {
                 for(int k = 0; k < nbins; ++k) {
                     spec(k) += systw(k) * inprop.variable_hist_storage(var_index,var_index,i, k);
-                    cvspec(k) += inprop.variable_hist_storage(var_index,var_index,i, k);
                 }
             }
 
@@ -260,7 +258,6 @@ namespace PROfit {
                 if(inprop.VariableBinIndex(var_index, i) >= 0) {
                     float finalw = systw * add_w;
                     spec(inprop.VariableBinIndex(var_index, i)) += finalw;
-                    cvspec(inprop.VariableBinIndex(var_index, i)) += add_w;
                 }
             }
         }
@@ -270,7 +267,7 @@ namespace PROfit {
             return PROspec(final_spec, final_spec.array().sqrt());
         }
 
-        Eigen::MatrixXf decomp_cov = insyst.DecomposeFractionalCovariance(inconfig, cvspec);
+        Eigen::MatrixXf decomp_cov = insyst.DecomposeFractionalCovariance(inconfig, cvspec.Spec());
         Eigen::VectorXf collapsed_spec = CollapseMatrix(inconfig, spec, var_index);
         Eigen::VectorXf final_spec = collapsed_spec + decomp_cov * throwC;
 
