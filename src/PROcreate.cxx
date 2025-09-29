@@ -927,11 +927,11 @@ namespace PROfit {
                 if(spline_bin < 0) continue;
                 for(auto so: var_syst_objs)
                     so->FillCV(spline_bin, mc_weight);
-                float norm_shift_percentage = 0.0;
                 
                 for(int is = 0; is < var_syst_objs.front()->GetNUniverse(); ++is){
                     size_t ivar=0;
                     for(auto so: var_syst_objs){
+                        float norm_shift_percentage = 0.0;
                         if( std::find(var_syst_objs.front()->norm_bins.begin(), var_syst_objs.front()->norm_bins.end(),var_bin_indices[ivar])!=var_syst_objs.front()->norm_bins.end()){
                             norm_shift_percentage =  var_syst_objs.front()->norm_value;
                        }

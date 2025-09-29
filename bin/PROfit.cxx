@@ -1252,9 +1252,12 @@ int main(int argc, char* argv[])
                     fixed_pts->SetTitle((syst_name+" - True Bin "+std::to_string(bin)).c_str());
                     fixed_pts->Draw("PA");
                     curve->Draw("C same");
+                    log<LOG_INFO>(L"%1% || FARGbin %2% for syst_name %3% ") % __func__ % bin % syst_name.c_str() ;
                     ++bin;
                     if(bin % 16 == 0) {
                         c.Print((final_output_tag+"_PROplot_Spline.pdf").c_str(), "pdf");
+                        c.Clear();
+                        c.Divide(4,4);
                         unprinted = false;
                     }
                 }
