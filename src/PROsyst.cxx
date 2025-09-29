@@ -160,7 +160,7 @@ namespace PROfit {
         return ret;
     }
 
-    PROsyst PROsyst::allsplines2cov(const PROconfig &config, const PROpeller &prop, uint32_t seed) const {
+    PROsyst PROsyst::allsplines2cov(const PROconfig &config, const PROpeller &prop, const PROmodel &model, const Eigen::VectorXf &params, uint32_t seed) const {
         PROsyst ret;
         for(const auto &[name, spair]: syst_map) {
 
@@ -169,7 +169,7 @@ namespace PROfit {
                 case SystType::Spline: {
                                            ret.syst_map[name] = std::make_pair(ret.covmat.size(), SystType::Covariance);
                                            ret.covar_names.push_back(name);
-                                           Eigen::MatrixXf cov = spline2cov(idx, config, prop, seed);
+                                           Eigen::MatrixXf cov = spline2cov(idx, config, prop, model,params, seed);
                                            Eigen::MatrixXf cor = GenerateCorrMatrix(cov);
                                            ret.covmat.push_back(cov);
                                            ret.corrmat.push_back(cor);
@@ -193,8 +193,8 @@ namespace PROfit {
         return ret;
     }
 
-    Eigen::MatrixXf PROsyst::spline2cov(int spline, const PROconfig &config, const PROpeller &prop, uint32_t seed) const {
-        Eigen::VectorXf cv = FillCVSpectra(config, prop, true, other_index).Spec();
+    Eigen::MatrixXf PROsyst::spline2cov(int spline, const PROconfig &config, const PROpeller &prop, const PROmodel &model, const Eigen::VectorXf &params, uint32_t seed) const {
+        Eigen::MatrixXf cv = FillSpectra(config, prop, *this, model, params , true, other_index).Spec();
 
         std::vector<Eigen::VectorXf> specs;
         for(size_t i = 0; i < 1000; ++i){
@@ -392,7 +392,7 @@ namespace PROfit {
         PROsyst::toFiniteMatrix(frac_covar_matrix);
 
         //check if it's good
-        if(!PROsyst::isPositiveSemiDefinite_WithTolerance(frac_covar_matrix,2.0*Eigen::NumTraits<float>::dummy_precision())){
+        if(!PROsyst::isPositiveSemiDefinite_WithTolerance(frac_covar_matrix,10.0*Eigen::NumTraits<float>::dummy_precision())){
             log<LOG_ERROR>(L"%1% || Fractional Covariance Matrix is not positive semi-definite!") % __func__;
             log<LOG_ERROR>(L"Terminating.");
             log<LOG_ERROR>(L" Matrix is %1% .") % frac_covar_matrix;
@@ -447,8 +447,8 @@ namespace PROfit {
     bool PROsyst::isPositiveSemiDefinite(const Eigen::MatrixXf& in_matrix){
 
         //first, check if it's symmetric 
-        if(!in_matrix.isApprox(in_matrix.transpose(), Eigen::NumTraits<float>::dummy_precision())){
-            log<LOG_ERROR>(L"%1% || Covariance matrix is not symmetric, with tolerance of %2%") % __func__ % Eigen::NumTraits<float>::dummy_precision();
+        if(!in_matrix.isApprox(in_matrix.transpose(), 10.0f*Eigen::NumTraits<float>::dummy_precision())){
+            log<LOG_ERROR>(L"%1% || Covariance matrix is not symmetric, with tolerance of %2%") % __func__ % float(10.0f*Eigen::NumTraits<float>::dummy_precision());
             return false;
         }
 

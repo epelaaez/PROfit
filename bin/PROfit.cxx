@@ -415,7 +415,7 @@ int main(int argc, char* argv[])
         for(size_t io = 0; io < config.m_num_variables; ++io) {
             PROspec data_spec = osc_params.size() || injected_systs.size() 
                 ? FillSpectra(config, prop, variable_systs[io], *model, allparams, !eventbyevent, io)
-                : FillCVSpectra(config, prop, !eventbyevent, io);
+                : FillSpectra(config, prop, variable_systs[io], *model, allparams, !eventbyevent, io);
 
             if(poisson_throw) PROspec::PoissonVariation(data_spec, dseed(myseed.global_rng));
             Eigen::VectorXf data_vec = CollapseMatrix(config, data_spec.Spec(), io);
@@ -663,8 +663,8 @@ int main(int argc, char* argv[])
         log<LOG_INFO>(L"%1% || MCMC acceptance is  %2%. ") % __func__% ((double)count /fitconfig.MCMCiter);
 
         std::string hname = "#chi^{2}/ndf = " + to_string(chi2) + "/" + to_string(config.m_num_variable_bins_total_collapsed[config.i_prime]);
-        PROspec cv = FillCVSpectra(config, prop, true);
-        PROspec bf = FillSpectra(config, prop, metric_to_use->GetSysts(), metric_to_use->GetModel(), best_fit, true);
+        PROspec cv = FillSpectra(config, prop, metric_to_use->GetSysts(), metric_to_use->GetModel(), CVpparams , true,config.i_prime);
+        PROspec bf = FillSpectra(config, prop, metric_to_use->GetSysts(), metric_to_use->GetModel(), best_fit, true,config.i_prime);
         TH1D post_hist("ph", hname.c_str(), config.m_num_variable_bins_total_collapsed[config.i_prime], config.m_channel_variable_bins[config.i_prime][0].Edges().data());
         TH1D pre_hist("prh", hname.c_str(), config.m_num_variable_bins_total_collapsed[config.i_prime], config.m_channel_variable_bins[config.i_prime][0].Edges().data());
         for(size_t i = 0; i < config.m_num_variable_bins_total_collapsed[config.i_prime]; ++i) {
@@ -682,10 +682,13 @@ int main(int argc, char* argv[])
 
         log<LOG_INFO>(L"%1% || Starting global getErrorBand() ") % __func__;
         Metropolis mh_pre(prior_only_target{*metric_to_use}, adaptive_proposal(*metric_to_use, dseed(PROseed::global_rng), fixed_pars), best_fit, dseed(PROseed::global_rng));
+        //log<LOG_INFO>(L"%1% ||ARSOut %2% ") % __func__ % cv.Spec();
+        //log<LOG_INFO>(L"%1% || address %2%") % __func__ % &cv;
+
         PROerrorbar  err_band = 
             MCMC_prefit_errors
             ? getMCMCErrorBand(mh_pre, fitconfig.MCMCburn, fitconfig.MCMCiter, config, prop, *metric_to_use, best_fit, priors, prior_covariance, binwidth_scale,config.i_prime)
-            : getErrorBand(config, prop, variable_systs[config.i_prime], binwidth_scale,config.i_prime);
+            : getErrorBand(config, prop, variable_systs[config.i_prime], *model, cv,CVpparams, binwidth_scale,config.i_prime);
 
         //Metropolis mh_post(simple_target{*metric_to_use}, simple_proposal(*metric_to_use, dseed(PROseed::global_rng), 0.2, fixed_pars), best_fit, dseed(PROseed::global_rng));
         Metropolis mh_post(simple_target{*metric_to_use}, adaptive_proposal(*metric_to_use, dseed(PROseed::global_rng), fixed_pars), best_fit, dseed(PROseed::global_rng));
@@ -923,7 +926,8 @@ int main(int argc, char* argv[])
         if(run_brazil && brazil_throws.size() == 0) {
             std::normal_distribution<float> d;
             size_t nphys = metric->GetModel().nparams;
-            PROspec cv = FillCVSpectra(config, prop, true);
+            PROspec cv = FillSpectra(config, prop, metric->GetSysts(), metric->GetModel(), CVpparams , true,config.i_prime);
+
             PROspec collapsed_cv = PROspec(CollapseMatrix(config, cv.Spec()), CollapseMatrix(config, cv.Error()));
             Eigen::MatrixXf L = metric->GetSysts().DecomposeFractionalCovariance(config, cv.Spec());
             for(size_t i = 0; i < 1000; ++i) {
@@ -1043,7 +1047,7 @@ int main(int argc, char* argv[])
     if(*proplot_command){
 
         log<LOG_INFO>(L"%1% || Making a PROsyst thats full covarinace for future error bar creation (might be slow) ")% __func__ ;
-        PROsyst allcovsyst = variable_systs[config.i_prime].allsplines2cov(config, prop, dseed(PROseed::global_rng));
+        PROsyst allcovsyst = variable_systs[config.i_prime].allsplines2cov(config, prop, *model, CVpparams, dseed(PROseed::global_rng));
 
         PlotOptions opt = PlotOptions::CVasStack;
         std::vector<TPaveText> notext;
@@ -1051,8 +1055,7 @@ int main(int argc, char* argv[])
         if(area_normalized) opt |= PlotOptions::AreaNormalized;
         std::vector<PROspec> other_cvs;
         for(size_t io = 0; io < config.m_num_variables; ++io) {
-            other_cvs.push_back(FillCVSpectra(config, prop, !eventbyevent, io));
-
+            other_cvs.push_back(FillSpectra(config, prop, variable_systs[config.i_prime],*model,CVpparams, !eventbyevent, io));
             plot_channels(final_output_tag+"_other_"+std::to_string(io)+"_PROplot_CV.pdf", config, other_cvs.back(), {}, {}, {}, {}, notext, opt, io);
         }
 
@@ -1201,7 +1204,7 @@ int main(int argc, char* argv[])
                         TPaveText chi2text(0.59, 0.50, 0.89, 0.59, "NDC");
                         if(io==config.i_prime){
                             log<LOG_INFO>(L"%1% || On channel %2%:") % __func__ % global_channel_index ;
-                            double chival = allcov_metric->getSingleChannelChi(global_channel_index, io);
+                            double chival = allcov_metric->getSingleChannelChi(global_channel_index, other_cvs[io], io);
                             int ndf = config.m_channel_variable_bins[ic][io].NBinsAlong(0) - bool(opt&PlotOptions::AreaNormalized);
                             log<LOG_INFO>(L"%1% || -- the datamc chi^2/ndof is %2%/%3% .") % __func__ % chival % ndf;
                             chi2text.AddText(("#chi^{2}/ndf = "+to_string_prec(chival,2)+"/"+std::to_string(ndf)).c_str());
@@ -1223,7 +1226,7 @@ int main(int argc, char* argv[])
         std::vector<PROerrorbar> other_err_bands;
         for(size_t io = 0; io < config.m_num_variables; ++io) {
             if(!config.m_channel_variable_plot_bool.at(io))continue;// For now skip the L/E 250 bin. 
-            other_err_bands.push_back(getErrorBand(config, prop, variable_systs[io], binwidth_scale, io));
+            other_err_bands.push_back(getErrorBand(config, prop, variable_systs[io], *model, other_cvs[io], CVpparams, binwidth_scale, io));
             plot_channels(final_output_tag+"_PROplot_other_"+std::to_string(io)+"_ErrorBand.pdf", config, other_cvs[io], {}, variable_data[io], 
                     other_err_bands.back(), {}, other_channel_chitexts[io], opt | PlotOptions::DataMCRatio, io);
         }
@@ -1321,7 +1324,8 @@ int main(int argc, char* argv[])
 
     if(*profc_command) {
         size_t FCthreads = nthread > nuniv ? nuniv : nthread;
-        Eigen::MatrixXf cv_vec = FillCVSpectra(config, prop, !eventbyevent).Spec();
+        Eigen::MatrixXf cv_vec = FillSpectra(config, prop, metric->GetSysts(), metric->GetModel(), CVpparams , true,config.i_prime).Spec();
+
         Eigen::MatrixXf L = variable_systs[config.i_prime].DecomposeFractionalCovariance(config, cv_vec);
 
         std::vector<std::vector<float>> dchi2s;
@@ -1413,9 +1417,10 @@ int main(int argc, char* argv[])
         size_t nparams = metric_to_use->nParams();
         size_t nphys = metric_to_use->GetModel().nparams;
         PROfitter fitter(metric_to_use->UpperBound(), metric_to_use->LowerBound(), fitconfig);
+        metric_to_use->setBounds(metric_to_use->UpperBound(), metric_to_use->LowerBound());
 
         log<LOG_INFO>(L"%1% || ########### Print of inputs ############") % __func__;
-        metric_to_use->print(allparams);
+        //metric_to_use->print(allparams); //fix
         log<LOG_INFO>(L"%1% || ########### Starting Global Best Fit Minimizing ############") % __func__;
 
 
@@ -1442,6 +1447,120 @@ int main(int argc, char* argv[])
             }
         }
         log<LOG_INFO>(L"%1% || ################################################") % __func__;
+
+        log<LOG_INFO>(L"%1% || Starting a metropolis hastings chain to estimate the covariace matrix aroud the above best fit. Run and Burn is (%2%,%3%);") % __func__%fitconfig.MCMCiter % fitconfig.MCMCburn;
+        Metropolis mh(simple_target{*metric_to_use}, adaptive_proposal(*metric_to_use, dseed(PROseed::global_rng)), best_fit, dseed(PROseed::global_rng));
+
+        Eigen::MatrixXf covmat = Eigen::MatrixXf::Constant(nparams, nparams, 0);
+        size_t count = 0;
+        const auto action = [&](const Eigen::VectorXf &value) {
+            covmat += (value-best_fit) * (value-best_fit).transpose();
+            count += 1; 
+        };
+        mh.run(fitconfig.MCMCburn,fitconfig.MCMCiter, action);
+
+        covmat /= count;
+        Eigen::VectorXf inv_best_fit = best_fit.array().abs().max(1e-10f).inverse();
+        Eigen::MatrixXf fraccovmat = inv_best_fit.asDiagonal() * covmat * inv_best_fit.asDiagonal();
+
+        Eigen::VectorXf inv_sqrt_diag = fraccovmat.diagonal().array().abs().max(1e-10f).sqrt().inverse();
+        Eigen::MatrixXf corrmat = inv_sqrt_diag.asDiagonal() * fraccovmat * inv_sqrt_diag.asDiagonal();
+
+
+        TH2D corrhist("crh", "", nparams, 0, nparams, nparams, 0, nparams);
+        TH2D fraccovhist("fch", "", nparams, 0, nparams, nparams, 0, nparams);
+        TH2D covhist("ch", "", nparams, 0, nparams, nparams, 0, nparams);
+        TH2D physhist;
+        if(nphys > 0) physhist = TH2D("ph","", nparams, 0, nparams, nphys, 0, nphys);
+        for(size_t i = 0; i < nparams; ++i) {
+            std::string label = i < metric_to_use->GetModel().nparams 
+                ? metric_to_use->GetModel().pretty_param_names[i]
+                : config.m_mcgen_variation_plotname_map[metric_to_use->GetSysts().spline_names[i-metric_to_use->GetModel().nparams]].c_str();
+            covhist.GetXaxis()->SetBinLabel(i+1, label.c_str());
+            covhist.GetYaxis()->SetBinLabel(i+1, label.c_str());
+            fraccovhist.GetXaxis()->SetBinLabel(i+1, label.c_str());
+            fraccovhist.GetYaxis()->SetBinLabel(i+1, label.c_str());
+            corrhist.GetXaxis()->SetBinLabel(i+1, label.c_str());
+            corrhist.GetYaxis()->SetBinLabel(i+1, label.c_str());
+            if(nphys > 0) physhist.GetXaxis()->SetBinLabel(i+1, label.c_str());
+            if(i < metric_to_use->GetModel().nparams) physhist.GetYaxis()->SetBinLabel(i+1, label.c_str());
+            for(size_t j = 0; j < nparams; ++j) {
+                covhist.SetBinContent(i+1, j+1, covmat(i,j));
+                fraccovhist.SetBinContent(i+1, j+1, fraccovmat(i,j));
+                corrhist.SetBinContent(i+1, j+1, corrmat(i,j));
+                if(j < metric_to_use->GetModel().nparams)
+                    physhist.SetBinContent(i+1, j+1, covmat(i,j));
+            }
+        }
+        TCanvas c1;
+        corrhist.SetMaximum(1);
+        corrhist.SetMinimum(-1);
+        covhist.SetMaximum(1);
+        covhist.SetMinimum(-1);
+        fraccovhist.SetMaximum(100);
+        fraccovhist.SetMinimum(-100);
+        c1.SetLeftMargin(0.18);   
+        corrhist.SetTitle("Post-Fit Correlation Matrix");
+        corrhist.Draw("colz");
+        gPad->Update();
+
+        TLine line;
+        line.SetLineColor(kBlack);
+        line.SetLineWidth(2);
+        line.DrawLine(nphys, 0, nphys, nparams);
+        line.DrawLine(0, nphys, nparams, nphys);
+        c1.Print((final_output_tag+"_postfit_correlation_matrix.pdf").c_str());
+        if(nphys > 0) {
+            physhist.Draw("colz");
+            c1.Print("phys_cov.pdf");
+        }
+        log<LOG_INFO>(L"%1% || MCMC acceptance is  %2%. ") % __func__% ((double)count /fitconfig.MCMCiter);
+
+        std::string hname = "#chi^{2}/ndf = " + to_string(chi2) + "/" + to_string(config.m_num_variable_bins_total_collapsed[config.i_prime]);
+        PROspec cv = FillSpectra(config, prop, metric_to_use->GetSysts(), metric_to_use->GetModel(), CVpparams , true,config.i_prime);
+        PROspec bf = FillSpectra(config, prop, metric_to_use->GetSysts(), metric_to_use->GetModel(), best_fit, true,config.i_prime);
+
+        TH1D post_hist("ph", hname.c_str(), config.m_num_variable_bins_total_collapsed[config.i_prime], config.m_channel_variable_bins[config.i_prime][0].Edges().data());
+        TH1D pre_hist("prh", hname.c_str(), config.m_num_variable_bins_total_collapsed[config.i_prime], config.m_channel_variable_bins[config.i_prime][0].Edges().data());
+        for(size_t i = 0; i < config.m_num_variable_bins_total_collapsed[config.i_prime]; ++i) {
+            post_hist.SetBinContent(i+1, bf.Spec()(i));
+            pre_hist.SetBinContent(i+1, cv.Spec()(i));
+        }
+
+        log<LOG_INFO>(L"%1% || Finished the metropolis hastings chain ") % __func__;
+
+        std::vector<TH1D> priors, posteriors;
+        Eigen::MatrixXf prior_covariance, spline_covariance;
+        // Fix physics parameters
+        std::vector<int> fixed_pars;
+        for(size_t i = 0; i < metric_to_use->GetModel().nparams; ++i) fixed_pars.push_back(i);
+
+        log<LOG_INFO>(L"%1% || Starting global getErrorBand() ") % __func__;
+        Metropolis mh_pre(prior_only_target{*metric_to_use}, adaptive_proposal(*metric_to_use, dseed(PROseed::global_rng), fixed_pars), best_fit, dseed(PROseed::global_rng));
+
+        PROerrorbar  err_band = 
+            MCMC_prefit_errors
+            ? getMCMCErrorBand(mh_pre, fitconfig.MCMCburn, fitconfig.MCMCiter, config, prop, *metric_to_use, best_fit, priors, prior_covariance, binwidth_scale,config.i_prime)
+            : getErrorBand(config, prop, variable_systs[config.i_prime], *model, cv,CVpparams, binwidth_scale,config.i_prime);
+
+        Metropolis mh_post(simple_target{*metric_to_use}, adaptive_proposal(*metric_to_use, dseed(PROseed::global_rng), fixed_pars), best_fit, dseed(PROseed::global_rng));
+        log<LOG_INFO>(L"%1% || Starting global getPostFitErrorBand() ") % __func__;
+        PROerrorbar post_err_band = getMCMCErrorBand(mh_post, fitconfig.MCMCburn, fitconfig.MCMCiter, config, prop, *metric_to_use, best_fit, posteriors, spline_covariance, binwidth_scale,config.i_prime);
+
+        std::vector<TPaveText> texts;
+        TPaveText chi2text(0.55, 0.50, 0.85, 0.58, "NDC");
+        chi2text.AddText(hname.c_str());
+        chi2text.SetFillColor(0);
+        chi2text.SetBorderSize(0);
+        chi2text.SetTextAlign(12);
+        //chi2text.SetTextSize(0.035); 
+        texts.push_back(chi2text);
+
+        PlotOptions opt = PlotOptions::DataPostfitRatio;
+        if(binwidth_scale) opt |= PlotOptions::BinWidthScaled;
+        if(area_normalized) opt |= PlotOptions::AreaNormalized;
+        plot_channels((final_output_tag+"_PROfile_hists.pdf"), config, cv, bf, data, err_band, post_err_band, texts, opt);
+
 
     }
 

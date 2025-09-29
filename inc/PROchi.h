@@ -72,7 +72,8 @@ namespace PROfit{
             }
 
             virtual PROmetric *Clone() const {
-                return new PROchi(*this);
+                 return new PROchi(model_tag, config, peller, syst, model, data, strat, shape_only, physics_param_fixed);
+
             }
 
             virtual const PROmodel &GetModel() const {
@@ -91,8 +92,7 @@ namespace PROfit{
 
             void fixSpline(int fix, float valin);
 
-            float getSingleChannelChi(size_t channel_index,size_t var_index) ;
-
+            float getSingleChannelChi(size_t global_channel_index, const PROspec &cv, size_t var_index);
             void print(const Eigen::VectorXf &param);
     };
 }

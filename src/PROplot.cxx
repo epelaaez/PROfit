@@ -188,11 +188,13 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
 
     return spline_graphs;
 }
-    PROerrorbar getErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, bool scale, int other_index) {
-        
+    PROerrorbar getErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const PROspec &cv_spec, const Eigen::VectorXf &cvparams,bool scale, int other_index) {
 
-        Eigen::VectorXf cv = CollapseMatrix(config, FillCVSpectra(config, prop, true, other_index).Spec(), other_index);
+        //cv_spec.Print();
+        //   log<LOG_INFO>(L"%1% ||ARSE %2% ") % __func__ % cv_spec.Spec();
+        //    log<LOG_INFO>(L"%1% ||AddressSE %2% ") % __func__ % &cv_spec;
 
+        Eigen::VectorXf cv = CollapseMatrix(config, cv_spec.Spec(), other_index);
    
         std::vector<float> centers;
         size_t global_channel_index = 0;
@@ -220,7 +222,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
         
         //Fills already collapsed
         for(size_t i = 0; i < nerrorsample; ++i){
-            Eigen::VectorXf var = FillSystRandomThrow(config, prop, syst, dseed(PROseed::global_rng), other_index).Spec();
+            Eigen::VectorXf var = FillSystRandomThrow(config, prop, syst, model,cv_spec, cvparams, dseed(PROseed::global_rng), other_index).Spec();
             specs.push_back(var);
 
         }
@@ -374,8 +376,9 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                         int channel_start =  config.GetCollapsedGlobalVariableBinStart(global_channel_index, other_index);
                         size_t total_bins = config.GetChannelVariableBins(global_channel_index, other_index).NBins();
                         Eigen::VectorXf this_bf_spec = config.GetChannelVariableBins(global_channel_index, other_index).ProjectSpectra(bf_spec(Eigen::seqN(channel_start, total_bins)), 0);
+
                         for(size_t bin = 0; bin < channel_nbins; ++bin) {
-                            bf_hist.SetBinContent(bin+1, bf_spec(bin));
+                            bf_hist.SetBinContent(bin+1, this_bf_spec(bin));
                         }
                         //bf_hist.SetLineColor(TColor::GetColor(234, 67, 53)); // pastel red
                         bf_hist.SetLineColor(bfcol); 

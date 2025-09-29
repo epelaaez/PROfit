@@ -64,12 +64,18 @@ float PROCNP::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
 float PROCNP::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient, bool rungradient){
     call_count++;
 
-    //size_t nparams = model->nparams+syst->GetNSplines();
+       //size_t nparams = model->nparams+syst->GetNSplines();
     //size_t nsyst = syst->GetNSplines();
 
     // Get Spectra from FillSpectra
     Eigen::VectorXf subvector1 = param.segment(0, model.nparams);
-    //log<LOG_DEBUG>(L"%1% || Created physics subvector with size %2%") % __func__ % subvector1.size();
+    log<LOG_DEBUG>(L"%1% || Created physics subvector with size %2%") % __func__ % subvector1.size();
+     if(model.model_constraint){
+        if(!model.model_constraint(subvector1)){
+            return 1e10;
+        }
+    }
+
     Eigen::VectorXf subvector2 = param.segment(model.nparams, syst->GetNSplines());
     //log<LOG_DEBUG>(L"%1% || Created spline subvector with size %2%") % __func__ % subvector2.size();
 
@@ -251,8 +257,7 @@ float PROCNP::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
 
     return value;}
 
-float PROCNP::getSingleChannelChi(size_t global_channel_index,size_t var_index) {
-    PROspec cv = FillCVSpectra(config, peller,strat == BinnedChi2);
+float PROCNP::getSingleChannelChi(size_t global_channel_index, const PROspec &cv, size_t var_index) {
 
     size_t nbin = config.m_channel_variable_bins[config.GetLocalChannelIndexFromGlobalChannelIndex(global_channel_index)][var_index].NBins();
     size_t startBin = config.GetCollapsedGlobalVariableBinStart(global_channel_index,var_index);
@@ -414,4 +419,5 @@ void PROCNP::print(const Eigen::VectorXf &param){
 
     return;
 }
+
 
