@@ -12,6 +12,7 @@
 #include "PROconfig.h"
 #include "PROcreate.h"
 #include "PROlog.h"
+#include "PROmodel.h"
 
 namespace PROfit {
 
@@ -44,9 +45,9 @@ namespace PROfit {
 
             PROsyst subset(const std::vector<std::string> &systs) const;
             PROsyst excluding(const std::vector<std::string> &systs) const;
-            PROsyst allsplines2cov(const PROconfig &config, const PROpeller &prop, uint32_t seed) const;
+            PROsyst allsplines2cov(const PROconfig &config, const PROpeller &prop,const PROmodel &model, const Eigen::VectorXf &params,  uint32_t seed) const;
 
-            Eigen::MatrixXf spline2cov(int idx, const PROconfig &config, const PROpeller &prop, uint32_t seed) const;
+            Eigen::MatrixXf spline2cov(int spline, const PROconfig &config, const PROpeller &prop, const PROmodel &model, const Eigen::VectorXf &params, uint32_t seed) const ;
 
             /* Function: given the systematic name, return corresponding fractional covariance matrix */
             Eigen::MatrixXf GrabMatrix(const std::string& sys) const;
