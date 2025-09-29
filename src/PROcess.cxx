@@ -184,6 +184,7 @@ namespace PROfit {
         nbins_collapsed = inconfig.m_num_variable_bins_total_collapsed[var_index];
         Eigen::VectorXf spec = Eigen::VectorXf::Constant(nbins, 0);
 
+        Eigen::VectorXf params = cvparams;
 
         // TODO: We should think about centralizing rng in a thread-safe/thread-aware way
         static std::mt19937 rng{seed};
@@ -200,9 +201,14 @@ namespace PROfit {
         for(int i = 0; i < nbins_collapsed; i++)
             throwC(i) = d_cov(rng);
 
+        //get actual splines 
+        for(size_t i=0;i<throws.size();i++){
+            params(i+model.nparams) = throws.at(i);
+        }
+
         bool binned = true;//dont want to faf around with event by event here lets be honst
         if (binned){
-          spec = FillSpectra(inconfig, inprop, insyst, model, cvparams, binned, var_index).Spec();
+          spec = FillSpectra(inconfig, inprop, insyst, model, params, binned, var_index).Spec();
 
         }else{//currently never run
             for(size_t i = 0; i<inprop.NEvent(); ++i){
@@ -236,7 +242,7 @@ namespace PROfit {
         return PROspec(final_spec, final_spec.array().sqrt());
     }
 
-    PROspec FillSplineRandomThrow(const PROconfig &inconfig, const PROpeller &inprop, const PROsyst &insyst, int spline, uint32_t seed, int other_index) {
+    PROspec FillSplineRandomThrow(const PROconfig &inconfig, const PROpeller &inprop, const PROsyst &insyst,  const PROmodel &model,  const Eigen::VectorXf &cvparams, int spline, uint32_t seed, int other_index) {
         int nbins =  inconfig.m_num_variable_bins_total[other_index];
         Eigen::VectorXf spec = Eigen::VectorXf::Constant(nbins, 0);
 
@@ -245,30 +251,13 @@ namespace PROfit {
         std::normal_distribution<float> d(insyst.spline_centers(spline), insyst.spline_priors(spline));
         float spline_throw = d(rng);
         int binning = insyst.spline_binnings[spline];
+        Eigen::VectorXf params = cvparams;
+        params(spline+model.nparams) = spline_throw;
 
         bool binned = true;//dont want to faf around with event by event here lets be honst
         if (binned){
-            const Eigen::MatrixXf &hist = inprop.variable_hist_storage(binning,other_index);
-            for(long int i = 0; i < hist.rows(); ++i) {
-                float systw = 1.0;
-                if(binning != -1) systw = insyst.GetSplineShift(spline, spline_throw, i);
-                for(int k = 0; k < nbins; ++k) {
-                    float binsystw = systw;
-                    if(binning == -1) binsystw *= insyst.GetSplineShift(spline, spline_throw, k);
-                    spec(k) += binsystw * hist(i, k);
-                }
-            }
-        } else {
-            for(size_t i = 0; i<inprop.NEvent(); ++i){
-                float add_w = inprop.added_weights[i]; 
-                const int spline_bin = inprop.VariableBinIndex(binning, i);
-                float systw = insyst.GetSplineShift(spline, spline_throw, spline_bin);
-                float finalw = systw * add_w;
-                if (inprop.VariableBinIndex(other_index, i) >= 0) {
-                    spec(inprop.VariableBinIndex(other_index, i)) += finalw;
-                }
-            }
-        }
+            spec = FillSpectra(inconfig, inprop, insyst, model, params, binned, other_index).Spec();
+        } 
 
         return PROspec(spec, spec.array().sqrt());
     }

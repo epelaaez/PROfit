@@ -198,7 +198,7 @@ namespace PROfit {
 
         std::vector<Eigen::VectorXf> specs;
         for(size_t i = 0; i < 1000; ++i){
-            specs.push_back(FillSplineRandomThrow(config, prop, *this, spline, seed, other_index).Spec());
+            specs.push_back(FillSplineRandomThrow(config, prop, *this, model, params, spline, seed, other_index).Spec());
         }
 
         int nbins = config.m_num_variable_bins_total[other_index];
