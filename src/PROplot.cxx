@@ -435,8 +435,9 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                         // int channel_start =  config.GetCollapsedGlobalVariableBinStart(global_channel_index, other_index);
                         size_t total_bins = config.GetChannelVariableBins(global_channel_index, other_index).NBins();
                         Eigen::VectorXf this_bf_spec = config.GetChannelVariableBins(global_channel_index, other_index).ProjectSpectra(bf_spec(Eigen::seqN(channel_start, total_bins)), 0);
-                        for(size_t bin = 0; bin < channel_nbins; bin++) {
-                            bf_hist.SetBinContent(bin+1, bf_spec(bin+channel_start));
+
+                        for(size_t bin = 0; bin < channel_nbins; ++bin) {
+                            bf_hist.SetBinContent(bin+1, this_bf_spec(bin));
                         }
                         //bf_hist.SetLineColor(TColor::GetColor(234, 67, 53)); // pastel red
                         bf_hist.SetLineColor(bfcol); 
