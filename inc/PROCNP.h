@@ -53,7 +53,7 @@ namespace PROfit{
             virtual float operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient, bool nograd);
 
             PROmetric *Clone() const {
-                return new PROCNP(*this);
+                return new PROCNP(model_tag, config, peller, syst, model, data, strat, shape_only, physics_param_fixed);
             }
 
             virtual const PROmodel &GetModel() const {
@@ -76,7 +76,7 @@ namespace PROfit{
 
             virtual float Pull(const Eigen::VectorXf &systs);
 
-            float getSingleChannelChi(size_t channel_index,size_t var_index);
+            float getSingleChannelChi(size_t global_channel_index, const PROspec &cv, size_t var_index);
 
             void fixSpline(int fix, float valin);
 

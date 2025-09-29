@@ -12,23 +12,6 @@
 
 
 namespace PROfit {
-    PROspec FillCVSpectra(const PROconfig &inconfig, const PROpeller &inprop, bool binned, size_t var_index){
-        PROspec myspectrum(inconfig.m_num_variable_bins_total[var_index]);
-        if(binned) {
-            for(int i = 0; i < inprop.variable_hist_storage(var_index, var_index).rows(); ++i) {
-                for(size_t k = 0; k < myspectrum.GetNbins(); ++k) {
-                    myspectrum.Fill(k, inprop.variable_hist_storage(var_index,var_index,i, k));
-                }
-            }
-        } else {
-            for(size_t i = 0; i<inprop.NEvent(); ++i){
-                float add_w = inprop.added_weights[i]; 
-                myspectrum.Fill(inprop.VariableBinIndex(var_index, i), add_w);
-            }
-        }
-        return myspectrum;
-    }
-
 
     PROspec FillSpectra(const PROconfig &inconfig, const PROpeller &inprop, const PROsyst &insyst, const PROmodel &inmodel, const std::map<std::string, float> &inparams, bool binned, size_t var_index) {
         // default parameters
@@ -196,7 +179,7 @@ namespace PROfit {
         return myspectrum;
     }
 
-    PROspec FillSystRandomThrow(const PROconfig &inconfig, const PROpeller &inprop, const PROsyst &insyst, const PROspec &cvspec, uint32_t seed, int var_index) {
+    PROspec FillSystRandomThrow(const PROconfig &inconfig, const PROpeller &inprop, const PROsyst &insyst, const PROmodel &model, const PROspec &cvspec, const Eigen::VectorXf &cvparams, uint32_t seed, int var_index) {
         int nbins = inconfig.m_num_variable_bins_total[var_index],
         nbins_collapsed = inconfig.m_num_variable_bins_total_collapsed[var_index];
         Eigen::VectorXf spec = Eigen::VectorXf::Constant(nbins, 0);
@@ -219,32 +202,7 @@ namespace PROfit {
 
         bool binned = true;//dont want to faf around with event by event here lets be honst
         if (binned){
-            Eigen::VectorXf systw = Eigen::VectorXf::Constant(nbins, 1);
-            for(size_t i = 0; i < throws.size(); ++i) {
-                int binning = insyst.spline_binnings[i];
-
-                //const Eigen::MatrixXf &hist = inprop.variable_hist_storage(binning,var_index);
-                //direct access with inprop.variable_hist_storage(binning,var_index,j,k)
-                for(size_t k = 0; k < inconfig.m_num_variable_bins_total[var_index]; ++k) {
-                    if(binning == var_index){
-                        systw(k) *= insyst.GetSplineShift(i, throws.at(i), k);
-                    }
-                    else {
-                        float val = 0, unweighted = 0;
-                        for(long int j = 0; j < inconfig.m_num_variable_bins_total[binning]; ++j) {
-                            float binsystw = insyst.GetSplineShift(i, throws.at(i), j);
-                            val += binsystw * inprop.variable_hist_storage(binning,var_index,j, k);
-                            unweighted += inprop.variable_hist_storage(binning,var_index,j, k);
-                        }
-                        if(unweighted > 0) systw(k) *= val/unweighted;
-                    }
-                }
-            }
-            for(long int i = 0; i < inconfig.m_num_variable_bins_total[var_index]; ++i) {
-                for(int k = 0; k < nbins; ++k) {
-                    spec(k) += systw(k) * inprop.variable_hist_storage(var_index,var_index,i, k);
-                }
-            }
+          spec = FillSpectra(inconfig, inprop, insyst, model, cvparams, binned, var_index).Spec();
 
         }else{//currently never run
             for(size_t i = 0; i<inprop.NEvent(); ++i){
