@@ -1300,8 +1300,8 @@ int main(int argc, char* argv[])
         //fout.mkdir("ErrorBand");
         //fout.cd("ErrorBand");
         //err_band->Write("err_band");
-        io = 0;
-        for(const auto &band: other_err_bands)
+        //io = 0;
+        //for(const auto &band: other_err_bands)
             //band->Write(("other_"+std::to_string(io++)+"_err_band").c_str());
 
 

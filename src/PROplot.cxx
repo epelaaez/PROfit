@@ -286,7 +286,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                     leg->SetNColumns(2);
                     leg->SetFillStyle(0);
                     leg->SetLineWidth(0);
-                    TH1D cv_hist(std::to_string(global_channel_index).c_str(), hist_title.c_str(), channel_nbins, edges.data());
+                    TH1D cv_hist(("cv_hist"+std::to_string(global_channel_index)).c_str(), hist_title.c_str(), channel_nbins, edges.data());
                     cv_hist.SetLineWidth(2);
                     cv_hist.SetLineColor(cvcol);
                     cv_hist.SetFillStyle(0);
@@ -334,7 +334,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                             }
                         }
 
-                        TH1 *leg_hack = (TH1*)cv_hist.Clone();
+                        TH1 *leg_hack = (TH1*)cv_hist.Clone((std::string(cv_hist.GetTitle())+"leg_hack").c_str());
                         leg_hack->SetFillStyle(3144);
                         leg_hack->SetFillColorAlpha(cvcol, 0.2);
                         //leg_hack->SetFillColorAlpha(kGray+2, 0.2);
@@ -386,7 +386,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                         bf_hist.SetLineWidth(2);
                         //leg->AddEntry(&bf_hist, "Best Fit", "l");
 
-                        TH1 *leg_hack = (TH1*)bf_hist.Clone("bf");
+                        TH1 *leg_hack = (TH1*)bf_hist.Clone((std::string(bf_hist.GetTitle())+"bf").c_str());
                         leg_hack->SetFillStyle(3254);
                         leg_hack->SetFillColor(bfcol);
                         leg_hack->SetLineColor(bfcol);
@@ -708,7 +708,6 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
         Eigen::MatrixXf diag = spec.Spec().array().matrix().asDiagonal(); 
         Eigen::MatrixXf collapsed_diag = CollapseMatrix(config, diag);
 
-        size_t global_subchannel_index = 0;
         size_t global_channel_index = 0;
         for(size_t mode = 0; mode < config.m_num_modes; ++mode) {
             for(size_t det = 0; det < config.m_num_detectors; ++det) {
@@ -731,7 +730,6 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                     for (const auto &[tag, vec] : used_tags) {
 
                         c.cd(padIndex++);
-                        bool first=true;
 
                         TLegend* leg = new TLegend(0.11, 0.6, 0.89, 0.89);
                         leg->SetNColumns(3);
