@@ -714,6 +714,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
             for(size_t det = 0; det < config.m_num_detectors; ++det) {
                 for(size_t channel = 0; channel < config.m_num_channels; ++channel) {
 
+                    std::string name = config.m_mode_plotnames[mode]+" "+config.m_detector_plotnames[det]+" "+config.m_channel_plotnames[channel]; 
                     c.Clear();
                     c.Divide(gridCols, gridRows);
 
@@ -803,13 +804,22 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                         for(auto &h:hvec) h->Draw("HIST SAME");
 
                         leg->Draw();
+                        
+                        TText *t = new TText();
+                        t->SetNDC();                
+                        t->SetTextFont(42);                          
+                        t->SetTextSize(0.03);      
+                        t->SetTextAlign(33);        
+                        std::string pv = "PROfit v"+std::string(PROJECT_VERSION_STR);
+                        t->DrawText(0.895, 0.945, pv.c_str()); 
+
                     }//end tag
 
 
                     //and each sum of sums to wrap it off!
                     c.cd(padIndex++);
 
-                    TH1F* hsum = new TH1F( ("USum_"+std::to_string(global_channel_index)).c_str(),"Summary!", bin_edges.size()-1, bin_edges.data());
+                    TH1F* hsum = new TH1F( ("USum_"+std::to_string(global_channel_index)).c_str(),("Summary! "+name).c_str(), bin_edges.size()-1, bin_edges.data());
                     hsum->Reset();
                     TLegend* leg = new TLegend(0.11, 0.6, 0.89, 0.89);
                     leg->SetNColumns(3);
@@ -832,7 +842,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                     }
                     leg->AddEntry(hsum,"Sum","l");
                     hsum->SetXTitle(config.m_channel_plotnames[channel].c_str());
-                    hsum->SetTitle("Summary!");
+                    hsum->SetTitle(("Summary: "+name).c_str());
                     hsum->SetYTitle("Fractional Uncertainty");
                     hsum->SetLineColor(kBlack);
                     hsum->SetLineWidth(2);
@@ -845,6 +855,14 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                     gPad->Update();
                     for(auto &h:hvec) h->Draw("HIST SAME");
                     leg->Draw();
+
+                    TText *t = new TText();
+                    t->SetNDC();                
+                    t->SetTextFont(42);                          
+                    t->SetTextSize(0.03);      
+                    t->SetTextAlign(33);        
+                    std::string pv = "PROfit v"+std::string(PROJECT_VERSION_STR);
+                    t->DrawText(0.895, 0.945, pv.c_str()); 
 
 
                     c.Print(filename.c_str());
