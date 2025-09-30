@@ -247,7 +247,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
     }
 
 
-    void plot_channels(const std::string &filename, const PROconfig &config, std::optional<PROspec> cv, std::optional<PROspec> best_fit, std::optional<PROdata> data, std::optional<PROerrorbar> errband, std::optional<PROerrorbar> posterrband, std::vector<TPaveText> &texts, PlotOptions opt, int other_index) {
+    void plot_channels(const std::string &filename, const PROconfig &config, std::optional<PROspec> cv, std::optional<PROspec> best_fit, std::optional<PROdata> data, std::optional<PROerrorbar> errband, std::optional<PROerrorbar> posterrband, std::vector<TPaveText> &texts, PlotBounds &bounds, PlotOptions opt, int other_index) {
         TCanvas c;
         c.Print((filename+"[").c_str());
 
@@ -457,12 +457,12 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
 
                     if(cv) {
                         if(bool(opt&PlotOptions::CVasStack)) {
-                            cvstack->SetMaximum(std::max(top_modifier*cvstack->GetMaximum(),top_modifier*data_hist.GetMaximum()));
+                            cvstack->SetMaximum(  bounds.hasBound("ymax") ? bounds.getBound("ymax") : std::max(top_modifier*cvstack->GetMaximum(), top_modifier*data_hist.GetMaximum()));
                             cvstack->Draw("hist");
                             cv_hist.Draw("same hist");
 
                         } else {
-                            cv_hist.SetMaximum(top_modifier*cv_hist.GetMaximum());
+                            cv_hist.SetMaximum( bounds.hasBound("ymax") ? bounds.getBound("ymax") :  top_modifier*cv_hist.GetMaximum());
 
                             cv_hist.Draw("hist");
                             cv_hist.GetYaxis()->SetTitleSize(0.06);  
@@ -506,7 +506,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
 
                         if(cv || best_fit) {
                             g->Draw("PE1 same");
-                            cv_hist.SetMaximum(std::max(cv_hist.GetMaximum(),top_modifier*datmax));
+                            cv_hist.SetMaximum( bounds.hasBound("ymax") ? bounds.getBound("ymax") : std::max(cv_hist.GetMaximum(),top_modifier*datmax));
 
                         } else {
                             g->Draw("PE1");
@@ -582,14 +582,12 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                         float yhigh = ymax + 0.05 * yrange; // 15% padding above
 
                         if(!posterrband){
-                            //one->SetMinimum(std::max(0.5f,std::min(ylow,0.85f)));
-                            //one->SetMaximum(std::min(1.5f,std::max(yhigh,1.148f)));
-                            one->SetMinimum(std::min(ylow,0.85f));
-                            one->SetMaximum(std::max(yhigh,1.148f));
+                            one->SetMinimum(  bounds.hasBound("ratmin") ? bounds.getBound("ratmin") : std::min(ylow,0.85f));
+                            one->SetMaximum(  bounds.hasBound("ratmax") ? bounds.getBound("ratmax") : std::max(yhigh,1.148f));
 
                         }else{
-                            one->SetMinimum(std::min(ylow,0.85f));
-                            one->SetMaximum(std::max(yhigh,1.148f));
+                            one->SetMinimum(  bounds.hasBound("ratmin") ? bounds.getBound("ratmin") :std::min(ylow,0.85f));
+                            one->SetMaximum( bounds.hasBound("ratmax") ? bounds.getBound("ratmax") : std::max(yhigh,1.148f));
 
                         }
 
