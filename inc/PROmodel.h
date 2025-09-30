@@ -228,7 +228,7 @@ public:
 
         nparams = 3;
         param_names = {"dmsq", "Ue4^2", "Um4^2"}; 
-        pretty_param_names = {"dmsq", "Ue4^2", "Um4^2"}; 
+        pretty_param_names = {"#Deltam^{2}", "|U_{e4}|^2","|U_{{#mu}4}|^2"}; 
         lb = Eigen::VectorXf(3);
         ub = Eigen::VectorXf(3);
         default_val = Eigen::VectorXf(3);

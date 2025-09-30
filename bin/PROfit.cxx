@@ -800,7 +800,7 @@ int main(int argc, char* argv[])
             for(size_t i = 0; i< nparams; i++){
 
                 if(i<nphys){
-                    log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % metric->GetModel().pretty_param_names[i].c_str() % best_fit(i);
+                    log<LOG_INFO>(L"%1% || %2%  :  %3% (non-log %4%)") % __func__ % metric->GetModel().pretty_param_names[i].c_str() % best_fit(i) % pow(10,best_fit(i));
                 }else{
                     log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % metric->GetSysts().spline_names[i-nphys].c_str() % best_fit(i);
                 }
@@ -1597,9 +1597,8 @@ int main(int argc, char* argv[])
         for(long i = 0; i < global_fit_result.size(); i++){
 
             if(use_phys && i < (long)metric->GetModel().nparams){
-                log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % metric->GetModel().pretty_param_names[i].c_str() % global_fit_result(i);
-                global_fit_out << metric->GetModel().param_names[i]
-                    << " : " << global_fit_result(i) << "\n";
+                log<LOG_INFO>(L"%1% || %2%  : %3% (log) %4% (nonlog) ") % __func__ % metric->GetModel().pretty_param_names[i].c_str() % global_fit_result(i) % pow(10,global_fit_result(i));
+                global_fit_out << metric->GetModel().param_names[i] << " : " << global_fit_result(i) << "\n";
             }else{
                 long idx = use_phys ? i - metric->GetModel().nparams : i;
                 log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % metric->GetSysts().spline_names[idx].c_str() % global_fit_result(i);
@@ -1624,9 +1623,8 @@ int main(int argc, char* argv[])
 
         for(long i = 0; i < global_fit_result.size(); i++){
             if(i < (long)metric->GetModel().nparams){
-                log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % metric->GetModel().pretty_param_names[i].c_str() % global_fit_result(i);
-                global_fit_out << metric->GetModel().param_names[i]
-                    << " : " << global_fit_result(i) << "\n";
+                log<LOG_INFO>(L"%1% || %2%  : %3% (log) %4% (nonlog) ") % __func__ % metric->GetModel().pretty_param_names[i].c_str() % global_fit_result(i) % pow(10,global_fit_result(i));
+                global_fit_out << metric->GetModel().param_names[i] << " : " << global_fit_result(i) << "\n";
             }else{
                 log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % metric->GetSysts().spline_names[i - metric->GetModel().nparams].c_str() % global_fit_result(i);
                 global_fit_out << metric->GetSysts().spline_names[i - metric->GetModel().nparams]
