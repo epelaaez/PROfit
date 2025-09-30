@@ -380,8 +380,8 @@ namespace PROfit {
             
             log<LOG_INFO>(L"");
             log<LOG_INFO>(L"==================================================================");
-            log<LOG_INFO>(L"Note: Use --fit-options <param_name>=<value> to set parameters");
-            log<LOG_INFO>(L"Example: --fit-options n_multistart=2000 max_iterations=5000");
+            log<LOG_INFO>(L"Note: Use --fit-options <param_name> <value> to set parameters");
+            log<LOG_INFO>(L"Example: --fit-options n_multistart 2000 max_iterations 5000");
             log<LOG_INFO>(L"==================================================================");
         }
     };
