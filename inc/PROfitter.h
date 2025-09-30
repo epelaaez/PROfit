@@ -41,13 +41,14 @@ namespace PROfit {
         size_t harmonic_min_num_seeds = 4;
         size_t harmonic_max_num_seeds = 15;
         size_t harmonic_num_test_points = 150;
+        size_t harmonic_raw_max_tests = 60;
         float harmonic_prominence_threshold = 0.5;
-        float harmonic_prominence_threshold_shift = 0.05;
+        float harmonic_prominence_threshold_shift = 0.2;
         float harmonic_min_spacing_log = 0.025;
-        float harmonic_prominence_threshold_minimum = 1e-7;
+        float harmonic_prominence_threshold_minimum = 1e-5;
         float harmonic_seed_norm_tolerance = 1e-4;  
         float harmonic_seed_chi_tolerence = 1e-6;   
-
+        
 
         PROfitterConfig(){};
         PROfitterConfig(std::map<std::string, float> input_fit_options, std::string fit_preset, bool isScan){
@@ -245,6 +246,8 @@ namespace PROfit {
                     harmonic_max_num_seeds = value;
                 } else if(param_name == "harmonic_num_test_points") {
                     harmonic_num_test_points = value;
+                } else if(param_name == "harmonic_raw_max_tests") {
+                    harmonic_raw_max_tests = value;
                 } else if(param_name == "harmonic_prominence_threshold") {
                     harmonic_prominence_threshold = value;
                 } else if(param_name == "harmonic_prominence_threshold_shift") {
@@ -299,6 +302,7 @@ namespace PROfit {
             log<LOG_INFO>(L"%1% || harmonic_min_num_seeds: %2% (default 4) ") % __func__ % harmonic_min_num_seeds;
             log<LOG_INFO>(L"%1% || harmonic_max_num_seeds: %2% (default 15) ") % __func__ % harmonic_max_num_seeds;
             log<LOG_INFO>(L"%1% || harmonic_num_test_points: %2% (default 150) ") % __func__ % harmonic_num_test_points;
+            log<LOG_INFO>(L"%1% || harmonic_raw_max_tests: %2% (default 60) ") % __func__ % harmonic_raw_max_tests;
             log<LOG_INFO>(L"%1% || harmonic_prominence_threshold: %2% (default 0.5) ") % __func__ % harmonic_prominence_threshold;
             log<LOG_INFO>(L"%1% || harmonic_prominence_threshold_shift: %2% (default 0.05) ") % __func__ % harmonic_prominence_threshold_shift;
             log<LOG_INFO>(L"%1% || harmonic_min_spacing_log: %2% (default 0.025) ") % __func__ % harmonic_min_spacing_log;
@@ -356,6 +360,7 @@ namespace PROfit {
             log<LOG_INFO>(L"  harmonic_min_num_seeds               : Minimum number of seed points for harmonic search");
             log<LOG_INFO>(L"  harmonic_max_num_seeds               : Maximum number of seed points for harmonic search");
             log<LOG_INFO>(L"  harmonic_num_test_points             : Number of test points in frequency space");
+            log<LOG_INFO>(L"  harmonic_raw_max_tests               : Max number of iterations to find significant minima.");
             log<LOG_INFO>(L"  harmonic_prominence_threshold        : Threshold for peak prominence in harmonic search");
             log<LOG_INFO>(L"  harmonic_prominence_threshold_shift  : Shift amount for adjusting prominence threshold");
             log<LOG_INFO>(L"  harmonic_min_spacing_log             : Minimum spacing between peaks in log space");
