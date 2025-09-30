@@ -104,6 +104,8 @@ int main(int argc, char* argv[])
     std::vector<std::string> mockreweights;
     std::vector<TH2D*> weighthists;
 
+    std::map<std::string, float> bound_list;
+    PlotBounds pbounds; 
     size_t nuniv;
 
 
@@ -119,6 +121,7 @@ int main(int argc, char* argv[])
     app.add_option("-d, --data", data_xml, "Load from a seperate data xml/data file instead of signal injection. Only used with plot subcommand.")->default_str("");
     app.add_option("-i, --inject", osc_params, "Physics parameters to inject as true signal. Example: dmsq 3 sinsq2thmm 0.25")->expected(-1);// HOW TO
     app.add_option("-s, --seed", global_seed, "A global seed for PROseed rng. Default to -1 for hardware rng seed.")->default_val(-1);
+    app.add_option("--plot-bounds", bound_list, "Plot bounds, set by  string float pairs. Available strings are ymax,ratmin,ratmax."); 
     app.add_option("--inject-systs", injected_systs, "Systematic shifts to inject. Map of name and shift value in sigmas. Only spline systs are supported right now.");
     app.add_flag("--poisson-throw", poisson_throw, "Do a Poisson stats throw of fake data.");
     app.add_option("--scale", scale_arg, "Scale detector POT by a given value.");
@@ -202,6 +205,7 @@ int main(int argc, char* argv[])
         log_impl::EnableFileLogging(log_file,FILE_LEVEL);
     }
 
+    pbounds.Load(bound_list);
 
     log<LOG_WARNING>(L" %1% ") % getIcon().c_str()  ;
     std::string final_output_tag =analysis_tag +"_"+output_tag;
@@ -707,7 +711,7 @@ int main(int argc, char* argv[])
         PlotOptions opt = PlotOptions::DataPostfitRatio;
         if(binwidth_scale) opt |= PlotOptions::BinWidthScaled;
         if(area_normalized) opt |= PlotOptions::AreaNormalized;
-        plot_channels((final_output_tag+"_PROfile_hists.pdf"), config, cv, bf, data, err_band, post_err_band, texts, opt);
+        plot_channels((final_output_tag+"_PROfile_hists.pdf"), config, cv, bf, data, err_band, post_err_band, texts, pbounds, opt);
 
         TCanvas c;
         c.Print((final_output_tag+"_postfit_posteriors.pdf[").c_str());
@@ -1053,18 +1057,18 @@ int main(int argc, char* argv[])
         std::vector<TPaveText> notext;
         if(binwidth_scale) opt |= PlotOptions::BinWidthScaled;
         if(area_normalized) opt |= PlotOptions::AreaNormalized;
-        std::vector<PROspec> other_cvs;
+        std::vector<PROspec> variable_cvs;
         for(size_t io = 0; io < config.m_num_variables; ++io) {
-            other_cvs.push_back(FillSpectra(config, prop, variable_systs[config.i_prime],*model,CVpparams, !eventbyevent, io));
-            plot_channels(final_output_tag+"_other_"+std::to_string(io)+"_PROplot_CV.pdf", config, other_cvs.back(), {}, {}, {}, {}, notext, opt, io);
+            variable_cvs.push_back(FillSpectra(config, prop, variable_systs[config.i_prime],*model,CVpparams, !eventbyevent, io));
+            plot_channels(final_output_tag+"_other_"+std::to_string(io)+"_PROplot_CV.pdf", config, variable_cvs.back(), {}, {}, {}, {}, notext, pbounds, opt, io);
         }
 
         std::string filename = final_output_tag+"_fractional_systematics.pdf";
-        plotPriorFractionalSystematicBreakdown(config, other_cvs[config.i_prime], allcovsyst, filename,config.i_prime);
+        plotPriorFractionalSystematicBreakdown(config, variable_cvs[config.i_prime], allcovsyst, filename,config.i_prime);
         
         std::vector<std::map<std::string, std::unique_ptr<TH1D>>> other_hists;
         for(size_t io = 0; io < config.m_num_variables; ++io) {
-            other_hists.push_back(getCVHists(other_cvs[io], config, binwidth_scale, io));
+            other_hists.push_back(getCVHists(variable_cvs[io], config, binwidth_scale, io));
         }
 
         TCanvas c;
@@ -1165,7 +1169,7 @@ int main(int argc, char* argv[])
         }
 
         //Now some covariances
-        std::map<std::string, std::unique_ptr<TH2D>> matrices = covarianceTH2D(allcovsyst, config, other_cvs[config.i_prime]);
+        std::map<std::string, std::unique_ptr<TH2D>> matrices = covarianceTH2D(allcovsyst, config, variable_cvs[config.i_prime]);
         c.Print((final_output_tag+"_PROplot_Covar.pdf" + "[").c_str(), "pdf");
         for(const auto &[name, mat]: matrices) {
 
@@ -1200,7 +1204,7 @@ int main(int argc, char* argv[])
                         TPaveText chi2text(0.59, 0.50, 0.89, 0.59, "NDC");
                         if(io==config.i_prime){
                             log<LOG_INFO>(L"%1% || On channel %2%:") % __func__ % global_channel_index ;
-                            double chival = allcov_metric->getSingleChannelChi(global_channel_index, other_cvs[io], io);
+                            double chival = allcov_metric->getSingleChannelChi(global_channel_index, variable_cvs[io], io);
                             int ndf = config.m_channel_variable_bins[ic][io].NBinsAlong(0) - bool(opt&PlotOptions::AreaNormalized);
                             log<LOG_INFO>(L"%1% || -- the datamc chi^2/ndof is %2%/%3% .") % __func__ % chival % ndf;
                             chi2text.AddText(("#chi^{2}/ndf = "+to_string_prec(chival,2)+"/"+std::to_string(ndf)).c_str());
@@ -1222,9 +1226,9 @@ int main(int argc, char* argv[])
         std::vector<PROerrorbar> other_err_bands;
         for(size_t io = 0; io < config.m_num_variables; ++io) {
             if(!config.m_channel_variable_plot_bool.at(io))continue;// For now skip the L/E 250 bin. 
-            other_err_bands.push_back(getErrorBand(config, prop, variable_systs[io], *model, other_cvs[io], CVpparams, binwidth_scale, io));
-            plot_channels(final_output_tag+"_PROplot_other_"+std::to_string(io)+"_ErrorBand.pdf", config, other_cvs[io], {}, variable_data[io], 
-                    other_err_bands.back(), {}, other_channel_chitexts[io], opt | PlotOptions::DataMCRatio, io);
+            other_err_bands.push_back(getErrorBand(config, prop, variable_systs[io], *model, variable_cvs[io], CVpparams, binwidth_scale, io));
+            plot_channels(final_output_tag+"_PROplot_Variable_"+std::to_string(io)+"_ErrorBand.pdf", config, variable_cvs[io], {}, variable_data[io], 
+                    other_err_bands.back(), {}, other_channel_chitexts[io], pbounds, opt | PlotOptions::DataMCRatio, io);
         }
 
 
@@ -1270,7 +1274,7 @@ int main(int argc, char* argv[])
         int io = 0;
         for(const auto &other: other_hists) {
             for(const auto &[name, hist]: other) {
-                hist->Write(("other_"+std::to_string(io)+name).c_str());
+                hist->Write(("Variable_"+std::to_string(io)+name).c_str());
             }
             io++;
         }
@@ -1558,7 +1562,7 @@ int main(int argc, char* argv[])
         PlotOptions opt = PlotOptions::DataPostfitRatio;
         if(binwidth_scale) opt |= PlotOptions::BinWidthScaled;
         if(area_normalized) opt |= PlotOptions::AreaNormalized;
-        plot_channels((final_output_tag+"_PROfile_hists.pdf"), config, cv, bf, data, err_band, post_err_band, texts, opt);
+        plot_channels((final_output_tag+"_PROfile_hists.pdf"), config, cv, bf, data, err_band, post_err_band, texts, pbounds,opt);
 
 
     }
