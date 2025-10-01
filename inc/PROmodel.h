@@ -22,6 +22,7 @@ public:
     int ivar; //TODO, this should be a string like "true" and then in config we have a map to that variable. error if not found. 
     std::vector<std::string> param_names;
     std::vector<std::string> pretty_param_names;
+    std::vector<std::string> pretty_param_units;
     Eigen::VectorXf lb, ub, default_val;
     std::vector<std::function<float(const Eigen::VectorXf&, float)>> model_functions;
     std::function<int(const Eigen::VectorXf&)> model_constraint;
@@ -82,6 +83,7 @@ public:
         nparams = 2;
         param_names = {"dmsq", "sinsq2thmm"}; 
         pretty_param_names = {"#Deltam^{2}", "sin^{2}2#theta_{#mu#mu}"}; 
+        pretty_param_units = {"eV^{2}", ""}; 
         lb = Eigen::VectorXf(2);
         ub = Eigen::VectorXf(2);
         default_val = Eigen::VectorXf(2);
@@ -149,6 +151,7 @@ public:
          nparams = 2;
         param_names = {"dmsq", "sinsq2thme"}; 
         pretty_param_names = {"#Deltam^{2}", "sin^{2}2#theta_{#mu{e}}"}; 
+        pretty_param_units = {"eV^{2}", ""}; 
         lb = Eigen::VectorXf(2);
         ub = Eigen::VectorXf(2);
         default_val = Eigen::VectorXf(2);
@@ -229,6 +232,7 @@ public:
         nparams = 3;
         param_names = {"dmsq", "Ue4^2", "Um4^2"}; 
         pretty_param_names = {"#Deltam^{2}", "|U_{e4}|^2","|U_{#mu 4}|^2"}; 
+        pretty_param_units = {"eV^{2}", "",""}; 
         lb = Eigen::VectorXf(3);
         ub = Eigen::VectorXf(3);
         default_val = Eigen::VectorXf(3);
