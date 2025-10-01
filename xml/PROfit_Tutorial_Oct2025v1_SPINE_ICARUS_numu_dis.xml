@@ -96,7 +96,7 @@
 <model tag="numudis">
     <rule index="0" name="No Osc"/>
     <rule index="1" name="Numu Dis"/>
-    <parameter name="L/E" variable_index="1"/>
+    <parameter name="L/E" variable_index="2"/>
 </model>
 
 <MCFile treename="events/full/selected" filename="/exp/icarus/app/users/mueller/medulla/medulla/build/icarus_disappearance_08292025_sys.root" scale = "1.0" pot="1.67528e21"> 
