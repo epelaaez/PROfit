@@ -581,14 +581,17 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                         float ylow = ymin - 0.05 * yrange;  // 15% padding below
                         float yhigh = ymax + 0.05 * yrange; // 15% padding above
 
+                        float kmin = bounds.hasBound("ratmin") ? bounds.getBound("ratmin") : std::min(ylow,0.85f);
+                        float kmax = bounds.hasBound("ratmax") ? bounds.getBound("ratmax") : std::max(yhigh,1.148f);
+                        log<LOG_DEBUG>(L"%1% || RatioMin %2%  Max %3% (ylow %4%) %5% val %6%") % __func__ % kmin % kmax % ylow % int(bounds.hasBound("ratmin")) % bounds.getBound("ratmin");
+
                         if(!posterrband){
-                            one->SetMinimum(  bounds.hasBound("ratmin") ? bounds.getBound("ratmin") : std::min(ylow,0.85f));
-                            one->SetMaximum(  bounds.hasBound("ratmax") ? bounds.getBound("ratmax") : std::max(yhigh,1.148f));
+                            one->SetMinimum(kmin);
+                            one->SetMaximum(kmax);
 
                         }else{
-                            one->SetMinimum(  bounds.hasBound("ratmin") ? bounds.getBound("ratmin") :std::min(ylow,0.85f));
-                            one->SetMaximum( bounds.hasBound("ratmax") ? bounds.getBound("ratmax") : std::max(yhigh,1.148f));
-
+                           one->SetMinimum(kmin);
+                           one->SetMaximum(kmax);
                         }
 
                         one->SetLineColor(kBlack);
