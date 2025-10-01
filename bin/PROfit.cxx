@@ -190,6 +190,14 @@ int main(int argc, char* argv[])
     //PROtest, test things
     CLI::App *protest_command = app.add_subcommand("protest", "Testing ground for rapid quick tests.");
 
+    app.set_config("--config");
+    surface_command->configurable(true);
+    process_command->configurable(true);
+    profile_command->configurable(true);
+    protest_command->configurable(true);
+    proglobal_command->configurable(true);
+    profc_command->configurable(true);
+    proplot_command->configurable(true);
 
     //Parse inputs. 
     CLI11_PARSE(app, argc, argv);
