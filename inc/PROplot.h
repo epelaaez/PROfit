@@ -36,9 +36,12 @@
 namespace PROfit{
 
     struct PlotBounds {
-        float xmin,xmax = -9999;
-        float ymin,ymax = -9999;
-        float ratmin,ratmax = -9999;
+        float xmin = -9999;
+        float xmax = -9999;
+        float ymin = -9999;
+        float ymax = -9999;
+        float ratmin = -9999;
+        float ratmax = -9999;
 
         int Load(std::map<std::string, float> bound_list){
             log<LOG_INFO>(L"%1% || Loading Bounds for plot_channels ") % __func__;

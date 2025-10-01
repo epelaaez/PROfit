@@ -190,6 +190,14 @@ int main(int argc, char* argv[])
     //PROtest, test things
     CLI::App *protest_command = app.add_subcommand("protest", "Testing ground for rapid quick tests.");
 
+    app.set_config("--config");
+    surface_command->configurable(true);
+    process_command->configurable(true);
+    profile_command->configurable(true);
+    protest_command->configurable(true);
+    proglobal_command->configurable(true);
+    profc_command->configurable(true);
+    proplot_command->configurable(true);
 
     //Parse inputs. 
     CLI11_PARSE(app, argc, argv);
@@ -800,7 +808,7 @@ int main(int argc, char* argv[])
             for(size_t i = 0; i< nparams; i++){
 
                 if(i<nphys){
-                    log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % metric->GetModel().pretty_param_names[i].c_str() % best_fit(i);
+                    log<LOG_INFO>(L"%1% || %2%  :  %3% (non-log %4%)") % __func__ % metric->GetModel().pretty_param_names[i].c_str() % best_fit(i) % pow(10,best_fit(i));
                 }else{
                     log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % metric->GetSysts().spline_names[i-nphys].c_str() % best_fit(i);
                 }
@@ -1129,7 +1137,7 @@ int main(int argc, char* argv[])
                         leg->AddEntry(cv_hist, "No Oscillations", "l");
                         std::string oscstr = "";//"#splitline{Oscilations:}{";
                         for(size_t j=0;j<model->nparams;j++){
-                            oscstr+=model->pretty_param_names[j]+ " : "+ to_string_prec(osc_param_vector(j),2) + (j==0 ? ", " : "" );
+                            oscstr+=model->pretty_param_names[j]+ " : "+ to_string_prec(pow(10,osc_param_vector(j)),2) +" "+model->pretty_param_units[j] + (j==0 ? ", " : "" );
                         }
                         //oscstr+="}";
 
@@ -1300,8 +1308,8 @@ int main(int argc, char* argv[])
         //fout.mkdir("ErrorBand");
         //fout.cd("ErrorBand");
         //err_band->Write("err_band");
-        io = 0;
-        for(const auto &band: other_err_bands)
+        //io = 0;
+        //for(const auto &band: other_err_bands)
             //band->Write(("other_"+std::to_string(io++)+"_err_band").c_str());
 
 
@@ -1597,9 +1605,8 @@ int main(int argc, char* argv[])
         for(long i = 0; i < global_fit_result.size(); i++){
 
             if(use_phys && i < (long)metric->GetModel().nparams){
-                log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % metric->GetModel().pretty_param_names[i].c_str() % global_fit_result(i);
-                global_fit_out << metric->GetModel().param_names[i]
-                    << " : " << global_fit_result(i) << "\n";
+                log<LOG_INFO>(L"%1% || %2%  : %3% (log) %4% (nonlog) ") % __func__ % metric->GetModel().pretty_param_names[i].c_str() % global_fit_result(i) % pow(10,global_fit_result(i));
+                global_fit_out << metric->GetModel().param_names[i] << " : " << global_fit_result(i) << "\n";
             }else{
                 long idx = use_phys ? i - metric->GetModel().nparams : i;
                 log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % metric->GetSysts().spline_names[idx].c_str() % global_fit_result(i);
@@ -1624,9 +1631,8 @@ int main(int argc, char* argv[])
 
         for(long i = 0; i < global_fit_result.size(); i++){
             if(i < (long)metric->GetModel().nparams){
-                log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % metric->GetModel().pretty_param_names[i].c_str() % global_fit_result(i);
-                global_fit_out << metric->GetModel().param_names[i]
-                    << " : " << global_fit_result(i) << "\n";
+                log<LOG_INFO>(L"%1% || %2%  : %3% (log) %4% (nonlog) ") % __func__ % metric->GetModel().pretty_param_names[i].c_str() % global_fit_result(i) % pow(10,global_fit_result(i));
+                global_fit_out << metric->GetModel().param_names[i] << " : " << global_fit_result(i) << "\n";
             }else{
                 log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % metric->GetSysts().spline_names[i - metric->GetModel().nparams].c_str() % global_fit_result(i);
                 global_fit_out << metric->GetSysts().spline_names[i - metric->GetModel().nparams]

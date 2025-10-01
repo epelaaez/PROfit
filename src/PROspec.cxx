@@ -75,7 +75,7 @@ TH1D PROspec::toTH1D_Collapsed(const PROconfig &inconfig, int channel_index, siz
     Eigen::VectorXf coll_spec_proj = inconfig.m_channel_variable_bins[channel_index][var_index].ProjectSpectra(coll_spec, dim);
 
     //fill 1D hist
-    TH1D hSpec(hist_name.c_str(),hist_name.c_str(), nbins_dim, &bin_edges[0]); 
+    TH1D hSpec( (hist_name+std::to_string(var_index)+std::to_string(dim)+std::to_string(channel_index)).c_str(), hist_name.c_str(),nbins_dim, &bin_edges[0]); 
     hSpec.GetXaxis()->SetTitle(xaxis_title.c_str());
     for(int i = 1; i <= nbins_dim; ++i){
         hSpec.SetBinContent(i, coll_spec_proj(i -1));
@@ -102,7 +102,7 @@ TH1D PROspec::toTH1D(PROconfig const & inconfig, int subchannel_index, int other
     Eigen::VectorXf error_proj = inconfig.m_channel_variable_bins[channel_index][other_index].ProjectSpectraErrors(error(Eigen::seqN(global_bin_start, nbins_tot)), dim);
 
     //fill 1D hist
-    TH1D hSpec(hist_name.c_str(),hist_name.c_str(), nbins_dim, &bin_edges[0]); 
+    TH1D hSpec((hist_name+std::to_string(other_index)+std::to_string(dim)+std::to_string(subchannel_index)).c_str(),hist_name.c_str(), nbins_dim, &bin_edges[0]); 
     hSpec.GetXaxis()->SetTitle(xaxis_title.c_str());
 
     for(int i = 1; i <= nbins_dim; ++i){
