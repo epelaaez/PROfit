@@ -85,7 +85,7 @@
     <parameter variable_index = "2" name="L/E"/>
 </model>
 
-<MCFile treename="events/selectedNu" filename="/pnfs/sbnd/persistent/users/noza/sBruce/sbnd_bnbcv/sbnd_bnbcv_files_test.txt" scale = "1.0" pot="2.15692e19">
+<MCFile treename="events/selectedNu" filename="/exp/sbnd/data/users/markross/PROfit_Data/Tutorial2025/sbnd_bnbcv_files_localtest.txt" scale = "1.0" pot="2.15692e19">
     <friend treename="events/multisigmaTree" />
     <friend treename="events/multisimTree" />
     <branch
@@ -99,7 +99,7 @@
     </branch>
 </MCFile>
 
-<MCFile treename="events/selectedNu" filename="/pnfs/sbnd/persistent/users/noza/sBruce/icarus_bnbcv/icarus_bnbcv_files_test.txt" scale = "1.0" pot="1.60787e20">
+<MCFile treename="events/selectedNu" filename="/exp/sbnd/data/users/markross/PROfit_Data/Tutorial2025/icarus_bnbcv_files_localtest.txt" scale = "1.0" pot="1.60787e20">
     <friend treename="events/multisigmaTree" />
     <friend treename="events/multisimTree" />
     <branch
@@ -113,7 +113,7 @@
     </branch>
 </MCFile>
 
-<MCFile treename="events/selectedNu" filename="/pnfs/sbnd/persistent/users/noza/sBruce/sbnd_nue/sbnd_nue_files_test.txt" scale = "1.0" pot="1.40322e21">
+<MCFile treename="events/selectedNu" filename="/exp/sbnd/data/users/markross/PROfit_Data/Tutorial2025/sbnd_nue_files_localtest.txt" scale = "1.0" pot="1.40322e21">
     <friend treename="events/multisigmaTree" />
     <friend treename="events/multisimTree" />
     <branch
@@ -127,7 +127,7 @@
     </branch>
 </MCFile>
 
-<MCFile treename="events/selectedNu" filename="/pnfs/sbnd/persistent/users/noza/sBruce/sbnd_fullosc/sbnd_fullosc_files_test.txt" scale = "1.0" pot="1.0282e19">
+<MCFile treename="events/selectedNu" filename="/exp/sbnd/data/users/markross/PROfit_Data/Tutorial2025/sbnd_fullosc_files_localtest.txt" scale = "1.0" pot="1.0282e19">
     <friend treename="events/multisigmaTree" />
     <friend treename="events/multisimTree" />
     <branch
@@ -141,7 +141,7 @@
     </branch>
 </MCFile>
 
-<MCFile treename="events/selectedNu" filename="/pnfs/sbnd/persistent/users/noza/sBruce/icarus_nue/icarus_nue_files_test.txt" scale = "1.0" pot="1.30163e22">
+<MCFile treename="events/selectedNu" filename="/exp/sbnd/data/users/markross/PROfit_Data/Tutorial2025/icarus_nue_files_localtest.txt" scale = "1.0" pot="1.30163e22">
     <friend treename="events/multisigmaTree" />
     <friend treename="events/multisimTree" />   
     <branch
@@ -155,7 +155,7 @@
     </branch>
 </MCFile>
 
-<MCFile treename="events/selectedNu" filename="/pnfs/sbnd/persistent/users/noza/sBruce/icarus_fullosc/icarus_fullosc_files_test.txt" scale = "1.0" pot="8.25357e19">
+<MCFile treename="events/selectedNu" filename="/exp/sbnd/data/users/markross/PROfit_Data/Tutorial2025/icarus_fullosc_files_localtest.txt" scale = "1.0" pot="8.25357e19">
     <friend treename="events/multisigmaTree" />
     <friend treename="events/multisimTree" />
     <branch

@@ -99,7 +99,7 @@
     <parameter name="L/E" variable_index="2"/>
 </model>
 
-<MCFile treename="events/full/selected" filename="/exp/icarus/app/users/mueller/medulla/medulla/build/icarus_disappearance_08292025_sys.root" scale = "1.0" pot="1.67528e21"> 
+<MCFile treename="events/full/selected" filename="/exp/sbnd/data/users/markross/PROfit_Data/Tutorial2025/icarus_disappearance_08292025_sys.root" scale = "1.0" pot="1.67528e21"> 
     <friend treename="events/full/multisigmaTree" />
     <friend treename="events/full/multisimTree" />
     <friend treename="events/full/variationTree" />
@@ -141,7 +141,7 @@
         <variable>true_neutrino_energy</variable>
     </branch>
 </MCFile>
-<MCFile treename="events/offbeam/selected" filename="/exp/icarus/app/users/mueller/medulla/medulla/build/icarus_disappearance_08292025_sys.root" scale = "1.0" pot="1.596e20"> 
+<MCFile treename="events/offbeam/selected" filename="/exp/sbnd/data/users/markross/PROfit_Data/Tutorial2025/icarus_disappearance_08292025_sys.root" scale = "1.0" pot="1.596e20"> 
     <branch
         associated_subchannel = "nu_ICARUS_numu_intime"
         incl_systematics      = "false"
