@@ -1,19 +1,82 @@
 <?xml version="1.0" ?>
 
+<!-- One mode and Single Detector Analysis -->
 <mode name="nu" />
-
 <detector name="ICARUS" pot="1.6e20"/>
 
+<!--Single Channel : Numu Selcetion-->
 <channel name="numu" plotname="SPINE CC #nu_{#mu} Selection">
     <bins unit="Reconstructed Neutrino Energy [GeV]" edges="0.3 0.4 0.45 0.5 0.55 0.6 0.65 0.7 0.75 0.8 0.85 0.9 0.95 1.0 1.25 1.5 2.0 2.5"/>
     <bins unit="True Neutrino Energy [GeV]" min="0" max="3" nbins="20"/>
     <bins unit="True L/E [km/GeV]" min="0" max="3" nbins="150" plot="false"/>
     <subchannel name="intime" plotname="Intime Cosmics" color="#FBBC04"/>
-    <subchannel name="cos" plotname="Cosmics" color="#E37400"/>
-    <subchannel name="nc" plotname="NC" color="#FF6961"/>
-    <subchannel name="nuecc" plotname="#nu_{e} CC" color="#34A853"/>
-    <subchannel name="numucc" plotname="#nu_{#mu} CC" color="#99CCFF"/>
+    <subchannel name="cos"    plotname="Cosmics"        color="#E37400"/>
+    <subchannel name="nc"     plotname="NC"             color="#FF6961"/>
+    <subchannel name="nuecc"  plotname="#nu_{e} CC"     color="#34A853"/>
+    <subchannel name="numucc" plotname="#nu_{#mu} CC"   color="#99CCFF"/>
 </channel>
+
+<!-- The Physics model to fit, here numu disapearance only-->
+<model tag="numudis">
+    <rule index="0" name="No Osc"/>
+    <rule index="1" name="Numu Dis"/>
+    <parameter name="L/E" variable_index="2"/>
+</model>
+
+<!-- Where to find the Montecarlo and how to fill all the subchannels defined above-->
+<MCFile treename="events/full/selected" filename="/exp/icarus/app/users/mueller/medulla/medulla/build/icarus_disappearance_08292025_sys.root" scale = "1.0" pot="1.67528e21"> 
+    <friend treename="events/full/multisigmaTree" />
+    <friend treename="events/full/multisimTree" />
+    <friend treename="events/full/variationTree" />
+    <branch
+        associated_subchannel = "nu_ICARUS_numu_numucc"
+        model_rule            = "1"
+        additional_weight     = "true_cc && (true_pdg == 14 || true_pdg == -14) && true_neutrino_id >= 0"
+    >
+        <variable>reco_visible_energy</variable>
+        <variable>true_baseline/(1000*true_neutrino_energy)</variable>
+        <variable>true_neutrino_energy</variable>
+    </branch>
+    <branch
+        associated_subchannel = "nu_ICARUS_numu_nuecc"
+        model_rule            = "0"
+        additional_weight     = "true_cc && (true_pdg == 12 || true_pdg == -12) && true_neutrino_id >= 0"
+    >
+        <variable>reco_visible_energy</variable>
+        <variable>true_baseline/(1000*true_neutrino_energy)</variable>
+        <variable>true_neutrino_energy</variable>
+    </branch>
+    <branch
+        associated_subchannel = "nu_ICARUS_numu_nc"
+        model_rule            = "1"
+        additional_weight     = "true_cc == 0 && true_neutrino_id >= 0"
+    >
+        <variable>reco_visible_energy</variable>
+        <variable>true_baseline/(1000*true_neutrino_energy)</variable>
+        <variable>true_neutrino_energy</variable>
+    </branch>
+    <branch
+        associated_subchannel = "nu_ICARUS_numu_cos"
+        incl_systematics      = "false"
+        model_rule            = "0"
+        additional_weight     = "true_neutrino_id < 0"
+    >
+        <variable>reco_visible_energy</variable>
+        <variable>true_baseline/(1000*true_neutrino_energy)</variable>
+        <variable>true_neutrino_energy</variable>
+    </branch>
+</MCFile>
+<MCFile treename="events/offbeam/selected" filename="/exp/icarus/app/users/mueller/medulla/medulla/build/icarus_disappearance_08292025_sys.root" scale = "1.0" pot="1.596e20"> 
+    <branch
+        associated_subchannel = "nu_ICARUS_numu_intime"
+        incl_systematics      = "false"
+        model_rule            = "0"
+    >
+        <variable>reco_visible_energy</variable>
+        <variable>true_baseline/(1000*true_neutrino_energy)</variable>
+        <variable>true_neutrino_energy</variable>
+    </branch>
+</MCFile>
 
 <variation_list>
     <!-- MC Statistics -->
@@ -93,62 +156,4 @@
     <allowlist type="norm" plotname="FiducialVol" tag="other">nu_ICARUS:0.01</allowlist>
 </variation_list>
 
-<model tag="numudis">
-    <rule index="0" name="No Osc"/>
-    <rule index="1" name="Numu Dis"/>
-    <parameter name="L/E" variable_index="2"/>
-</model>
 
-<MCFile treename="events/full/selected" filename="/exp/icarus/app/users/mueller/medulla/medulla/build/icarus_disappearance_08292025_sys.root" scale = "1.0" pot="1.67528e21"> 
-    <friend treename="events/full/multisigmaTree" />
-    <friend treename="events/full/multisimTree" />
-    <friend treename="events/full/variationTree" />
-    <branch
-        associated_subchannel = "nu_ICARUS_numu_numucc"
-        model_rule            = "1"
-        additional_weight     = "true_cc && (true_pdg == 14 || true_pdg == -14) && true_neutrino_id >= 0"
-    >
-        <variable>reco_visible_energy</variable>
-        <variable>true_baseline/(1000*true_neutrino_energy)</variable>
-        <variable>true_neutrino_energy</variable>
-    </branch>
-    <branch
-        associated_subchannel = "nu_ICARUS_numu_nuecc"
-        model_rule            = "0"
-        additional_weight     = "true_cc && (true_pdg == 12 || true_pdg == -12) && true_neutrino_id >= 0"
-    >
-        <variable>reco_visible_energy</variable>
-        <variable>true_baseline/(1000*true_neutrino_energy)</variable>
-        <variable>true_neutrino_energy</variable>
-    </branch>
-    <branch
-        associated_subchannel = "nu_ICARUS_numu_nc"
-        model_rule            = "1"
-        additional_weight     = "true_cc == 0 && true_neutrino_id >= 0"
-    >
-        <variable>reco_visible_energy</variable>
-        <variable>true_baseline/(1000*true_neutrino_energy)</variable>
-        <variable>true_neutrino_energy</variable>
-    </branch>
-    <branch
-        associated_subchannel = "nu_ICARUS_numu_cos"
-        incl_systematics      = "false"
-        model_rule            = "0"
-        additional_weight     = "true_neutrino_id < 0"
-    >
-        <variable>reco_visible_energy</variable>
-        <variable>true_baseline/(1000*true_neutrino_energy)</variable>
-        <variable>true_neutrino_energy</variable>
-    </branch>
-</MCFile>
-<MCFile treename="events/offbeam/selected" filename="/exp/icarus/app/users/mueller/medulla/medulla/build/icarus_disappearance_08292025_sys.root" scale = "1.0" pot="1.596e20"> 
-    <branch
-        associated_subchannel = "nu_ICARUS_numu_intime"
-        incl_systematics      = "false"
-        model_rule            = "0"
-    >
-        <variable>reco_visible_energy</variable>
-        <variable>true_baseline/(1000*true_neutrino_energy)</variable>
-        <variable>true_neutrino_energy</variable>
-    </branch>
-</MCFile>
