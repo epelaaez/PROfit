@@ -276,7 +276,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
     }
 
 
-    void plot_channels(const std::string &filename, const PROconfig &config, std::optional<PROspec> cv, std::optional<PROspec> best_fit, std::optional<PROdata> data, std::optional<PROerrorbar> errband, std::optional<PROerrorbar> posterrband, std::vector<TPaveText> &texts, PlotOptions opt, int other_index) {
+    void plot_channels(const std::string &filename, const PROconfig &config, std::optional<PROspec> cv, std::optional<PROspec> best_fit, std::optional<PROdata> data, std::optional<PROerrorbar> errband, std::optional<PROerrorbar> posterrband, std::vector<TPaveText> &texts, PlotBounds &bounds, PlotOptions opt, int other_index) {
         TCanvas c;
         c.Print((filename+"[").c_str());
 
@@ -347,7 +347,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                     leg->SetNColumns(2);
                     leg->SetFillStyle(0);
                     leg->SetLineWidth(0);
-                    TH1D cv_hist(std::to_string(global_channel_index).c_str(), hist_title.c_str(), channel_nbins, edges.data());
+                    TH1D cv_hist(("cv_hist"+std::to_string(global_channel_index)).c_str(), hist_title.c_str(), channel_nbins, edges.data());
                     cv_hist.SetLineWidth(2);
                     cv_hist.SetLineColor(cvcol);
                     cv_hist.SetFillStyle(0);
@@ -395,7 +395,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                             }
                         }
 
-                        TH1 *leg_hack = (TH1*)cv_hist.Clone();
+                        TH1 *leg_hack = (TH1*)cv_hist.Clone((std::string(cv_hist.GetTitle())+"leg_hack").c_str());
                         leg_hack->SetFillStyle(3144);
                         leg_hack->SetFillColorAlpha(cvcol, 0.2);
                         //leg_hack->SetFillColorAlpha(kGray+2, 0.2);
@@ -447,7 +447,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                         bf_hist.SetLineWidth(2);
                         //leg->AddEntry(&bf_hist, "Best Fit", "l");
 
-                        TH1 *leg_hack = (TH1*)bf_hist.Clone("bf");
+                        TH1 *leg_hack = (TH1*)bf_hist.Clone((std::string(bf_hist.GetTitle())+"bf").c_str());
                         leg_hack->SetFillStyle(3254);
                         leg_hack->SetFillColor(bfcol);
                         leg_hack->SetLineColor(bfcol);
@@ -518,12 +518,12 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
 
                     if(cv) {
                         if(bool(opt&PlotOptions::CVasStack)) {
-                            cvstack->SetMaximum(std::max(top_modifier*cvstack->GetMaximum(),top_modifier*data_hist.GetMaximum()));
+                            cvstack->SetMaximum(  bounds.hasBound("ymax") ? bounds.getBound("ymax") : std::max(top_modifier*cvstack->GetMaximum(), top_modifier*data_hist.GetMaximum()));
                             cvstack->Draw("hist");
                             cv_hist.Draw("same hist");
 
                         } else {
-                            cv_hist.SetMaximum(top_modifier*cv_hist.GetMaximum());
+                            cv_hist.SetMaximum( bounds.hasBound("ymax") ? bounds.getBound("ymax") :  top_modifier*cv_hist.GetMaximum());
 
                             cv_hist.Draw("hist");
                             cv_hist.GetYaxis()->SetTitleSize(0.06);  
@@ -567,7 +567,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
 
                         if(cv || best_fit) {
                             g->Draw("PE1 same");
-                            cv_hist.SetMaximum(std::max(cv_hist.GetMaximum(),top_modifier*datmax));
+                            cv_hist.SetMaximum( bounds.hasBound("ymax") ? bounds.getBound("ymax") : std::max(cv_hist.GetMaximum(),top_modifier*datmax));
 
                         } else {
                             g->Draw("PE1");
@@ -642,16 +642,17 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                         float ylow = ymin - 0.05 * yrange;  // 15% padding below
                         float yhigh = ymax + 0.05 * yrange; // 15% padding above
 
+                        float kmin = bounds.hasBound("ratmin") ? bounds.getBound("ratmin") : std::min(ylow,0.85f);
+                        float kmax = bounds.hasBound("ratmax") ? bounds.getBound("ratmax") : std::max(yhigh,1.148f);
+                        log<LOG_DEBUG>(L"%1% || RatioMin %2%  Max %3% (ylow %4%) %5% val %6%") % __func__ % kmin % kmax % ylow % int(bounds.hasBound("ratmin")) % bounds.getBound("ratmin");
+
                         if(!posterrband){
-                            //one->SetMinimum(std::max(0.5f,std::min(ylow,0.85f)));
-                            //one->SetMaximum(std::min(1.5f,std::max(yhigh,1.148f)));
-                            one->SetMinimum(std::min(ylow,0.85f));
-                            one->SetMaximum(std::max(yhigh,1.148f));
+                            one->SetMinimum(kmin);
+                            one->SetMaximum(kmax);
 
                         }else{
-                            one->SetMinimum(std::min(ylow,0.85f));
-                            one->SetMaximum(std::max(yhigh,1.148f));
-
+                           one->SetMinimum(kmin);
+                           one->SetMaximum(kmax);
                         }
 
                         one->SetLineColor(kBlack);
@@ -772,12 +773,12 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
         Eigen::MatrixXf diag = spec.Spec().array().matrix().asDiagonal(); 
         Eigen::MatrixXf collapsed_diag = CollapseMatrix(config, diag);
 
-        size_t global_subchannel_index = 0;
         size_t global_channel_index = 0;
         for(size_t mode = 0; mode < config.m_num_modes; ++mode) {
             for(size_t det = 0; det < config.m_num_detectors; ++det) {
                 for(size_t channel = 0; channel < config.m_num_channels; ++channel) {
 
+                    std::string name = config.m_mode_plotnames[mode]+" "+config.m_detector_plotnames[det]+" "+config.m_channel_plotnames[channel]; 
                     c.Clear();
                     c.Divide(gridCols, gridRows);
 
@@ -794,7 +795,6 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                     for (const auto &[tag, vec] : used_tags) {
 
                         c.cd(padIndex++);
-                        bool first=true;
 
                         TLegend* leg = new TLegend(0.11, 0.6, 0.89, 0.89);
                         leg->SetNColumns(3);
@@ -867,13 +867,22 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                         for(auto &h:hvec) h->Draw("HIST SAME");
 
                         leg->Draw();
+                        
+                        TText *t = new TText();
+                        t->SetNDC();                
+                        t->SetTextFont(42);                          
+                        t->SetTextSize(0.03);      
+                        t->SetTextAlign(33);        
+                        std::string pv = "PROfit v"+std::string(PROJECT_VERSION_STR);
+                        t->DrawText(0.895, 0.945, pv.c_str()); 
+
                     }//end tag
 
 
                     //and each sum of sums to wrap it off!
                     c.cd(padIndex++);
 
-                    TH1F* hsum = new TH1F( ("USum_"+std::to_string(global_channel_index)).c_str(),"Summary!", bin_edges.size()-1, bin_edges.data());
+                    TH1F* hsum = new TH1F( ("USum_"+std::to_string(global_channel_index)).c_str(),("Summary! "+name).c_str(), bin_edges.size()-1, bin_edges.data());
                     hsum->Reset();
                     TLegend* leg = new TLegend(0.11, 0.6, 0.89, 0.89);
                     leg->SetNColumns(3);
@@ -896,7 +905,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                     }
                     leg->AddEntry(hsum,"Sum","l");
                     hsum->SetXTitle(config.m_channel_plotnames[channel].c_str());
-                    hsum->SetTitle("Summary!");
+                    hsum->SetTitle(("Summary: "+name).c_str());
                     hsum->SetYTitle("Fractional Uncertainty");
                     hsum->SetLineColor(kBlack);
                     hsum->SetLineWidth(2);
@@ -909,6 +918,14 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                     gPad->Update();
                     for(auto &h:hvec) h->Draw("HIST SAME");
                     leg->Draw();
+
+                    TText *t = new TText();
+                    t->SetNDC();                
+                    t->SetTextFont(42);                          
+                    t->SetTextSize(0.03);      
+                    t->SetTextAlign(33);        
+                    std::string pv = "PROfit v"+std::string(PROJECT_VERSION_STR);
+                    t->DrawText(0.895, 0.945, pv.c_str()); 
 
 
                     c.Print(filename.c_str());

@@ -6,7 +6,7 @@ namespace PROfit {
 void fc_worker(fc_args args) {
     log<LOG_INFO>(L"%1% || FC for point %2%") % __func__ % args.phy_params;
     std::mt19937 rng{args.seed};
-    std::unique_ptr<PROmodel> model = get_model_from_string(args.config.m_model_tag, args.prop);
+    std::unique_ptr<PROmodel> model = get_model_from_string(args.config, args.prop);
     std::unique_ptr<PROmodel> null_model = std::make_unique<NullModel>(args.prop);
 
     PROchi::EvalStrategy strat = args.binned ? PROchi::BinnedChi2 : PROchi::EventByEvent;

@@ -99,8 +99,8 @@ namespace PROfit {
 
         Eigen::VectorXf operator()(Eigen::VectorXf &current) {
             Eigen::VectorXf ret = current;
-            int nparams = metric.GetModel().nparams;
-            for(int i = 0; i < ret.size(); ++i) {
+            long int nparams = metric.GetModel().nparams;
+            for(long int i = 0; i < ret.size(); ++i) {
                 if(std::find(fixed.begin(), fixed.end(), i) != std::end(fixed)) continue;
                 if(i < nparams) {
                     float lo = ret(i) - width;
@@ -129,8 +129,8 @@ namespace PROfit {
 
         float P(const Eigen::VectorXf &value, const Eigen::VectorXf &given) {
             float prob = 1.0;
-            int nparams = metric.GetModel().nparams;
-            for(int i = 0; i < value.size(); ++i) {
+            long int nparams = metric.GetModel().nparams;
+            for(long int i = 0; i < value.size(); ++i) {
                 if(std::find(fixed.begin(), fixed.end(), i) != std::end(fixed)) continue;
                 if(i < nparams) {
                     //float diff = metric.GetModel().ub(i) - metric.GetModel().lb(i);
@@ -161,8 +161,8 @@ namespace PROfit {
         }
 
         bool within_bound(const Eigen::VectorXf &value) {
-            int nparams = metric.GetModel().nparams;
-            for(int i = 0; i < value.size(); ++i) {
+            long int nparams = metric.GetModel().nparams;
+            for(long int i = 0; i < value.size(); ++i) {
                 if(std::find(fixed.begin(), fixed.end(), i) != std::end(fixed)) continue;
                 if(i < nparams) {
                     if(value(i) > metric.GetModel().ub(i) || value(i) < metric.GetModel().lb(i) || value(i) < -5.0f)
@@ -259,7 +259,7 @@ namespace PROfit {
             Eigen::VectorXf sub_throw1(active.size());
             Eigen::VectorXf sub_throw2(active.size());
             std::normal_distribution<float> nd(0.0f, 1.0f);
-            for (int i = 0; i < active.size(); ++i) {
+            for (size_t i = 0; i < active.size(); ++i) {
                 sub_throw1(i) = nd(rng);
                 sub_throw2(i) = nd(rng);
             }
@@ -280,8 +280,8 @@ namespace PROfit {
 
 
         bool within_bound(const Eigen::VectorXf &value) {
-            int nparams = metric.GetModel().nparams;
-            for(int i = 0; i < value.size(); ++i) {
+            long int nparams = metric.GetModel().nparams;
+            for(long int i = 0; i < value.size(); ++i) {
                 if(std::find(fixed.begin(), fixed.end(), i) != std::end(fixed)) continue;
                 if(i < nparams) {
                     if(value(i) > metric.GetModel().ub(i) || value(i) < std::max(metric.GetModel().lb(i),-5.0f))
@@ -326,7 +326,7 @@ namespace PROfit {
 
             if(tune_calls > (size_t)(4*last_proposed.size())) {
                 Eigen::MatrixXf cov_pd = cov;
-                for(int i = 0; i < cov_pd.rows(); ++i)
+                for(long int i = 0; i < cov_pd.rows(); ++i)
                     cov_pd(i, i) += 1e-8;
                 width = cov_pd;
                 beta = tune_calls > (size_t)(100*last_proposed.size()) ? 0.05 : 0.5;

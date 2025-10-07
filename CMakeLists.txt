@@ -33,29 +33,29 @@ endif()
 ##### Some Dependancies ######
 
 if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.25")
-FetchContent_Declare(
-    eigen
-    SYSTEM
-    GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git 
-    GIT_TAG        3.4.0
-    )
-FetchContent_Declare(
-    lbfgspp
-    SYSTEM
-    GIT_REPOSITORY https://github.com/markrosslonergan/LBFGSpp
-    GIT_TAG        253e837bbff0460bddd84cd9883715c18aa19426
-    )
+    FetchContent_Declare(
+        eigen
+        SYSTEM
+        GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git 
+        GIT_TAG        3.4.0
+        )
+    FetchContent_Declare(
+        lbfgspp
+        SYSTEM
+        GIT_REPOSITORY https://github.com/markrosslonergan/LBFGSpp
+        GIT_TAG        253e837bbff0460bddd84cd9883715c18aa19426
+        )
 else()
-FetchContent_Declare(
-    eigen
-    GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git 
-    GIT_TAG        3.4.0
-    )
-FetchContent_Declare(
-    lbfgspp
-    GIT_REPOSITORY https://github.com/markrosslonergan/LBFGSpp
-    GIT_TAG        253e837bbff0460bddd84cd9883715c18aa19426
-    )
+    FetchContent_Declare(
+        eigen
+        GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git 
+        GIT_TAG        3.4.0
+        )
+    FetchContent_Declare(
+        lbfgspp
+        GIT_REPOSITORY https://github.com/markrosslonergan/LBFGSpp
+        GIT_TAG        253e837bbff0460bddd84cd9883715c18aa19426
+        )
 endif()
 FetchContent_MakeAvailable(eigen)
 FetchContent_MakeAvailable(lbfgspp)
@@ -99,7 +99,7 @@ if(MPI_ENABLE)
 
     message("MFA include dir: ${MFA_INCLUDE_DIR}")
     message("DIY include dir: ${DIY_INCLUDE_DIR}")
-    
+
     if                          (MFA_INCLUDE_DIR)
         include_directories     (SYSTEM ${MFA_INCLUDE_DIR} ${DIY_INCLUDE_DIR} ${FMT_INCLUDE_DIR})
         message                 ("MFA_INCLUDE_DIR = " ${MFA_INCLUDE_DIR})
@@ -156,16 +156,23 @@ endif(MPI_ENABLE)
 file(GLOB SRHeaders ${SBNANAOBJ_INCLUDE_DIR}/sbnanaobj/StandardRecord/*.h)
 execute_process(COMMAND rootcling -f ${CMAKE_BINARY_DIR}/PROfit_dict.cxx -I${SBNANAOBJ_INCLUDE_DIR} -c ${SRHeaders} ${CMAKE_SOURCE_DIR}/dict/LinkDef.h)
 add_library(PROfit_dict ${CMAKE_BINARY_DIR}/PROfit_dict.cxx)
+add_custom_command(TARGET PROfit_dict POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy
+    ${CMAKE_BINARY_DIR}/PROfit_dict_rdict.pcm
+    ${CMAKE_BINARY_DIR}/bin/
+    COMMENT "Copying dictionary files to bin directory"
+    )
 target_include_directories(PROfit_dict PRIVATE ${SBNANAOBJ_INCLUDE_DIR})
 target_link_directories(PROfit_dict PRIVATE ${CMAKE_BINARY_DIR})
 target_link_libraries(PROfit_dict PRIVATE ${ROOT_LIBRARIES})
 
+
 # Install the SBNANAOBJ headers 
 install(
-  DIRECTORY ${SBNANAOBJ_INCLUDE_DIR}/sbnanaobj/StandardRecord/
-  DESTINATION  ${CMAKE_INSTALL_PREFIX}/include/sbnanaobj/StandardRecord/
-  FILES_MATCHING PATTERN "*.h"
-)
+    DIRECTORY ${SBNANAOBJ_INCLUDE_DIR}/sbnanaobj/StandardRecord/
+    DESTINATION  ${CMAKE_INSTALL_PREFIX}/include/sbnanaobj/StandardRecord/
+    FILES_MATCHING PATTERN "*.h"
+    )
 
 configure_file(${CMAKE_SOURCE_DIR}/inc/PROversion.h.in ${CMAKE_SOURCE_DIR}/inc/PROversion.h)
 
@@ -175,10 +182,10 @@ add_subdirectory(src)
 
 # Install headers
 install(
-  DIRECTORY ${CMAKE_SOURCE_DIR}/inc/
-  DESTINATION  ${CMAKE_INSTALL_PREFIX}/include
-  FILES_MATCHING PATTERN "*.h"
-)
+    DIRECTORY ${CMAKE_SOURCE_DIR}/inc/
+    DESTINATION  ${CMAKE_INSTALL_PREFIX}/include
+    FILES_MATCHING PATTERN "*.h"
+    )
 
 # The executable code will be placed here
 add_subdirectory(bin)

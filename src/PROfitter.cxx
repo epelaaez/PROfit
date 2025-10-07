@@ -467,6 +467,8 @@ std::vector<std::pair<float, float>> PROfitter::findSignificantMinima(  const st
     float prominence_threshold = fitconfig.harmonic_prominence_threshold;
     float min_spacing_log = fitconfig.harmonic_min_spacing_log;
 
+
+    size_t niter = 0;
     while(minima.size()< fitconfig.harmonic_min_num_seeds || minima.size()>fitconfig.harmonic_max_num_seeds){
         //while(minima.size()==0 || minima.size()>15){
         if(x_values.size() != y_values.size() || x_values.size() < 3) {
@@ -545,6 +547,12 @@ std::vector<std::pair<float, float>> PROfitter::findSignificantMinima(  const st
             min_spacing_log = min_spacing_log*(1.0-fitconfig.harmonic_prominence_threshold_shift);
         }
         if(prominence_threshold<fitconfig.harmonic_prominence_threshold_minimum){
+            return minima;
+        }
+        
+        niter++;
+        if(niter>=fitconfig.harmonic_raw_max_tests){
+            log<LOG_INFO>(L"%1% || Hit Harmonic Raw max Tests (%2%) minima.size() %3%  ") %__func__% fitconfig.harmonic_raw_max_tests % minima.size() ;
             return minima;
         }
     }

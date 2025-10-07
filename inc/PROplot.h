@@ -35,6 +35,77 @@
 #include "TLine.h"
 namespace PROfit{
 
+    struct PlotBounds {
+        float xmin = -9999;
+        float xmax = -9999;
+        float ymin = -9999;
+        float ymax = -9999;
+        float ratmin = -9999;
+        float ratmax = -9999;
+
+        int Load(std::map<std::string, float> bound_list){
+            log<LOG_INFO>(L"%1% || Loading Bounds for plot_channels ") % __func__;
+            for(const auto &[bound_name, value]: bound_list) {
+                log<LOG_INFO>(L"%1% || --on bound %2% val %3% ") % __func__ % bound_name.c_str() % value;
+                if(bound_name == "xmin") {
+                    xmin=value;
+                }else if(bound_name == "xmax") {
+                    xmax=value;
+                }else if(bound_name == "ymin") {
+                    ymin=value;
+                }else if(bound_name == "ymax") {
+                    ymax=value;
+                }else if(bound_name == "ratmin") {
+                    ratmin=value;
+                }else if(bound_name == "ratmax") {
+                    ratmax=value;
+                }else{
+                    log<LOG_ERROR>(L"%1% || ERROR! you passed a plot-bounds string that is not allowed (%2%). Needs to be xmin,xmax,ymin,ymax,ratmin,ratmax. ") % __func__ % bound_name.c_str();
+                    throw std::invalid_argument(std::string("Invalid plot-bounds ")+bound_name );
+                }
+            }
+        return 1;
+        };
+        bool hasBound(std::string bound_name){
+                if(bound_name == "xmin") {
+                    return xmin!=-9999? true : false;
+                }else if(bound_name == "xmax") {
+                    return xmax!=-9999? true : false;
+                }else if(bound_name == "ymin") {
+                    return ymin!=-9999? true : false;
+                }else if(bound_name == "ymax") {
+                    return ymax!=-9999? true : false;
+                }else if(bound_name == "ratmin") {
+                    return ratmin!=-9999? true : false;
+                }else if(bound_name == "ratmax") {
+                    return ratmax!=-9999? true : false;
+                }else{
+                    log<LOG_ERROR>(L"%1% || ERROR! you passed a plot-bounds string that is not allowed (%2%). Needs to be ymax,ratmin,ratmax. ") % __func__ % bound_name.c_str();
+                    throw std::invalid_argument(std::string("Invalid plot-bounds ")+bound_name );
+                }
+        return false;
+        };
+        float getBound(std::string bound_name){
+                if(bound_name == "xmin") {
+                    return xmin;
+                }else if(bound_name == "xmax") {
+                    return xmax;
+                }else if(bound_name == "ymin") {
+                    return ymin;
+                }else if(bound_name == "ymax") {
+                    return ymax;
+                }else if(bound_name == "ratmin") {
+                    return ratmin;
+                }else if(bound_name == "ratmax") {
+                    return ratmax;
+                }else{
+                    log<LOG_ERROR>(L"%1% || ERROR! you passed a plot-bounds string that is not allowed (%2%). Needs to be ymax,ratmin,ratmax. ") % __func__ % bound_name.c_str();
+                    throw std::invalid_argument(std::string("Invalid plot-bounds ")+bound_name );
+                }
+        return -999;
+        };
+    };
+    
     enum class PlotOptions {
         Default = 0,
         CVasStack = 1 << 0,
@@ -62,7 +133,7 @@ namespace PROfit{
 
 
 
-    void plot_channels(const std::string &filename, const PROconfig &config, std::optional<PROspec> cv, std::optional<PROspec> best_fit, std::optional<PROdata> data, std::optional<PROerrorbar> errband, std::optional<PROerrorbar> posterrband, std::vector<TPaveText> &texts, PlotOptions opt = PlotOptions::Default, int var_index = 0);
+    void plot_channels(const std::string &filename, const PROconfig &config, std::optional<PROspec> cv, std::optional<PROspec> best_fit, std::optional<PROdata> data, std::optional<PROerrorbar> errband, std::optional<PROerrorbar> posterrband, std::vector<TPaveText> &texts, PlotBounds &bounds, PlotOptions opt = PlotOptions::Default, int var_index = 0);
 
     //some helper functions for PROplot
     std::map<std::string, std::unique_ptr<TH1D>> getCV1DHists(const PROspec & spec, const PROconfig& inconfig, bool scale = false, int var_index = 0);
@@ -74,7 +145,7 @@ namespace PROfit{
     int plotPriorFractionalSystematicBreakdown(const PROconfig &config, const PROspec &spec, const PROsyst &allsplinesyst, std::string filename, int var_index = 0);
 
     template<class T, class P>
-    PROerrorbar getMCMCErrorBand(Metropolis<T, P> met, size_t burnin, size_t iterations, const PROconfig &config, const PROpeller &prop, PROmetric &metric, const Eigen::VectorXf &best_fit, std::vector<TH1D> &posteriors, Eigen::MatrixXf &post_covar,  bool scale = false,int var_index=0) {
+        PROerrorbar getMCMCErrorBand(Metropolis<T, P> met, size_t burnin, size_t iterations, const PROconfig &config, const PROpeller &prop, PROmetric &metric, const Eigen::VectorXf &best_fit, std::vector<TH1D> &posteriors, Eigen::MatrixXf &post_covar,  bool scale = false,int var_index=0) {
             for(size_t i = 0; i < metric.GetSysts().GetNSplines(); ++i)
                 posteriors.emplace_back("", (";"+config.m_mcgen_variation_plotname_map.at(metric.GetSysts().spline_names[i])).c_str(), 60, -3, 3);
 
@@ -111,42 +182,42 @@ namespace PROfit{
             log<LOG_INFO>(L"%1% || Acceptance rate %2%") % __func__ % ((float)accepted / iterations);
 
             cv = CollapseMatrix(config, cv);
- 
-        std::vector<float> centers;
-        size_t global_channel_index = 0;
-        for(size_t mode = 0; mode < config.m_num_modes; ++mode) {
-            for(size_t det = 0; det < config.m_num_detectors; ++det) {
-                for(size_t channel = 0; channel < config.m_num_channels; ++channel) {
-                    std::vector<float> tedges =  config.GetChannelVariableBins(global_channel_index, var_index).Edges();
-                    global_channel_index++;
-                    for(size_t p=0; p<tedges.size(); p++){
-                        if(p<tedges.size()-1){
-                            centers.push_back((tedges[p+1]+tedges[p])/2.0);
+
+            std::vector<float> centers;
+            size_t global_channel_index = 0;
+            for(size_t mode = 0; mode < config.m_num_modes; ++mode) {
+                for(size_t det = 0; det < config.m_num_detectors; ++det) {
+                    for(size_t channel = 0; channel < config.m_num_channels; ++channel) {
+                        std::vector<float> tedges =  config.GetChannelVariableBins(global_channel_index, var_index).Edges();
+                        global_channel_index++;
+                        for(size_t p=0; p<tedges.size(); p++){
+                            if(p<tedges.size()-1){
+                                centers.push_back((tedges[p+1]+tedges[p])/2.0);
+                            }
                         }
+
                     }
-                    
                 }
             }
-        }
 
-        PROerrorbar ebar(cv.size());
-        for(int i = 0; i < cv.size(); ++i) {
-            std::vector<float> binconts(specs.size());
-            for(size_t j = 0; j < specs.size(); ++j) {
-                binconts[j] = specs[j](i);
+            PROerrorbar ebar(cv.size());
+            for(int i = 0; i < cv.size(); ++i) {
+                std::vector<float> binconts(specs.size());
+                for(size_t j = 0; j < specs.size(); ++j) {
+                    binconts[j] = specs[j](i);
+                }
+                float scale_factor = scale ? 1.0/config.collapsed_bin_widths.at(var_index)(i) :  1.0;
+                if(std::isnan(scale_factor)) scale_factor = 1;
+                std::sort(binconts.begin(), binconts.end());
+                float ehi = std::abs((binconts[int(0.840*specs.size())] - cv(i))*scale_factor);
+                float elo = std::abs((cv(i) - binconts[int(0.160*specs.size())])*scale_factor);
+                ebar.error_up(i) =  ehi;
+                ebar.error_down(i) =  elo;
+                ebar.error_point(i) = cv(i)*scale_factor;
+                log<LOG_DEBUG>(L"%1% || ErrorBand bin %2% %3% %4% %5% %6% ") % __func__ % i % cv(i) % ehi % elo % scale_factor ;
             }
-            float scale_factor = scale ? 1.0/config.collapsed_bin_widths.at(var_index)(i) :  1.0;
-            if(std::isnan(scale_factor)) scale_factor = 1;
-            std::sort(binconts.begin(), binconts.end());
-            float ehi = std::abs((binconts[int(0.840*specs.size())] - cv(i))*scale_factor);
-            float elo = std::abs((cv(i) - binconts[int(0.160*specs.size())])*scale_factor);
-            ebar.error_up(i) =  ehi;
-            ebar.error_down(i) =  elo;
-            ebar.error_point(i) = cv(i)*scale_factor;
-            log<LOG_DEBUG>(L"%1% || ErrorBand bin %2% %3% %4% %5% %6% ") % __func__ % i % cv(i) % ehi % elo % scale_factor ;
+            return ebar;
         }
-        return ebar;
-    }
 
 
 };

@@ -104,12 +104,17 @@ int main(int argc, char* argv[])
     std::vector<std::string> mockreweights;
     std::vector<TH2D*> weighthists;
 
+    std::map<std::string, float> bound_list;
+    PlotBounds pbounds; 
     size_t nuniv;
 
 
     //Global Arguments for all PROfit enables subcommands.
     app.add_option("-x,--xml", xmlname, "Input PROfit XML configuration file.")->required();
     app.add_option("-t,--tag", analysis_tag, "Analysis Tag used for output identification.")->default_str("PROfit");
+    app.add_option("-v,--verbosity", GLOBAL_LEVEL, "Verbosity Level [1-4]->[Error,Warning,Info,Debug].")->default_val(GLOBAL_LEVEL);
+    app.add_option("-l,--log", log_file, "File to save log to. Warning: Will overwrite this file.");
+    app.add_option("-w,--file-verbosity", FILE_LEVEL, "File (log) Verbosity Level [1-4]->[Error,Warning,Info,Debug].")->default_val(static_cast<log_level_t>(-1));
     app.add_option("-o,--output",output_tag,"Additional output filename quantifier")->default_str("v1");
     app.add_option("-n, --nthread",   nthread, "Number of threads to parallelize over.")->default_val(1);
     app.add_option("-m,--max", maxevents, "Max number of events to run over.");
@@ -117,19 +122,22 @@ int main(int argc, char* argv[])
     app.add_option("-d, --data", data_xml, "Load from a seperate data xml/data file instead of signal injection. Only used with plot subcommand.")->default_str("");
     app.add_option("-i, --inject", osc_params, "Physics parameters to inject as true signal. Example: dmsq 3 sinsq2thmm 0.25")->expected(-1);// HOW TO
     app.add_option("-s, --seed", global_seed, "A global seed for PROseed rng. Default to -1 for hardware rng seed.")->default_val(-1);
+    app.add_option("-p,--preset", fit_preset, "Preset fitting params. Available `fast`, `good` and `overkill` .");
+    app.add_option("--fit-options", global_fit_options, "Parameters for single, detailed global best fit LBFGSB. See PROfitter.h or run --fit-help for available settings.");
+    app.add_option("--scan-fit-options", scan_fit_options, "Parameters for simpier, multiple best fits in PROfile/surface LBFGSB.");
+    app.add_flag("--fit-help", show_fit_help, "Show detailed help for all fitting parameters (L-BFGS-B, PSO, MCMC, etc.)");
+
     app.add_option("--inject-systs", injected_systs, "Systematic shifts to inject. Map of name and shift value in sigmas. Only spline systs are supported right now.");
-    app.add_flag("--poisson-throw", poisson_throw, "Do a Poisson stats throw of fake data.");
-    app.add_option("--scale", scale_arg, "Scale detector POT by a given value.");
     app.add_option("--syst-list", syst_list, "Override list of systematics to use (note: all systs must be in the xml).");
     app.add_option("--exclude-systs", systs_excluded, "List of systematics to exclude.")->excludes("--syst-list"); 
-    app.add_option("--fit-options", global_fit_options, "Parameters for single, detailed global best fit LBFGSB. See PROfitter.h or run --fit-help for available settings.");
-    app.add_flag("--fit-help", show_fit_help, "Show detailed help for all fitting parameters (L-BFGS-B, PSO, MCMC, etc.)");
-    app.add_option("--scan-fit-options", scan_fit_options, "Parameters for simpier, multiple best fits in PROfile/surface LBFGSB.");
-    app.add_option("-p,--preset", fit_preset, "Preset fitting params. Available `fast`, `good` and `overkill` .");
-    app.add_option("-f, --rwfile", reweights_file, "File containing histograms for reweighting");
-    app.add_option("-r, --mockrw",   mockreweights, "Vector of reweights to use for mock data");
-    app.add_option("--log", log_file, "File to save log to. Warning: Will overwrite this file.");
+
+    app.add_flag("--poisson-throw", poisson_throw, "Do a Poisson stats throw of fake data.");
     app.add_flag("--scale-by-width", binwidth_scale, "Scale histgrams by 1/(bin width).");
+    app.add_option("--scale", scale_arg, "Scale detector POT by a given value.");
+    app.add_option("--plot-bounds", bound_list, "Plot bounds, set by  string float pairs. Available strings are ymax,ratmin,ratmax."); 
+    
+    //app.add_option("-f, --rwfile", reweights_file, "File containing histograms for reweighting");//deprociated, add back in later
+    //app.add_option("-r, --mockrw",   mockreweights, "Vector of reweights to use for mock data");
     app.add_flag("--event-by-event", eventbyevent, "Do you want to weight event-by-event?");
     app.add_flag("--statonly", statonly, "Run a stats only surface instead of fitting systematics");
     app.add_flag("--force",force,"Force loading binary data even if hash is incorrect (Be Careful!)");
@@ -182,6 +190,14 @@ int main(int argc, char* argv[])
     //PROtest, test things
     CLI::App *protest_command = app.add_subcommand("protest", "Testing ground for rapid quick tests.");
 
+    app.set_config("--config");
+    surface_command->configurable(true);
+    process_command->configurable(true);
+    profile_command->configurable(true);
+    protest_command->configurable(true);
+    proglobal_command->configurable(true);
+    profc_command->configurable(true);
+    proplot_command->configurable(true);
 
     //Parse inputs. 
     CLI11_PARSE(app, argc, argv);
@@ -199,6 +215,7 @@ int main(int argc, char* argv[])
         log_impl::EnableFileLogging(log_file, FILE_LEVEL);
     }
 
+    pbounds.Load(bound_list);
 
     log<LOG_WARNING>(L" %1% ") % getIcon().c_str()  ;
     std::string final_output_tag =analysis_tag +"_"+output_tag;
@@ -707,7 +724,7 @@ int main(int argc, char* argv[])
         PlotOptions opt = PlotOptions::DataPostfitRatio;
         if(binwidth_scale) opt |= PlotOptions::BinWidthScaled;
         if(area_normalized) opt |= PlotOptions::AreaNormalized;
-        plot_channels((final_output_tag+"_PROfile_hists.pdf"), config, cv, bf, data, err_band, post_err_band, texts, opt);
+        plot_channels((final_output_tag+"_PROfile_hists.pdf"), config, cv, bf, data, err_band, post_err_band, texts, pbounds, opt);
 
         TCanvas c;
         c.Print((final_output_tag+"_postfit_posteriors.pdf[").c_str());
@@ -793,7 +810,7 @@ int main(int argc, char* argv[])
             for(size_t i = 0; i< nparams; i++){
 
                 if(i<nphys){
-                    log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % metric->GetModel().pretty_param_names[i].c_str() % best_fit(i);
+                    log<LOG_INFO>(L"%1% || %2%  :  %3% (non-log %4%)") % __func__ % metric->GetModel().pretty_param_names[i].c_str() % best_fit(i) % pow(10,best_fit(i));
                 }else{
                     log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % metric->GetSysts().spline_names[i-nphys].c_str() % best_fit(i);
                 }
@@ -1053,13 +1070,20 @@ int main(int argc, char* argv[])
         std::vector<TPaveText> notext;
         if(binwidth_scale) opt |= PlotOptions::BinWidthScaled;
         if(area_normalized) opt |= PlotOptions::AreaNormalized;
-        std::vector<PROspec> other_cvs;
+        std::vector<PROspec> variable_cvs;
         for(size_t io = 0; io < config.m_num_variables; ++io) {
-            plot_channels(final_output_tag+"_other_"+std::to_string(io)+"_PROplot_CV.pdf", config, other_cvs.back(), {}, {}, {}, {}, notext, opt, io);
+            variable_cvs.push_back(FillSpectra(config, prop, variable_systs[config.i_prime],*model,CVpparams, !eventbyevent, io));
+            plot_channels(final_output_tag+"_PROplot_Variable_"+std::to_string(io)+"_CV.pdf", config, variable_cvs.back(), {}, {}, {}, {}, notext, pbounds, opt, io);
         }
 
         std::string filename = final_output_tag+"_fractional_systematics.pdf";
-        plotPriorFractionalSystematicBreakdown(config, other_cvs[config.i_prime], allcovsyst, filename,config.i_prime);
+        plotPriorFractionalSystematicBreakdown(config, variable_cvs[config.i_prime], allcovsyst, filename,config.i_prime);
+        
+        std::vector<std::map<std::string, std::unique_ptr<TH1D>>> other_hists;
+        for(size_t io = 0; io < config.m_num_variables; ++io) {
+            other_hists.push_back(getCVHists(variable_cvs[io], config, binwidth_scale, io));
+        }
+
         TCanvas c;
         if(osc_params.size()) {
 
@@ -1115,7 +1139,7 @@ int main(int argc, char* argv[])
                         leg->AddEntry(cv_hist, "No Oscillations", "l");
                         std::string oscstr = "";//"#splitline{Oscilations:}{";
                         for(size_t j=0;j<model->nparams;j++){
-                            oscstr+=model->pretty_param_names[j]+ " : "+ to_string_prec(osc_param_vector(j),2) + (j==0 ? ", " : "" );
+                            oscstr+=model->pretty_param_names[j]+ " : "+ to_string_prec(pow(10,osc_param_vector(j)),2) +" "+model->pretty_param_units[j] + (j==0 ? ", " : "" );
                         }
                         //oscstr+="}";
 
@@ -1158,25 +1182,21 @@ int main(int argc, char* argv[])
         }
 
         //Now some covariances
-        std::map<std::string, std::unique_ptr<TH2D>> matrices;
+        std::map<std::string, std::unique_ptr<TH2D>> matrices = covarianceTH2D(allcovsyst, config, variable_cvs[config.i_prime]);
+        c.Print((final_output_tag+"_PROplot_Covar.pdf" + "[").c_str(), "pdf");
+        for(const auto &[name, mat]: matrices) {
 
-        if(variable_systs[config.i_prime].GetNCovar()>0){
-            matrices = covarianceTH2D(variable_systs[config.i_prime], config, other_cvs[config.i_prime]);
-            c.Print((final_output_tag+"_PROplot_Covar.pdf" + "[").c_str(), "pdf");
-            for(const auto &[name, mat]: matrices) {
-
-                mat->Draw("colz");
-                TText *t = new TText();
-                t->SetNDC();                
-                t->SetTextFont(42);                          
-                t->SetTextSize(0.03);      
-                t->SetTextAlign(33);        
-                std::string pv = "PROfit v"+std::string(PROJECT_VERSION_STR);
-                t->DrawText(0.895, 0.955, pv.c_str()); 
-                c.Print((final_output_tag+"_PROplot_Covar.pdf").c_str(), "pdf");
-            }
-            c.Print((final_output_tag+"_PROplot_Covar.pdf" + "]").c_str(), "pdf");
+            mat->Draw("colz");
+            TText *t = new TText();
+            t->SetNDC();                
+            t->SetTextFont(42);                          
+            t->SetTextSize(0.03);      
+            t->SetTextAlign(33);        
+            std::string pv = "PROfit v"+std::string(PROJECT_VERSION_STR);
+            t->DrawText(0.895, 0.955, pv.c_str()); 
+            c.Print((final_output_tag+"_PROplot_Covar.pdf").c_str(), "pdf");
         }
+        c.Print((final_output_tag+"_PROplot_Covar.pdf" + "]").c_str(), "pdf");
 
         //errorband
         std::unique_ptr<PROmetric> allcov_metric(metric->Clone());
@@ -1197,7 +1217,7 @@ int main(int argc, char* argv[])
                         TPaveText chi2text(0.59, 0.50, 0.89, 0.59, "NDC");
                         if(io==config.i_prime){
                             log<LOG_INFO>(L"%1% || On channel %2%:") % __func__ % global_channel_index ;
-                            double chival = allcov_metric->getSingleChannelChi(global_channel_index, other_cvs[io], io);
+                            double chival = allcov_metric->getSingleChannelChi(global_channel_index, variable_cvs[io], io);
                             int ndf = config.m_channel_variable_bins[ic][io].NBinsAlong(0) - bool(opt&PlotOptions::AreaNormalized);
                             log<LOG_INFO>(L"%1% || -- the datamc chi^2/ndof is %2%/%3% .") % __func__ % chival % ndf;
                             chi2text.AddText(("#chi^{2}/ndf = "+to_string_prec(chival,2)+"/"+std::to_string(ndf)).c_str());
@@ -1219,9 +1239,9 @@ int main(int argc, char* argv[])
         std::vector<PROerrorbar> other_err_bands;
         for(size_t io = 0; io < config.m_num_variables; ++io) {
             if(!config.m_channel_variable_plot_bool.at(io))continue;// For now skip the L/E 250 bin. 
-            other_err_bands.push_back(getErrorBand(config, prop, variable_systs[io], *model, other_cvs[io], CVpparams, binwidth_scale, io));
-            plot_channels(final_output_tag+"_PROplot_other_"+std::to_string(io)+"_ErrorBand.pdf", config, other_cvs[io], {}, variable_data[io], 
-                    other_err_bands.back(), {}, other_channel_chitexts[io], opt | PlotOptions::DataMCRatio, io);
+            other_err_bands.push_back(getErrorBand(config, prop, variable_systs[io], *model, variable_cvs[io], CVpparams, binwidth_scale, io));
+            plot_channels(final_output_tag+"_PROplot_Variable_"+std::to_string(io)+"_ErrorBand.pdf", config, variable_cvs[io], {}, variable_data[io], 
+                    other_err_bands.back(), {}, other_channel_chitexts[io], pbounds, opt | PlotOptions::DataMCRatio, io);
         }
 
 
@@ -1245,9 +1265,12 @@ int main(int argc, char* argv[])
                     fixed_pts->SetTitle((syst_name+" - True Bin "+std::to_string(bin)).c_str());
                     fixed_pts->Draw("PA");
                     curve->Draw("C same");
+                    log<LOG_INFO>(L"%1% || FARGbin %2% for syst_name %3% ") % __func__ % bin % syst_name.c_str() ;
                     ++bin;
                     if(bin % 16 == 0) {
                         c.Print((final_output_tag+"_PROplot_Spline.pdf").c_str(), "pdf");
+                        c.Clear();
+                        c.Divide(4,4);
                         unprinted = false;
                     }
                 }
@@ -1264,7 +1287,7 @@ int main(int argc, char* argv[])
         int io = 0;
         for(const auto &other: other_hists) {
             for(const auto &[name, hist]: other) {
-                hist->Write(("other_"+std::to_string(io)+name).c_str());
+                hist->Write(("Variable_"+std::to_string(io)+name).c_str());
             }
             io++;
         }
@@ -1287,8 +1310,8 @@ int main(int argc, char* argv[])
         //fout.mkdir("ErrorBand");
         //fout.cd("ErrorBand");
         //err_band->Write("err_band");
-        io = 0;
-        for(const auto &band: other_err_bands)
+        //io = 0;
+        //for(const auto &band: other_err_bands)
             //band->Write(("other_"+std::to_string(io++)+"_err_band").c_str());
 
 
@@ -1552,7 +1575,7 @@ int main(int argc, char* argv[])
         PlotOptions opt = PlotOptions::DataPostfitRatio;
         if(binwidth_scale) opt |= PlotOptions::BinWidthScaled;
         if(area_normalized) opt |= PlotOptions::AreaNormalized;
-        plot_channels((final_output_tag+"_PROfile_hists.pdf"), config, cv, bf, data, err_band, post_err_band, texts, opt);
+        plot_channels((final_output_tag+"_PROfile_hists.pdf"), config, cv, bf, data, err_band, post_err_band, texts, pbounds,opt);
 
 
     }
@@ -1584,9 +1607,8 @@ int main(int argc, char* argv[])
         for(long i = 0; i < global_fit_result.size(); i++){
 
             if(use_phys && i < (long)metric->GetModel().nparams){
-                log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % metric->GetModel().pretty_param_names[i].c_str() % global_fit_result(i);
-                global_fit_out << metric->GetModel().param_names[i]
-                    << " : " << global_fit_result(i) << "\n";
+                log<LOG_INFO>(L"%1% || %2%  : %3% (log) %4% (nonlog) ") % __func__ % metric->GetModel().pretty_param_names[i].c_str() % global_fit_result(i) % pow(10,global_fit_result(i));
+                global_fit_out << metric->GetModel().param_names[i] << " : " << global_fit_result(i) << "\n";
             }else{
                 long idx = use_phys ? i - metric->GetModel().nparams : i;
                 log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % metric->GetSysts().spline_names[idx].c_str() % global_fit_result(i);
@@ -1611,9 +1633,8 @@ int main(int argc, char* argv[])
 
         for(long i = 0; i < global_fit_result.size(); i++){
             if(i < (long)metric->GetModel().nparams){
-                log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % metric->GetModel().pretty_param_names[i].c_str() % global_fit_result(i);
-                global_fit_out << metric->GetModel().param_names[i]
-                    << " : " << global_fit_result(i) << "\n";
+                log<LOG_INFO>(L"%1% || %2%  : %3% (log) %4% (nonlog) ") % __func__ % metric->GetModel().pretty_param_names[i].c_str() % global_fit_result(i) % pow(10,global_fit_result(i));
+                global_fit_out << metric->GetModel().param_names[i] << " : " << global_fit_result(i) << "\n";
             }else{
                 log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % metric->GetSysts().spline_names[i - metric->GetModel().nparams].c_str() % global_fit_result(i);
                 global_fit_out << metric->GetSysts().spline_names[i - metric->GetModel().nparams]
