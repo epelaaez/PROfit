@@ -428,7 +428,7 @@ int PROfitter::calcFreqSeedPoints(PROmetric &metric) {
                 exception_string_map[msg]++;
             }
         }else{
-           fx = metric(local_candidate,grad);
+           fx = metric(local_candidate,grad,false);
         }
 
         chivalues.push_back(fx);
@@ -440,7 +440,6 @@ int PROfitter::calcFreqSeedPoints(PROmetric &metric) {
 
     //#STEP 2 From the scan above, find local minima in freq
     std::vector<std::pair<float,float>> minima = findSignificantMinima(chipos, chivalues, true);
-
 
 
     //STEP 3, loop over all mimima and do twofold minimzation. 

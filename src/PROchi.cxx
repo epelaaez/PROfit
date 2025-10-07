@@ -89,10 +89,13 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
 
     Eigen::MatrixXf diag = result.Spec().array().matrix().asDiagonal(); 
     Eigen::MatrixXf full_covariance = diag*(syst->fractional_covariance)*diag;
-    
+   
+    Eigen::VectorXf normdata = shape_only 
+        ? data.Normalize(config,result)
+        : data.Spec();
+
     Eigen::MatrixXf collapsed_full_covariance = CollapseMatrix(config, full_covariance); 
-    if(shape_only)
-        collapsed_stat_covariance = ( data.Normalize(config,result)).matrix().asDiagonal();
+    collapsed_stat_covariance = ( normdata).matrix().asDiagonal();
     inverted_collapsed_full_covariance = (collapsed_stat_covariance+ collapsed_full_covariance).inverse();
 
     Eigen::VectorXf delta  = CollapseMatrix(config,result.Spec()) - (shape_only ? data.Normalize(config,result) : data.Spec());
@@ -111,45 +114,111 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
     }
 
     if(rungradient){
-        float dval = 1e-4;
-        for (size_t i = 0; i < nparams; i++) {
-            //if(i == fixed_index) gradient(i) = 0;
-            //Eigen::VectorXd tmpParams = last_param;
-            Eigen::VectorXf tmpParams = param;
-            int sgn = ((param(i) - last_param(i)) > 0) - ((param(i) - last_param(i)) < 0);
-            if(!sgn) sgn = 1;
-            //if(fitparams.size() != 0 && i == 1 && param(i) < -4 + dval) sgn = 1;
-            //if(fitparams.size() != 0 && i == 1 && param(i) > 0 - dval) sgn = -1;
-            tmpParams(i) = /*param(i) != last_param(i) ? param(i) :*/ param(i) + sgn * dval;
-            
-            Eigen::VectorXf subvector2 = tmpParams.segment(nparams - nsyst, nsyst);
-            PROspec result = FillSpectra(config, peller, *syst, model, tmpParams, strat != EventByEvent, config.i_prime);
-            // Calcuate Full Covariance matrix
-            Eigen::MatrixXf inverted_collapsed_full_covariance(config.m_num_variable_bins_total_collapsed[config.i_prime],config.m_num_variable_bins_total_collapsed[config.i_prime]);
+        for (size_t i = 0; i < model.nparams+syst->GetNSplines(); i++) {
 
-            Eigen::MatrixXf diag = result.Spec().array().matrix().asDiagonal(); 
-            Eigen::MatrixXf full_covariance = diag*(syst->fractional_covariance)*diag;
-            
-            Eigen::MatrixXf collapsed_full_covariance = CollapseMatrix(config, full_covariance); 
-            if(shape_only)
-                collapsed_stat_covariance = (data.Normalize(config,result)).matrix().asDiagonal();
-            inverted_collapsed_full_covariance = (collapsed_stat_covariance+ collapsed_full_covariance).inverse();
-           
-            // Calculate Chi^2  value
-            Eigen::VectorXf delta  = CollapseMatrix(config,result.Spec()) - (shape_only ? data.Normalize(config,result) : data.Spec());
+            if(is_fixed.size()>0){
+                if(is_fixed.at(i)) {
+                    gradient(i) = 0.0f;
+                    continue;  
+                }
+            }
 
-            float pull = Pull(subvector2);
-            float dmsq_penalty = 0;
-            float value_grad = (delta.transpose())*inverted_collapsed_full_covariance*(delta) + dmsq_penalty + pull;
-            
-            gradient(i) = (value_grad-value)/(tmpParams(i) - param(i));
+            float h;
+            h = 1e-4f;
+            if(i < model.nparams) {
+                h = 1e-3f;
+            }
 
-            if(gradient(i)!=gradient(i)){
-        }
+            float boundary_tol = 2.0f*std::numeric_limits<float>::epsilon();
+            bool at_lower = fabs(param(i) - lb(i)) < boundary_tol;
+            bool at_upper = fabs(ub(i) - param(i)) < boundary_tol;
+        
+            if(at_lower && at_upper){//shouldnt happen, if ix fixed working
+                    gradient(i) = 0.0f;
+                    continue;
+            }
 
+            int sign = (at_lower? 1 : (at_upper ? -1 : -999) );
+
+
+            if(at_lower || at_upper) {
+                Eigen::VectorXf param_plus = param;
+                param_plus(i) = param(i) + sign*h;
+
+                float chi2_oneside;
+                // Calculate chi2_plus or chi2_minus, depending on boundary
+                PROspec result = FillSpectra(config, peller, *syst, model, param_plus, strat != EventByEvent,config.i_prime);
+
+                Eigen::MatrixXf diag = result.Spec().array().matrix().asDiagonal();
+                Eigen::MatrixXf full_covariance = diag*(syst->fractional_covariance)*diag;
+                Eigen::MatrixXf collapsed_full_covariance = CollapseMatrix(config, full_covariance);
+                Eigen::MatrixXf inverted_collapsed_full_covariance = (collapsed_stat_covariance + collapsed_full_covariance).inverse();
+
+                Eigen::VectorXf delta = CollapseMatrix(config,result.Spec()) - normdata;
+                Eigen::VectorXf subvector2 = param_plus.segment(model.nparams, syst->GetNSplines());
+                float pull = Pull(subvector2);
+                chi2_oneside = (delta.transpose())*inverted_collapsed_full_covariance*(delta) + pull;
+
+                gradient(i) = sign*(chi2_oneside - value) / h;
+
+                // If gradient suggests going further out of bounds, set to zero
+                if(sign*gradient(i) > 0) {
+                    gradient(i) = 0.0f;//-sign*h/2.0f;  // Minimum is at boundary, really (small bounce)
+                }
+            }else{
+
+                // Central difference method
+                Eigen::VectorXf param_plus = param;
+                Eigen::VectorXf param_minus = param;
+                param_plus(i) = param(i) + h;
+                param_minus(i) = param(i) - h;
+
+                // Calculate chi2 at both points
+                float chi2_plus, chi2_minus;
+
+                // Plus point
+                {
+                    PROspec result = FillSpectra(config, peller, *syst, model, param_plus, strat != EventByEvent,config.i_prime);
+
+                    Eigen::MatrixXf diag = result.Spec().array().matrix().asDiagonal();
+                    Eigen::MatrixXf full_covariance = diag*(syst->fractional_covariance)*diag;
+                    Eigen::MatrixXf collapsed_full_covariance = CollapseMatrix(config, full_covariance);
+                    Eigen::MatrixXf inverted_collapsed_full_covariance = (collapsed_stat_covariance + collapsed_full_covariance).inverse();
+
+                    Eigen::VectorXf delta = CollapseMatrix(config,result.Spec()) - normdata;
+                    Eigen::VectorXf subvector2 = param_plus.segment(model.nparams, syst->GetNSplines());
+                    float pull = Pull(subvector2);
+                    chi2_plus = (delta.transpose())*inverted_collapsed_full_covariance*(delta) + pull;
+                }
+
+                // Minus point
+                {
+                    PROspec result = FillSpectra(config, peller, *syst, model, param_minus, strat != EventByEvent,config.i_prime);
+
+
+                    Eigen::MatrixXf full_covariance = diag*(syst->fractional_covariance)*diag;
+                    Eigen::MatrixXf collapsed_full_covariance = CollapseMatrix(config, full_covariance);
+                    Eigen::MatrixXf inverted_collapsed_full_covariance = (collapsed_stat_covariance + collapsed_full_covariance).inverse();
+
+                    Eigen::VectorXf delta = CollapseMatrix(config,result.Spec()) - normdata;
+                    Eigen::VectorXf subvector2 = param_minus.segment(model.nparams, syst->GetNSplines());
+                    float pull = Pull(subvector2);
+                    chi2_minus = (delta.transpose())*inverted_collapsed_full_covariance*(delta) + pull;
+                }
+
+                // Central difference formula
+                gradient(i) = (chi2_plus - chi2_minus) / (2.0f * h);
+                //log<LOG_DEBUG>(L"%1% || On grad %2% result %3% with chi2_plus %4% chi2_minus %5% and h %6%") % __func__ % i % gradient(i) % chi2_plus % chi2_minus % h;
+
+            }
+            // Sanity check
+            if(!std::isfinite(gradient(i))) {
+                gradient(i) = 0.0f;
+            }
 
         }
     }
+
 
 
     //Update last param

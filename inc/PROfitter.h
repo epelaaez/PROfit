@@ -43,7 +43,7 @@ namespace PROfit {
         //Parameters in frequency based harmonic seed search
         size_t harmonic_min_num_seeds = 2;//4
         size_t harmonic_max_num_seeds = 4;//15
-        size_t harmonic_num_test_points = 150;
+        size_t harmonic_num_test_points = 125;
         size_t harmonic_raw_max_tests = 60;
         float harmonic_prominence_threshold = 0.5;
         float harmonic_prominence_threshold_shift = 0.2;
@@ -61,7 +61,7 @@ namespace PROfit {
             if(fit_preset == "good"){
                 param.epsilon = 1e-5;
                 param.epsilon_rel = 1e-5;
-                param.max_iterations = 200;
+                param.max_iterations = 150;
                 param.max_linesearch = 20;
                 param.delta = 1e-6;
                 param.wolfe = 0.90;
@@ -70,10 +70,10 @@ namespace PROfit {
                 param.max_submin =10;
                 param.min_step = std::numeric_limits<float>::epsilon();
 
-                n_latin_points = 2500;
+                n_latin_points = 2000;
                 n_swarm_particles = 25;
                 n_swarm_iterations = 100;
-                n_localfit=10;
+                n_localfit=8;
                  
             }else if (fit_preset == "fast"){
                 //typically used for scans
@@ -88,16 +88,16 @@ namespace PROfit {
                 param.max_submin =10;
                 param.min_step = std::numeric_limits<float>::epsilon();
 
-                n_latin_points = 1500;
+                n_latin_points = 1000;
                 n_swarm_particles = 25;
                 n_swarm_iterations = 100;
-                n_localfit=5;
+                n_localfit=4;
 
             }else if(fit_preset == "overkill"){
                 param.epsilon = 1e-5;
                 param.epsilon_rel = 1e-5;
-                param.max_iterations = 500;
-                param.max_linesearch = 40;
+                param.max_iterations = 250;
+                param.max_linesearch = 30;
                 param.delta = 1e-6;
                 param.wolfe = 0.90;
                 param.ftol = 1e-4;

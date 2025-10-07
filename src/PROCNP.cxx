@@ -134,8 +134,8 @@ float PROCNP::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
             }
 
             float boundary_tol = 2.0f*std::numeric_limits<float>::epsilon();
-            bool at_lower = (param(i) - lb(i)) < boundary_tol;
-            bool at_upper = (ub(i) - param(i)) < boundary_tol;
+            bool at_lower = fabs(param(i) - lb(i)) < boundary_tol;
+            bool at_upper = fabs(ub(i) - param(i)) < boundary_tol;
         
             if(at_lower && at_upper){//shouldnt happen, if ix fixed working
                     gradient(i) = 0.0f;
@@ -239,6 +239,8 @@ float PROCNP::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
 
                 // Central difference formula
                 gradient(i) = (chi2_plus - chi2_minus) / (2.0f * h);
+                //log<LOG_DEBUG>(L"%1% || On grad %2% result %3% with chi2_plus %4% chi2_minus %5% and h %6%") % __func__ % i % gradient(i) % chi2_plus % chi2_minus % h;
+
             }
             // Sanity check
             if(!std::isfinite(gradient(i))) {
@@ -249,7 +251,12 @@ float PROCNP::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
     }
 
     //log<LOG_DEBUG>(L"%1% || value %2%, last_value %3%, pull") % __func__ % value  % last_value % pull;
-    //log<LOG_DEBUG>(L"%1% || FINISHED ITERATION got vals: %2% %3%") % __func__ % value % last_value ;
+    //if(rungradient){
+    //    log<LOG_DEBUG>(L"%1% || FINISHED ITERATION got vals: %2% %3%") % __func__ % value % last_value ;
+    //    log<LOG_DEBUG>(L"%1% || FINISHED ITERATION par %2% ") % __func__ % param ;
+    //    log<LOG_DEBUG>(L"%1% || FINISHED ITERATION grad %2% ") % __func__ % gradient ;
+    //}
+
 
     //Update last param
     last_param = param;
