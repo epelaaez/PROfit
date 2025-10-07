@@ -39,6 +39,74 @@ std::vector<int> sorted_indices(const std::vector<float>& vec) {
     return indices;
 }
 
+
+
+static inline
+std::vector<int> select_diverse_best(const std::vector<float>& chi2s, const std::vector<std::vector<float>>& points,size_t n_select,
+                                     const Eigen::VectorXf& ub,const Eigen::VectorXf& lb,float diversity_factor = 0.3f) {
+    
+    if(n_select >= chi2s.size()) {
+        return sorted_indices(chi2s);
+    }
+    
+    std::vector<int> sorted_idx = sorted_indices(chi2s);
+    
+    std::vector<int> selected;
+    selected.reserve(n_select);
+    
+    // always include the best point
+    selected.push_back(sorted_idx[0]);
+    
+    // Use diversity_factor * average normalized dimension range
+    size_t ndim = points[0].size();
+    float threshold = diversity_factor / std::sqrt(static_cast<float>(ndim));
+    
+    for(size_t i = 1; i < sorted_idx.size() && selected.size() < n_select; ++i) {
+        int candidate_idx = sorted_idx[i];
+        bool is_diverse = true;
+        
+        for(int sel_idx : selected) {
+            float normalized_dist_sq = 0.0;
+            
+            // Calculate normalized Euclidean distance
+            for(size_t d = 0; d < ndim; ++d) {
+                float range = (ub(d) - lb(d));
+                if(std::isinf(range) || range <= 0) {
+                    range = 1.0;  // Default normalization for unbounded dimensions
+                }
+                float diff = (points[candidate_idx][d] - points[sel_idx][d]) / range;
+                normalized_dist_sq += diff * diff;
+            }
+            
+            float normalized_dist = std::sqrt(normalized_dist_sq);
+            
+            if(normalized_dist < threshold) {
+                is_diverse = false;
+                break;
+            }
+        }
+        
+        if(is_diverse) {
+            selected.push_back(candidate_idx);
+        }
+    }
+    
+    // i not enough, fill with best remaining
+    if(selected.size() < n_select) {
+        log<LOG_WARNING>(L"%1% || Only found %2% diverse points out of requested %3% with diversity_factor=%4%")%  __func__ %  selected.size() % n_select % diversity_factor;
+        
+        for(size_t i = 0; i < sorted_idx.size() && selected.size() < n_select; ++i) {
+            int idx = sorted_idx[i];
+            if(std::find(selected.begin(), selected.end(), idx) == selected.end()) {
+                selected.push_back(idx);
+            }
+        }
+    }
+    
+    return selected;
+}
+
+
 float PROfitter::Fit(PROmetric &metric, const Eigen::VectorXf &seed_pt ) {
     const std::vector<Eigen::VectorXf> seed_points = seed_pt.size() > 0 ? std::vector<Eigen::VectorXf>{seed_pt} : std::vector<Eigen::VectorXf>{};
     return Fit(metric, seed_points);
@@ -52,8 +120,8 @@ float PROfitter::Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed
     std::normal_distribution<float> d;
     std::uniform_real_distribution<float> d_uni(-2.0, 2.0);
 
-    //n_multistart is how many initial latin cube points
-    std::vector<std::vector<float>> latin_samples = latin_hypercube_sampling(fitconfig.n_multistart, ub.size(), d_uni,rng);
+    //n_latin_points is how many initial latin cube points
+    std::vector<std::vector<float>> latin_samples = latin_hypercube_sampling(fitconfig.n_latin_points, ub.size(), d_uni,rng);
     //Rescale the latin hypercube now at -2 to 2, scale to real bounds.
     for(std::vector<float> &pt: latin_samples) {
         for(size_t i = 0; i < pt.size(); ++i) {
@@ -80,20 +148,22 @@ float PROfitter::Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed
 
 
     std::vector<float> chi2s_multistart;
-    chi2s_multistart.reserve(fitconfig.n_multistart);
+    chi2s_multistart.reserve(fitconfig.n_latin_points);
 
-    log<LOG_INFO>(L"%1% || Starting MultiGlobal runs (i.e latin hypercube runs, pure chi^2 no grad) : %2%") % __func__ % fitconfig.n_multistart ;
-    for(int s = 0; s < fitconfig.n_multistart; s++){
+    log<LOG_INFO>(L"%1% || Starting MultiGlobal runs (i.e latin hypercube runs, pure chi^2 no grad) : %2%") % __func__ % fitconfig.n_latin_points ;
+    for(int s = 0; s < fitconfig.n_latin_points; s++){
         Eigen::VectorXf x = Eigen::Map<Eigen::VectorXf>(latin_samples[s].data(), latin_samples[s].size());
         Eigen::VectorXf grad = Eigen::VectorXf::Constant(x.size(), 0);
         float fx =  metric(x, grad, false);
         chi2s_multistart.push_back(fx);
+        if(run_progress){progress->increment_bar(0);}
+
     }
     //Sort so we can take the best N_localfits for further zoning with a PSO
-    std::vector<int> best_multistart = sorted_indices(chi2s_multistart);    
+    //std::vector<int> best_multistart = sorted_indices(chi2s_multistart);    
+    std::vector<int> best_multistart = select_diverse_best(chi2s_multistart, latin_samples, fitconfig.n_swarm_particles, ub, lb, fitconfig.latin_diversity_factor); 
 
     log<LOG_INFO>(L"%1% || Best Point after latin hypercube has chi^2 %2% with pts  : %3% ") % __func__ % chi2s_multistart[best_multistart[0]] % latin_samples[best_multistart[0]];
-
 
     std::string swarm_string = "";
     std::vector<std::vector<float>> swarm_start_points;
@@ -110,7 +180,11 @@ float PROfitter::Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed
     log<LOG_INFO>(L"%1% || Will swarm with %2% swarm points chis of %3% ") % __func__ % fitconfig.n_swarm_particles % swarm_string.c_str();
 
     PROswarm PSO(metric, rng, swarm_start_points, lb, ub , fitconfig.n_swarm_iterations);
-    PSO.runSwarm(metric, rng, fitconfig);
+    if(run_progress){
+        PSO.runSwarm(metric,rng,fitconfig, progress);
+    }else{
+        PSO.runSwarm(metric,rng,fitconfig);
+    }
 
     Eigen::VectorXf x;  
 
@@ -124,10 +198,20 @@ float PROfitter::Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed
     log<LOG_INFO>(L"%1% || Starting local fit of best swarm point. ") % __func__ ;
 
     for (size_t attempt = 1; attempt <= fitconfig.n_max_local_retries; ++attempt) {
+        if(run_progress)progress->increment_bar(2);
+
         try {
             x = PSO.getGlobalBestPosition();
             log<LOG_INFO>(L"%1% || Starting local minimization attempt %2%/%3%") % __func__ % attempt % fitconfig.n_max_local_retries;
-            niter = solver.minimize(metric, x, fx, lb, ub);
+
+            try{
+                niter = solver.minimize(metric, x, fx, lb, ub);
+            } catch(const std::exception &e) {
+                std::string msg = e.what();
+                exception_string_map[msg]++;
+            }
+
+
             chi2s_localfits.push_back(fx);
 
             if (fx < chimin) {
@@ -170,13 +254,23 @@ float PROfitter::Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed
         fudge = seed_points.size();
         log<LOG_INFO>(L"%1% || Starting local fit of seed point. ") % __func__ ;
 
+        if(run_progress)progress->increment_bar(2);
         for(size_t s = 0; s < seed_points.size();s++){
             for (size_t attempt = 1; attempt <= fitconfig.n_max_local_retries; ++attempt) {
                 try {
 
                     x = seed_points.at(s);
                 log<LOG_INFO>(L"%1% || Starting local minimization attempt %2%/%3%") % __func__ % attempt % fitconfig.n_max_local_retries;
+            try{
                 niter = solver.minimize(metric, x, fx, lb, ub);
+            } catch(const std::exception &e) {
+                std::string msg = e.what();
+                exception_string_map[msg]++;
+            }
+
+
+
+
                 chi2s_localfits.push_back(fx);
 
                 if (fx < chimin) {
@@ -218,11 +312,18 @@ float PROfitter::Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed
         x = Eigen::Map<Eigen::VectorXf>(latin_samples[best_multistart[i+1]].data(), latin_samples[best_multistart[i+1]].size());
         log<LOG_INFO>(L"%1% || Starting n_localfit local fit number %2%/%3% ") % __func__ % i  % fitconfig.n_localfit;
 
+        if(run_progress)progress->increment_bar(2);
 
         for (size_t attempt = 1; attempt <= fitconfig.n_max_local_retries; ++attempt) {
             try {
                 log<LOG_INFO>(L"%1% || Starting local minimization attempt %2%/%3%") % __func__ % attempt % fitconfig.n_max_local_retries;
+                
+                try{
                 niter = solver.minimize(metric, x, fx, lb, ub);
+            } catch(const std::exception &e) {
+                std::string msg = e.what();
+                exception_string_map[msg]++;
+            }
                 chi2s_localfits.push_back(fx);
 
                 if (fx < chimin) {
@@ -301,6 +402,8 @@ int PROfitter::calcFreqSeedPoints(PROmetric &metric) {
     for (float val = s1 + w2; val <= s2; val += w2) test_p.push_back(val);
     for (float val = s2 + w3; val <= ub(osc_par); val += w3) test_p.push_back(val);
 
+    
+
     for(float &k : test_p){
         local_candidate = best_fit;
         local_candidate(osc_par) =k;
@@ -316,17 +419,23 @@ int PROfitter::calcFreqSeedPoints(PROmetric &metric) {
         metric.setBounds(temp_lb,temp_ub);
 
         float fx = -9;
-        try{
-            int niter = solver.minimize(metric, local_candidate, fx, temp_lb, temp_ub);
-        } catch (const std::exception &except) {
-            std::string msg = except.what();
-            exception_string_map[msg]++;
+
+        if(fitconfig.harmonic_scan_fit){
+            try{
+                int niter = solver.minimize(metric, local_candidate, fx, temp_lb, temp_ub);
+            } catch (const std::exception &except) {
+                std::string msg = except.what();
+                exception_string_map[msg]++;
+            }
+        }else{
+           fx = metric(local_candidate,grad);
         }
+
         chivalues.push_back(fx);
         chipos.push_back(k);
 
         if(run_progress)progress->increment_bar(3);
-        //log<LOG_INFO>(L"%1% || PARG  %2% %3% %4% ") %__func__% k %  local_candidate % fx;
+       // log<LOG_INFO>(L"%1% || PARG  %2% %3% ") %__func__% k %  fx;
     }
 
     //#STEP 2 From the scan above, find local minima in freq
@@ -460,101 +569,126 @@ int PROfitter::calcFreqSeedPoints(PROmetric &metric) {
     return freq_seed_values.size();
 }
 
-std::vector<std::pair<float, float>> PROfitter::findSignificantMinima(  const std::vector<float>& x_values,const std::vector<float>& y_values,  bool use_log_spacing ){
-
-
-    std::vector<std::pair<float, float>> minima;  
-    float prominence_threshold = fitconfig.harmonic_prominence_threshold;
-    float min_spacing_log = fitconfig.harmonic_min_spacing_log;
-
-
-    size_t niter = 0;
-    while(minima.size()< fitconfig.harmonic_min_num_seeds || minima.size()>fitconfig.harmonic_max_num_seeds){
-        //while(minima.size()==0 || minima.size()>15){
-        if(x_values.size() != y_values.size() || x_values.size() < 3) {
-            return minima;
-        }
-
-        for(size_t i = 1; i < y_values.size() - 1; ++i) {
-            // Check if local minimum
-            if(y_values[i] >= y_values[i-1] || y_values[i] >= y_values[i+1]) {
-                continue;
-            }
-
-            float left_peak = y_values[i];
-            float right_peak = y_values[i];
-
-            // Search left for peak
-            // Stop if sufficient
-            for(int j = i - 1; j >= 0; --j) {
-                left_peak = std::max(left_peak, y_values[j]);
-                if(y_values[j] > y_values[i] + prominence_threshold * 2) {
-                    break;
-                }
-            }
-            //same othr
-            for(size_t j = i + 1; j < y_values.size(); ++j) {
-                right_peak = std::max(right_peak, y_values[j]);
-                if(y_values[j] > y_values[i] + prominence_threshold * 2) {
-                    break;
-                }
-            }
-
-            float prominence = std::min(left_peak - y_values[i], right_peak - y_values[i]);
-
-            // Check prominence threshold
-            if(prominence < prominence_threshold) {
-                continue;
-            }
-
-            // Check spacing from last accepted minimum
-            bool too_close = false;
-            if(!minima.empty()) {
-                float spacing;
-                if(use_log_spacing && x_values[i] > 0 && minima.back().first > 0) {
-                    spacing = std::abs(std::log10(x_values[i]) - std::log10(minima.back().first));
-                } else {
-                    spacing = std::abs(x_values[i] - minima.back().first);
-                }
-
-                if(spacing < min_spacing_log) {
-                    if(y_values[i] < minima.back().second) {
-                        minima.back() = {x_values[i], y_values[i]};
-                    }
-                    too_close = true;
-                }
-            }
-
-            if(!too_close) {
-                minima.push_back({x_values[i], y_values[i]});
-            }
-        }
-
-        if(minima.size()<fitconfig.harmonic_min_num_seeds){
-            prominence_threshold = prominence_threshold*(1.0-fitconfig.harmonic_prominence_threshold_shift);
-        }
-        if(minima.size()>fitconfig.harmonic_max_num_seeds){
-            prominence_threshold = prominence_threshold*(1.0+fitconfig.harmonic_prominence_threshold_shift);
-        }
-        log<LOG_DEBUG>(L"%1% || Minima.size() (%2%) prom %3% minspace %4% ") %__func__% minima.size() % prominence_threshold % min_spacing_log;
-        log<LOG_DEBUG>(L"%1% || X (%2%) ") %__func__% x_values;
-        log<LOG_DEBUG>(L"%1% || Y (%2%)  ") %__func__% y_values;
-        for(auto &m:minima){
-            log<LOG_DEBUG>(L"%1% || Min (%2%, %3%)  ") %__func__% m.first % m.second;
-        }
-
-        if(prominence_threshold<10*fitconfig.harmonic_prominence_threshold_minimum){
-            min_spacing_log = min_spacing_log*(1.0-fitconfig.harmonic_prominence_threshold_shift);
-        }
-        if(prominence_threshold<fitconfig.harmonic_prominence_threshold_minimum){
-            return minima;
+std::vector<std::pair<float, float>> PROfitter::findSignificantMinima(const std::vector<float>& x_values, const std::vector<float>& y_values, bool use_log_spacing){
+    if (x_values.size() != y_values.size() || x_values.size() < 3)
+        return {};
+    
+    // Precompute derivative sign changes
+    std::vector<float> dy(y_values.size() - 1);
+    for (size_t i = 0; i < dy.size(); ++i)
+        dy[i] = y_values[i + 1] - y_values[i];
+    
+    //Keep absolute for now
+    //const float y_range = *std::max_element(y_values.begin(), y_values.end())- *std::min_element(y_values.begin(), y_values.end());
+    //if (y_range == 0) return {};
+    
+    // Adaptive threshold loop
+    float prominence_threshold = fitconfig.harmonic_prominence_threshold;//* y_range;
+    float min_spacing = fitconfig.harmonic_min_spacing_log;
+    
+    std::vector<std::pair<float, float>> minima;
+    size_t max_iter = fitconfig.harmonic_raw_max_tests;
+    size_t iter = 0;
+    
+    // Keep trying with adjusted thresholds until we get the right number
+    while (iter++ < max_iter) {
+        minima.clear();
+        
+        std::vector<size_t> candidates;
+        for (size_t i = 1; i < dy.size(); ++i) {
+            if (dy[i - 1] < 0 && dy[i] > 0)
+                candidates.push_back(i);
         }
         
-        niter++;
-        if(niter>=fitconfig.harmonic_raw_max_tests){
-            log<LOG_INFO>(L"%1% || Hit Harmonic Raw max Tests (%2%) minima.size() %3%  ") %__func__% fitconfig.harmonic_raw_max_tests % minima.size() ;
-            return minima;
+        // now fiilter found minima by prominence
+        std::vector<std::pair<size_t, float>> prominent_minima;
+        
+        for (size_t idx : candidates) {
+            float y0 = y_values[idx];
+            
+            float left_peak = y0;
+            for (int j = static_cast<int>(idx) - 1; j >= 0; --j) {
+                left_peak = std::max(left_peak, y_values[j]);
+                if (y_values[j] > y0 + 3 * prominence_threshold)
+                    break;
+            }
+            
+            float right_peak = y0;
+            for (size_t j = idx + 1; j < y_values.size(); ++j) {
+                right_peak = std::max(right_peak, y_values[j]);
+                if (y_values[j] > y0 + 3 * prominence_threshold)
+                    break;
+            }
+            
+            float prominence = std::min(left_peak - y0, right_peak - y0);
+            if (prominence >= prominence_threshold) {
+                prominent_minima.emplace_back(idx, prominence);
+            }
         }
+        
+        // remove minima that are too close together
+        std::sort(prominent_minima.begin(), prominent_minima.end(),[&y_values](const auto& a, const auto& b) { 
+                return y_values[a.first] < y_values[b.first]; 
+        });
+        
+        std::vector<bool> keep(prominent_minima.size(), true);
+        
+        for (size_t i = 0; i < prominent_minima.size(); ++i) {
+            if (!keep[i]) continue;
+            
+            size_t idx_i = prominent_minima[i].first;
+            float x_i = x_values[idx_i];
+            
+            for (size_t j = i + 1; j < prominent_minima.size(); ++j) {
+                if (!keep[j]) continue;
+                
+                size_t idx_j = prominent_minima[j].first;
+                float x_j = x_values[idx_j];
+                
+                float spacing;
+                if (use_log_spacing && x_i > 0 && x_j > 0) {
+                    spacing = std::abs(std::log10(x_i) - std::log10(x_j));
+                } else {
+                    spacing = std::abs(x_i - x_j);
+                }
+                
+                if (spacing < min_spacing) {
+                    keep[j] = false;
+                }
+            }
+        }
+        
+        // Collect final minima
+        for (size_t i = 0; i < prominent_minima.size(); ++i) {
+            if (keep[i]) {
+                size_t idx = prominent_minima[i].first;
+                minima.emplace_back(x_values[idx], y_values[idx]);
+            }
+        }
+        
+        // Check if we have enough minima
+        if (minima.size() >= fitconfig.harmonic_min_num_seeds) {
+           break;  // We have enough! If too many, we'll truncate later
+         }
+         
+        // otheriwwse lets adjust thresholds for next iteration
+        if (minima.size() < fitconfig.harmonic_min_num_seeds) {
+            // Need more minima - relax thresholds
+            prominence_threshold *= (1.0f - fitconfig.harmonic_prominence_threshold_shift);
+            min_spacing *= (1.0f - fitconfig.harmonic_prominence_threshold_shift * 0.5f);
+        };
     }
+    
+    std::sort(minima.begin(), minima.end(), [](const auto& a, const auto& b) { return a.second < b.second; });
+   
+    // Limit to maximum number if we still have too many
+    if (minima.size() > fitconfig.harmonic_max_num_seeds) {
+         minima.resize(fitconfig.harmonic_max_num_seeds);
+         log<LOG_INFO>(L"%1% || Truncated to %2% best minima from %3% found")      % __func__ % fitconfig.harmonic_max_num_seeds % minima.size();
+    }
+    // Log results
+    log<LOG_INFO>(L"%1% || Found %2% significant minima with prominence threshold %3%")  % __func__ % minima.size() % prominence_threshold;
+    
     return minima;
-    }
+}
+

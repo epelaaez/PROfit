@@ -17,11 +17,14 @@ namespace PROfit {
         /***PROfit fitter parameters**/
     
         //Number of latin hypercube points to sample across ALL parameters, physics and otherwise
-        int n_multistart = 1500;
-       
+        int n_latin_points = 1500;
+        float latin_diversity_factor =0.5;
+
         //Number of partile swarm particels, and how many iterations. 
-        //taken from best (aka lowest chi) hypercube points
-        int n_swarm_particles = 1, n_swarm_iterations=1, n_swarm_max_stagnent_iterations=50;
+        //taken from best (aka lowest chi, with iverse greedy seleciton) hypercube points
+        int n_swarm_particles = 1;
+        int n_swarm_iterations=1;
+        int n_swarm_max_stagnent_iterations=50;
         float swarm_inertia_start = 0.9; 
         float swarm_inertia_end= 0.6; 
         float swarm_cognitive_score= 2.0; 
@@ -29,7 +32,7 @@ namespace PROfit {
         float swarm_convergence_theshold = 1e-4;
 
         //Total number of LBFGSB fits to do after PSO.
-        int n_localfit=3;
+        int n_localfit=10;
         //Now many times to retry if LBFBSG has exception. Currently not really worth it until we cod ebetter logic for "changing" things after a fail. 
         size_t n_max_local_retries = 1;
 
@@ -38,8 +41,8 @@ namespace PROfit {
         size_t MCMCburn = 25'000;
 
         //Parameters in frequency based harmonic seed search
-        size_t harmonic_min_num_seeds = 4;
-        size_t harmonic_max_num_seeds = 15;
+        size_t harmonic_min_num_seeds = 2;//4
+        size_t harmonic_max_num_seeds = 4;//15
         size_t harmonic_num_test_points = 150;
         size_t harmonic_raw_max_tests = 60;
         float harmonic_prominence_threshold = 0.5;
@@ -48,90 +51,70 @@ namespace PROfit {
         float harmonic_prominence_threshold_minimum = 1e-5;
         float harmonic_seed_norm_tolerance = 1e-4;  
         float harmonic_seed_chi_tolerence = 1e-6;   
-        
+        bool harmonic_scan_fit  = false; 
+
+        bool progress_bar = false;
 
         PROfitterConfig(){};
         PROfitterConfig(std::map<std::string, float> input_fit_options, std::string fit_preset, bool isScan){
 
-            if(!isScan){
-                //Global Big presets
-                if(fit_preset == "good"){
-                    param.epsilon = 1e-6;
-                    param.max_iterations = 10'000;
-                    param.max_linesearch = 400;
-                    param.delta = 1e-6;
-                    n_multistart = 3000;
-                    n_swarm_particles = 45;
-                    n_swarm_iterations = 250;
-                    n_localfit=3;
-                    n_max_local_retries = 4;
-                    param.wolfe = 0.99;
-                    param.ftol = 1e-8;
-                }else if (fit_preset == "fast"){
-                    param.epsilon = 1e-6;
-                    param.max_iterations = 100;
-                    param.max_linesearch = 250;
-                    param.delta = 1e-6;
-                    n_multistart = 1250;
-                    n_swarm_particles = 25;
-                    n_swarm_iterations = 100;
-                    n_localfit=2;
-                    n_max_local_retries = 1;
-                }else if(fit_preset == "overkill"){
-                    param.epsilon = 1e-6;
-                    param.max_iterations = 100'000;
-                    param.max_linesearch = 1000;
-                    param.delta = 1e-6;
-                    n_multistart = 3000;
-                    n_swarm_particles = 100;
-                    n_swarm_iterations = 250;
-                    n_localfit=4;
-                    n_max_local_retries = 8;
-                    param.wolfe = 0.99;
-                    param.ftol = 1e-8;
-                }
+            if(fit_preset == "good"){
+                param.epsilon = 1e-5;
+                param.epsilon_rel = 1e-5;
+                param.max_iterations = 200;
+                param.max_linesearch = 20;
+                param.delta = 1e-6;
+                param.wolfe = 0.90;
+                param.ftol = 1e-4;
+                param.m = 6;
+                param.max_submin =10;
+                param.min_step = std::numeric_limits<float>::epsilon();
 
-            }else{
+                n_latin_points = 2500;
+                n_swarm_particles = 25;
+                n_swarm_iterations = 100;
+                n_localfit=10;
+                 
+            }else if (fit_preset == "fast"){
+                //typically used for scans
+                param.epsilon = 1e-5;
+                param.epsilon_rel = 1e-5;
+                param.max_iterations = 100;
+                param.max_linesearch = 20;
+                param.delta = 1e-6;
+                param.wolfe = 0.90;
+                param.ftol = 1e-4;
+                param.m = 6;
+                param.max_submin =10;
+                param.min_step = std::numeric_limits<float>::epsilon();
 
-                // the lesser Scan version
-                if(fit_preset == "good"){
-                    param.epsilon = 1e-6;
-                    param.max_iterations = 10'000;
-                    param.max_linesearch = 250;
-                    param.delta = 1e-6;
-                    n_multistart = 1500;
-                    n_swarm_particles = 5;
-                    n_swarm_iterations = 100;
-                    n_localfit=2;
-                    n_max_local_retries = 3;
-                    param.wolfe = 0.99;
-                    param.ftol = 1e-8;
-                }else if (fit_preset == "fast"){
-                    param.epsilon = 1e-6;
-                    param.max_iterations = 100;
-                    param.max_linesearch = 200;
-                    param.delta = 1e-6;
-                    n_multistart = 1000;
-                    n_swarm_particles = 1;
-                    n_swarm_iterations = 100;
-                    n_localfit=2;
-                    n_max_local_retries = 1;
-                }else if(fit_preset == "overkill"){
-                    param.epsilon = 1e-6;
-                    param.max_iterations = 100'000;
-                    param.max_linesearch = 500;
-                    param.delta = 1e-6;
-                    n_multistart = 2500;
-                    n_swarm_particles = 30;
-                    n_swarm_iterations = 250;
-                    n_localfit=4;
-                    n_max_local_retries = 7;
-                    param.wolfe = 0.99;
-                    param.ftol = 1e-8;
-                }
+                n_latin_points = 1500;
+                n_swarm_particles = 25;
+                n_swarm_iterations = 100;
+                n_localfit=5;
 
+            }else if(fit_preset == "overkill"){
+                param.epsilon = 1e-5;
+                param.epsilon_rel = 1e-5;
+                param.max_iterations = 500;
+                param.max_linesearch = 40;
+                param.delta = 1e-6;
+                param.wolfe = 0.90;
+                param.ftol = 1e-4;
+                param.m = 6;
+                param.max_submin =10;
+                param.min_step = std::numeric_limits<float>::epsilon();
 
+                n_latin_points = 5000;
+                n_swarm_particles = 100;
+                n_swarm_iterations = 300;
+                n_localfit=15;
+
+                harmonic_min_num_seeds = 3;//4
+                harmonic_max_num_seeds = 8;
+                harmonic_num_test_points = 200;
             }
+
 
 
             std::string whichFit = ( isScan? "Simplier Scan" : "Detailed Global");
@@ -182,13 +165,21 @@ namespace PROfit {
                     param.wolfe = value;
                     
                 // PROfitter specific parameters
-                } else if(param_name == "n_multistart") {
-                    n_multistart = value;
-                    if(n_multistart < 1) {
+                } else if(param_name == "n_latin_points") {
+                    n_latin_points = value;
+                    if(n_latin_points < 1) {
                         log<LOG_ERROR>(L"%1% || Expected to run at least 1 multistart point. Provided value is %2%.")
                             % __func__ % value;
                         exit(EXIT_FAILURE);
                     }
+                } else if(param_name == "latin_diversity_factor") {
+                    latin_diversity_factor = value;
+                    if(latin_diversity_factor > 1 || latin_diversity_factor<0) {
+                        log<LOG_ERROR>(L"%1% || Latin Diversity Factor must be between 0 and 1.  Provided value is %2%.")
+                            % __func__ % value;
+                        exit(EXIT_FAILURE);
+                    }
+
                 } else if(param_name == "n_localfit") {
                     n_localfit = value;
                     if(n_localfit < 1) {
@@ -260,7 +251,8 @@ namespace PROfit {
                     harmonic_seed_norm_tolerance = value;
                 } else if(param_name == "harmonic_seed_chi_tolerence") {
                     harmonic_seed_chi_tolerence = value;
-                    
+                } else if(param_name == "harmonic_scan_fit") {
+                    harmonic_scan_fit = bool(value);
                 } else {
                     log<LOG_WARNING>(L"%1% || Unrecognized parameter %2%. Will ignore.") 
                         % __func__ % param_name.c_str();
@@ -280,13 +272,14 @@ namespace PROfit {
             log<LOG_INFO>(L"%1% || Printing PROfitterConfig Values.") % __func__;
             
             log<LOG_INFO>(L"%1% || ------------ PROfitter specific -------------- ") % __func__ ;
-            log<LOG_INFO>(L"%1% || n_multistart: %2% (default 1500) ") % __func__ % n_multistart;
-            log<LOG_INFO>(L"%1% || n_localfit: %2% (default 3) ") % __func__ % n_localfit;
+            log<LOG_INFO>(L"%1% || n_latin_points: %2% (default 1500) ") % __func__ % n_latin_points;
+            log<LOG_INFO>(L"%1% || latin_diversity_factor: %2% (default 0.5) ") % __func__ % latin_diversity_factor;
+            log<LOG_INFO>(L"%1% || n_localfit: %2% (default 10) ") % __func__ % n_localfit;
             log<LOG_INFO>(L"%1% || n_max_local_retries: %2% (default 1) ") % __func__ % n_max_local_retries;
             
             log<LOG_INFO>(L"%1% || ------------ Particle Swarm Optimization -------------- ") % __func__ ;
-            log<LOG_INFO>(L"%1% || n_swarm_particles: %2% (default 1) ") % __func__ % n_swarm_particles;
-            log<LOG_INFO>(L"%1% || n_swarm_iterations: %2% (default 1) ") % __func__ % n_swarm_iterations;
+            log<LOG_INFO>(L"%1% || n_swarm_particles: %2% (default 25) ") % __func__ % n_swarm_particles;
+            log<LOG_INFO>(L"%1% || n_swarm_iterations: %2% (default 250) ") % __func__ % n_swarm_iterations;
             log<LOG_INFO>(L"%1% || n_swarm_max_stagnent_iterations: %2% (default 50) ") % __func__ % n_swarm_max_stagnent_iterations;
             log<LOG_INFO>(L"%1% || swarm_inertia_start: %2% (default 0.9) ") % __func__ % swarm_inertia_start;
             log<LOG_INFO>(L"%1% || swarm_inertia_end: %2% (default 0.6) ") % __func__ % swarm_inertia_end;
@@ -299,9 +292,9 @@ namespace PROfit {
             log<LOG_INFO>(L"%1% || MCMCburn: %2% (default 25000) ") % __func__ % MCMCburn;
             
             log<LOG_INFO>(L"%1% || ------------ Harmonic Seed Search -------------- ") % __func__ ;
-            log<LOG_INFO>(L"%1% || harmonic_min_num_seeds: %2% (default 4) ") % __func__ % harmonic_min_num_seeds;
-            log<LOG_INFO>(L"%1% || harmonic_max_num_seeds: %2% (default 15) ") % __func__ % harmonic_max_num_seeds;
-            log<LOG_INFO>(L"%1% || harmonic_num_test_points: %2% (default 150) ") % __func__ % harmonic_num_test_points;
+            log<LOG_INFO>(L"%1% || harmonic_min_num_seeds: %2% (default 2 ) ") % __func__ % harmonic_min_num_seeds;
+            log<LOG_INFO>(L"%1% || harmonic_max_num_seeds: %2% (default 4 ) ") % __func__ % harmonic_max_num_seeds;
+            log<LOG_INFO>(L"%1% || harmonic_num_test_points: %2% (default 100) ") % __func__ % harmonic_num_test_points;
             log<LOG_INFO>(L"%1% || harmonic_raw_max_tests: %2% (default 60) ") % __func__ % harmonic_raw_max_tests;
             log<LOG_INFO>(L"%1% || harmonic_prominence_threshold: %2% (default 0.5) ") % __func__ % harmonic_prominence_threshold;
             log<LOG_INFO>(L"%1% || harmonic_prominence_threshold_shift: %2% (default 0.05) ") % __func__ % harmonic_prominence_threshold_shift;
@@ -309,6 +302,7 @@ namespace PROfit {
             log<LOG_INFO>(L"%1% || harmonic_prominence_threshold_minimum: %2% (default 1e-7) ") % __func__ % harmonic_prominence_threshold_minimum;
             log<LOG_INFO>(L"%1% || harmonic_seed_norm_tolerance: %2% (default 1e-4) ") % __func__ % harmonic_seed_norm_tolerance;
             log<LOG_INFO>(L"%1% || harmonic_seed_chi_tolerence: %2% (default 1e-6) ") % __func__ % harmonic_seed_chi_tolerence;
+            log<LOG_INFO>(L"%1% || harmonic_scan_fit: %2% (default false) ") % __func__ % harmonic_scan_fit;
             
             log<LOG_INFO>(L"%1% || ------------ LBFGSBParam -------------- ") % __func__ ;
             log<LOG_INFO>(L"%1% || m: %2%  (default %3%) ") % __func__ % param.m % 6;
@@ -335,7 +329,8 @@ namespace PROfit {
             
             log<LOG_INFO>(L"");
             log<LOG_INFO>(L"------ PROfitter Specific Parameters ------");
-            log<LOG_INFO>(L"  n_multistart                         : Number of Latin hypercube points to sample across all parameters");
+            log<LOG_INFO>(L"  n_latin_points                       : Number of Latin hypercube points to sample across all parameters");
+            log<LOG_INFO>(L"  latin_diversity_factor               : Diversity of latin points, 0: no distance weighting, 1: select most diverse far away points");
             log<LOG_INFO>(L"  n_localfit                           : Total number of L-BFGS-B fits to do after PSO");
             log<LOG_INFO>(L"  n_max_local_retries                  : Maximum retries if L-BFGS-B throws an exception");
             
@@ -367,6 +362,7 @@ namespace PROfit {
             log<LOG_INFO>(L"  harmonic_prominence_threshold_minimum: Absolute minimum for prominence threshold");
             log<LOG_INFO>(L"  harmonic_seed_norm_tolerance         : Tolerance for seed point norm convergence");
             log<LOG_INFO>(L"  harmonic_seed_chi_tolerence          : Tolerance for chi-squared convergence in seed search");
+            log<LOG_INFO>(L"  harmonic_scan_fit                    : During harmonic scan, fit per point (true) or hold at BF (false/default)");
             
             log<LOG_INFO>(L"");
             log<LOG_INFO>(L"------ L-BFGS-B Parameters ------");
@@ -386,7 +382,7 @@ namespace PROfit {
             log<LOG_INFO>(L"");
             log<LOG_INFO>(L"==================================================================");
             log<LOG_INFO>(L"Note: Use --fit-options <param_name> <value> to set parameters");
-            log<LOG_INFO>(L"Example: --fit-options n_multistart 2000 max_iterations 5000");
+            log<LOG_INFO>(L"Example: --fit-options n_latin_points 2000 max_iterations 5000");
             log<LOG_INFO>(L"==================================================================");
         }
     };
