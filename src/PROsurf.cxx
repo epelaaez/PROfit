@@ -266,7 +266,7 @@ std::vector<profOut> PROfile::PROfilePointHelper(const PROsyst *systs, const PRO
 
                 cnt++;
                 last_val = which_value;
-                progressbar.increment_bar(which_spline);
+                if(fitconfig.progress_bar)progressbar.increment_bar(which_spline);
 
             }    //end step loop        
             output.sort();
@@ -490,8 +490,10 @@ PROfile::PROfile(const PROconfig &config, const PROsyst &systs, const PROmodel &
             }
 
             MultiPROgressBar prof_progress(prof_PB_configs);
-            prof_progress.initialize_display();
-            prof_progress.start_display_thread(); 
+            if(fitconfig.progress_bar){
+                prof_progress.initialize_display();
+                prof_progress.start_display_thread(); 
+            }
 
 
             log<LOG_INFO>(L"%1% || Starting THREADS  : %2% , Loops %3%, Chunks %4%") % __func__ % nThreads % loopSize % chunkSize;
@@ -518,7 +520,7 @@ PROfile::PROfile(const PROconfig &config, const PROsyst &systs, const PROmodel &
                     combinedResults.at(offset+i*stride) = result.at(i);
                 ++offset;
             }
-            prof_progress.finish_all();
+            if(fitconfig.progress_bar) prof_progress.finish_all();
 
             //create all graphs, used directly in first setion
             for(auto & out: combinedResults){
@@ -539,11 +541,12 @@ PROfile::PROfile(const PROconfig &config, const PROsyst &systs, const PROmodel &
                         float relative_tol1 = 1e-3;
                             
                         if( (norm_without_phys < relative_tol1*bfnorm_without_phys)  &&  (chidiff< relative_tol1*minchi) ){
-                            log<LOG_ERROR>(L"%1% || Warning. A lower global best fit was found during PROfile, but less than relatively 1e-3f from global best fit (%2%), and pull parameters norm less than 1e-3 (%3%)from best_fit nuisence values. AKA same point.") % __func__ % float(chidiff/minchi) % float(norm_without_phys/bfnorm_without_phys);
+                            log<LOG_WARNING>(L"%1% || Warning. A lower global best fit was found during PROfile, but less than relatively 1e-3f from global best fit (%2%), and pull parameters norm less than 1e-3 (%3%)from best_fit nuisence values. AKA same point.") % __func__ % float(chidiff/minchi) % float(norm_without_phys/bfnorm_without_phys);
                         }else if((chidiff< relative_tol1*minchi)){
-                            log<LOG_ERROR>(L"%1% || Warning. A lower global best fit was found during PROfile, but less than relatively 1e-3f from global best fit (%2%), although pull parameters norm more than 1e-3 (%3%) from best_fit nuisence values. Not uncommon in degenerate phase space.") % __func__ % float(chidiff/minchi) % float(norm_without_phys/bfnorm_without_phys); 
+                            log<LOG_WARNING>(L"%1% || Warning. A lower global best fit was found during PROfile, but less than relatively 1e-3f from global best fit (%2%), although pull parameters norm more than 1e-3 (%3%) from best_fit nuisence values. Not uncommon in degenerate phase space.") % __func__ % float(chidiff/minchi) % float(norm_without_phys/bfnorm_without_phys); 
                         }else{
-                            log<LOG_ERROR>(L"%1% || Warning. A lower global best fit was found during PROfile. Difference greater than relative 1e-3f from global best fit (%2%). Rel Difference pull parameters norm (%3%). This is enough that could consider updating global best fit values and restarting.") % __func__ % float(chidiff/minchi) % float(norm_without_phys/bfnorm_without_phys)  ;
+                            log<LOG_WARNING>(L"%1% || Warning. A lower global best fit was found during PROfile. Difference greater than relative 1e-3f from global best fit (%2%). Rel Difference pull parameters norm (%3%). This is enough that could consider updating global best fit values and restarting.") % __func__ % float(chidiff/minchi) % float(norm_without_phys/bfnorm_without_phys)  ;
+                            log<LOG_WARNING>(L"%1% || -- minchi %2% and chidiff %3% ") % __func__ % minchi % chidiff  ;
                            // log<LOG_ERROR>(L"%1% || TEMP chi glob %2% new %3% ") % __func__ % minchi % out.knob_chis.at(u);
                            // log<LOG_ERROR>(L"%1% || TEMP norm %2% pull norm %3% ") % __func__ % norm % norm_without_phys;
                            // log<LOG_ERROR>(L"%1% || TEMP chi param %2% ") % __func__ % seed_points.front() ;
