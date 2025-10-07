@@ -1055,7 +1055,6 @@ int main(int argc, char* argv[])
         if(area_normalized) opt |= PlotOptions::AreaNormalized;
         std::vector<PROspec> other_cvs;
         for(size_t io = 0; io < config.m_num_variables; ++io) {
-            other_cvs.push_back(FillSpectra(config, prop, variable_systs[config.i_prime],*model,CVpparams, !eventbyevent, io));
             plot_channels(final_output_tag+"_other_"+std::to_string(io)+"_PROplot_CV.pdf", config, other_cvs.back(), {}, {}, {}, {}, notext, opt, io);
         }
 
