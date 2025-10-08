@@ -231,6 +231,7 @@ int main(int argc, char* argv[])
     //Initilize configuration from the XML;
     PROconfig config(xmlname, rateonly);
 
+
     //Inititilize PROpeller to keep MC
     PROpeller prop;
 
@@ -297,7 +298,12 @@ int main(int argc, char* argv[])
     //PROsyst systs(prop, config, systsstructs.front(), shapeonly);
     std::vector<PROsyst> variable_systs;
     for(size_t i = 0; i < config.m_num_variables; ++i){
-        variable_systs.emplace_back(prop, config, systsstructs.at(i), shapeonly, i);
+
+        if(config.m_channel_variable_plot_bool.at(i)){ 
+            variable_systs.emplace_back(prop, config, systsstructs.at(i), shapeonly, i);
+        }else{
+            variable_systs.emplace_back();
+        }
         //variable_systs.back().PrintSplines();
         //return 0;
     }
@@ -430,10 +436,7 @@ int main(int argc, char* argv[])
     else{
         log<LOG_INFO>(L"%1% || Going to get fake data set up for each variable.") % __func__ ;
         for(size_t io = 0; io < config.m_num_variables; ++io) {
-            PROspec data_spec = osc_params.size() || injected_systs.size() 
-                ? FillSpectra(config, prop, variable_systs[io], *model, allparams, !eventbyevent, io)
-                : FillSpectra(config, prop, variable_systs[io], *model, allparams, !eventbyevent, io);
-
+            PROspec data_spec = config.m_channel_variable_plot_bool.at(io) ?  FillSpectra(config, prop, variable_systs[io], *model, allparams, !eventbyevent, io) : PROspec(config.m_num_variable_bins_total[io]) ;
             if(poisson_throw) PROspec::PoissonVariation(data_spec, dseed(myseed.global_rng));
             Eigen::VectorXf data_vec = CollapseMatrix(config, data_spec.Spec(), io);
             variable_data.push_back(PROdata(data_vec, data_vec.array().sqrt()));
