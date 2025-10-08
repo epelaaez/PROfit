@@ -34,8 +34,8 @@
         additional_weight     = "true_cc && (true_pdg == 14 || true_pdg == -14) && true_neutrino_id >= 0"
     >
         <variable>reco_visible_energy</variable>
-        <variable>true_baseline/(1000*true_neutrino_energy)</variable>
         <variable>true_neutrino_energy</variable>
+        <variable>true_baseline/(1000*true_neutrino_energy)</variable>
     </branch>
     <branch
         associated_subchannel = "nu_ICARUS_numu_nuecc"
@@ -43,8 +43,8 @@
         additional_weight     = "true_cc && (true_pdg == 12 || true_pdg == -12) && true_neutrino_id >= 0"
     >
         <variable>reco_visible_energy</variable>
-        <variable>true_baseline/(1000*true_neutrino_energy)</variable>
         <variable>true_neutrino_energy</variable>
+        <variable>true_baseline/(1000*true_neutrino_energy)</variable>
     </branch>
     <branch
         associated_subchannel = "nu_ICARUS_numu_nc"
@@ -52,8 +52,8 @@
         additional_weight     = "true_cc == 0 && true_neutrino_id >= 0"
     >
         <variable>reco_visible_energy</variable>
-        <variable>true_baseline/(1000*true_neutrino_energy)</variable>
         <variable>true_neutrino_energy</variable>
+        <variable>true_baseline/(1000*true_neutrino_energy)</variable>
     </branch>
     <branch
         associated_subchannel = "nu_ICARUS_numu_cos"
@@ -62,8 +62,8 @@
         additional_weight     = "true_neutrino_id < 0"
     >
         <variable>reco_visible_energy</variable>
-        <variable>true_baseline/(1000*true_neutrino_energy)</variable>
         <variable>true_neutrino_energy</variable>
+        <variable>true_baseline/(1000*true_neutrino_energy)</variable>
     </branch>
 </MCFile>
 <MCFile treename="events/offbeam/selected" filename="/exp/sbnd/data/users/markross/PROfit_Data/Tutorial2025/icarus_disappearance_08292025_sys.root" scale = "1.0" pot="1.596e20"> 
@@ -73,8 +73,8 @@
         model_rule            = "0"
     >
         <variable>reco_visible_energy</variable>
-        <variable>true_baseline/(1000*true_neutrino_energy)</variable>
         <variable>true_neutrino_energy</variable>
+        <variable>true_baseline/(1000*true_neutrino_energy)</variable>
     </branch>
 </MCFile>
 

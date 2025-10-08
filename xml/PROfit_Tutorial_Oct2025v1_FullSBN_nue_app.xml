@@ -39,8 +39,8 @@
         additional_weight     = "0.9*CC*(truePDG == 14 || truePDG == -14)*(recoE>0)"
         >
         <variable>recoE</variable>
-        <variable>trueL/(trueE*1000.0)</variable>
         <variable>trueE</variable>
+        <variable>trueL/(trueE*1000.0)</variable>
     </branch>
 </MCFile>
 
@@ -53,8 +53,8 @@
         additional_weight     = "0.9*CC*(truePDG == 14 || truePDG == -14)*(recoE>0)"
         >
         <variable>recoE</variable>
-        <variable>trueL/(trueE*1000.0)</variable>
         <variable>trueE</variable>
+        <variable>trueL/(trueE*1000.0)</variable>
     </branch>
 </MCFile>
 
@@ -67,8 +67,8 @@
         additional_weight     = "0.8*CC*(truePDG == 12 || truePDG == -12)*(recoE>0)"
         >
         <variable>recoE</variable>
-        <variable>trueL/(trueE*1000.0)</variable>
         <variable>trueE</variable>
+        <variable>trueL/(trueE*1000.0)</variable>
     </branch>
 </MCFile>
 
@@ -81,8 +81,8 @@
         additional_weight     = "0.8*CC*(truePDG == 12 || truePDG == -12)*(recoE>0)"
         >
         <variable>recoE</variable>
-        <variable>trueL/(trueE*1000.0)</variable>
         <variable>trueE</variable>
+        <variable>trueL/(trueE*1000.0)</variable>
     </branch>
 </MCFile>
 
@@ -95,8 +95,8 @@
         additional_weight     = "0.8*CC*(truePDG == 12 || truePDG == -12)*(recoE>0)"
         >
         <variable>recoE</variable>
-        <variable>trueL/(trueE*1000.0)</variable>
         <variable>trueE</variable>
+        <variable>trueL/(trueE*1000.0)</variable>
     </branch>
 </MCFile>
 
@@ -109,8 +109,8 @@
         additional_weight     = "0.8*CC*(truePDG == 12 || truePDG == -12)*(recoE>0)"
         >
         <variable>recoE</variable>
-        <variable>trueL/(trueE*1000.0)</variable>
         <variable>trueE</variable>
+        <variable>trueL/(trueE*1000.0)</variable>
     </branch>
 
 </MCFile>
