@@ -215,7 +215,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
 
         log<LOG_DEBUG>(L"%1% || PARK cv is %2% and the centers are %3%") % __func__ %  cv.size() % centers.size();
         log<LOG_DEBUG>(L"%1% || For other var %2% the cv is %3% and the centers are %4%") % __func__ % other_index % cv % centers;
-        size_t nerrorsample = 5000;
+        size_t nerrorsample = 2500;
         
         std::vector<Eigen::VectorXf> specs;
         std::uniform_int_distribution<uint32_t> dseed(0, std::numeric_limits<uint32_t>::max());
@@ -236,8 +236,8 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
             float scale_factor = scale ? 1.0/config.collapsed_bin_widths.at(other_index)(i) :  1.0;
             if(std::isnan(scale_factor)) scale_factor = 1;
             std::sort(binconts.begin(), binconts.end());
-            float ehi = std::abs((binconts[5*840] - cv(i))*scale_factor);
-            float elo = std::abs((cv(i) - binconts[5*160])*scale_factor);
+            float ehi = std::abs((binconts[2.5*840] - cv(i))*scale_factor);
+            float elo = std::abs((cv(i) - binconts[2.5*160])*scale_factor);
             ebar.error_up(i) =  ehi;
             ebar.error_down(i) =  elo;
             ebar.error_point(i) = cv(i)*scale_factor;

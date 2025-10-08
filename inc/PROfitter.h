@@ -88,8 +88,8 @@ namespace PROfit {
                 param.max_submin =10;
                 param.min_step = std::numeric_limits<float>::epsilon();
 
-                n_latin_points = 1000;
-                n_swarm_particles = 25;
+                n_latin_points = 750;
+                n_swarm_particles = 15;
                 n_swarm_iterations = 100;
                 n_localfit=4;
 
