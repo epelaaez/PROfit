@@ -197,7 +197,7 @@ namespace PROfit {
         Eigen::MatrixXf cv = FillSpectra(config, prop, *this, model, params , true, other_index).Spec();
 
         std::vector<Eigen::VectorXf> specs;
-        for(size_t i = 0; i < 1000; ++i){
+        for(size_t i = 0; i < 500; ++i){
             specs.push_back(FillSplineRandomThrow(config, prop, *this, model, params, spline, seed, other_index).Spec());
         }
 
