@@ -1081,7 +1081,7 @@ int main(int argc, char* argv[])
         
         std::vector<std::map<std::string, std::unique_ptr<TH1D>>> other_hists;
         for(size_t io = 0; io < config.m_num_variables; ++io) {
-            other_hists.push_back(getCVHists(variable_cvs[io], config, binwidth_scale, io));
+            other_hists.push_back(getCV1DHists(variable_cvs[io], config, binwidth_scale, io));
         }
 
         TCanvas c;

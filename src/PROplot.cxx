@@ -45,11 +45,9 @@ namespace PROfit{
                             const std::string& subchannel_name  = inconfig.m_fullnames[global_subchannel_index];
                             const std::string& color = inconfig.m_subchannel_colors[ic][sc];
                             int rcolor = color == "NONE" ? kRed - 7 : inconfig.HexToROOTColor(color);
-                            //std::unique_ptr<TH1D> htmp = std::make_unique<TH1D>(spec.toTH1D(inconfig, global_subchannel_index, other_index));
                             std::unique_ptr<TH2D> htmp = std::make_unique<TH2D>(spec.toTH2D(inconfig, global_subchannel_index, other_index));
                             if(scale) htmp->Scale(1,"width");
                             hists[subchannel_name] = std::move(htmp);
-
                             log<LOG_DEBUG>(L"%1% || Printot %2% %3% %4% %5% %6% : Integral %7% ") % __func__ % global_channel_index % global_subchannel_index % subchannel_name.c_str() % sc % ic % hists[subchannel_name]->Integral();
                             }
                         ++global_subchannel_index;
@@ -300,16 +298,21 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
         for(size_t mode = 0; mode < config.m_num_modes; ++mode) {
             for(size_t det = 0; det < config.m_num_detectors; ++det) {
                 for(size_t channel = 0; channel < config.m_num_channels; ++channel) {
+
+                    size_t channel_nbins = config.m_channel_variable_bins[channel][other_index].NBinsAlong(0);
+                    Eigen::VectorXf bf_spec;
+                    if(best_fit) {
+                        bf_spec = config.GetChannelVariableBins(0, other_index).ProjectSpectra(CollapseMatrix(config, best_fit->Spec(), other_index), 0);//TODO, get N-dim compatability?                        
+                    }
+
                     if(config.m_variable_dims.at(channel) == 2){
                         std::string joined_title = config.m_channel_variable_units[channel][other_index];
                         string del = ",";
                         auto pos = joined_title.find(del);
                         std::string xtitle2d = joined_title.substr(0, pos);
                         std::string ytitle2d = joined_title.erase(0, pos + del.length());
-
-                        std::string hist_title = config.m_detector_plotnames[det]  + " "+ config.m_channel_plotnames[channel]+";"+xtitle2d+";"+ytitle2d;
-
-
+                        std::string hist_title = config.m_detector_plotnames[det]  + " "+ config.m_channel_plotnames[channel]+" CV;"+xtitle2d+";"+ytitle2d;
+                        size_t channel_nbins_x = config.m_channel_variable_bins[channel][other_index].NBinsAlong(0);
                         std::vector<float> edges_x = config.m_channel_variable_bins[channel][other_index].Edges(0);
                         size_t channel_nbins_y = config.m_channel_variable_bins[channel][other_index].NBinsAlong(1);
                         std::vector<float> edges_y = config.m_channel_variable_bins[channel][other_index].Edges(1);
@@ -322,17 +325,25 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                         c.cd();
                         p2d.Draw();
                         c.Print(filename.c_str());
+
+                        hist_title = config.m_detector_plotnames[det]  + " "+ config.m_channel_plotnames[channel]+" Best-Fit;"+xtitle2d+";"+ytitle2d;
+                        TH2D bf_hist(hist_title.c_str(),hist_title.c_str(), channel_nbins_x, edges_x.data(), channel_nbins_y, edges_y.data());
+                        Eigen::VectorXf tmp_bf = best_fit->Spec();
+                        for(int xbin = 0; xbin < channel_nbins_x; xbin++){
+                            for(size_t ybin = 0; ybin < channel_nbins_y; ybin++) {
+                                bf_hist.SetBinContent(xbin+1, ybin, tmp_bf(xbin*channel_nbins_y+ybin));
+                            }
+                        }
+
+                        TPad pbfd("pbfd", "pbfd", 0, 0, 1, 1);
+                        pbfd.cd();
+                        bf_hist.SetTitle(hist_title.c_str());
+                        bf_hist.Draw("colz");
+                        c.cd();
+                        pbfd.Draw();
+                        c.Print(filename.c_str());
                         global_subchannel_index_2d += config.m_num_subchannels[channel];
                     }
-
-
-                    size_t channel_nbins = config.m_channel_variable_bins[channel][other_index].NBinsAlong(0);
-                    Eigen::VectorXf bf_spec;
-                    if(best_fit) {
-                        bf_spec = config.GetChannelVariableBins(0, other_index).ProjectSpectra(CollapseMatrix(config, best_fit->Spec(), other_index), 0);//TODO, get N-dim compatability?                        
-                        log<LOG_DEBUG>(L"%1% || full_bf_spec %2%: ") % __func__ % best_fit->Spec();
-                    }
-
 
                     std::vector<float> edges = config.m_channel_variable_bins[channel][other_index].Edges();
                     std::string xtitle = config.m_channel_variable_units[channel][other_index];
@@ -364,8 +375,6 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                     TPad p2("p2", "p2", 0, 0, 1, 0.25);
                     p2.SetTopMargin(0);
                     p2.SetBottomMargin(0.3);
-
-
 
                     THStack *cvstack = NULL;
                     if(cv) {
@@ -436,16 +445,17 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                     if(best_fit) {
                         // int channel_start =  config.GetCollapsedGlobalVariableBinStart(global_channel_index, other_index);
                         size_t total_bins = config.GetChannelVariableBins(global_channel_index, other_index).NBins();
-                        Eigen::VectorXf this_bf_spec = config.GetChannelVariableBins(global_channel_index, other_index).ProjectSpectra(bf_spec(Eigen::seqN(channel_start, total_bins)), 0);
+                        // Eigen::VectorXf this_bf_spec = config.GetChannelVariableBins(global_channel_index, other_index).ProjectSpectra(bf_spec(Eigen::seqN(channel_start, total_bins)), 0);
 
                         for(size_t bin = 0; bin < channel_nbins; ++bin) {
-                            bf_hist.SetBinContent(bin+1, this_bf_spec(bin));
+                            bf_hist.SetBinContent(bin+1, bf_spec(bin+channel_start));
                         }
                         //bf_hist.SetLineColor(TColor::GetColor(234, 67, 53)); // pastel red
                         bf_hist.SetLineColor(bfcol); 
                         bf_hist.SetLineStyle(kDashed); 
                         bf_hist.SetLineWidth(2);
                         //leg->AddEntry(&bf_hist, "Best Fit", "l");
+
 
                         TH1 *leg_hack = (TH1*)bf_hist.Clone((std::string(bf_hist.GetTitle())+"bf").c_str());
                         leg_hack->SetFillStyle(3254);
