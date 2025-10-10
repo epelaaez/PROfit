@@ -1179,7 +1179,7 @@ int main(int argc, char* argv[])
                         leg->AddEntry(cv_hist, "No Oscillations", "l");
                         std::string oscstr = "";//"#splitline{Oscilations:}{";
                         for(size_t j=0;j<model->nparams;j++){
-                            oscstr+=model->pretty_param_names[j]+ " : "+ to_string_prec(pow(10,osc_param_vector(j)),2) +" "+model->pretty_param_units[j] + (j==0 ? ", " : "" );
+                            oscstr+=model->pretty_param_names[j]+ " : "+ to_string_prec(pow(10,osc_param_vector(j)),3) +" "+model->pretty_param_units[j] + (j==0 ? ", " : "" );
                         }
                         //oscstr+="}";
 
@@ -1190,6 +1190,7 @@ int main(int argc, char* argv[])
                         p1.cd();
                         cv_hist->Draw("hist");
                         osc_hist->Draw("hist same");
+                        cv_hist->SetMaximum(std::max(cv_hist->GetMaximum(),osc_hist->GetMaximum())*1.1);
                         leg->Draw("same");
 
                         TPad p2("p2", "p2", 0, 0, 1, 0.25);
