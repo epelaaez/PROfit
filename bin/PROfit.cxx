@@ -1225,8 +1225,25 @@ int main(int argc, char* argv[])
         //Now some covariances
         std::map<std::string, std::unique_ptr<TH2D>> matrices = covarianceTH2D(allcovsyst, config, variable_cvs[config.i_prime]);
         c.Print((final_output_tag+"_PROplot_Covar.pdf" + "[").c_str(), "pdf");
-        for(const auto &[name, mat]: matrices) {
 
+        std::vector<std::string> first_plots = {"collapsed_total_cor","collapsed_total_frac_cov","total_cor","total_frac_cov"};
+
+        for(const auto &name: first_plots){
+            auto &mat = matrices.at(name);
+            mat->Draw("colz");
+            TText *t = new TText();
+            t->SetNDC();                
+            t->SetTextFont(42);                          
+            t->SetTextSize(0.03);      
+            t->SetTextAlign(33);        
+            std::string pv = "PROfit v"+std::string(PROJECT_VERSION_STR);
+            t->DrawText(0.895, 0.955, pv.c_str()); 
+            c.Print((final_output_tag+"_PROplot_Covar.pdf").c_str(), "pdf");
+        }
+
+
+        for(const auto &[name, mat]: matrices) {
+            if (std::find(first_plots.begin(), first_plots.end(), name) != first_plots.end())continue;
             mat->Draw("colz");
             TText *t = new TText();
             t->SetNDC();                
