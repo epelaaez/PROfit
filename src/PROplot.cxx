@@ -280,13 +280,13 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                     Color_t cvcol =  TColor::GetColor(66, 103, 210);//nice blue :)
                     if(!best_fit)cvcol=kBlack;
 
-                    std::string hist_title = config.m_detector_plotnames[det]  + " "+ config.m_channel_plotnames[channel]+";"+xtitle+";"+ytitle;
+                    std::string hist_titles = config.m_mode_plotnames[mode]+" "+config.m_detector_plotnames[det]  + " "+ config.m_channel_plotnames[channel]+";"+xtitle+";"+ytitle;
                     //std::unique_ptr<TLegend> leg = std::make_unique<TLegend>(0.11,0.75,0.89,0.89); 4
                     std::unique_ptr<TLegend> leg = std::make_unique<TLegend>(0.38,0.69,0.89,0.89);
                     leg->SetNColumns(2);
                     leg->SetFillStyle(0);
                     leg->SetLineWidth(0);
-                    TH1D cv_hist(("cv_hist"+std::to_string(global_channel_index)).c_str(), hist_title.c_str(), channel_nbins, edges.data());
+                    TH1D cv_hist(("cv_hist"+std::to_string(global_channel_index)).c_str(), hist_titles.c_str(), channel_nbins, edges.data());
                     cv_hist.SetLineWidth(2);
                     cv_hist.SetLineColor(cvcol);
                     cv_hist.SetFillStyle(0);
@@ -459,6 +459,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                         if(bool(opt&PlotOptions::CVasStack)) {
                             cvstack->SetMaximum(  bounds.hasBound("ymax") ? bounds.getBound("ymax") : std::max(top_modifier*cvstack->GetMaximum(), top_modifier*data_hist.GetMaximum()));
                             cvstack->Draw("hist");
+                            cvstack->SetTitle(hist_titles.c_str());
                             cv_hist.Draw("same hist");
 
                         } else {
@@ -475,7 +476,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                     if(errband) channel_errband->Draw("2 same");
 
                     if(best_fit) {
-                        bf_hist.SetTitle("");
+                        bf_hist.SetTitle(hist_titles.c_str());
                         if(cv) bf_hist.Draw("hist same");
                         else bf_hist.Draw("hist");
                     }
