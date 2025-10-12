@@ -1266,8 +1266,10 @@ void PROconfig::CalcTotalBins(){
                     std::vector<float> widths =  GetChannelVariableBins(global_channel_index, io).Widths();
                     const std::vector<float>& edges = GetChannelVariableBins(global_channel_index, io).Edges();
 
-                    for(size_t i = 0; i < edges.size() - 1; ++i) {
-                        tmpe.push_back(std::make_pair(edges[i], edges[i+1]));
+                    for(size_t sc = 0; sc < m_num_subchannels[channel]; sc++){           
+                        for(size_t i = 0; i < edges.size() - 1; ++i) {
+                            tmpe.push_back(std::make_pair(edges[i], edges[i+1]));
+                        }
                     }
 
                     global_channel_index++;

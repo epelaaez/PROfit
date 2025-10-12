@@ -83,7 +83,8 @@ int main(int argc, char* argv[])
     std::string fit_preset = "good";
     static const std::unordered_set<std::string> allowed_preset = {"good","fast","overkill"};
     bool with_splines = false, binwidth_scale = false, area_normalized = false;
-    std::map<std::string, float> osc_params;
+    std::map<std::string, float> fake_data_osc_params;
+    std::map<std::string, float> cv_osc_params;
     std::map<std::string, float> injected_systs;
     std::vector<std::string> syst_list, systs_excluded;
     bool MCMC_prefit_errors = false;
@@ -122,7 +123,8 @@ int main(int argc, char* argv[])
     app.add_option("-m,--max", maxevents, "Max number of events to run over.");
     app.add_option("-c, --chi2", chi2, "Which chi2 function to use. Options are PROchi or PROCNP")->default_str("PROchi");
     app.add_option("-d, --data", data_xml, "Load from a seperate data xml/data file instead of signal injection. Only used with plot subcommand.")->default_str("");
-    app.add_option("-i, --inject", osc_params, "Physics parameters to inject as true signal. Example: dmsq 3 sinsq2thmm 0.25")->expected(-1);// HOW TO
+    app.add_option("-i, --inject", fake_data_osc_params, "Physics parameters to inject as fake-data true signal. Example: dmsq 3 sinsq2thmm 0.25")->expected(-1);
+    app.add_option("--inject-cv", cv_osc_params, "Physics parameters to inject as CV. Example: dmsq 3 sinsq2thmm 0.25")->expected(-1);
     app.add_option("-s, --seed", global_seed, "A global seed for PROseed rng. Default to -1 for hardware rng seed.")->default_val(-1);
     app.add_option("-p,--preset", fit_preset, "Preset fitting params. Available `fast`, `good` and `overkill` .");
     app.add_option("--fit-options", global_fit_options, "Parameters for single, detailed global best fit LBFGSB. See PROfitter.h or run --fit-help for available settings.");
@@ -313,8 +315,8 @@ int main(int argc, char* argv[])
     std::unique_ptr<PROmodel> model = get_model_from_string(config, prop);
     std::unique_ptr<PROmodel> null_model = std::make_unique<NullModel>(prop);
 
-    Eigen::VectorXf osc_param_vector = model->default_val;
-    for(const auto &[name, value]: osc_params) {
+    Eigen::VectorXf fake_data_osc_param_vector = model->default_val;
+    for(const auto &[name, value]: fake_data_osc_params) {
         const auto it = std::find(model->param_names.begin(), model->param_names.end(), name);
         if(it == std::end(model->param_names)) {
             log<LOG_ERROR>(L"%1% || Unrecognized model parameter name %2%.\n"
@@ -324,9 +326,22 @@ int main(int argc, char* argv[])
             return 1;
         }
         int loc = std::distance(model->param_names.begin(), it);
-        osc_param_vector(loc) = std::log10(value);
+        fake_data_osc_param_vector(loc) = std::log10(value);
     }
 
+    Eigen::VectorXf cv_osc_param_vector = model->default_val;
+    for(const auto &[name, value]: cv_osc_params) {
+        const auto it = std::find(model->param_names.begin(), model->param_names.end(), name);
+        if(it == std::end(model->param_names)) {
+            log<LOG_ERROR>(L"%1% || Unrecognized model parameter name %2%.\n"
+                    L"Valid names for model %3% are %4%") %
+                __func__% name.c_str()% config.m_model_tag.c_str()%
+                model->param_names;
+            return 1;
+        }
+        int loc = std::distance(model->param_names.begin(), it);
+        cv_osc_param_vector(loc) = std::log10(value);
+    }
 
 
     //Seed time
@@ -337,7 +352,7 @@ int main(int argc, char* argv[])
     //Spline injection studies
     Eigen::VectorXf allparams = Eigen::VectorXf::Constant(model->nparams + variable_systs[config.i_prime].GetNSplines(), 0);
     Eigen::VectorXf systparams = Eigen::VectorXf::Constant(variable_systs[config.i_prime].GetNSplines(), 0);
-    for(size_t i = 0; i < model->nparams; ++i) allparams(i) = osc_param_vector(i);
+    for(size_t i = 0; i < model->nparams; ++i) allparams(i) = fake_data_osc_param_vector(i);
     for(const auto& [name, shift]: injected_systs) {
         log<LOG_INFO>(L"%1% || Injected syst: %2% shifted by %3%") % __func__ % name.c_str() % shift;
 
@@ -502,10 +517,14 @@ int main(int argc, char* argv[])
     //Pysics parameter input
     Eigen::VectorXf pparams = Eigen::VectorXf::Constant(model->nparams + variable_systs[config.i_prime].GetNSplines(), 0);
     Eigen::VectorXf CVpparams = Eigen::VectorXf::Constant(model->nparams + variable_systs[config.i_prime].GetNSplines(), 0);
-    for(long i = 0; i < osc_param_vector.size(); ++i) {
-        pparams(i) = osc_param_vector(i);
+    for(long i = 0; i < fake_data_osc_param_vector.size(); ++i) {
+        pparams(i) = fake_data_osc_param_vector(i);
         CVpparams(i) = model->default_val(i);
     }
+    for(long i = 0; i < cv_osc_param_vector.size(); ++i) {
+        CVpparams(i) = cv_osc_param_vector(i);
+    }
+
 
     log<LOG_INFO>(L"%1% || Starting from fit preset :  %2%.")% __func__ % fit_preset.c_str();
     if (allowed_preset.find(fit_preset) == allowed_preset.end()) {
@@ -1125,7 +1144,7 @@ int main(int argc, char* argv[])
         }
 
         TCanvas c;
-        if(osc_params.size()) {
+        if(fake_data_osc_params.size()) {
 
             c.Print((final_output_tag +"_PROplot_Osc.pdf"+ "[").c_str(), "pdf");
 
@@ -1179,7 +1198,7 @@ int main(int argc, char* argv[])
                         leg->AddEntry(cv_hist, "No Oscillations", "l");
                         std::string oscstr = "";//"#splitline{Oscilations:}{";
                         for(size_t j=0;j<model->nparams;j++){
-                            oscstr+=model->pretty_param_names[j]+ " : "+ to_string_prec(pow(10,osc_param_vector(j)),3) +" "+model->pretty_param_units[j] + (j==0 ? ", " : "" );
+                            oscstr+=model->pretty_param_names[j]+ " : "+ to_string_prec(pow(10,fake_data_osc_param_vector(j)),3) +" "+model->pretty_param_units[j] + (j==0 ? ", " : "" );
                         }
                         //oscstr+="}";
 
@@ -1364,7 +1383,7 @@ int main(int argc, char* argv[])
             io++;
         }
 
-        if((osc_params.size())) {
+        if((fake_data_osc_params.size())) {
             PROspec osc_spec = FillSpectra(config, prop, variable_systs[config.i_prime], *model, pparams, !eventbyevent,config.i_prime);
             std::map<std::string, std::unique_ptr<TH1D>> osc_hists = getCVHists(osc_spec, config, binwidth_scale);
             fout.mkdir("Osc_hists");
