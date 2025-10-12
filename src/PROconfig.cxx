@@ -128,9 +128,9 @@ int PROconfig::LoadFromXML(const std::string &filename){
     for (tinyxml2::XMLElement* elem = doc.FirstChildElement(); elem; elem = elem->NextSiblingElement()) {
         std::string name = elem->Name();
         if (std::find(allowed_elements.begin(), allowed_elements.end(), name) == allowed_elements.end()) {
-                    log<LOG_ERROR>(L"%1% || ERROR! Top Level Element [%2%] in the XML is not expected.") % __func__ % name.c_str()  ;
-                    log<LOG_ERROR>(L"%1% || -- Check spelling: allowed elements are %2%") % __func__ % allowed_elements ;
-                    throw std::invalid_argument(std::string("Top level <element> not allowed : ") + name);
+            log<LOG_ERROR>(L"%1% || ERROR! Top Level Element [%2%] in the XML is not expected.") % __func__ % name.c_str()  ;
+            log<LOG_ERROR>(L"%1% || -- Check spelling: allowed elements are %2%") % __func__ % allowed_elements ;
+            throw std::invalid_argument(std::string("Top level <element> not allowed : ") + name);
         }
     }
 
@@ -313,7 +313,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
             m_channel_variable_bins.push_back({});
             m_channel_variable_units.push_back({});
-            
+
 
             tinyxml2::XMLElement *pBin2DO = pChan->FirstChildElement("bins2D"); // 2D Bins
             while(pBin2DO){
@@ -331,7 +331,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 const char* oplot = pBin2DO->Attribute("plot");
 
                 if((omin_x == NULL && omax_x == NULL && onbins_x == NULL && oedges_x == NULL) ||
-                   (omin_y == NULL && omax_y == NULL && onbins_y == NULL && oedges_y == NULL)) {
+                        (omin_y == NULL && omax_y == NULL && onbins_y == NULL && oedges_y == NULL)) {
                     log<LOG_DEBUG>(L"%1% || This variable has a NO other binning (or attribute min,max,nbins)  ") % __func__ ;
                     m_channel_variable_bins.back().push_back(PROconfig::Binning());
                     m_channel_variable_units.back().push_back("");
@@ -776,7 +776,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                     log<LOG_ERROR>(L"Terminating.");
                     exit(EXIT_FAILURE);
                 }
-                        
+
 
 
 
@@ -1147,7 +1147,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
             pModelRule = pModelRule->NextSiblingElement("rule");
         }
 
-       // Now loop over all this models Parameters
+        // Now loop over all this models Parameters
         tinyxml2::XMLElement *pModelParam;
         pModelParam = pModel->FirstChildElement("parameter");
         while(pModelParam){
@@ -1255,24 +1255,33 @@ void PROconfig::CalcTotalBins(){
     this->generate_index_map();
 
     //some internal cals
-    
+
     for(size_t io = 0; io < m_num_variables; ++io) {
         std::vector<float> tmp;
+        std::vector<std::pair<float,float>> tmpe;
         int global_channel_index=0;
         for(size_t mode = 0; mode < m_num_modes; ++mode) {
             for(size_t det = 0; det < m_num_detectors; ++det) {
                 for(size_t channel = 0; channel < m_num_channels; ++channel) {
                     std::vector<float> widths =  GetChannelVariableBins(global_channel_index, io).Widths();
+                    const std::vector<float>& edges = GetChannelVariableBins(global_channel_index, io).Edges();
+
+                    for(size_t i = 0; i < edges.size() - 1; ++i) {
+                        tmpe.push_back(std::make_pair(edges[i], edges[i+1]));
+                    }
+
                     global_channel_index++;
                     tmp.insert(tmp.end(), widths.begin(), widths.end());
                 }
             }
+        m_variable_bin_to_edges.push_back(tmpe);
         }
         Eigen::VectorXf coll_bin_widths = Eigen::Map<Eigen::VectorXf>(tmp.data(),tmp.size());
         collapsed_bin_widths.push_back(coll_bin_widths);
         log<LOG_INFO>(L"%1% || On variable %2% bin widths are size %3% and  %4% ") % __func__ % io % coll_bin_widths.size() % coll_bin_widths;
 
     }
+
 
     return;
 }
@@ -1285,6 +1294,11 @@ size_t PROconfig::GetSubchannelIndex(const std::string& fullname) const{
         exit(EXIT_FAILURE);
     }
     return pos_iter->second;
+}
+
+std::string PROconfig::GetSubchannelName(size_t index) const{
+    return m_fullnames.at(index); 
+
 }
 
 size_t PROconfig::GetLocalChannelIndexFromGlobalSubchannelIndex(size_t subchannel_index) const{
@@ -1758,7 +1772,7 @@ uint32_t PROconfig::CalcHash() const{
     for (const auto& vec1 : m_channel_variable_bins){
         for (const auto& vec2 : vec1){ 
             for (const auto& vec3 : vec2.bin_edges) {
-              unique_string << vecToString(vec3);
+                unique_string << vecToString(vec3);
             }
         }
     }
@@ -1868,9 +1882,9 @@ Eigen::VectorXf PROconfig::Binning::ProjectSpectra(const Eigen::VectorXf &in, si
     Eigen::VectorXf ret = Eigen::VectorXf::Zero(NBinsAlong(dim)*n_copies);
 
     for (unsigned i = 0; i < in.size(); i++) {
-      unsigned i_copy = i / NBins();
-      unsigned i_bin = i % NBins();
-      ret(ProjectIndex(i_bin, dim) + i_copy*NBinsAlong(dim)) += in(i);
+        unsigned i_copy = i / NBins();
+        unsigned i_bin = i % NBins();
+        ret(ProjectIndex(i_bin, dim) + i_copy*NBinsAlong(dim)) += in(i);
     }
 
     return ret;
@@ -1887,9 +1901,9 @@ Eigen::VectorXf PROconfig::Binning::ProjectSpectraErrors(const Eigen::VectorXf &
     Eigen::VectorXf ret = Eigen::VectorXf::Zero(NBinsAlong(dim)*n_copies);
 
     for (unsigned i = 0; i < in.size(); i++) {
-      unsigned i_copy = i / NBins();
-      unsigned i_bin = i % NBins();
-      ret(ProjectIndex(i_bin, dim) + i_copy*NBinsAlong(dim)) += in(i)*in(i); // sum of squares
+        unsigned i_copy = i / NBins();
+        unsigned i_bin = i % NBins();
+        ret(ProjectIndex(i_bin, dim) + i_copy*NBinsAlong(dim)) += in(i)*in(i); // sum of squares
     }
 
     return ret.array().sqrt();

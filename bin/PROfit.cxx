@@ -41,7 +41,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
-
+#include "TMath.h"
 using namespace PROfit;
 
 log_level_t GLOBAL_LEVEL = LOG_INFO;
@@ -1310,20 +1310,34 @@ int main(int argc, char* argv[])
             std::map<std::string, std::vector<std::pair<std::unique_ptr<TGraph>,std::unique_ptr<TGraph>>>> spline_graphs = getSplineGraphs(variable_systs[config.i_prime], config);
             c.Clear();
             c.Divide(4,4);
+            int chan=0;
             for(const auto &[syst_name, syst_bins]: spline_graphs) {
                 int bin = 0;
                 bool unprinted = true;
+                chan++;
+                int col = chan%2==0 ? kRed: kBlue;
+                int lastsbindex = 0;
                 for(const auto &[fixed_pts, curve]: syst_bins) {
                     unprinted = true;
                     c.cd(bin%16+1);
-                    fixed_pts->SetMarkerColor(kBlack);
+                    size_t sbi = config.GetSubchannelIndexFromVariableGlobalBin(bin,config.i_prime);
+                    std::string nsubchannel = config.GetSubchannelName(sbi);
+                    std::string chan_units =   config.m_channel_variable_units[config.i_prime][config.GetLocalChannelIndexFromGlobalSubchannelIndex(sbi)];
+                    std::pair<float,float> edg = config.m_variable_bin_to_edges[config.i_prime][bin];
+
+                    fixed_pts->SetMarkerColor(col);
                     fixed_pts->SetMarkerStyle(kFullCircle);
                     fixed_pts->GetXaxis()->SetTitle("#sigma");
                     fixed_pts->GetYaxis()->SetTitle("Weight");
-                    fixed_pts->SetTitle((syst_name+" - True Bin "+std::to_string(bin)).c_str());
+                    fixed_pts->SetTitle(("#splitline{"+syst_name+"}{#splitline{"+nsubchannel+" "+std::to_string(bin)+"}{"+chan_units+" ["+to_string_prec(edg.first,2)+"->"+to_string_prec(edg.second,2)+ "]}}").c_str());
                     fixed_pts->Draw("PA");
+                    double max_y = TMath::MaxElement(fixed_pts->GetN(), fixed_pts->GetY());
+                    double min_y = TMath::MinElement(fixed_pts->GetN(), fixed_pts->GetY());
+                    double range = max_y - min_y;
+                    fixed_pts->SetMaximum(max_y + 0.2 * range);
+                    fixed_pts->SetMinimum(min_y);
+
                     curve->Draw("C same");
-                    log<LOG_INFO>(L"%1% || FARGbin %2% for syst_name %3% ") % __func__ % bin % syst_name.c_str() ;
                     ++bin;
                     if(bin % 16 == 0) {
                         c.Print((final_output_tag+"_PROplot_Spline.pdf").c_str(), "pdf");
