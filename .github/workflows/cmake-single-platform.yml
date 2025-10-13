@@ -23,6 +23,10 @@ jobs:
     - uses: actions/checkout@v4
     - name: Install HDF5
       run: sudo apt-get update && sudo apt-get install -y libhdf5-dev
+    - name: Install Boost
+      run: sudo apt install libboost-all-dev
+    - name: Install ROOT
+      run: wget https://root.cern/download/root_v6.28.12.Linux-ubuntu22-x86_64-gcc11.4.tar.gz && tar -xzvf root_v6.28.12.Linux-ubuntu22-x86_64-gcc11.4.tar.gz && source root/bin/thisroot.sh
     - name: Configure CMake
       # Configure CMake in a 'build' subdirectory. `CMAKE_BUILD_TYPE` is only required if you are using a single-configuration generator such as make.
       # See https://cmake.org/cmake/help/latest/variable/CMAKE_BUILD_TYPE.html?highlight=cmake_build_type
