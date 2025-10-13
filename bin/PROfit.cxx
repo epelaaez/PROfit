@@ -463,7 +463,8 @@ int main(int argc, char* argv[])
     // Leave this after creating fake data so we can make fake data using systs that aren't
     // included in the fit.
 
-    for(auto & systs : variable_systs){
+    //for(auto & systs : variable_systs){
+    {
         if(syst_list.size()) {
 
             std::vector<std::string> systs_to_include;
@@ -484,9 +485,14 @@ int main(int argc, char* argv[])
                     }
                 }
             }
-            systs = systs.subset(systs_to_include);
-            for(PROsyst &syst: variable_systs)
-                syst = syst.subset(systs_to_include);
+            //systs = systs.subset(systs_to_include);
+            int io=0;
+            for(PROsyst &syst: variable_systs){
+                if(config.m_channel_variable_plot_bool.at(io)){
+                    syst = syst.subset(systs_to_include);
+                }
+                io++;
+            }
         } else if(systs_excluded.size()) {
 
             std::vector<std::string> systs_to_exclude;
@@ -508,9 +514,14 @@ int main(int argc, char* argv[])
                     }
                 }
             }
-            systs = systs.excluding(systs_to_exclude);
-            for(PROsyst &syst: variable_systs)
-                syst = syst.excluding(systs_to_exclude);
+            //systs = systs.excluding(systs_to_exclude);
+            int io=0;
+            for(PROsyst &syst: variable_systs){
+                if(config.m_channel_variable_plot_bool.at(io)){
+                    syst = syst.excluding(systs_to_exclude);
+                }
+                io++;
+            }
         }
     }
 

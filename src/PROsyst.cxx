@@ -77,6 +77,8 @@ namespace PROfit {
         for(const std::string &name: systs) {
             log<LOG_DEBUG>(L"%1% | Looking up systematic %2% from subset list.") % __func__ % name.c_str();
             const auto &[idx, stype] = syst_map.at(name);
+            log<LOG_DEBUG>(L"%1% | idx %2% ") % __func__ % idx ;
+
             switch(stype) {
                 case SystType::Spline:
                     {
@@ -112,6 +114,7 @@ namespace PROfit {
         ret.fractional_covariance = ret.covmat.size() ? ret.SumMatrices()
             : Eigen::MatrixXf::Constant(fractional_covariance.rows(), fractional_covariance.cols(), 0.0f);
         ret.other_index = other_index;
+        log<LOG_DEBUG>(L"%1% | Done Subset.") % __func__ ;
         return ret;
     }
 
