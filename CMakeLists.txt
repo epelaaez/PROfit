@@ -3,7 +3,7 @@ cmake_minimum_required (VERSION 3.19)
 
 project (
     PROfit
-    VERSION 2.0.1
+    VERSION 2.1.0
     DESCRIPTION "A PROfessional PROfitable PROtractable Fitter"
     LANGUAGES CXX)
 message(STATUS "Building PROfit version: ${PROJECT_VERSION}")
@@ -15,7 +15,8 @@ option(MPI_ENABLE "MPI_ENABLE" OFF)
 message("MPI_ENABLE IS SET TO ${MPI_ENABLE}")
 
 
-set(CMAKE_CXX_FLAGS "-g -O3 -Wall -Wextra")
+set(CMAKE_CXX_FLAGS "-O3 -Wall -Wextra")
+#set(CMAKE_CXX_FLAGS "-g -DNDEBUG -fno-omit-frame-pointer -O3 -Wall -Wextra")
 
 #Allow for nice support folders in IDEs like VScode
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)

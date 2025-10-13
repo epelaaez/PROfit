@@ -73,7 +73,7 @@ namespace PROfit{
         std::unique_ptr<TH2D> collapsed_cov_hist = std::make_unique<TH2D>("ccov", "Collapsed Fractional Covariance Matrix;Bin # ;Bin #", config.m_num_variable_bins_total_collapsed[config.i_prime], 0, config.m_num_variable_bins_total_collapsed[config.i_prime], config.m_num_variable_bins_total_collapsed[config.i_prime], 0, config.m_num_variable_bins_total_collapsed[config.i_prime]);
 
         std::unique_ptr<TH2D> cor_hist = std::make_unique<TH2D>("cor", "Correlation Matrix;Bin # ;Bin #", config.m_num_variable_bins_total[config.i_prime], 0, config.m_num_variable_bins_total[config.i_prime], config.m_num_variable_bins_total[config.i_prime], 0, config.m_num_variable_bins_total[config.i_prime]);
-        std::unique_ptr<TH2D> collapsed_cor_hist = std::make_unique<TH2D>("ccor", "Collapsed Correlation Matrix;Bin # ;Bin #", config.m_num_variable_bins_total[config.i_prime], 0, config.m_num_variable_bins_total_collapsed[config.i_prime], config.m_num_variable_bins_total_collapsed[config.i_prime], 0, config.m_num_variable_bins_total_collapsed[config.i_prime]);
+        std::unique_ptr<TH2D> collapsed_cor_hist = std::make_unique<TH2D>("ccor", "Collapsed Correlation Matrix;Bin # ;Bin #", config.m_num_variable_bins_total_collapsed[config.i_prime], 0, config.m_num_variable_bins_total_collapsed[config.i_prime], config.m_num_variable_bins_total_collapsed[config.i_prime], 0, config.m_num_variable_bins_total_collapsed[config.i_prime]);
 
         for(size_t i = 0; i < config.m_num_variable_bins_total[config.i_prime]; ++i)
             for(size_t j = 0; j < config.m_num_variable_bins_total[config.i_prime]; ++j){
@@ -242,7 +242,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
 
         log<LOG_DEBUG>(L"%1% || PARK cv is %2% and the centers are %3%") % __func__ %  cv.size() % centers.size();
         log<LOG_DEBUG>(L"%1% || For other var %2% the cv is %3% and the centers are %4%") % __func__ % other_index % cv % centers;
-        size_t nerrorsample = 5000;
+        size_t nerrorsample = 2500;
         
         std::vector<Eigen::VectorXf> specs;
         std::uniform_int_distribution<uint32_t> dseed(0, std::numeric_limits<uint32_t>::max());
@@ -263,8 +263,8 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
             float scale_factor = scale ? 1.0/config.collapsed_bin_widths.at(other_index)(i) :  1.0;
             if(std::isnan(scale_factor)) scale_factor = 1;
             std::sort(binconts.begin(), binconts.end());
-            float ehi = std::abs((binconts[5*840] - cv(i))*scale_factor);
-            float elo = std::abs((cv(i) - binconts[5*160])*scale_factor);
+            float ehi = std::abs((binconts[2.5*840] - cv(i))*scale_factor);
+            float elo = std::abs((cv(i) - binconts[2.5*160])*scale_factor);
             ebar.error_up(i) =  ehi;
             ebar.error_down(i) =  elo;
             ebar.error_point(i) = cv(i)*scale_factor;
@@ -352,13 +352,13 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                     Color_t cvcol =  TColor::GetColor(66, 103, 210);//nice blue :)
                     if(!best_fit)cvcol=kBlack;
 
-                    std::string hist_title = config.m_detector_plotnames[det]  + " "+ config.m_channel_plotnames[channel]+";"+xtitle+";"+ytitle;
+                    std::string hist_titles = config.m_mode_plotnames[mode]+" "+config.m_detector_plotnames[det]  + " "+ config.m_channel_plotnames[channel]+";"+xtitle+";"+ytitle;
                     //std::unique_ptr<TLegend> leg = std::make_unique<TLegend>(0.11,0.75,0.89,0.89); 4
                     std::unique_ptr<TLegend> leg = std::make_unique<TLegend>(0.38,0.69,0.89,0.89);
                     leg->SetNColumns(2);
                     leg->SetFillStyle(0);
                     leg->SetLineWidth(0);
-                    TH1D cv_hist(("cv_hist"+std::to_string(global_channel_index)).c_str(), hist_title.c_str(), channel_nbins, edges.data());
+                    TH1D cv_hist(("cv_hist"+std::to_string(global_channel_index)).c_str(), hist_titles.c_str(), channel_nbins, edges.data());
                     cv_hist.SetLineWidth(2);
                     cv_hist.SetLineColor(cvcol);
                     cv_hist.SetFillStyle(0);
@@ -530,6 +530,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                         if(bool(opt&PlotOptions::CVasStack)) {
                             cvstack->SetMaximum(  bounds.hasBound("ymax") ? bounds.getBound("ymax") : std::max(top_modifier*cvstack->GetMaximum(), top_modifier*data_hist.GetMaximum()));
                             cvstack->Draw("hist");
+                            cvstack->SetTitle(hist_titles.c_str());
                             cv_hist.Draw("same hist");
 
                         } else {
@@ -546,7 +547,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                     if(errband) channel_errband->Draw("2 same");
 
                     if(best_fit) {
-                        bf_hist.SetTitle("");
+                        bf_hist.SetTitle(hist_titles.c_str());
                         if(cv) bf_hist.Draw("hist same");
                         else bf_hist.Draw("hist");
                     }

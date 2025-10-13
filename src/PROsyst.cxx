@@ -77,6 +77,8 @@ namespace PROfit {
         for(const std::string &name: systs) {
             log<LOG_DEBUG>(L"%1% | Looking up systematic %2% from subset list.") % __func__ % name.c_str();
             const auto &[idx, stype] = syst_map.at(name);
+            log<LOG_DEBUG>(L"%1% | idx %2% ") % __func__ % idx ;
+
             switch(stype) {
                 case SystType::Spline:
                     {
@@ -112,6 +114,7 @@ namespace PROfit {
         ret.fractional_covariance = ret.covmat.size() ? ret.SumMatrices()
             : Eigen::MatrixXf::Constant(fractional_covariance.rows(), fractional_covariance.cols(), 0.0f);
         ret.other_index = other_index;
+        log<LOG_DEBUG>(L"%1% | Done Subset.") % __func__ ;
         return ret;
     }
 
@@ -197,7 +200,7 @@ namespace PROfit {
         Eigen::MatrixXf cv = FillSpectra(config, prop, *this, model, params , true, other_index).Spec();
 
         std::vector<Eigen::VectorXf> specs;
-        for(size_t i = 0; i < 1000; ++i){
+        for(size_t i = 0; i < 500; ++i){
             specs.push_back(FillSplineRandomThrow(config, prop, *this, model, params, spline, seed, other_index).Spec());
         }
 

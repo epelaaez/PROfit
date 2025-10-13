@@ -299,6 +299,8 @@ namespace PROfit{
             std::vector<size_t> m_num_variable_bins_mode_block_collapsed; 
             std::vector<size_t> m_num_variable_bins_total_collapsed; 
 
+            std::vector<std::vector<std::pair<float,float>>> m_variable_bin_to_edges;
+
             std::vector<Eigen::MatrixXf> variable_collapsing_matrices; 
             std::vector<Eigen::VectorXf> collapsed_bin_widths;
 
@@ -381,6 +383,12 @@ namespace PROfit{
              * Note: index start from 0, not 1
              */
             size_t GetSubchannelIndex(const std::string& fullname) const;
+
+            /* Function: given global subchannel index, return fullname
+             * Note: index start from 0, not 1
+             */
+            std::string GetSubchannelName(size_t index) const;
+
 
             /* Function: given global index (in the full vector), return global subchannel index of associated subchannel
              * Note: returns a 0-based index 
