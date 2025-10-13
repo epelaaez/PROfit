@@ -33,7 +33,7 @@ jobs:
       run: source root/bin/thisroot.sh && root --version && cd ${{github.workspace}}/build && cmake ..
     - name: Build
       # Build your program with the given configuration
-      run: make -j10
+      run: cd ${{github.workspace}}/build && make -j10
 
     # - name: Test
     #   working-directory: ${{github.workspace}}/build
