@@ -42,6 +42,9 @@
 #include <string>
 #include <vector>
 #include "TMath.h"
+#include "TMarker.h"
+#include "TMultiGraph.h"
+#include "TArrow.h"
 using namespace PROfit;
 
 log_level_t GLOBAL_LEVEL = LOG_INFO;
@@ -101,6 +104,7 @@ int main(int argc, char* argv[])
     bool single_brazil = false;
     bool only_brazil = false;
     std::vector<std::string> brazil_throws;
+    std::vector<float> procurve_points;
 
     std::string reweights_file;
     std::vector<std::string> mockreweights;
@@ -173,6 +177,7 @@ int main(int argc, char* argv[])
     surface_command->add_flag("--single-throw", single_brazil, "Only run a single iteration of the Brazil band")->needs("--brazil-band");
     surface_command->add_flag("--only-throw", only_brazil, "Only run Brazil band throws and not the nominal surface")->needs("--brazil-band");
     surface_command->add_option("--from-many", brazil_throws, "Make Brazil band from many provided throws")->needs("--brazil-band");
+    surface_command->add_option("--curve-mode", procurve_points , "Make a PROcurve plot from param A to param B.");
 
     //PROfile, make N profile'd chi^2 for each physics and nuisence parameters
     CLI::App *profile_command = app.add_subcommand("profile", "Make a 1D profiled chi2 for each physics and nuisence parameter.");
@@ -842,7 +847,7 @@ int main(int argc, char* argv[])
         //***********************************************************************
         //***********************************************************************
     }
-    if(*surface_command){
+    if(*surface_command ){
 
         size_t nparams = metric->GetModel().nparams + metric->GetSysts().GetNSplines();
         if(global_fit_result.size() == 0 || global_fit_result.size() != (int)nparams) {
@@ -940,6 +945,120 @@ int main(int argc, char* argv[])
         size_t nbinsx = grid_size[0], nbinsy = grid_size[1];
         PROsurf surface(*metric, xaxis_idx, yaxis_idx, nbinsx, logx ? PROsurf::LogAxis : PROsurf::LinAxis, xlo, xhi,
                 nbinsy, logy ? PROsurf::LogAxis : PROsurf::LinAxis, ylo, yhi);
+
+        if(procurve_points.size()!=0){
+
+
+            size_t mid = procurve_points.size() / 2;
+            std::vector<float> A(procurve_points.begin(), procurve_points.begin() + mid);
+            std::vector<float> B(procurve_points.begin() + mid, procurve_points.end());
+            size_t Ncurvep = 20;
+            log<LOG_INFO>(L"%1% || Running a PROcurve from %2% to point %3% with %4% points") % __func__ % A% B %Ncurvep;
+            std::vector<surfOut> cpoints = surface.FillCurve(fitConfig, myseed, nthread, A, B, Ncurvep);
+
+            std::vector<float> binedges_x, binedges_y;
+            for(size_t i = 0; i < surface.nbinsx+1; i++)
+                binedges_x.push_back(logx ? std::pow(10, surface.edges_x(i)) : surface.edges_x(i));
+            for(size_t i = 0; i < surface.nbinsy+1; i++)
+                binedges_y.push_back(logy ? std::pow(10, surface.edges_y(i)) : surface.edges_y(i));
+
+            if(xlabel == "") 
+                xlabel = xaxis_idx < model->nparams ? model->pretty_param_names[xaxis_idx] : 
+                    config.m_mcgen_variation_plotname_map[variable_systs[config.i_prime].spline_names[xaxis_idx]];
+            if(ylabel == "") 
+                ylabel = yaxis_idx < model->nparams ? model->pretty_param_names[yaxis_idx] : 
+                    config.m_mcgen_variation_plotname_map[variable_systs[config.i_prime].spline_names[yaxis_idx]];
+            TH2D surf("surf", (";"+xlabel+";"+ylabel).c_str(), surface.nbinsx, binedges_x.data(), surface.nbinsy, binedges_y.data());
+
+            TCanvas c1("c1", "PROcurve Analysis", 1600, 800);
+            TPad *p1 = new TPad("p1", "left", 0.0, 0.0, 0.3, 1.0);  // 30% width
+            TPad *p2 = new TPad("p2", "right", 0.3, 0.0, 1.0, 1.0); // 70% width
+            p1->Draw();
+            p2->Draw();
+
+
+            p1->cd();
+            p1->SetLeftMargin(0.12);
+            p1->SetRightMargin(0.15);
+            if(logx) p1->SetLogx();
+            if(logy) p1->SetLogy();
+            surf.Draw("COLZ");
+            TMarker *markerA = new TMarker(pow(10,A[xaxis_idx]), pow(10,A[yaxis_idx]), 29); 
+            markerA->SetMarkerColor(kRed);
+            markerA->SetMarkerSize(3);
+            markerA->Draw();
+            TMarker *markerB = new TMarker(pow(10,B[xaxis_idx]), pow(10,B[yaxis_idx]), 29);
+            markerB->SetMarkerColor(kBlue);
+            markerB->SetMarkerSize(3);
+            markerB->Draw();
+
+            
+            TArrow *arrow = new TArrow(pow(10,A[xaxis_idx]), pow(10,A[yaxis_idx]), pow(10,B[xaxis_idx]), pow(10,B[yaxis_idx]),0.02, "|>");
+            arrow->SetLineStyle(2);  // Dashed
+            arrow->SetLineWidth(2);
+            arrow->SetLineColor(kBlack);
+            arrow->SetFillColor(kBlack);  
+            arrow->Draw();
+
+            p2->cd();
+            p2->SetLeftMargin(0.12);
+            p2->SetRightMargin(0.05);
+
+            size_t nparams =  variable_systs[config.i_prime].GetNSplines();
+            //Eigen::VectorXf subvector2 = param.segment();
+
+            TMultiGraph *mg = new TMultiGraph();
+            TLegend *leg = new TLegend(0.18,0.69,0.89,0.89);
+            int colors[] = {kBlack, kRed, kBlue, kGreen+2, kMagenta, kOrange, kCyan+2, kViolet, kYellow+2, kPink};
+
+            double ymin = 1e10, ymax = -1e10;
+
+            for(size_t iparam = 0; iparam < nparams; iparam++) {
+                std::vector<double> x_points, y_points;
+
+                log<LOG_INFO>(L"%1% || Curve plot  %2% ") % __func__ % iparam;
+
+                for(size_t i = 0; i < cpoints.size(); i++) {
+                    x_points.push_back(i);
+                    float val = cpoints[i].best_fit(iparam+model->nparams);
+                    y_points.push_back(val);
+                    if(val < ymin) ymin = val;
+                    if(val > ymax) ymax = val;
+
+                }
+                log<LOG_INFO>(L"Parameter %1%: min=%2%, max=%3%") % iparam % *std::min_element(y_points.begin(), y_points.end()) % *std::max_element(y_points.begin(), y_points.end());
+
+                TGraph *gr = new TGraph(x_points.size(), x_points.data(), y_points.data());
+                gr->SetLineColor(colors[iparam % 10]);
+                gr->SetLineWidth(2);
+                gr->SetMarkerColor(colors[iparam % 10]);
+                gr->SetMarkerStyle(20);
+                gr->SetMarkerSize(0.8);
+
+                mg->Add(gr, "LP");  
+
+                std::string param_name = config.m_mcgen_variation_plotname_map[variable_systs[config.i_prime].spline_names[iparam]];
+                leg->AddEntry(gr, param_name.c_str(), "lp");
+            }
+
+            mg->Draw("A");
+            double margin = (ymax - ymin) * 0.05;
+            mg->GetYaxis()->SetRangeUser(ymin - margin, ymax + 4*margin);
+
+            mg->GetXaxis()->SetTitle("Curve Point Index");
+            mg->GetYaxis()->SetTitle("Parameter Value");
+            mg->SetTitle("Parameter Evolution Along Curve");
+
+            leg->SetNColumns(4);
+            leg->SetFillStyle(0);
+            leg->SetLineWidth(0);
+            leg->Draw();
+
+            c1.SaveAs((final_output_tag+"_PROcurve.pdf").c_str(), "pdf");
+
+            return 0;
+        }
+
 
         if(!only_brazil) {
             if(statonly)
