@@ -93,7 +93,7 @@ std::vector<int> select_diverse_best(const std::vector<float>& chi2s, const std:
     
     // i not enough, fill with best remaining
     if(selected.size() < n_select) {
-        log<LOG_WARNING>(L"%1% || Only found %2% diverse points out of requested %3% with diversity_factor=%4%")%  __func__ %  selected.size() % n_select % diversity_factor;
+        log<LOG_DEBUG>(L"%1% || Only found %2% diverse points out of requested %3% with diversity_factor=%4%")%  __func__ %  selected.size() % n_select % diversity_factor;
         
         for(size_t i = 0; i < sorted_idx.size() && selected.size() < n_select; ++i) {
             int idx = sorted_idx[i];
@@ -186,6 +186,7 @@ float PROfitter::Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed
         PSO.runSwarm(metric,rng,fitconfig);
     }
 
+
     Eigen::VectorXf x;  
 
     float chimin = 9999999;
@@ -193,6 +194,8 @@ float PROfitter::Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed
     niter=0;
 
     bool success = false;
+    best_fit = PSO.getGlobalBestPosition();
+    chimin = PSO.getGlobalBestScore();
 
 
     log<LOG_INFO>(L"%1% || Starting local fit of best swarm point. ") % __func__ ;
@@ -354,6 +357,11 @@ float PROfitter::Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed
 
 
         }
+    }
+
+    if (fx < chimin) {
+        best_fit = x;
+        chimin = fx;
     }
 
     log<LOG_INFO>(L"%1% || FINAL has a chi %2%") % __func__ %  chimin;
