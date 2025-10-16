@@ -155,9 +155,10 @@ public:
         lb = Eigen::VectorXf(2);
         ub = Eigen::VectorXf(2);
         default_val = Eigen::VectorXf(2);
-        lb << -2, -std::numeric_limits<float>::infinity();
+        lb << -2, -10; //-std::numeric_limits<float>::infinity();
         ub << 2, 0;
-        default_val << -std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity();
+        //default_val << -std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity();
+        default_val << -10, -10; //std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity();
     
         log<LOG_INFO>(L"%1% || setting up a model nueapp, with  %2% params.")     % __func__ % nparams;
         for(size_t i=0; i< nparams;i++){
