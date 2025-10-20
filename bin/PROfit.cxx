@@ -42,6 +42,7 @@
 #include <string>
 #include <vector>
 #include "TMath.h"
+
 using namespace PROfit;
 
 log_level_t GLOBAL_LEVEL = LOG_INFO;
@@ -101,6 +102,7 @@ int main(int argc, char* argv[])
     bool single_brazil = false;
     bool only_brazil = false;
     std::vector<std::string> brazil_throws;
+    std::vector<float> procurve_points;
 
     std::string reweights_file;
     std::vector<std::string> mockreweights;
@@ -173,6 +175,7 @@ int main(int argc, char* argv[])
     surface_command->add_flag("--single-throw", single_brazil, "Only run a single iteration of the Brazil band")->needs("--brazil-band");
     surface_command->add_flag("--only-throw", only_brazil, "Only run Brazil band throws and not the nominal surface")->needs("--brazil-band");
     surface_command->add_option("--from-many", brazil_throws, "Make Brazil band from many provided throws")->needs("--brazil-band");
+    surface_command->add_option("--curve-mode", procurve_points , "Make a PROcurve plot from param A to param B.");
 
     //PROfile, make N profile'd chi^2 for each physics and nuisence parameters
     CLI::App *profile_command = app.add_subcommand("profile", "Make a 1D profiled chi2 for each physics and nuisence parameter.");
@@ -845,7 +848,7 @@ int main(int argc, char* argv[])
         //***********************************************************************
         //***********************************************************************
     }
-    if(*surface_command){
+    if(*surface_command ){
 
         size_t nparams = metric->GetModel().nparams + metric->GetSysts().GetNSplines();
         if(global_fit_result.size() == 0 || global_fit_result.size() != (int)nparams) {
@@ -885,7 +888,7 @@ int main(int argc, char* argv[])
                 if(i<nphys){
                     log<LOG_INFO>(L"%1% || %2%  :  %3% (non-log %4%)") % __func__ % metric->GetModel().pretty_param_names[i].c_str() % best_fit(i) % pow(10,best_fit(i));
                 }else{
-                    log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % metric->GetSysts().spline_names[i-nphys].c_str() % best_fit(i);
+                    log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % config.m_mcgen_variation_plotname_map.at(metric->GetSysts().spline_names[i-nphys]).c_str() % best_fit(i);
                 }
             }
             log<LOG_INFO>(L"%1% || ################################################") % __func__;
@@ -943,6 +946,21 @@ int main(int argc, char* argv[])
         size_t nbinsx = grid_size[0], nbinsy = grid_size[1];
         PROsurf surface(*metric, xaxis_idx, yaxis_idx, nbinsx, logx ? PROsurf::LogAxis : PROsurf::LinAxis, xlo, xhi,
                 nbinsy, logy ? PROsurf::LogAxis : PROsurf::LinAxis, ylo, yhi);
+
+        if(procurve_points.size()!=0){
+
+
+            size_t mid = procurve_points.size() / 2;
+            std::vector<float> A(procurve_points.begin(), procurve_points.begin() + mid);
+            std::vector<float> B(procurve_points.begin() + mid, procurve_points.end());
+            size_t Ncurvep = 20;
+            log<LOG_INFO>(L"%1% || Running a PROcurve from %2% to point %3% with %4% points") % __func__ % A% B %Ncurvep;
+            
+            std::vector<surfOut> cpoints = surface.FillCurve(fitConfig, myseed, nthread, A, B, Ncurvep);
+            surface.PlotCurve(config,*model,variable_systs[config.i_prime],cpoints,final_output_tag,logx,logy,xaxis_idx,yaxis_idx,A, B, Ncurvep); 
+            return 0;
+        }
+
 
         if(!only_brazil) {
             if(statonly)
@@ -1597,7 +1615,7 @@ int main(int argc, char* argv[])
             if(i<nphys){
                 log<LOG_INFO>(L"%1% || %2%  : %3% (log) %4% (nonlog) ") % __func__ % metric_to_use->GetModel().pretty_param_names[i].c_str() % best_fit(i) % pow(10,best_fit(i));
             }else{
-                log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % metric_to_use->GetSysts().spline_names[i-nphys].c_str() % best_fit(i) ;
+                log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % config.m_mcgen_variation_plotname_map.at(metric->GetSysts().spline_names[i-nphys]).c_str() % best_fit(i);
             }
         }
         log<LOG_INFO>(L"%1% || ################################################") % __func__;
@@ -1713,7 +1731,7 @@ int main(int argc, char* argv[])
         PlotOptions opt = PlotOptions::DataPostfitRatio;
         if(binwidth_scale) opt |= PlotOptions::BinWidthScaled;
         if(area_normalized) opt |= PlotOptions::AreaNormalized;
-        plot_channels((final_output_tag+"_PROfile_hists.pdf"), config, cv, bf, data, err_band, post_err_band, texts, pbounds,opt);
+        plot_channels((final_output_tag+"_PROglobal_hists.pdf"), config, cv, bf, data, err_band, post_err_band, texts, pbounds,opt);
 
 
     }
@@ -1749,8 +1767,9 @@ int main(int argc, char* argv[])
                 global_fit_out << metric->GetModel().param_names[i] << " : " << global_fit_result(i) << "\n";
             }else{
                 long idx = use_phys ? i - metric->GetModel().nparams : i;
-                log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % metric->GetSysts().spline_names[idx].c_str() % global_fit_result(i);
-                global_fit_out << metric->GetSysts().spline_names[idx]
+                log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % config.m_mcgen_variation_plotname_map.at(metric->GetSysts().spline_names[idx]).c_str() % global_fit_result(i);
+
+                global_fit_out <<  config.m_mcgen_variation_plotname_map.at(metric->GetSysts().spline_names[idx])
                     << " : " << global_fit_result(i) << "\n";
             }
         }
