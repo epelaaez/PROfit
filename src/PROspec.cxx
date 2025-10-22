@@ -85,6 +85,33 @@ TH1D PROspec::toTH1D_Collapsed(const PROconfig &inconfig, int channel_index, siz
     return hSpec;
 }
 
+TH1D PROspec::toTH1DSlices(PROconfig const & inconfig, int subchannel_index, int other_index, int dim) const{
+    int global_bin_start = inconfig.GetGlobalVariableBinStart(subchannel_index, other_index);
+    int channel_index = inconfig.GetLocalChannelIndexFromGlobalSubchannelIndex(subchannel_index);
+
+    //set up hist specs
+    int nbins_tot = inconfig.m_channel_variable_bins[channel_index][other_index].NBins();
+    int nbins_dim = inconfig.m_channel_variable_bins[channel_index][other_index].NBinsAlong(dim);
+    std::vector<float> bin_edges = inconfig.m_channel_variable_bins[channel_index][other_index].Edges(dim);
+    std::string hist_name = inconfig.m_fullnames[subchannel_index];
+    std::string xaxis_title =  inconfig.m_channel_variable_units[channel_index][other_index];
+
+    //fill 1D hist
+    TH1D hSpec((hist_name+std::to_string(other_index)+std::to_string(dim)+std::to_string(subchannel_index)).c_str(),hist_name.c_str(), nbins_dim, &bin_edges[0]); 
+    hSpec.GetXaxis()->SetTitle(xaxis_title.c_str());
+
+    if(inconfig.m_channel_variable_dims[channel_index][other_index] == 2){
+        // project along input dimension
+        Eigen::VectorXf spec_proj = spec(Eigen::seqN(global_bin_start, nbins_dim));
+        Eigen::VectorXf error_proj = error(Eigen::seqN(global_bin_start, nbins_dim));
+        for(int i = 1; i <= nbins_dim; ++i){
+            hSpec.SetBinContent(i, spec_proj(i -1));
+            hSpec.SetBinError(i, error_proj(i -1));
+        }
+    }
+
+    return hSpec;
+}
 
 TH1D PROspec::toTH1D(PROconfig const & inconfig, int subchannel_index, int other_index, int dim) const{
     int global_bin_start = inconfig.GetGlobalVariableBinStart(subchannel_index, other_index);
@@ -96,6 +123,7 @@ TH1D PROspec::toTH1D(PROconfig const & inconfig, int subchannel_index, int other
     std::vector<float> bin_edges = inconfig.m_channel_variable_bins[channel_index][other_index].Edges(dim);
     std::string hist_name = inconfig.m_fullnames[subchannel_index];
     std::string xaxis_title =  inconfig.m_channel_variable_units[channel_index][other_index];
+
 
     // project along input dimension
     Eigen::VectorXf spec_proj = inconfig.m_channel_variable_bins[channel_index][other_index].ProjectSpectra(spec(Eigen::seqN(global_bin_start, nbins_tot)), dim);

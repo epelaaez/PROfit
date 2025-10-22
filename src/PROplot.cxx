@@ -21,7 +21,10 @@ namespace PROfit{
                         htmp->SetFillColor(rcolor);
                         if(scale) htmp->Scale(1,"width");
                         hists[subchannel_name] = std::move(htmp);
-
+                        std::unique_ptr<TH1D> htmp_slc = std::make_unique<TH1D>(spec.toTH1DSlices(inconfig, global_subchannel_index, other_index));
+                        if(htmp_slc){
+                            hists[subchannel_name+"slc"] = std::move(htmp_slc);
+                        }
                         ++global_subchannel_index;
                     }//end subchan
                     ++global_channel_index;
@@ -34,7 +37,6 @@ namespace PROfit{
     std::map<std::string, std::unique_ptr<TH2D>> getCV2DHists(const PROspec &spec, const PROconfig& inconfig, bool scale, int other_index) {
         std::map<std::string, std::unique_ptr<TH2D>> hists;
 
-        log<LOG_DEBUG>(L"%1% || 2d get") % __func__;
         size_t global_subchannel_index = 0;
         size_t global_channel_index = 0;
         for(size_t im = 0; im < inconfig.m_num_modes; im++){
@@ -47,7 +49,6 @@ namespace PROfit{
                         std::unique_ptr<TH2D> htmp = std::make_unique<TH2D>(spec.toTH2D(inconfig, global_subchannel_index, other_index));
                         if(scale) htmp->Scale(1,"width");
                         hists[subchannel_name] = std::move(htmp);
-                        log<LOG_DEBUG>(L"%1% || Printot %2% %3% %4% %5% %6% : Integral %7% ") % __func__ % global_channel_index % global_subchannel_index % subchannel_name.c_str() % sc % ic % hists[subchannel_name]->Integral();
                         ++global_subchannel_index;
                         }//end subchan
                     ++global_channel_index;
@@ -290,7 +291,6 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
         for(size_t mode = 0; mode < config.m_num_modes; ++mode) {
             for(size_t det = 0; det < config.m_num_detectors; ++det) {
                 for(size_t channel = 0; channel < config.m_num_channels; ++channel) {
-                    log<LOG_DEBUG>(L"%1% || channel %2%") % __func__ % channel;
                     if(cv){
                         if(config.m_channel_variable_dims[channel][other_index] == 2){
                             cv2dhists = getCV2DHists(*cv, config, (bool)(opt & PlotOptions::BinWidthScaled), other_index);
@@ -329,7 +329,6 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                         TH2D bf_hist(hist_title.c_str(),hist_title.c_str(), channel_nbins_x, edges_x.data(), channel_nbins_y, edges_y.data());
                         if(best_fit){
                             Eigen::VectorXf tmp_bf = best_fit->Spec();
-                           log<LOG_DEBUG>(L"%1% || tmp_bf %2%") % __func__ % tmp_bf;
                             for(int xbin = 0; xbin < channel_nbins_x; xbin++){
                                 for(size_t ybin = 0; ybin < channel_nbins_y; ybin++) {
                                     bf_hist.SetBinContent(xbin+1, ybin, tmp_bf(xbin*channel_nbins_y+ybin));
@@ -354,7 +353,6 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                     if(!best_fit)cvcol=kBlack;
 
                     std::string hist_titles = config.m_mode_plotnames[mode]+" "+config.m_detector_plotnames[det]  + " "+ config.m_channel_plotnames[channel]+";"+xtitle+";"+ytitle;
-                    //std::unique_ptr<TLegend> leg = std::make_unique<TLegend>(0.11,0.75,0.89,0.89); 4
                     std::unique_ptr<TLegend> leg = std::make_unique<TLegend>(0.38,0.69,0.89,0.89);
                     leg->SetNColumns(2);
                     leg->SetFillStyle(0);
@@ -385,9 +383,15 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                             const std::string& subchannel_name  = config.m_fullnames[global_subchannel_index];
                             if(bool(opt&PlotOptions::CVasStack)) {
                                 cvstack->Add(cv1dhists[subchannel_name].get());
+                                if (cv1dhists.find(subchannel_name+"slc") != cv1dhists.end()) {
+                                    cvstack->Add(cv1dhists[subchannel_name+"slc"].get());
+                                }
                                 subplots.push_back({subchannel_name, config.m_subchannel_plotnames[channel][subchannel].c_str()});
                             }
                             cv_hist.Add(cv1dhists[subchannel_name].get());
+                            //if (cv1dhists.find(subchannel_name+"slc") != cv1dhists.end()) {
+                            //    cv_hist.Add(cv1dhists[subchannel_name+"slc"].get());
+                            //}
                             ++global_subchannel_index;
                         }
                         if(bool(opt&PlotOptions::CVasStack)) {
@@ -408,7 +412,6 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                         TH1 *leg_hack = (TH1*)cv_hist.Clone((std::string(cv_hist.GetTitle())+"leg_hack").c_str());
                         leg_hack->SetFillStyle(3144);
                         leg_hack->SetFillColorAlpha(cvcol, 0.2);
-                        //leg_hack->SetFillColorAlpha(kGray+2, 0.2);
                         leg_hack->SetLineColor(cvcol);
                         leg_hack->SetLineWidth(2);
 
@@ -422,12 +425,10 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                     TGraphAsymmErrors *channel_errband = NULL;
                     if(errband) {
                         channel_errband = new TGraphAsymmErrors(&cv_hist);
-                        // int channel_start =  config.GetCollapsedGlobalVariableBinStart(global_channel_index, other_index);
 
                         for(size_t bin = 0; bin < channel_nbins; ++bin) {
                             float scale = 1.0;
 
-                            //log<LOG_DEBUG>(L"%1% || PARK IN bin %2% channel_nbins %3% channel_start %4% bin+channel_start %5% erriorN %6%") % __func__ % bin % channel_nbins % channel_start % int(bin+channel_start) % errband->error_point.size();
                             if(bool(opt&PlotOptions::AreaNormalized) || bool(opt&PlotOptions::BinWidthScaled)) {
                                 scale = channel_errband->GetPointY(bin) / errband->error_point(bin+channel_start);
                             }
@@ -435,28 +436,21 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                             channel_errband->SetPointEYlow(bin, scale*(errband->error_down(bin+channel_start)));
                         }
                         channel_errband->SetFillStyle(3144);
-                        //channel_errband->SetFillColorAlpha(kGray+2, 0.2);
                         channel_errband->SetFillColorAlpha(cvcol, 0.2);
                         channel_errband->SetLineColor(cvcol);
                         channel_errband->SetLineWidth(1);
-                        //leg->AddEntry(channel_errband, "#pm 1#sigma", "f");
                     }
 
                     TH1D bf_hist(("bf"+std::to_string(global_channel_index)).c_str(), "", channel_nbins, edges.data());
                     if(best_fit) {
-                        // int channel_start =  config.GetCollapsedGlobalVariableBinStart(global_channel_index, other_index);
                         size_t total_bins = config.GetChannelVariableBins(global_channel_index, other_index).NBins();
-                        // Eigen::VectorXf this_bf_spec = config.GetChannelVariableBins(global_channel_index, other_index).ProjectSpectra(bf_spec(Eigen::seqN(channel_start, total_bins)), 0);
 
                         for(size_t bin = 0; bin < channel_nbins; ++bin) {
                             bf_hist.SetBinContent(bin+1, bf_spec(bin+channel_start));
                         }
-                        //bf_hist.SetLineColor(TColor::GetColor(234, 67, 53)); // pastel red
                         bf_hist.SetLineColor(bfcol); 
                         bf_hist.SetLineStyle(kDashed); 
                         bf_hist.SetLineWidth(2);
-                        //leg->AddEntry(&bf_hist, "Best Fit", "l");
-
 
                         TH1 *leg_hack = (TH1*)bf_hist.Clone((std::string(bf_hist.GetTitle())+"bf").c_str());
                         leg_hack->SetFillStyle(3254);
@@ -469,7 +463,6 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                         }else{
                             leg->AddEntry(&bf_hist, "Best Fit #pm 1#sigma (post-fit)", "l");
                         }
-                        //cv_hist.Draw("hist");
 
                         if(bool(opt&PlotOptions::BinWidthScaled))
                             bf_hist.Scale(1, "width");
@@ -480,7 +473,6 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                     TGraphAsymmErrors *post_channel_errband = NULL;
                     if(posterrband) {
                         post_channel_errband = new TGraphAsymmErrors(&bf_hist);
-                        // int channel_start =  config.GetCollapsedGlobalVariableBinStart(global_channel_index, other_index);
                         for(size_t bin = 0; bin < channel_nbins; ++bin) {
                             float scale = 1.0;
                             if(bool(opt&PlotOptions::AreaNormalized) || bool(opt&PlotOptions::BinWidthScaled)) {
@@ -493,7 +485,6 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                         post_channel_errband->SetFillStyle(3254);
                         post_channel_errband->SetLineColor(bfcol);
                         post_channel_errband->SetLineWidth(1);
-                        //leg->AddEntry(post_channel_errband, "post-fit #pm 1#sigma", "f");
                     }
                     TH1D data_hist;
                     if(data) {
@@ -591,12 +582,10 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                         dummy_line->SetLineColor(kWhite);
                         dummy_line->SetLineWidth(0);
                         if(texts.size()==1){
-                            //texts.front().Draw("same");
                             TText* text = (TText*)texts.front().GetListOfLines()->First();
                             const char* label = text->GetTitle(); 
                             leg->AddEntry(dummy_line,label,"l"); 
                         }else{
-                            //texts[global_channel_index].Draw("same");
                             TText* text = (TText*)texts.at(global_channel_index).GetListOfLines()->First();
                             const char* label = text->GetTitle(); 
                             leg->AddEntry(dummy_line,label,"l"); 
@@ -618,8 +607,6 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                             ? *channel_errband
                             : *post_channel_errband;
 
-
-                       
                         float ymin = 1e9, ymax = -1e9;
 
                         for(size_t i = 0; i < channel_nbins; ++i) {
@@ -638,8 +625,6 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                             ratio_err->SetPointY(i, 1.0);
                             ymin = std::min(ymin, rat);
                             ymax = std::max(ymax, rat);
-
-
                         }
                         for (int i = 0; i < ratio_err->GetN(); ++i) {
                             float y, eyh, eyl;
@@ -683,8 +668,6 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                         ratio->SetMarkerColor(kBlack);
                         ratio->SetMarkerSize(1);
 
-                        //ratio_err->SetFillColor(kRed);
-                        //ratio_err->SetFillStyle(3345);
                         ratio_err->Draw("2 same");
 
                         ratio->Draw("PE1 E0 same");
