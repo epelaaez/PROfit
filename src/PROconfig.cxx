@@ -19,7 +19,6 @@ PROconfig::PROconfig(const std::string &xml, bool rate_only):
     m_num_variable_bins_detector_block(0),
     m_num_variable_bins_mode_block(0),
     m_num_variable_bins_total(0),
-    m_variable_dims(0),
     m_num_variable_bins_detector_block_collapsed(0),
     m_num_variable_bins_mode_block_collapsed(0),
     m_num_variable_bins_total_collapsed(0),
@@ -279,7 +278,6 @@ int PROconfig::LoadFromXML(const std::string &filename){
         while(pChan){
             // Read in how many bins this channel uses
 
-            bool got_dim = false;
             const char* channel_name= pChan->Attribute("name");
             if(channel_name==NULL){
                 log<LOG_ERROR>(L"%1% || ERROR: Need all channels to have names in xml.@ line %2% in %3% ") % __func__ % __LINE__  % __FILE__;
@@ -315,14 +313,11 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
             m_channel_variable_bins.push_back({});
             m_channel_variable_units.push_back({});
+            m_channel_variable_dims.push_back({});
 
 
             tinyxml2::XMLElement *pBin2DO = pChan->FirstChildElement("bins2D"); // 2D Bins
             while(pBin2DO){
-                if(got_dim == false){
-                    m_variable_dims.push_back(2);
-                    got_dim = true;
-                }
                 const char* omin_x = pBin2DO->Attribute("minx");
                 const char* omax_x = pBin2DO->Attribute("maxx");
                 const char* onbins_x = pBin2DO->Attribute("nbinsx");
@@ -341,6 +336,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                     log<LOG_DEBUG>(L"%1% || This variable has a NO other binning (or attribute min,max,nbins)  ") % __func__ ;
                     m_channel_variable_bins.back().push_back(PROconfig::Binning());
                     m_channel_variable_units.back().push_back("");
+                    m_channel_variable_dims.back().push_back(2);
                     m_channel_variable_plot_bool.push_back(true);
                 }else{
                     log<LOG_DEBUG>(L"%1% || This variable has an Variable Binning.   ") % __func__  ;
@@ -397,6 +393,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
                     m_channel_variable_bins.back().push_back(PROconfig::Binning(std::vector<std::vector<float>>({binedge_x, binedge_y})));
                     m_channel_variable_units.back().push_back(ounits ? ounits : "");
+                    m_channel_variable_dims.back().push_back(2);
                 }
                 pBin2DO = pBin2DO->NextSiblingElement("bins2D");
             }
@@ -404,11 +401,6 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
             tinyxml2::XMLElement *pBinO = pChan->FirstChildElement("bins"); // 1D Bins
             while(pBinO){
-                if(got_dim == false){
-                    m_variable_dims.push_back(1);
-                    got_dim = true;
-                }
-
                 expected_attrs = {"min","max","nbins","edges","unit","plot"};
                 for (const tinyxml2::XMLAttribute* attr = pBinO->FirstAttribute(); attr; attr = attr->Next()) {
                     std::string name = attr->Name();
@@ -429,6 +421,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                     log<LOG_DEBUG>(L"%1% || This variable has a NO other binning (or attribute min,max,nbins)  ") % __func__ ;
                     m_channel_variable_bins.back().push_back(PROconfig::Binning());
                     m_channel_variable_units.back().push_back("");
+                    m_channel_variable_dims.back().push_back(1);
                     m_channel_variable_plot_bool.push_back(true);
                 }else{
                     log<LOG_DEBUG>(L"%1% || This variable has an Variable Binning.   ") % __func__  ;
@@ -464,6 +457,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
                     m_channel_variable_bins.back().push_back({binedge});
                     m_channel_variable_units.back().push_back(ounits ? ounits : "");
+                    m_channel_variable_dims.back().push_back(1);
                 }
                 pBinO = pBinO->NextSiblingElement("bins");
             }
@@ -1411,14 +1405,13 @@ void PROconfig::remove_unused_channel(){
         std::vector<std::vector<Binning>> temp_channel_other_bins(m_num_channels);
 
         std::vector<std::string> temp_channel_names(m_num_channels);
-        std::vector<int> temp_variable_dims(m_num_channels);
+        std::vector<std::vector<int>> temp_variable_dims(m_num_channels);
         std::vector<std::string> temp_channel_plotnames(m_num_channels);
         std::vector<std::string> temp_channel_units(m_num_channels);
         std::vector<std::vector<std::string>> temp_channel_other_units(m_num_channels);
         for(size_t i=0, chan_index = 0; i< m_channel_bool.size(); ++i){
             if(m_channel_bool[i]){
                 temp_channel_names[chan_index] = m_channel_names[i];
-                temp_variable_dims[chan_index] = m_variable_dims[i];
                 temp_channel_plotnames[chan_index] = m_channel_plotnames[i];
                 temp_channel_units[chan_index] = m_channel_units[i];
 
@@ -1432,7 +1425,6 @@ void PROconfig::remove_unused_channel(){
         m_channel_names = temp_channel_names;
         m_channel_plotnames = temp_channel_plotnames;
         m_channel_units = temp_channel_units;
-        m_variable_dims = temp_variable_dims;
     }
 
     {

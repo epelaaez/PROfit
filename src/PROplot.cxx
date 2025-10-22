@@ -2,9 +2,9 @@
 
 namespace PROfit{
 
-
     std::map<std::string, std::unique_ptr<TH1D>> getCV1DHists(const PROspec &spec, const PROconfig& inconfig, bool scale, int other_index) {
         std::map<std::string, std::unique_ptr<TH1D>> hists;  
+
 
         size_t global_subchannel_index = 0;
         size_t global_channel_index = 0;
@@ -22,7 +22,6 @@ namespace PROfit{
                         if(scale) htmp->Scale(1,"width");
                         hists[subchannel_name] = std::move(htmp);
 
-                        log<LOG_DEBUG>(L"%1% || Printot %2% %3% %4% %5% %6% : Integral %7% ") % __func__ % global_channel_index % global_subchannel_index % subchannel_name.c_str() % sc % ic % hists[subchannel_name]->Integral();
                         ++global_subchannel_index;
                     }//end subchan
                     ++global_channel_index;
@@ -35,21 +34,20 @@ namespace PROfit{
     std::map<std::string, std::unique_ptr<TH2D>> getCV2DHists(const PROspec &spec, const PROconfig& inconfig, bool scale, int other_index) {
         std::map<std::string, std::unique_ptr<TH2D>> hists;
 
+        log<LOG_DEBUG>(L"%1% || 2d get") % __func__;
         size_t global_subchannel_index = 0;
         size_t global_channel_index = 0;
         for(size_t im = 0; im < inconfig.m_num_modes; im++){
             for(size_t id =0; id < inconfig.m_num_detectors; id++){
                 for(size_t ic = 0; ic < inconfig.m_num_channels; ic++){
                     for(size_t sc = 0; sc < inconfig.m_num_subchannels[ic]; sc++){
-                        if(inconfig.m_variable_dims.at(ic) == 2){
-                            const std::string& subchannel_name  = inconfig.m_fullnames[global_subchannel_index];
-                            const std::string& color = inconfig.m_subchannel_colors[ic][sc];
-                            int rcolor = color == "NONE" ? kRed - 7 : inconfig.HexToROOTColor(color);
-                            std::unique_ptr<TH2D> htmp = std::make_unique<TH2D>(spec.toTH2D(inconfig, global_subchannel_index, other_index));
-                            if(scale) htmp->Scale(1,"width");
-                            hists[subchannel_name] = std::move(htmp);
-                            log<LOG_DEBUG>(L"%1% || Printot %2% %3% %4% %5% %6% : Integral %7% ") % __func__ % global_channel_index % global_subchannel_index % subchannel_name.c_str() % sc % ic % hists[subchannel_name]->Integral();
-                            }
+                        const std::string& subchannel_name  = inconfig.m_fullnames[global_subchannel_index];
+                        const std::string& color = inconfig.m_subchannel_colors[ic][sc];
+                        int rcolor = color == "NONE" ? kRed - 7 : inconfig.HexToROOTColor(color);
+                        std::unique_ptr<TH2D> htmp = std::make_unique<TH2D>(spec.toTH2D(inconfig, global_subchannel_index, other_index));
+                        if(scale) htmp->Scale(1,"width");
+                        hists[subchannel_name] = std::move(htmp);
+                        log<LOG_DEBUG>(L"%1% || Printot %2% %3% %4% %5% %6% : Integral %7% ") % __func__ % global_channel_index % global_subchannel_index % subchannel_name.c_str() % sc % ic % hists[subchannel_name]->Integral();
                         ++global_subchannel_index;
                         }//end subchan
                     ++global_channel_index;
@@ -278,19 +276,13 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
         TCanvas c;
         c.Print((filename+"[").c_str());
 
-        std::map<std::string, std::unique_ptr<TH1D>> cv1dhists;
-        std::map<std::string, std::unique_ptr<TH2D>> cv2dhists;
-        if(cv){
-            cv1dhists = getCV1DHists(*cv, config, (bool)(opt & PlotOptions::BinWidthScaled), other_index);
-            cv2dhists = getCV2DHists(*cv, config, (bool)(opt & PlotOptions::BinWidthScaled), other_index);
-        }
-
         std::string ytitle = bool(opt&PlotOptions::AreaNormalized)
             ? "Area Normalized"
             : bool(opt&PlotOptions::BinWidthScaled) 
             ? "Events/GeV" 
             : "Events";
-
+        std::map<std::string, std::unique_ptr<TH1D>> cv1dhists;
+        std::map<std::string, std::unique_ptr<TH2D>> cv2dhists;
         size_t global_subchannel_index = 0;
         size_t global_subchannel_index_2d = 0;
         size_t global_channel_index = 0;
@@ -298,6 +290,13 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
         for(size_t mode = 0; mode < config.m_num_modes; ++mode) {
             for(size_t det = 0; det < config.m_num_detectors; ++det) {
                 for(size_t channel = 0; channel < config.m_num_channels; ++channel) {
+                    log<LOG_DEBUG>(L"%1% || channel %2%") % __func__ % channel;
+                    if(cv){
+                        if(config.m_channel_variable_dims[channel][other_index] == 2){
+                            cv2dhists = getCV2DHists(*cv, config, (bool)(opt & PlotOptions::BinWidthScaled), other_index);
+                        }
+                        cv1dhists = getCV1DHists(*cv, config, (bool)(opt & PlotOptions::BinWidthScaled), other_index);
+                    }
 
                     size_t channel_nbins = config.m_channel_variable_bins[channel][other_index].NBinsAlong(0);
                     Eigen::VectorXf bf_spec;
@@ -305,7 +304,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                         bf_spec = config.GetChannelVariableBins(0, other_index).ProjectSpectra(CollapseMatrix(config, best_fit->Spec(), other_index), 0);//TODO, get N-dim compatability?                        
                     }
 
-                    if(config.m_variable_dims.at(channel) == 2){
+                    if(config.m_channel_variable_dims[channel][other_index] == 2){
                         std::string joined_title = config.m_channel_variable_units[channel][other_index];
                         string del = ",";
                         auto pos = joined_title.find(del);
@@ -328,20 +327,22 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
 
                         hist_title = config.m_detector_plotnames[det]  + " "+ config.m_channel_plotnames[channel]+" Best-Fit;"+xtitle2d+";"+ytitle2d;
                         TH2D bf_hist(hist_title.c_str(),hist_title.c_str(), channel_nbins_x, edges_x.data(), channel_nbins_y, edges_y.data());
-                        Eigen::VectorXf tmp_bf = best_fit->Spec();
-                        for(int xbin = 0; xbin < channel_nbins_x; xbin++){
-                            for(size_t ybin = 0; ybin < channel_nbins_y; ybin++) {
-                                bf_hist.SetBinContent(xbin+1, ybin, tmp_bf(xbin*channel_nbins_y+ybin));
+                        if(best_fit){
+                            Eigen::VectorXf tmp_bf = best_fit->Spec();
+                           log<LOG_DEBUG>(L"%1% || tmp_bf %2%") % __func__ % tmp_bf;
+                            for(int xbin = 0; xbin < channel_nbins_x; xbin++){
+                                for(size_t ybin = 0; ybin < channel_nbins_y; ybin++) {
+                                    bf_hist.SetBinContent(xbin+1, ybin, tmp_bf(xbin*channel_nbins_y+ybin));
+                                }
                             }
+                            TPad pbfd("pbfd", "pbfd", 0, 0, 1, 1);
+                            pbfd.cd();
+                            bf_hist.SetTitle(hist_title.c_str());
+                            bf_hist.Draw("colz");
+                            c.cd();
+                            pbfd.Draw();
+                            c.Print(filename.c_str());
                         }
-
-                        TPad pbfd("pbfd", "pbfd", 0, 0, 1, 1);
-                        pbfd.cd();
-                        bf_hist.SetTitle(hist_title.c_str());
-                        bf_hist.Draw("colz");
-                        c.cd();
-                        pbfd.Draw();
-                        c.Print(filename.c_str());
                         global_subchannel_index_2d += config.m_num_subchannels[channel];
                     }
 
