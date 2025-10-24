@@ -4,9 +4,9 @@ name: CMake on a single platform
 
 on:
   push:
-    branches: [ "project-SBN-dev", "GH_actions" ]
+    branches: [ "project-SBN-dev" ]
   pull_request:
-    branches: [ "project-SBN-dev", "GH_actions" ]
+    branches: [ "project-SBN-dev" ]
 
 env:
   # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
