@@ -1371,7 +1371,9 @@ int main(int argc, char* argv[])
                     size_t sbi = config.GetSubchannelIndexFromVariableGlobalBin(bin,config.i_prime);
                     std::string nsubchannel = config.GetSubchannelName(sbi);
                     std::string chan_units =   config.m_channel_variable_units[config.i_prime][config.GetLocalChannelIndexFromGlobalSubchannelIndex(sbi)];
-                    std::pair<float,float> edg = config.m_variable_bin_to_edges[config.i_prime][bin];
+                    int edges_vec_sz = (int)config.m_variable_bin_to_edges[config.i_prime].size();
+                    size_t safe_bin = (edges_vec_sz>0) ? std::min((size_t)bin, (size_t)edges_vec_sz-1) : 0;
+                    std::pair<float,float> edg = config.m_variable_bin_to_edges[config.i_prime][safe_bin];
 
                     fixed_pts->SetMarkerColor(col);
                     fixed_pts->SetMarkerStyle(kFullCircle);
