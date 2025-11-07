@@ -239,8 +239,6 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
             }
         }
 
-        log<LOG_DEBUG>(L"%1% || PARK cv is %2% and the centers are %3%") % __func__ %  cv.size() % centers.size();
-        log<LOG_DEBUG>(L"%1% || For other var %2% the cv is %3% and the centers are %4%") % __func__ % other_index % cv % centers;
         size_t nerrorsample = 2500;
         
         std::vector<Eigen::VectorXf> specs;
@@ -267,13 +265,156 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
             ebar.error_up(i) =  ehi;
             ebar.error_down(i) =  elo;
             ebar.error_point(i) = cv(i)*scale_factor;
-            log<LOG_DEBUG>(L"%1% || ErrorBand bin %2% %3% %4% %5% %6% ") % __func__ % i % cv(i) % ehi % elo % scale_factor ;
         }
         return ebar;
     }
 
+    void plot_hist1ds(TCanvas* c, std::optional<TH1D> cv_hist, std::optional<TGraphAsymmErrors> errband, std::optional<TH1D> bf_hist, std::optional<TGraphAsymmErrors> posterrband, std::optional<TH1D> data_hist, PlotOptions opt, std::string hist_titles, std::string ratio_titles, const std::string &filename, PlotBounds &bounds){
+
+
+        std::unique_ptr<TLegend> leg = std::make_unique<TLegend>(0.38,0.69,0.89,0.89);
+        leg->SetNColumns(2);
+        leg->SetFillStyle(0);
+        leg->SetLineWidth(0);
+
+        Color_t bfcol = TColor::GetColor(234, 67, 53);
+        Color_t cvcol =  TColor::GetColor(66, 103, 210);
+
+        TPad p1("p1", "p1", 0, 0.25, 1, 1);
+        p1.SetBottomMargin(0);
+        p1.cd();
+        TPad p2("p2", "p2", 0, 0, 1, 0.25);
+        p2.SetTopMargin(0);
+        p2.SetBottomMargin(0.3);
+
+        double top_modifier = 1.35;
+
+        if(cv_hist) {
+            cv_hist->SetLineColor(cvcol);
+            cv_hist->SetMaximum( bounds.hasBound("ymax") ? bounds.getBound("ymax") :  top_modifier*cv_hist->GetMaximum());
+            cv_hist->Draw("hist");
+            cv_hist->GetYaxis()->SetTitleSize(0.06);  
+            cv_hist->GetYaxis()->SetTitleOffset(0.75);
+            cv_hist->GetYaxis()->SetLabelSize(0.05);
+            cv_hist->SetMinimum(0.01);
+        }
+
+        if(bf_hist) {
+            bf_hist->SetLineStyle(kDashed);
+
+            if(cv_hist) bf_hist->Draw("hist same");
+            else bf_hist->Draw("hist");
+        }
+        if (errband) errband->Draw("2 same");
+        if (posterrband) posterrband->Draw("2 same");
+
+        TH1D* ratio = (TH1D*)cv_hist->Clone("rat");
+        ratio->Reset();
+        ratio->SetTitle(ratio_titles.c_str());
+
+        TH1D* one = (TH1D*)cv_hist->Clone("one");
+        one->Reset();
+        one->SetTitle(ratio_titles.c_str());
+
+        TGraphAsymmErrors *ratio_err;
+        if(bool(opt&PlotOptions::DataMCRatio) || bool(opt&PlotOptions::DataPostfitRatio)) {
+            p2.cd();
+
+            ratio_err = new TGraphAsymmErrors(); 
+
+            if (posterrband){
+                if(bool(opt&PlotOptions::DataMCRatio)){
+                    *ratio_err = *errband;  
+                }
+                else{
+                    *ratio_err = *posterrband;  
+                }
+            }
+            else if(errband){
+                *ratio_err = *errband;  
+            }
+
+            float ymin = 1e9, ymax = -1e9;
+
+            if(data_hist){
+                for(size_t i = 0; i < bf_hist->GetNbinsX(); ++i) {
+                    float numerator = data_hist->GetBinContent(i+1);
+                    float denonminator = 
+                        bool(opt&PlotOptions::DataMCRatio)
+                        ? cv_hist->GetBinContent(i+1)
+                        : bf_hist->GetBinContent(i+1);
+
+                    float rat = numerator/denonminator;
+                    if(isnan(rat)) rat = 1;
+                    ratio->SetBinError(i+1, data_hist->GetBinError(i+1)/denonminator);
+                    ratio->SetBinContent(i+1, rat);
+                    one->SetBinContent(i+1, 1.0);
+
+                    ratio_err->SetPointEYhigh(i, ratio_err->GetErrorYhigh(i)/ratio_err->GetPointY(i));
+                    ratio_err->SetPointEYlow(i, ratio_err->GetErrorYlow(i)/ratio_err->GetPointY(i));
+                    ratio_err->SetPointY(i, 1.0);
+                    ymin = std::min(ymin, rat);
+                    ymax = std::max(ymax, rat);
+                }
+                for (int i = 0; i < ratio_err->GetN(); ++i) {
+                    float y, eyh, eyl;
+                    y = ratio_err->GetPointY(i);
+                    eyh = ratio_err->GetErrorYhigh(i);
+                    eyl = ratio_err->GetErrorYlow(i);
+                    ymin = std::min(ymin, y - eyl);
+                    ymax = std::max(ymax, y + eyh);
+
+                }
+            }
+            float yrange = ymax - ymin;
+            float ylow = ymin - 0.05 * yrange;  // 15% padding below
+            float yhigh = ymax + 0.05 * yrange; // 15% padding above
+
+            float kmin = bounds.hasBound("ratmin") ? bounds.getBound("ratmin") : std::min(ylow,0.85f);
+            float kmax = bounds.hasBound("ratmax") ? bounds.getBound("ratmax") : std::max(yhigh,1.148f);
+
+            one->SetMinimum(kmin);
+            one->SetMaximum(kmax);
+
+            one->SetLineColor(kBlack);
+            one->SetLineStyle(kDashed);
+            one->Draw("hist");
+            one->SetTitle("");
+            one->GetYaxis()->SetTitleSize(0.15);
+            one->GetYaxis()->SetLabelSize(0.12);
+            one->GetXaxis()->SetTitleSize(0.14);
+            one->GetXaxis()->SetLabelSize(0.14);
+            one->GetYaxis()->SetTitleOffset(0.21);
+            one->GetXaxis()->SetTitleOffset(0.85);
+            ratio->SetLineColor(kBlack);
+            ratio->SetLineWidth(2);
+            ratio->SetMarkerStyle(kFullCircle);
+            ratio->SetMarkerColor(kBlack);
+            ratio->SetMarkerSize(1);
+
+            ratio_err->Draw("2 same");
+            ratio->Draw("PE1 E0 same");
+        }
+
+        c->cd();
+        p1.Draw();
+        if(errband) p2.Draw();
+
+        TText *t = new TText();
+        t->SetNDC();
+        t->SetTextFont(42);
+        t->SetTextSize(0.03); 
+        t->SetTextAlign(33); 
+        std::string pv = "PROfit v"+std::string(PROJECT_VERSION_STR);
+        t->DrawText(0.895, 0.955, pv.c_str()); 
+        c->Print(filename.c_str());
+    }
 
     void plot_channels(const std::string &filename, const PROconfig &config, std::optional<PROspec> cv, std::optional<PROspec> best_fit, std::optional<PROdata> data, std::optional<PROerrorbar> errband, std::optional<PROerrorbar> posterrband, std::vector<TPaveText> &texts, PlotBounds &bounds, PlotOptions opt, int other_index) {
+
+
+        std::string rat_y_title = bool(opt&PlotOptions::DataMCRatio) ? "Data/MC" : "Data/Best-Fit";
+
         TCanvas c;
         c.Print((filename+"[").c_str());
 
@@ -288,9 +429,17 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
         size_t global_subchannel_index_2d = 0;
         size_t global_channel_index = 0;
         int channel_start = 0;
+
+        Color_t bfcol = TColor::GetColor(234, 67, 53);
+        Color_t cvcol =  TColor::GetColor(66, 103, 210);
+
         for(size_t mode = 0; mode < config.m_num_modes; ++mode) {
             for(size_t det = 0; det < config.m_num_detectors; ++det) {
                 for(size_t channel = 0; channel < config.m_num_channels; ++channel) {
+
+                    std::string xtitle = config.m_channel_variable_units[channel][other_index];
+                    std::string ratio_titles = ";"+xtitle+";"+rat_y_title;
+
                     if(cv){
                         if(config.m_channel_variable_dims[channel][other_index] == 2){
                             cv2dhists = getCV2DHists(*cv, config, (bool)(opt & PlotOptions::BinWidthScaled), other_index);
@@ -300,8 +449,12 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
 
                     size_t channel_nbins = config.m_channel_variable_bins[channel][other_index].NBinsAlong(0);
                     Eigen::VectorXf bf_spec;
+                    Eigen::VectorXf data_spec;
                     if(best_fit) {
-                        bf_spec = config.GetChannelVariableBins(0, other_index).ProjectSpectra(CollapseMatrix(config, best_fit->Spec(), other_index), 0);//TODO, get N-dim compatability?                        
+                       bf_spec = config.GetChannelVariableBins(0, other_index).ProjectSpectra(CollapseMatrix(config, best_fit->Spec(), other_index), 0);
+                    }
+                    if(data) {
+                       data_spec = config.GetChannelVariableBins(0, other_index).ProjectSpectra(CollapseMatrix(config, data->Spec(), other_index), 0);
                     }
 
                     if(config.m_channel_variable_dims[channel][other_index] == 2){
@@ -310,7 +463,10 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                         auto pos = joined_title.find(del);
                         std::string xtitle2d = joined_title.substr(0, pos);
                         std::string ytitle2d = joined_title.erase(0, pos + del.length());
+                        ratio_titles = ";"+xtitle2d+";"+rat_y_title;
                         std::string hist_title = config.m_detector_plotnames[det]  + " "+ config.m_channel_plotnames[channel]+" CV;"+xtitle2d+";"+ytitle2d;
+
+
                         size_t channel_nbins_x = config.m_channel_variable_bins[channel][other_index].NBinsAlong(0);
                         std::vector<float> edges_x = config.m_channel_variable_bins[channel][other_index].Edges(0);
                         size_t channel_nbins_y = config.m_channel_variable_bins[channel][other_index].NBinsAlong(1);
@@ -327,53 +483,108 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
 
                         hist_title = config.m_detector_plotnames[det]  + " "+ config.m_channel_plotnames[channel]+" Best-Fit;"+xtitle2d+";"+ytitle2d;
                         TH2D bf_hist(hist_title.c_str(),hist_title.c_str(), channel_nbins_x, edges_x.data(), channel_nbins_y, edges_y.data());
+                        TH2D data_hist(hist_title.c_str(),hist_title.c_str(), channel_nbins_x, edges_x.data(), channel_nbins_y, edges_y.data());
+
+                        int nbins_p_chan = channel_nbins_y*channel_nbins_x;
+                        int det_offset = det*nbins_p_chan; 
+                        int mode_offset = mode*det_offset; 
+
                         if(best_fit){
+                            bf_hist.SetLineColor(bfcol); 
+                            bf_hist.SetLineStyle(kDashed); 
+                            bf_hist.SetLineWidth(2);
+
                             Eigen::VectorXf tmp_bf = best_fit->Spec();
+                            Eigen::VectorXf tmp_data = data->Spec();
                             for(int xbin = 0; xbin < channel_nbins_x; xbin++){
                                 for(size_t ybin = 0; ybin < channel_nbins_y; ybin++) {
-                                    bf_hist.SetBinContent(xbin+1, ybin, tmp_bf(xbin*channel_nbins_y+ybin));
+                                    bf_hist.SetBinContent(xbin+1, ybin, tmp_bf(xbin*channel_nbins_y+ybin+det_offset+mode_offset));
+                                    data_hist.SetBinContent(xbin+1, ybin, tmp_data(xbin*channel_nbins_y+ybin+det_offset+mode_offset));
                                 }
                             }
+
                             TPad pbfd("pbfd", "pbfd", 0, 0, 1, 1);
                             pbfd.cd();
-                            bf_hist.SetTitle(hist_title.c_str());
                             bf_hist.Draw("colz");
                             c.cd();
                             pbfd.Draw();
                             c.Print(filename.c_str());
                         }
+
+                        TGraphAsymmErrors *channel_errband = NULL;
+
                         global_subchannel_index_2d += config.m_num_subchannels[channel];
+
+                        float scale = 1.0;
+
+                        for(size_t ybin = 0; ybin < channel_nbins_y; ybin++) {
+                            TGraphAsymmErrors *post_channel_errband = NULL; 
+                            if(posterrband) {
+                                post_channel_errband = new TGraphAsymmErrors(cv_hist->ProjectionX("slc", ybin, ybin));
+                                int temp;
+                                for(size_t xbin = 0; xbin < channel_nbins_x; ++xbin) {
+                                    temp = ybin*channel_nbins_x+xbin+det_offset+mode_offset;
+                                    post_channel_errband->SetPointEYhigh(xbin, scale*(posterrband->error_up(ybin*channel_nbins_x+xbin+det_offset+mode_offset)));
+                                    post_channel_errband->SetPointEYlow(xbin, scale*(posterrband->error_down(ybin*channel_nbins_x+xbin+det_offset+mode_offset)));
+                                }
+                                post_channel_errband->SetFillStyle(3144);
+                                post_channel_errband->SetFillColorAlpha(bfcol, 0.5);
+                                post_channel_errband->SetLineColor(bfcol);
+                                post_channel_errband->SetLineWidth(1);
+                            }
+
+                            TGraphAsymmErrors *channel_errband = NULL; 
+                            if(errband) {
+                                channel_errband = new TGraphAsymmErrors(cv_hist->ProjectionX("slc", ybin, ybin));
+                                int temp;
+                                for(size_t xbin = 0; xbin < channel_nbins_x; ++xbin) {
+                                    temp = ybin*channel_nbins_x+xbin+det_offset+mode_offset;
+                                    channel_errband->SetPointEYhigh(xbin, scale*(errband->error_up(ybin*channel_nbins_x+xbin+det_offset+mode_offset)));
+                                    channel_errband->SetPointEYlow(xbin, scale*(errband->error_down(ybin*channel_nbins_x+xbin+det_offset+mode_offset)));
+                                }
+                                channel_errband->SetFillStyle(3144);
+                                channel_errband->SetFillColorAlpha(cvcol, 0.5);
+                                channel_errband->SetLineColor(cvcol);
+                                channel_errband->SetLineWidth(1);
+                            }
+                            std::string ybin_str = "Slice "+std::to_string(ybin)+" ";
+                            TPad pnew("new", "new", 0, 0, 1, 1);
+                            pnew.cd();
+                            c.cd();
+                            pnew.Draw();
+
+                            TH1D* cv_hist_proj = cv_hist->ProjectionX("slc", ybin, ybin);
+                            cv_hist_proj->GetYaxis()->SetTitle(ytitle.c_str());
+                            TH1D* bf_hist_proj = bf_hist.ProjectionX("bfslc", ybin, ybin);
+                            bf_hist_proj->GetYaxis()->SetTitle(ytitle.c_str());
+                            TH1D* data_hist_proj = data_hist.ProjectionX("dataslc", ybin, ybin);
+                            data_hist_proj->GetYaxis()->SetTitle(ytitle.c_str());
+
+                            if(posterrband){
+                                plot_hist1ds(&c, *cv_hist_proj, *channel_errband, *bf_hist_proj, *post_channel_errband, *data_hist_proj, opt, ybin_str+hist_title, ratio_titles, filename, bounds);
+                            }
+                            else{
+                                if(errband){
+                                    plot_hist1ds(&c, *cv_hist_proj, *channel_errband, {}, {}, {}, opt, ybin_str+hist_title, ratio_titles, filename, bounds);
+                                }
+                                else{
+                                    plot_hist1ds(&c, *cv_hist_proj, {}, {}, {}, {}, opt, ybin_str+hist_title, ratio_titles, filename, bounds);
+                                }
+                            }
+                        }
                     }
 
                     std::vector<float> edges = config.m_channel_variable_bins[channel][other_index].Edges();
-                    std::string xtitle = config.m_channel_variable_units[channel][other_index];
-
-                    Color_t bfcol = TColor::GetColor(234, 67, 53);//ncie red
-                    Color_t cvcol =  TColor::GetColor(66, 103, 210);//nice blue :)
-                    if(!best_fit)cvcol=kBlack;
-
                     std::string hist_titles = config.m_mode_plotnames[mode]+" "+config.m_detector_plotnames[det]  + " "+ config.m_channel_plotnames[channel]+";"+xtitle+";"+ytitle;
-                    std::unique_ptr<TLegend> leg = std::make_unique<TLegend>(0.38,0.69,0.89,0.89);
-                    leg->SetNColumns(2);
-                    leg->SetFillStyle(0);
-                    leg->SetLineWidth(0);
                     TH1D cv_hist(("cv_hist"+std::to_string(global_channel_index)).c_str(), hist_titles.c_str(), channel_nbins, edges.data());
                     cv_hist.SetLineWidth(2);
-                    cv_hist.SetLineColor(cvcol);
+
                     cv_hist.SetFillStyle(0);
                     for(size_t bin = 0; bin < channel_nbins; ++bin) {
                         cv_hist.SetBinContent(bin+1, 0);
                     }
                     if(bool(opt&PlotOptions::BinWidthScaled))
                         cv_hist.Scale(1, "width");
-
-                    // Set up TPads for ratios, unused if ratio option not chosen
-                    TPad p1("p1", "p1", 0, 0.25, 1, 1);
-                    p1.SetBottomMargin(0);
-
-                    TPad p2("p2", "p2", 0, 0, 1, 0.25);
-                    p2.SetTopMargin(0);
-                    p2.SetBottomMargin(0.3);
 
                     THStack *cvstack = NULL;
                     if(cv) {
@@ -383,55 +594,21 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                             const std::string& subchannel_name  = config.m_fullnames[global_subchannel_index];
                             if(bool(opt&PlotOptions::CVasStack)) {
                                 cvstack->Add(cv1dhists[subchannel_name].get());
-                                if (cv1dhists.find(subchannel_name+"slc") != cv1dhists.end()) {
-                                    cvstack->Add(cv1dhists[subchannel_name+"slc"].get());
-                                }
                                 subplots.push_back({subchannel_name, config.m_subchannel_plotnames[channel][subchannel].c_str()});
                             }
                             cv_hist.Add(cv1dhists[subchannel_name].get());
-                            //if (cv1dhists.find(subchannel_name+"slc") != cv1dhists.end()) {
-                            //    cv_hist.Add(cv1dhists[subchannel_name+"slc"].get());
-                            //}
                             ++global_subchannel_index;
-                        }
-                        if(bool(opt&PlotOptions::CVasStack)) {
-                            for(size_t sc = subplots.size(); sc > 0; --sc)
-                                leg->AddEntry(cv1dhists[subplots[sc-1].first].get(), subplots[sc-1].second ,"f");
-                        }
-                        if(bool(opt&PlotOptions::AreaNormalized)) {
-                            float integral = cv_hist.Integral();
-                            cv_hist.Scale(1 / integral);
-                            if(bool(opt&PlotOptions::CVasStack)) {
-                                TList *stlists = (TList*)cvstack->GetHists();
-                                for(const auto&& obj: *stlists){
-                                    ((TH1*)obj)->Scale(1/integral);
-                                }
-                            }
-                        }
-
-                        TH1 *leg_hack = (TH1*)cv_hist.Clone((std::string(cv_hist.GetTitle())+"leg_hack").c_str());
-                        leg_hack->SetFillStyle(3144);
-                        leg_hack->SetFillColorAlpha(cvcol, 0.2);
-                        leg_hack->SetLineColor(cvcol);
-                        leg_hack->SetLineWidth(2);
-
-                        if(errband){
-                            leg->AddEntry(leg_hack,"CV Prediction #pm 1#sigma" ,"fl"); 
-                        }else{
-                            leg->AddEntry(&cv_hist, "CV Prediction #pm 1#sigma", "l");
                         }
                     }
 
                     TGraphAsymmErrors *channel_errband = NULL;
                     if(errband) {
                         channel_errband = new TGraphAsymmErrors(&cv_hist);
+                        int channel_start =  config.GetCollapsedGlobalVariableBinStart(global_channel_index, other_index);
 
                         for(size_t bin = 0; bin < channel_nbins; ++bin) {
                             float scale = 1.0;
 
-                            if(bool(opt&PlotOptions::AreaNormalized) || bool(opt&PlotOptions::BinWidthScaled)) {
-                                scale = channel_errband->GetPointY(bin) / errband->error_point(bin+channel_start);
-                            }
                             channel_errband->SetPointEYhigh(bin, scale*(errband->error_up(bin+channel_start)));
                             channel_errband->SetPointEYlow(bin, scale*(errband->error_down(bin+channel_start)));
                         }
@@ -444,25 +621,13 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                     TH1D bf_hist(("bf"+std::to_string(global_channel_index)).c_str(), "", channel_nbins, edges.data());
                     if(best_fit) {
                         size_t total_bins = config.GetChannelVariableBins(global_channel_index, other_index).NBins();
-
                         for(size_t bin = 0; bin < channel_nbins; ++bin) {
                             bf_hist.SetBinContent(bin+1, bf_spec(bin+channel_start));
                         }
+
                         bf_hist.SetLineColor(bfcol); 
                         bf_hist.SetLineStyle(kDashed); 
                         bf_hist.SetLineWidth(2);
-
-                        TH1 *leg_hack = (TH1*)bf_hist.Clone((std::string(bf_hist.GetTitle())+"bf").c_str());
-                        leg_hack->SetFillStyle(3254);
-                        leg_hack->SetFillColor(bfcol);
-                        leg_hack->SetLineColor(bfcol);
-                        leg_hack->SetLineWidth(2);
-
-                        if(errband){
-                            leg->AddEntry(leg_hack,"Best Fit #pm 1#sigma (post-fit)" ,"fl"); 
-                        }else{
-                            leg->AddEntry(&bf_hist, "Best Fit #pm 1#sigma (post-fit)", "l");
-                        }
 
                         if(bool(opt&PlotOptions::BinWidthScaled))
                             bf_hist.Scale(1, "width");
@@ -473,6 +638,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                     TGraphAsymmErrors *post_channel_errband = NULL;
                     if(posterrband) {
                         post_channel_errband = new TGraphAsymmErrors(&bf_hist);
+                        int channel_start =  config.GetCollapsedGlobalVariableBinStart(global_channel_index, other_index);
                         for(size_t bin = 0; bin < channel_nbins; ++bin) {
                             float scale = 1.0;
                             if(bool(opt&PlotOptions::AreaNormalized) || bool(opt&PlotOptions::BinWidthScaled)) {
@@ -486,9 +652,9 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                         post_channel_errband->SetLineColor(bfcol);
                         post_channel_errband->SetLineWidth(1);
                     }
+                       
                     TH1D data_hist;
                     if(data) {
-
                         data_hist = data->toTH1D(config, global_channel_index, other_index);
                         data_hist.SetLineColor(kBlack);
                         data_hist.SetLineWidth(2);
@@ -501,192 +667,26 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                         float mantissa = config.m_det_pot[det]/ std::pow(10, exponent);
                         oss << std::fixed << std::setprecision(2) << mantissa << "x10^{" << exponent << "} POT";
                         dat_str+= oss.str();
-                        leg->AddEntry(&data_hist,dat_str.c_str(), "lp");
                         if(bool(opt&PlotOptions::BinWidthScaled))
                             data_hist.Scale(1, "width");
                         if(bool(opt&PlotOptions::AreaNormalized))
                             data_hist.Scale(1.0/data_hist.Integral());
                     }
 
-
-                    /*******************/
-                    /* Draw everything */
-                    /*******************/
-                    double top_modifier = 1.35;
-
-                    if(bool(opt&PlotOptions::DataMCRatio) || bool(opt&PlotOptions::DataPostfitRatio))
-                        p1.cd();
-
-
-                    if(cv) {
-                        if(bool(opt&PlotOptions::CVasStack)) {
-                            cvstack->SetMaximum(  bounds.hasBound("ymax") ? bounds.getBound("ymax") : std::max(top_modifier*cvstack->GetMaximum(), top_modifier*data_hist.GetMaximum()));
-                            cvstack->Draw("hist");
-                            cvstack->SetTitle(hist_titles.c_str());
-                            cv_hist.Draw("same hist");
-
-                        } else {
-                            cv_hist.SetMaximum( bounds.hasBound("ymax") ? bounds.getBound("ymax") :  top_modifier*cv_hist.GetMaximum());
-
-                            cv_hist.Draw("hist");
-                            cv_hist.GetYaxis()->SetTitleSize(0.06);  
-                            cv_hist.GetYaxis()->SetTitleOffset(0.75);
-                            cv_hist.GetYaxis()->SetLabelSize(0.05);
-                            cv_hist.SetMinimum(0.01);
-                        }
-                    }
-
-                    if(errband) channel_errband->Draw("2 same");
-
-                    if(best_fit) {
-                        bf_hist.SetTitle(hist_titles.c_str());
-                        if(cv) bf_hist.Draw("hist same");
-                        else bf_hist.Draw("hist");
-                    }
-
-                    if(posterrband) post_channel_errband->Draw("2 same");
-
-                    if(data) {
-                        TGraphErrors *g = new TGraphErrors(data_hist.GetNbinsX());
-                        float datmax =-999;
-                        for (int i = 1; i <= data_hist.GetNbinsX(); ++i) {
-                            double x = data_hist.GetBinCenter(i);
-                            double y = data_hist.GetBinContent(i);
-                            double ex = 0;
-                            double ey = data_hist.GetBinError(i);
-                            if(y>datmax){
-                                datmax=y;
-                            }
-                            g->SetPoint(i - 1, x, y);
-                            g->SetPointError(i - 1, ex, ey);
-                            g->SetLineColor(kBlack);
-                            g->SetLineWidth(2);
-                            g->SetMarkerStyle(kFullCircle);
-                            g->SetMarkerColor(kBlack);
-                            g->SetMarkerSize(1);
-
-                        }
-
-
-                        if(cv || best_fit) {
-                            g->Draw("PE1 same");
-                            cv_hist.SetMaximum( bounds.hasBound("ymax") ? bounds.getBound("ymax") : std::max(cv_hist.GetMaximum(),top_modifier*datmax));
-
-                        } else {
-                            g->Draw("PE1");
-                        }
-                    }
-
-                    if(texts.size()!=0) {
-                        TLine *dummy_line = new TLine(0,0,0.1,0);
-                        dummy_line->SetLineColor(kWhite);
-                        dummy_line->SetLineWidth(0);
-                        if(texts.size()==1){
-                            TText* text = (TText*)texts.front().GetListOfLines()->First();
-                            const char* label = text->GetTitle(); 
-                            leg->AddEntry(dummy_line,label,"l"); 
-                        }else{
-                            TText* text = (TText*)texts.at(global_channel_index).GetListOfLines()->First();
-                            const char* label = text->GetTitle(); 
-                            leg->AddEntry(dummy_line,label,"l"); 
-                        }
-                    }
-
-                    leg->Draw("same");
-
                     TH1D *ratio, *one;
                     TGraphAsymmErrors *ratio_err;
-                    if(bool(opt&PlotOptions::DataMCRatio) || bool(opt&PlotOptions::DataPostfitRatio)) {
-                        p2.cd();
-
-                        std::string y_title = bool(opt&PlotOptions::DataMCRatio) ? "Data/MC" : "Data/Best-Fit";
-                        ratio = new TH1D(("rat"+std::to_string(global_channel_index)).c_str(), (";"+xtitle+";"+y_title).c_str(), channel_nbins, edges.data());
-                        one = new TH1D(("one"+std::to_string(global_channel_index)).c_str(), (";"+xtitle+";"+y_title).c_str(), channel_nbins, edges.data());
-                        ratio_err = new TGraphAsymmErrors(); 
-                        *ratio_err = bool(opt&PlotOptions::DataMCRatio)
-                            ? *channel_errband
-                            : *post_channel_errband;
-
-                        float ymin = 1e9, ymax = -1e9;
-
-                        for(size_t i = 0; i < channel_nbins; ++i) {
-                            float numerator = data_hist.GetBinContent(i+1);
-                            float denonminator = 
-                                bool(opt&PlotOptions::DataMCRatio)
-                                ? cv_hist.GetBinContent(i+1)
-                                : bf_hist.GetBinContent(i+1);
-                            float rat = numerator/denonminator;
-                            if(isnan(rat)) rat = 1;
-                            ratio->SetBinError(i+1, data_hist.GetBinError(i+1)/denonminator);
-                            ratio->SetBinContent(i+1, rat);
-                            one->SetBinContent(i+1, 1.0);
-                            ratio_err->SetPointEYhigh(i, ratio_err->GetErrorYhigh(i)/ratio_err->GetPointY(i));
-                            ratio_err->SetPointEYlow(i, ratio_err->GetErrorYlow(i)/ratio_err->GetPointY(i));
-                            ratio_err->SetPointY(i, 1.0);
-                            ymin = std::min(ymin, rat);
-                            ymax = std::max(ymax, rat);
-                        }
-                        for (int i = 0; i < ratio_err->GetN(); ++i) {
-                            float y, eyh, eyl;
-                            y = ratio_err->GetPointY(i);
-                            eyh = ratio_err->GetErrorYhigh(i);
-                            eyl = ratio_err->GetErrorYlow(i);
-                            ymin = std::min(ymin, y - eyl);
-                            ymax = std::max(ymax, y + eyh);
-
-                        }
-                        float yrange = ymax - ymin;
-                        float ylow = ymin - 0.05 * yrange;  // 15% padding below
-                        float yhigh = ymax + 0.05 * yrange; // 15% padding above
-
-                        float kmin = bounds.hasBound("ratmin") ? bounds.getBound("ratmin") : std::min(ylow,0.85f);
-                        float kmax = bounds.hasBound("ratmax") ? bounds.getBound("ratmax") : std::max(yhigh,1.148f);
-                        log<LOG_DEBUG>(L"%1% || RatioMin %2%  Max %3% (ylow %4%) %5% val %6%") % __func__ % kmin % kmax % ylow % int(bounds.hasBound("ratmin")) % bounds.getBound("ratmin");
-
-                        if(!posterrband){
-                            one->SetMinimum(kmin);
-                            one->SetMaximum(kmax);
-
-                        }else{
-                           one->SetMinimum(kmin);
-                           one->SetMaximum(kmax);
-                        }
-
-                        one->SetLineColor(kBlack);
-                        one->SetLineStyle(kDashed);
-                        one->Draw("hist");
-                        one->SetTitle("");
-                        one->GetYaxis()->SetTitleSize(0.15);
-                        one->GetYaxis()->SetLabelSize(0.12);
-                        one->GetXaxis()->SetTitleSize(0.14);
-                        one->GetXaxis()->SetLabelSize(0.14);
-                        one->GetYaxis()->SetTitleOffset(0.21);
-                        one->GetXaxis()->SetTitleOffset(0.85);
-                        ratio->SetLineColor(kBlack);
-                        ratio->SetLineWidth(2);
-                        ratio->SetMarkerStyle(kFullCircle);
-                        ratio->SetMarkerColor(kBlack);
-                        ratio->SetMarkerSize(1);
-
-                        ratio_err->Draw("2 same");
-
-                        ratio->Draw("PE1 E0 same");
-
-                        c.cd();
-                        p1.Draw();
-                        p2.Draw();
+           
+                    if(posterrband){ 
+                        plot_hist1ds(&c, cv_hist, *channel_errband, bf_hist, *post_channel_errband, data_hist, opt, hist_titles, ratio_titles, filename, bounds);
                     }
-
-
-                    TText *t = new TText();
-                    t->SetNDC();                
-                    t->SetTextFont(42);                          
-                    t->SetTextSize(0.03);      
-                    t->SetTextAlign(33);        
-                    std::string pv = "PROfit v"+std::string(PROJECT_VERSION_STR);
-                    t->DrawText(0.895, 0.955, pv.c_str()); 
-
-                    c.Print(filename.c_str());
+                    else{
+                        if(errband){
+                            plot_hist1ds(&c, cv_hist, *channel_errband, {}, {}, {}, opt, hist_titles, ratio_titles, filename, bounds);
+                        }
+                        else{
+                            plot_hist1ds(&c, cv_hist, {}, {}, {}, {}, opt, hist_titles, ratio_titles, filename, bounds);
+                        }
+                    }
 
                     ++global_channel_index;
                     channel_start += config.m_channel_variable_bins[channel][other_index].NBinsAlong(0);
