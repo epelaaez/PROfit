@@ -389,7 +389,7 @@ public:
     };
 
     int UnitarityConstraint(const Eigen::VectorXf &v){
-        return   (sqrt(pow(10,v(1)))*cosh(v(2))<1 ? 1 : 0);      
+        return   (sqrt(pow(10,v(1)))*cosh(v(2))<0.999 ? 1 : 0);      
     }
 
     float Pmue(float dmsq, float sinsq2thmue, [[maybe_unused]]float xi, float le) const{
@@ -426,12 +426,12 @@ public:
         sinsq2thmue = std::pow(10.0f, sinsq2thmue);
 
         float Um4sq=(std::exp(xi) * std::sqrt(sinsq2thmue)) / 2.0;
-        
+
         float sinterm = std::sin(1.27*dmsq*(le));
         float prob    = 1.0f - 4.0f*Um4sq*(1.0f-Um4sq)*sinterm*sinterm;
 
         if(prob<0.0 || prob >1.0){
-            log<LOG_ERROR>(L"%1% || Your probability %2% is outside the bounds of math. dmsq = %3%, Um4sq = %4%, L/E = %5%") % __func__ % prob % dmsq % Um4sq % le;
+            log<LOG_ERROR>(L"%1% || Your probability %2% is outside the bounds of math. dmsq = %3%, Um4sq = %4%, sinsq2thmue = %5%, xi = %6%, L/E = %7%") % __func__ % prob % dmsq % Um4sq % sinsq2thmue % xi % le;
             log<LOG_ERROR>(L"%1% || Terminating.") % __func__;
             exit(EXIT_FAILURE);
         }
@@ -449,7 +449,7 @@ public:
         float prob    = 1.0f - 4.0f*Ue4sq*(1.0f-Ue4sq)*sinterm*sinterm;
 
         if(prob<0.0 || prob >1.0){
-            log<LOG_ERROR>(L"%1% || Your probability %2% is outside the bounds of math. dmsq = %3%, Ue4sq = %4%, L/E = %5%") % __func__ % prob % dmsq % Ue4sq % le;
+            log<LOG_ERROR>(L"%1% || Your probability %2% is outside the bounds of math. dmsq = %3%, Ue4sq = %4%, sinsq2thmue = %5%, xi = %6%, L/E = %7%") % __func__ % prob % dmsq % Ue4sq % sinsq2thmue % xi % le;
             log<LOG_ERROR>(L"%1% || Terminating.") % __func__;
             exit(EXIT_FAILURE);
         }

@@ -402,7 +402,7 @@ namespace PROfit {
             std::vector<float> freq_seed_values;
 
             PROfitter(const Eigen::VectorXf ub, const Eigen::VectorXf lb, PROfitterConfig fitconfig_ = {}, uint32_t inseed = 0)
-                : ub(ub), lb(lb), fitconfig(fitconfig_), solver(fitconfig.param), seed(inseed) {}
+                : ub(ub), lb(lb), fitconfig(fitconfig_), solver(fitconfig.param), seed(inseed) {run_progress=false;}
 
             float Fit(PROmetric &metric, const Eigen::VectorXf &seed_pt = Eigen::VectorXf());
             float Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed_points );
