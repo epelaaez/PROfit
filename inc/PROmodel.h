@@ -196,6 +196,77 @@ public:
     }
 };
 
+class PROnuedis : public PROmodel {
+public:
+    PROnuedis(const PROpeller &prop,const std::map<std::string,int> &parameter_map) {
+        model_functions.push_back([this]([[maybe_unused]] const Eigen::VectorXf &v, float) {(void)this; return 1.0;});
+        model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pee(v(0),v(1),le);});
+        
+
+        if(parameter_map.find("L/E") == parameter_map.end()) {
+            log<LOG_ERROR>(L"%1%, %2% || Missing expected parameter: 'L/E'.Make sure its in your model section of XML. ") % __func__ % __LINE__;
+            throw std::runtime_error("Missing parameter: L/E");
+        }
+        ivar = parameter_map.at("L/E");
+
+        size_t nvar = prop.variable_mc_stat_err.size();
+        hists.resize(nvar);
+        for(size_t v = 0; v <nvar ;v++){
+            for(size_t m = 0; m < model_functions.size(); ++m) {
+                hists.at(v).emplace_back(Eigen::MatrixXf::Constant(prop.variable_hist_storage(ivar,v).rows(), prop.variable_hist_storage(ivar,v).cols(),0.0));
+                Eigen::MatrixXf &h = hists.at(v).back();
+                for(size_t i = 0; i < prop.NEvent(); ++i) {
+                    if(prop.model_rule[i] != (int)m) continue;
+                    int tbin = prop.VariableBinIndex(ivar, i), rbin = prop.VariableBinIndex(v, i);
+                    if(tbin<0 || rbin<0) continue;
+                    h(tbin, rbin) += prop.added_weights[i];
+                }
+            }
+        }
+        nparams = 2;
+        param_names = {"dmsq", "sinsq2thee"}; 
+        pretty_param_names = {"#Deltam^{2}", "sin^{2}2#theta_{ee}"}; 
+        pretty_param_units = {"eV^{2}", ""}; 
+        lb = Eigen::VectorXf(2);
+        ub = Eigen::VectorXf(2);
+        default_val = Eigen::VectorXf(2);
+        lb << -2, -std::numeric_limits<float>::infinity();
+        ub << 2, 0;
+        default_val << -10, -10;
+
+    };
+
+    /* Function: 3+1 nue->nue disapperance prob in SBL approx */
+    float Pee(float dmsq, float sinsq2thee, float le) const{
+        dmsq = std::pow(10.0f, dmsq);
+        sinsq2thee = std::pow(10.0f, sinsq2thee);
+
+        if(sinsq2thee > 1) {
+            //log<LOG_ERROR>(L"%1% || sinsq2thee is %2% which is greater than 1. Setting to 1.")     % __func__ % sinsq2thee;
+            sinsq2thee = 1;
+        }
+        if(sinsq2thee < 0) {
+            log<LOG_ERROR>(L"%1% || sinsq2thee is %2% which is less than 0. Setting to 0.")
+                % __func__ % sinsq2thee;
+            sinsq2thee = 0;
+        }
+
+        float sinterm = std::sin(1.27f*dmsq*(le));
+        float prob    = 1.0f - (sinsq2thee*sinterm*sinterm);
+
+        if(prob<0.0 || prob >1.0 ){;//|| std::isnan(prob)){
+            log<LOG_ERROR>(L"%1% || Your probability %2% is outside the bounds of math."
+                           L"dmsq = %3%, sinsq2thee = %4%, L/E = %5%")
+                % __func__ % prob % dmsq % sinsq2thee % le;
+            log<LOG_ERROR>(L"%1% || Terminating.") % __func__;
+            exit(EXIT_FAILURE);
+        }
+
+        return prob;
+    }
+};
+
+
 class PRO3p1 : public PROmodel {
 public:
     PRO3p1(const PROpeller &prop, const std::map<std::string,int> &parameter_map) {
@@ -390,7 +461,7 @@ public:
     };
 
     int UnitarityConstraint(const Eigen::VectorXf &v){
-        return   (sqrt(pow(10,v(1)))*cosh(v(2))<1 ? 1 : 0);      
+        return   (sqrt(pow(10,v(1)))*cosh(v(2))<0.999 ? 1 : 0);      
     }
 
     float Pmue(float dmsq, float sinsq2thmue, [[maybe_unused]]float xi, float le) const{
@@ -427,12 +498,12 @@ public:
         sinsq2thmue = std::pow(10.0f, sinsq2thmue);
 
         float Um4sq=(std::exp(xi) * std::sqrt(sinsq2thmue)) / 2.0;
-        
+
         float sinterm = std::sin(1.27*dmsq*(le));
         float prob    = 1.0f - 4.0f*Um4sq*(1.0f-Um4sq)*sinterm*sinterm;
 
         if(prob<0.0 || prob >1.0){
-            log<LOG_ERROR>(L"%1% || Your probability %2% is outside the bounds of math. dmsq = %3%, Um4sq = %4%, L/E = %5%") % __func__ % prob % dmsq % Um4sq % le;
+            log<LOG_ERROR>(L"%1% || Your probability %2% is outside the bounds of math. dmsq = %3%, Um4sq = %4%, sinsq2thmue = %5%, xi = %6%, L/E = %7%") % __func__ % prob % dmsq % Um4sq % sinsq2thmue % xi % le;
             log<LOG_ERROR>(L"%1% || Terminating.") % __func__;
             exit(EXIT_FAILURE);
         }
@@ -450,7 +521,7 @@ public:
         float prob    = 1.0f - 4.0f*Ue4sq*(1.0f-Ue4sq)*sinterm*sinterm;
 
         if(prob<0.0 || prob >1.0){
-            log<LOG_ERROR>(L"%1% || Your probability %2% is outside the bounds of math. dmsq = %3%, Ue4sq = %4%, L/E = %5%") % __func__ % prob % dmsq % Ue4sq % le;
+            log<LOG_ERROR>(L"%1% || Your probability %2% is outside the bounds of math. dmsq = %3%, Ue4sq = %4%, sinsq2thmue = %5%, xi = %6%, L/E = %7%") % __func__ % prob % dmsq % Ue4sq % sinsq2thmue % xi % le;
             log<LOG_ERROR>(L"%1% || Terminating.") % __func__;
             exit(EXIT_FAILURE);
         }
@@ -469,12 +540,14 @@ std::unique_ptr<PROmodel> get_model_from_string(const PROconfig& config, const P
         return std::unique_ptr<PROmodel>(new PROnumudis(prop,config.m_model_parameter_map));
     } else if(name == "nueapp") {
         return std::unique_ptr<PROmodel>(new PROnueapp(prop,config.m_model_parameter_map));
+    } else if(name == "nuedis") {
+        return std::unique_ptr<PROmodel>(new PROnuedis(prop,config.m_model_parameter_map));
     } else if(name == "3+1") {
         return std::unique_ptr<PROmodel>(new PRO3p1(prop,config.m_model_parameter_map));
     } else if(name == "3+1_3C") {
         return std::unique_ptr<PROmodel>(new PRO3p1_3C(prop,config.m_model_parameter_map));
     }
-    log<LOG_ERROR>(L"%1% || Unrecognized model name %2%. Try numudis, nueapp, 3+1 or 3+1_3C for now. Terminating.") % __func__ % name.c_str();
+    log<LOG_ERROR>(L"%1% || Unrecognized model name %2%. Try numudis, nueapp, nuedis, 3+1 or 3+1_3C for now. Terminating.") % __func__ % name.c_str();
     exit(EXIT_FAILURE);
 }
 
