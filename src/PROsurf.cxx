@@ -703,10 +703,10 @@ PROfile::PROfile(const PROconfig &config, const PROsyst &systs, const PROmodel &
         for(size_t u=0; u< out.knob_vals.size(); u++){
             if(out.knob_chis.at(u)<0){
                 float chidiff = fabs(out.knob_chis.at(u));
-                float bfnorm = seed_points.front().norm();
-                float bfnorm_without_phys = seed_points.front().tail(seed_points.front().size() - model.nparams).norm();
+                float bfnorm = seed_points.size() ? seed_points.front().norm() : 1;
+                float bfnorm_without_phys = seed_points.size() ? seed_points.front().tail(seed_points.front().size() - model.nparams).norm() : 1;
 
-                Eigen::VectorXf param_diff = out.knob_bfs.at(u)-seed_points.front();
+                Eigen::VectorXf param_diff = seed_points.size() ? out.knob_bfs.at(u)-seed_points.front() : out.knob_bfs.at(u);
                 float norm = param_diff.norm();
                 float norm_without_phys = param_diff.tail(param_diff.size() - model.nparams).norm();
 
