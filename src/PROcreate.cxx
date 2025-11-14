@@ -885,7 +885,7 @@ namespace PROfit {
 
             float additional_weight = syst_additional_weight.at(i);
             auto map_iter = eventweight_map.find(var_syst_objs.front()->GetSysName());
-            int spline_bin =  var_bin_indices[var_syst_objs.front()->binning];
+            int spline_bin = (var_syst_objs.front()->mode == "covariance") ? -1: var_bin_indices[var_syst_objs.front()->binning];
 
             if(var_syst_objs.front()->mode == "spline") {
                 if(spline_bin < 0) continue;

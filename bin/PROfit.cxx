@@ -638,7 +638,7 @@ int main(int argc, char* argv[])
         float best_chi2 = fitter.Fit(*metric_to_use,CVpparams); 
         Eigen::VectorXf best_fit = fitter.best_fit;
         Eigen::MatrixXf post_covar = fitter.Covariance();
-        fitter.calcFreqSeedPoints(*metric_to_use);
+        if(!systs_only_profile) fitter.calcFreqSeedPoints(*metric_to_use);
 
         for(size_t i=0; i< fitter.freq_seed_points.size(); i++){
             float chi_freq = fitter.freq_seed_values.at(i);
@@ -829,6 +829,7 @@ int main(int argc, char* argv[])
         if(progress_bar)scanFitConfig.progress_bar = true;
 
         std::vector<Eigen::VectorXf> seeds = fitter.freq_seed_points;//to be updated to v1.1.5 harmoincs [DONE]
+        if(!seeds.size()) seeds.push_back(best_fit);
         PROfile profile(config, metric_to_use->GetSysts(), metric_to_use->GetModel(), *metric_to_use, myseed, scanFitConfig, 
                 final_output_tag+"_PROfile", best_chi2, !systs_only_profile, nthread, seeds,
                 systs_only_profile ? systparams : allparams);
@@ -1374,7 +1375,9 @@ int main(int argc, char* argv[])
                     size_t sbi = config.GetSubchannelIndexFromVariableGlobalBin(bin,config.i_prime);
                     std::string nsubchannel = config.GetSubchannelName(sbi);
                     std::string chan_units =   config.m_channel_variable_units[config.i_prime][config.GetLocalChannelIndexFromGlobalSubchannelIndex(sbi)];
-                    std::pair<float,float> edg = config.m_variable_bin_to_edges[config.i_prime][bin];
+                    int edges_vec_sz = (int)config.m_variable_bin_to_edges[config.i_prime].size();
+                    size_t safe_bin = (edges_vec_sz>0) ? std::min((size_t)bin, (size_t)edges_vec_sz-1) : 0;
+                    std::pair<float,float> edg = config.m_variable_bin_to_edges[config.i_prime][safe_bin];
 
                     fixed_pts->SetMarkerColor(col);
                     fixed_pts->SetMarkerStyle(kFullCircle);
