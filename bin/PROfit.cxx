@@ -627,6 +627,12 @@ int main(int argc, char* argv[])
                 global_ub(i) = variable_systs[config.i_prime].spline_hi[i-N_phys_params];
 
     }
+    if(fixed_params.size()!=std::accumulate(global_fixed.begin(), global_fixed.end(), 0)){
+            log<LOG_ERROR>(L"%1% || ERROR. The fixed parameters you passed, check they exist? the number of fixed params is not the same as input params.") % __func__;
+            log<LOG_ERROR>(L"%1% || ERROR. fixed_params %2% ") % __func__ % fixed_params;
+            log<LOG_ERROR>(L"%1% || ERROR. global_fixed %2% : sum %3% ") % __func__ % global_fixed % ((int)std::accumulate(global_fixed.begin(), global_fixed.end(), 0)) ;
+            exit(EXIT_FAILURE);
+    }
 
 
     //Metric Time
@@ -1758,6 +1764,10 @@ int main(int argc, char* argv[])
         // Fix physics parameters
         std::vector<int> fixed_pars;
         for(size_t i = 0; i < N_phys_params; ++i) fixed_pars.push_back(i);
+        for(size_t i = N_phys_params; i< global_fixed.size();i++){
+            if(global_fixed.at(i)==1)fixed_pars.push_back(i);
+        }
+
 
         log<LOG_INFO>(L"%1% || Starting global getErrorBand() ") % __func__;
         Metropolis mh_pre(prior_only_target{*metric}, adaptive_proposal(*metric, dseed(PROseed::global_rng), fixed_pars), best_fit, dseed(PROseed::global_rng));
