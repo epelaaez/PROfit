@@ -627,7 +627,7 @@ int main(int argc, char* argv[])
                 global_ub(i) = variable_systs[config.i_prime].spline_hi[i-N_phys_params];
 
     }
-    if(fixed_params.size()!=std::accumulate(global_fixed.begin(), global_fixed.end(), 0)){
+    if( (fixed_params.size()!=std::accumulate(global_fixed.begin(), global_fixed.end(), 0)) && !systs_only ){
             log<LOG_ERROR>(L"%1% || ERROR. The fixed parameters you passed, check they exist? the number of fixed params is not the same as input params.") % __func__;
             log<LOG_ERROR>(L"%1% || ERROR. fixed_params %2% ") % __func__ % fixed_params;
             log<LOG_ERROR>(L"%1% || ERROR. global_fixed %2% : sum %3% ") % __func__ % global_fixed % ((int)std::accumulate(global_fixed.begin(), global_fixed.end(), 0)) ;
