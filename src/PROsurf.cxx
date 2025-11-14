@@ -197,35 +197,41 @@ std::vector<profOut> PROfile::PROfilePointHelper(const PROsyst *systs, const PRO
         std::vector<float> test_values;
 
         //if not physis do normal
-        if(!isphys){
-            //if lower bound is 0 or both pos/both negative (aka not sym around zero)
-            if(lb(which_spline)==0 || (lb(which_spline)*ub(which_spline) >0) ){
-                for (int j = 0; j <= nstep; ++j) {
-                    float which_value =  std::isinf(lb(which_spline)) ? -3 + (ub(which_spline) - (-3)) * j / (float)nstep :   lb(which_spline) + (ub(which_spline) - lb(which_spline)) * j / (float)nstep;
-                    test_values.push_back(which_value);       
+        
+        
+        if(lb(which_spline)==ub(which_spline)){//its fixed. Dont run it
+            test_values.push_back(ub(which_spline));
+        }else{
+            if(!isphys){
+                //if lower bound is 0 or both pos/both negative (aka not sym around zero)
+                if(lb(which_spline)==0 || (lb(which_spline)*ub(which_spline) >0) ){
+                    for (int j = 0; j <= nstep; ++j) {
+                        float which_value =  std::isinf(lb(which_spline)) ? -3 + (ub(which_spline) - (-3)) * j / (float)nstep :   lb(which_spline) + (ub(which_spline) - lb(which_spline)) * j / (float)nstep;
+                        test_values.push_back(which_value);       
+                    }
+                }else{
+                    for (int j = 0; j <= nstep; ++j) {
+                        int k;
+                        if (j <= nstep - nstep / 2) {
+                            k = nstep / 2 + j;  // Forward direction
+                        } else {
+                            k = nstep - j;  // Backward direction
+                        }
+                        float which_value =  std::isinf(lb(which_spline)) ? -3 + (ub(which_spline) - (-3)) * k / (float)nstep :   lb(which_spline) + (ub(which_spline) - lb(which_spline)) * k / (float)nstep;
+                        test_values.push_back(which_value);       
+                    }
                 }
             }else{
-                for (int j = 0; j <= nstep; ++j) {
-                    int k;
-                    if (j <= nstep - nstep / 2) {
-                        k = nstep / 2 + j;  // Forward direction
-                    } else {
-                        k = nstep - j;  // Backward direction
-                    }
-                    float which_value =  std::isinf(lb(which_spline)) ? -3 + (ub(which_spline) - (-3)) * k / (float)nstep :   lb(which_spline) + (ub(which_spline) - lb(which_spline)) * k / (float)nstep;
-                    test_values.push_back(which_value);       
+                //if its physics, grab seed points, need to include those
+                std::vector<float> seed_values(seed_points.size());
+                std::transform(seed_points.begin(), seed_points.end(), seed_values.begin(), [which_spline](const auto& vec) { return vec[which_spline]; });
+                float mod = 0.5;
+                while(test_values.size()<nstep*1.5){
+                    test_values = combined_sparse_seed(std::isinf(lb(which_spline)) ? -3 : lb(which_spline), ub(which_spline), seed_values, nstep*mod, 2);
+                    mod=mod*1.2;
                 }
+                log<LOG_INFO>(L"%1% || PROfileing over physics parameter number %2% has %3% uniform points, and %4% local ones for a total of %5% points. ") % __func__ %  which_spline % int(nstep*0.5) %int((2*2+1)*seed_values.size()) % test_values.size();
             }
-        }else{
-            //if its physics, grab seed points, need to include those
-            std::vector<float> seed_values(seed_points.size());
-            std::transform(seed_points.begin(), seed_points.end(), seed_values.begin(), [which_spline](const auto& vec) { return vec[which_spline]; });
-            float mod = 0.5;
-            while(test_values.size()<nstep*1.5){
-                test_values = combined_sparse_seed(std::isinf(lb(which_spline)) ? -3 : lb(which_spline), ub(which_spline), seed_values, nstep*mod, 2);
-                mod=mod*1.2;
-            }
-            log<LOG_INFO>(L"%1% || PROfileing over physics parameter number %2% has %3% uniform points, and %4% local ones for a total of %5% points. ") % __func__ %  which_spline % int(nstep*0.5) %int((2*2+1)*seed_values.size()) % test_values.size();
         }
 
         //log<LOG_INFO>(L"%1% || PLONK which_spline %2% has testpt order %3% ") % __func__ %  which_spline % test_values;
@@ -838,6 +844,15 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
             graphs[w]->GetYaxis()->SetRangeUser(0, std::min(graphs[w]->GetHistogram()->GetMaximum(),10.0));
         }
 
+        if(graphs[w]->GetN()==1){//1 point, its been fixed. Just draw a line
+            float x_val = graphs[w]->GetPointX(0);
+            TLine* linet = new TLine(x_val, 0, x_val, 1);
+            linet->SetLineStyle(1);  // Dotted line style (1 is solid, 2 is dashed, 3 is dotted)
+            linet->SetLineWidth(2);  // Thin line
+            linet->SetLineColor(kGreen+2);  // Set color (black for visibility)
+            linet->Draw();
+        }
+
         if(w==model.nparams-1){
             //on past physics param, lets do a quick zoom, stepping back though the physics param
             for(int zs = model.nparams-1; zs>=0; zs--){
@@ -857,6 +872,15 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
                 graphClone->GetYaxis()->SetLabelSize(0.04);            
                 graphClone->GetXaxis()->SetTitleSize(0.04);             
                 graphClone->GetXaxis()->SetLabelSize(0.04);            
+
+                if(graphClone->GetN()==1){//1 point, its been fixed. Just draw a line
+                    float x_val = graphClone->GetPointX(0);
+                    TLine* linet = new TLine(x_val, 0, x_val, 1);
+                    linet->SetLineStyle(1);  // Dotted line style (1 is solid, 2 is dashed, 3 is dotted)
+                    linet->SetLineWidth(2);  // Thin line
+                    linet->SetLineColor(kGreen+2);  // Set color (black for visibility)
+                    linet->Draw();
+                }
 
                 log<LOG_INFO>(L"%1% || Zoom boundaries X %2% %3% Y %4% %5%  ") % __func__ % pd % pu % 0.0 % (std::max(graphClone->Eval(pu),graphClone->Eval(pd))*1.1)  ;
 
@@ -942,11 +966,7 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
     //if (twosig) {
     //    TGraphAsymmErrors *h2 = new TGraphAsymmErrors(barvalues.size(),barvalues.data(), bfvalues.data(), barvalues_err.data(), barvalues_err.data(), values2_down.data(), values2_up.data());
     //    h2->SetFillColor(38);
-    //    h2->SetStats(0);
-    //    h2->SetTitle("");
-    //    h2->Draw("A2");
-    //    h2->GetYaxis()->SetTitle("");
-    //}
+    //    h2->Se
 
 
     TLine l(0,0,nBins+0.5,0);
