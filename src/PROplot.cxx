@@ -215,10 +215,6 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
 }
     PROerrorbar getErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const PROspec &cv_spec, const Eigen::VectorXf &cvparams,bool scale, int other_index) {
 
-        //cv_spec.Print();
-        //   log<LOG_INFO>(L"%1% ||ARSE %2% ") % __func__ % cv_spec.Spec();
-        //    log<LOG_INFO>(L"%1% ||AddressSE %2% ") % __func__ % &cv_spec;
-
         Eigen::VectorXf cv = CollapseMatrix(config, cv_spec.Spec(), other_index);
    
         std::vector<float> centers;
@@ -268,33 +264,70 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
         return ebar;
     }
 
-    void plot_hist1ds(TCanvas* c, std::optional<TH1D> cv_hist, std::optional<TGraphAsymmErrors> errband, std::optional<TH1D> bf_hist, std::optional<TGraphAsymmErrors> posterrband, std::optional<TH1D> data_hist, std::optional<std::string> dat_str, PlotOptions opt, std::string hist_titles, std::string ratio_titles, const std::string &filename, PlotBounds &bounds, std::optional<TText> text){
+    void plot_hist1ds(TCanvas* c, std::optional<TH1D> cv_hist, std::optional<TGraphAsymmErrors> errband, std::optional<THStack> cvstack, std::optional<std::vector<std::pair<std::string, const char*>>> subplots, std::optional<TH1D> bf_hist, std::optional<TGraphAsymmErrors> posterrband, std::optional<TH1D> data_hist, std::optional<std::string> dat_str, PlotOptions opt, std::string hist_titles, std::string ratio_titles, const std::string &filename, PlotBounds &bounds, std::optional<TText> text){
 
-        std::unique_ptr<TLegend> leg = std::make_unique<TLegend>(0.38,0.69,0.89,0.89);
+        std::unique_ptr<TLegend> leg = std::make_unique<TLegend>(0.38,0.74,0.89,0.91);
         leg->SetNColumns(2);
         leg->SetFillStyle(0);
         leg->SetLineWidth(0);
 
         Color_t cvcol =  TColor::GetColor(66, 103, 210);
+        if(!bf_hist)cvcol=kBlack;
         Color_t bfcol = TColor::GetColor(234, 67, 53);
 
-        TPad p1("p1", "p1", 0, 0.25, 1, 1);
-        p1.SetBottomMargin(0);
-        p1.cd();
-        TPad p2("p2", "p2", 0, 0, 1, 0.25);
-        p2.SetTopMargin(0);
-        p2.SetBottomMargin(0.3);
+        TPad* p1 = NULL;
+        if(bool(opt&PlotOptions::DataMCRatio) || bool(opt&PlotOptions::DataPostfitRatio)){
+            p1 = new TPad("p1", "p1", 0, 0.25, 1, 1);
+            p1->cd();
+            p1->SetBottomMargin(0);
+        }
+        else{
+            p1 = new TPad("p1", "p1", 0, 0, 1, 1);
+            p1->cd();
+        }
+
+        TPad* p2 = new TPad("p2", "p2", 0, 0, 1, 0.25);
+        p2->SetTopMargin(0);
+        p2->SetBottomMargin(0.3);
 
         double top_modifier = 1.35;
 
         if(cv_hist) {
+
             cv_hist->SetLineColor(cvcol);
             cv_hist->SetMaximum( bounds.hasBound("ymax") ? bounds.getBound("ymax") :  top_modifier*cv_hist->GetMaximum());
             cv_hist->GetYaxis()->SetTitleSize(0.06);  
             cv_hist->GetYaxis()->SetTitleOffset(0.75);
             cv_hist->GetYaxis()->SetLabelSize(0.05);
             cv_hist->SetMinimum(0.01);
-            cv_hist->Draw("hist");
+
+            if(bool(opt&PlotOptions::CVasStack)) {
+                if(data_hist){
+                    cvstack->SetMaximum(  bounds.hasBound("ymax") ? bounds.getBound("ymax") : std::max(top_modifier*cvstack->GetMaximum(), top_modifier*data_hist->GetMaximum()));
+                }
+                else{
+                    cvstack->SetMaximum(  bounds.hasBound("ymax") ? bounds.getBound("ymax") : top_modifier*cvstack->GetMaximum());
+                }
+                cvstack->Draw("hist");
+                cvstack->SetTitle(hist_titles.c_str());
+                cv_hist->Draw("same hist");
+
+                TList* hist_list = cvstack->GetHists();
+                TIter next(hist_list); 
+                TObject* obj;
+                size_t sc = 0; 
+                while ((obj = next())) {
+
+                    TH1D* hist = dynamic_cast<TH1D*>(obj);
+                    if (hist) {
+                        leg->AddEntry(hist, subplots->at(sc).second, "f");
+                    }
+                    sc = sc + 1;
+                }
+            }
+            else{
+                cv_hist->Draw("hist");
+            }
 
             TH1 *leg_hack = (TH1*)cv_hist->Clone((std::string(cv_hist->GetTitle())+"leg_hack").c_str());
             if(errband){
@@ -306,6 +339,8 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
             }else{
                 leg->AddEntry(leg_hack, "CV Prediction #pm 1#sigma", "l");
             }
+
+
         }
 
         if(bf_hist) {
@@ -328,6 +363,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
         }
 
         if(data_hist) {
+
             TGraphErrors *g = new TGraphErrors(data_hist->GetNbinsX());
             float datmax =-999;
             for (int i = 1; i <= data_hist->GetNbinsX(); ++i) {
@@ -350,6 +386,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
             TH1 *leg_hack = (TH1*)data_hist->Clone((std::string(data_hist->GetTitle())).c_str());
 	    leg->AddEntry(leg_hack, dat_str->c_str(), "lp");
         }
+
 
         if(errband) {
             errband->SetFillStyle(3144);
@@ -387,7 +424,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
 
         TGraphAsymmErrors *ratio_err;
         if(bool(opt&PlotOptions::DataMCRatio) || bool(opt&PlotOptions::DataPostfitRatio)) {
-            p2.cd();
+            p2->cd();
 
             ratio_err = new TGraphAsymmErrors(); 
 
@@ -406,7 +443,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
             float ymin = 1e9, ymax = -1e9;
 
             if(data_hist){
-                for(int i = 0; i < bf_hist->GetNbinsX(); ++i) {
+                for(int i = 0; i < data_hist->GetNbinsX(); ++i) {
                     float numerator = data_hist->GetBinContent(i+1);
                     float denonminator = 
                         bool(opt&PlotOptions::DataMCRatio)
@@ -466,8 +503,8 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
         }
 
         c->cd();
-        p1.Draw();
-        if(errband) p2.Draw();
+        p1->Draw();
+        if(errband) p2->Draw();
 
         TText *t = new TText();
         t->SetNDC();
@@ -526,12 +563,8 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
 
                     size_t channel_nbins = config.m_channel_variable_bins[channel][other_index].NBinsAlong(0);
                     Eigen::VectorXf bf_spec;
-                    Eigen::VectorXf data_spec;
                     if(best_fit) {
-                       bf_spec = config.GetChannelVariableBins(0, other_index).ProjectSpectra(CollapseMatrix(config, best_fit->Spec(), other_index), 0);
-                    }
-                    if(data) {
-                       data_spec = config.GetChannelVariableBins(0, other_index).ProjectSpectra(CollapseMatrix(config, data->Spec(), other_index), 0);
+                       bf_spec = config.GetChannelVariableBins(global_channel_index, other_index).ProjectSpectra(CollapseMatrix(config, best_fit->Spec(), other_index), 0);
                     }
 
                     if(config.m_channel_variable_dims[channel][other_index] == 2){
@@ -542,7 +575,6 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                         std::string ytitle2d = joined_title.erase(0, pos + del.length());
                         ratio_titles = ";"+xtitle2d+";"+rat_y_title;
                         std::string hist_title = config.m_detector_plotnames[det]  + " "+ config.m_channel_plotnames[channel]+" CV;"+xtitle2d+";"+ytitle2d;
-                        log<LOG_DEBUG>(L"%1% || hist_title %2%") % __func__ % hist_title.c_str();
 
                         size_t channel_nbins_x = config.m_channel_variable_bins[channel][other_index].NBinsAlong(0);
                         std::vector<float> edges_x = config.m_channel_variable_bins[channel][other_index].Edges(0);
@@ -643,14 +675,14 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                             data_hist_proj->SetTitle(ybin_str.c_str());
 
                             if(posterrband){
-                                plot_hist1ds(&c, *cv_hist_proj, *channel_errband, *bf_hist_proj, *post_channel_errband, *data_hist_proj, dat_str, opt, ybin_str, ratio_titles, filename, bounds, {});
+                                plot_hist1ds(&c, *cv_hist_proj, *channel_errband, {}, {}, *bf_hist_proj, *post_channel_errband, *data_hist_proj, dat_str, opt, ybin_str, ratio_titles, filename, bounds, {});
                             }
                             else{
                                 if(errband){
-                                    plot_hist1ds(&c, *cv_hist_proj, *channel_errband, {}, {}, {}, {}, opt, ybin_str+hist_title, ratio_titles, filename, bounds, {});
+                                    plot_hist1ds(&c, *cv_hist_proj, *channel_errband, {}, {}, {}, {}, {}, {}, opt, ybin_str+hist_title, ratio_titles, filename, bounds, {});
                                 }
                                 else{
-                                    plot_hist1ds(&c, *cv_hist_proj, {}, {}, {}, {}, {}, opt, ybin_str+hist_title, ratio_titles, filename, bounds, {});
+                                    plot_hist1ds(&c, *cv_hist_proj, {}, {}, {}, {}, {}, {}, {}, opt, ybin_str+hist_title, ratio_titles, filename, bounds, {});
                                 }
                             }
                         }
@@ -669,9 +701,10 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                         cv_hist.Scale(1, "width");
 
                     THStack *cvstack = NULL;
+                    std::vector<std::pair<std::string, const char*>> subplots;
                     if(cv) {
                         if(bool(opt&PlotOptions::CVasStack)) cvstack = new THStack(std::to_string(global_channel_index).c_str(), "");
-                        std::vector<std::pair<std::string, const char*>> subplots;
+
                         for(size_t subchannel = 0; subchannel < config.m_num_subchannels[channel]; ++subchannel){
                             const std::string& subchannel_name  = config.m_fullnames[global_subchannel_index];
                             if(bool(opt&PlotOptions::CVasStack)) {
@@ -686,6 +719,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                     TGraphAsymmErrors *channel_errband = NULL;
                     if(errband) {
                         channel_errband = new TGraphAsymmErrors(&cv_hist);
+                       log<LOG_DEBUG>(L"%1% || plot_channels 3") % __func__;
                         int channel_start =  config.GetCollapsedGlobalVariableBinStart(global_channel_index, other_index);
 
                         for(size_t bin = 0; bin < channel_nbins; ++bin) {
@@ -712,6 +746,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                     TGraphAsymmErrors *post_channel_errband = NULL;
                     if(posterrband) {
                         post_channel_errband = new TGraphAsymmErrors(&bf_hist);
+                        log<LOG_DEBUG>(L"%1% || plot_channels 4") % __func__;
                         int channel_start =  config.GetCollapsedGlobalVariableBinStart(global_channel_index, other_index);
                         for(size_t bin = 0; bin < channel_nbins; ++bin) {
                             float scale = 1.0;
@@ -739,27 +774,31 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
 
                     TGraphAsymmErrors *ratio_err;
 
-                    TText* text;
+                    TText* text = NULL;
+                    log<LOG_DEBUG>(L"%1% || pre debug") % __func__;
                     if(texts.size()!=0) {
+                        log<LOG_DEBUG>(L"%1% || in debug") % __func__;
                         if(texts.size()==1){
+                            log<LOG_DEBUG>(L"%1% || beef") % __func__;
                             text = (TText*)texts.front().GetListOfLines()->First();
+                            log<LOG_DEBUG>(L"%1% || debug") % __func__;
                         }else{
+                            log<LOG_DEBUG>(L"%1% || boof") % __func__;
                             text = (TText*)texts.at(global_channel_index).GetListOfLines()->First();
+                            log<LOG_DEBUG>(L"%1% || debug 2") % __func__;
                         }
                     }
 
-                    log<LOG_DEBUG>(L"%1% || debug") % __func__;
-
- 
+                    log<LOG_DEBUG>(L"%1% || post debug") % __func__;
                     if(posterrband){ 
-                        plot_hist1ds(&c, cv_hist, *channel_errband, bf_hist, *post_channel_errband, data_hist, dat_str, opt, hist_titles, ratio_titles, filename, bounds, *text);
+                        plot_hist1ds(&c, cv_hist, *channel_errband, *cvstack, subplots, bf_hist, *post_channel_errband, data_hist, dat_str, opt, hist_titles, ratio_titles, filename, bounds, *text);
                     }
                     else{
                         if(errband){
-                            plot_hist1ds(&c, cv_hist, *channel_errband, {}, {}, {}, {}, opt, hist_titles, ratio_titles, filename, bounds, {});
+                            plot_hist1ds(&c, cv_hist, *channel_errband, *cvstack, subplots, {}, {}, data_hist, dat_str, opt, hist_titles, ratio_titles, filename, bounds, *text);
                         }
                         else{
-                            plot_hist1ds(&c, cv_hist, {}, {}, {}, {}, {}, opt, hist_titles, ratio_titles, filename, bounds, {});
+                            plot_hist1ds(&c, cv_hist, {}, *cvstack, subplots, {}, {}, {}, {}, opt, hist_titles, ratio_titles, filename, bounds, {});
                         }
                     }
 
@@ -867,6 +906,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                         c.cd(padIndex++);
 
                         TLegend* leg = new TLegend(0.11, 0.6, 0.89, 0.89);
+                        //TLegend* leg = new TLegend(0.11, 0.79, 0.89, 0.88);
                         leg->SetNColumns(3);
                         //leg->SetHeader(tag.c_str(), "C");  // Center-aligned header
 
