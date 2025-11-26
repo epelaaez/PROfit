@@ -266,6 +266,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
 
     void plot_hist1ds(TCanvas* c, std::optional<TH1D> cv_hist, std::optional<TGraphAsymmErrors> errband, std::optional<THStack> cvstack, std::optional<std::vector<std::pair<std::string, const char*>>> subplots, std::optional<TH1D> bf_hist, std::optional<TGraphAsymmErrors> posterrband, std::optional<TH1D> data_hist, std::optional<std::string> dat_str, PlotOptions opt, std::string hist_titles, std::string ratio_titles, const std::string &filename, PlotBounds &bounds, std::optional<TText> text){
 
+        log<LOG_DEBUG>(L"%1% || inside") % __func__;
         std::unique_ptr<TLegend> leg = std::make_unique<TLegend>(0.38,0.74,0.89,0.91);
         leg->SetNColumns(2);
         leg->SetFillStyle(0);
@@ -700,7 +701,8 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                     if(bool(opt&PlotOptions::BinWidthScaled))
                         cv_hist.Scale(1, "width");
 
-                    THStack *cvstack = NULL;
+                    THStack *cvstack = {};
+                    //THStack *cvstack = NULL;
                     std::vector<std::pair<std::string, const char*>> subplots;
                     if(cv) {
                         if(bool(opt&PlotOptions::CVasStack)) cvstack = new THStack(std::to_string(global_channel_index).c_str(), "");
@@ -714,16 +716,30 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                             cv_hist.Add(cv1dhists[subchannel_name].get());
                             ++global_subchannel_index;
                         }
+
+                        if(bool(opt&PlotOptions::AreaNormalized)) {
+                            float integral = cv_hist.Integral();
+                            cv_hist.Scale(1 / integral);
+                            if(bool(opt&PlotOptions::CVasStack)) {
+                                TList *stlists = (TList*)cvstack->GetHists();
+                                for(const auto&& obj: *stlists){
+                                    ((TH1*)obj)->Scale(1/integral);
+                                }
+                            }
+                        }
                     }
 
+                    log<LOG_DEBUG>(L"%1% || egg") % __func__;
                     TGraphAsymmErrors *channel_errband = NULL;
                     if(errband) {
                         channel_errband = new TGraphAsymmErrors(&cv_hist);
-                       log<LOG_DEBUG>(L"%1% || plot_channels 3") % __func__;
                         int channel_start =  config.GetCollapsedGlobalVariableBinStart(global_channel_index, other_index);
 
                         for(size_t bin = 0; bin < channel_nbins; ++bin) {
                             float scale = 1.0;
+                            if(bool(opt&PlotOptions::AreaNormalized) || bool(opt&PlotOptions::BinWidthScaled)) {
+                                scale = channel_errband->GetPointY(bin) / errband->error_point(bin+channel_start);
+                            }
 
                             channel_errband->SetPointEYhigh(bin, scale*(errband->error_up(bin+channel_start)));
                             channel_errband->SetPointEYlow(bin, scale*(errband->error_down(bin+channel_start)));
@@ -775,23 +791,17 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                     TGraphAsymmErrors *ratio_err;
 
                     TText* text = NULL;
-                    log<LOG_DEBUG>(L"%1% || pre debug") % __func__;
                     if(texts.size()!=0) {
-                        log<LOG_DEBUG>(L"%1% || in debug") % __func__;
                         if(texts.size()==1){
-                            log<LOG_DEBUG>(L"%1% || beef") % __func__;
                             text = (TText*)texts.front().GetListOfLines()->First();
-                            log<LOG_DEBUG>(L"%1% || debug") % __func__;
                         }else{
-                            log<LOG_DEBUG>(L"%1% || boof") % __func__;
                             text = (TText*)texts.at(global_channel_index).GetListOfLines()->First();
-                            log<LOG_DEBUG>(L"%1% || debug 2") % __func__;
                         }
                     }
 
-                    log<LOG_DEBUG>(L"%1% || post debug") % __func__;
                     if(posterrband){ 
-                        plot_hist1ds(&c, cv_hist, *channel_errband, *cvstack, subplots, bf_hist, *post_channel_errband, data_hist, dat_str, opt, hist_titles, ratio_titles, filename, bounds, *text);
+                        plot_hist1ds(&c, cv_hist, *channel_errband, {}, subplots, bf_hist, *post_channel_errband, data_hist, dat_str, opt, hist_titles, ratio_titles, filename, bounds, *text);
+                        //plot_hist1ds(&c, cv_hist, *channel_errband, *cvstack, subplots, bf_hist, *post_channel_errband, data_hist, dat_str, opt, hist_titles, ratio_titles, filename, bounds, *text);
                     }
                     else{
                         if(errband){
