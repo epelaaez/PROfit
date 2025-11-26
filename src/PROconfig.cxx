@@ -1811,9 +1811,9 @@ uint32_t PROconfig::CalcHash() const{
 
 ROOTFormula::ROOTFormula(const std::string &name, const std::string &formula, TTree *t) {
     std::stringstream formula_reader(formula);
-    // split the formula at a "," into multiple values
+    // split the formula at a ";" into multiple values. used to be "," but that breaks arguments
     std::string this_formula;
-    while(std::getline(formula_reader, this_formula, ',')) {
+    while(std::getline(formula_reader, this_formula, ';')) {
         fs.push_back(std::make_unique<TTreeFormula>(name.c_str(), this_formula.c_str(), t));
     }
     treeNumber = -1;
