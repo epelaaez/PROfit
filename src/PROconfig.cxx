@@ -1844,7 +1844,7 @@ std::string ROOTFormula::FormulaName() const {
     std::string ret;
     bool delim = false;
     for (const std::unique_ptr<TTreeFormula> &f: fs) {
-        if (delim) ret += ',';
+        if (delim) ret += ';';
         ret += f->PrintValue();
         delim = true;
     }
