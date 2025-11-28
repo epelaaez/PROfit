@@ -165,7 +165,7 @@ TH2D PROspec::toTH2D(PROconfig const & inconfig, int subchannel_index, int other
     for(int xbin = 0; xbin < channel_nbins_x; xbin++){
         for(int ybin = 0; ybin < channel_nbins_y; ybin++){
             int arg = xbin*channel_nbins_y+ybin;
-            hSpec.SetBinContent(xbin+1, ybin, spec_2d(xbin*channel_nbins_y+ybin));
+            hSpec.SetBinContent(xbin+1, ybin+1, spec_2d(xbin*channel_nbins_y+ybin));
         }
     }
 

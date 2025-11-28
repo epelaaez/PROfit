@@ -54,7 +54,6 @@ TH1D PROdata::toTH1D(const PROconfig &inconfig, int global_channel_index, int ot
     std::string xaxis_title =  inconfig.m_channel_variable_units[local_channel_index][other_index];
 
 
-    log<LOG_DEBUG>(L"%1% || in F ") % __func__ ;
     //fill 1D hist
     TH1D hSpec(hist_name.c_str(),hist_name.c_str(), nbins_dim, &bin_edges[0]); 
     hSpec.GetXaxis()->SetTitle(xaxis_title.c_str());

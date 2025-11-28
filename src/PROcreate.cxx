@@ -614,7 +614,7 @@ namespace PROfit {
                         branches[ib]->branch_monte_carlo_weight_formula->LoadEvent(i);
                     }
                     for(auto &b: branches[ib]->branch_variable_formulas) {
-                         b->LoadEvent(i);
+                        b->LoadEvent(i);
                     }
                 }
                 
