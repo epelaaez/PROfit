@@ -543,6 +543,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
 
         for(size_t mode = 0; mode < config.m_num_modes; ++mode) {
             for(size_t det = 0; det < config.m_num_detectors; ++det) {
+                // data string for legend is only det specific
                 std::string dat_str;
                 if(data){
                     dat_str = "Data: ";
@@ -558,8 +559,12 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                     std::string ratio_titles = ";"+xtitle+";"+rat_y_title;
 
                     size_t channel_nbins_x = config.m_channel_variable_bins[channel][other_index].NBinsAlong(0);
+
+                    // default is 1d, but catch 2d case for ybins
                     size_t channel_nbins_y = 1;
                     if(config.m_channel_variable_dims[channel][other_index] == 2)  channel_nbins_y = config.m_channel_variable_bins[channel][other_index].NBinsAlong(1);
+
+                    // try to get the total offset outside of the histogram binning
                     int nbins_p_2dchan = channel_nbins_y*channel_nbins_x;
                     int chan_offset = nbins_p_2dchan*channel;
                     int mode_offset = mode*config.m_num_channels*nbins_p_2dchan; 
@@ -573,25 +578,24 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                         cv1dhists = getCV1DHists(*cv, config, (bool)(opt & PlotOptions::BinWidthScaled), other_index);
                     }
 
+                    // collapse 2d info to 1d projections for best_fit, errband, posterrband
                     Eigen::VectorXf bf_spec;
+                    Eigen::VectorXf bf_spec_1d = Eigen::VectorXf::Zero(channel_nbins_x);
                     if(best_fit) {
                        bf_spec = config.GetChannelVariableBins(global_channel_index, other_index).ProjectSpectra(CollapseMatrix(config, best_fit->Spec(), other_index), 0);
-                       bf_spec_1d = new PROspec(channel_nbins_x);
-
                        for(size_t bx = 0; bx < channel_nbins_x; bx++){
                            if(config.m_channel_variable_dims[channel][other_index] == 2){
                                for(size_t by = 0; by < channel_nbins_x; by++){
                                    size_t b = bx + by*channel_nbins_x;
-                                   bf_spec_1d->QuickFill(bx, bf_spec_1d(bx)+bf_spec(b+tot_offset));
+                                   bf_spec_1d(bx) = bf_spec_1d(bx)+bf_spec(b+tot_offset);
                                }
                            }
                            else{
-                               bf_spec_1d->QuickFill(bx, bf_spec_1d(bx)+bf_spec(b+tot_offset));
+                               bf_spec_1d(bx) = bf_spec(bx+tot_offset);
                            }
                        }
                     }
 
-                    // make errorband specific to 1d channel projection
                     PROerrorbar *errband_1d = NULL;
                     if(errband){
                         // take current errband (single nbinx x nbiny x num_channels vector), initialize PROerrorbar with nbinx
@@ -720,34 +724,29 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                             }
 
                             std::string ybin_str = "Slice "+std::to_string(ybin)+" "+hist_title;
-                            // TPad pnew("new", "new", 0, 0, 1, 1);
-                            // pnew.cd();
-                            // c.cd();
-                            // pnew.Draw();
 
-                            TH1D cv_hist_proj = *(cv_hist->ProjectionX("slc", ybin, ybin));
-                            cv_hist_proj.SetTitle(ybin_str.c_str());
-                            cv_hist_proj.GetYaxis()->SetTitle(ytitle.c_str());
-                            TH1D *bf_hist_proj = NULL;
+                            TH1D cv_hist_slice = *(cv_hist->ProjectionX("slc", ybin, ybin));
+                            cv_hist_slice.SetTitle(ybin_str.c_str());
+                            cv_hist_slice.GetYaxis()->SetTitle(ytitle.c_str());
+                            TH1D *bf_hist_slice = NULL;
                             if(best_fit){
-                                bf_hist_proj = bf_hist.ProjectionX("bfslc", ybin, ybin);
-                                bf_hist_proj->SetTitle(ybin_str.c_str());
-                                bf_hist_proj->GetYaxis()->SetTitle(ytitle.c_str());
+                                bf_hist_slice = bf_hist.ProjectionX("bfslc", ybin, ybin);
+                                bf_hist_slice->SetTitle(ybin_str.c_str());
+                                bf_hist_slice->GetYaxis()->SetTitle(ytitle.c_str());
                             }
-                            TH1D* data_hist_proj = NULL;
+                            TH1D* data_hist_slice = NULL;
                             if(data){
-                                data_hist_proj = data_hist.ProjectionX("dataslc", ybin, ybin);
-                                data_hist_proj->SetTitle(dat_str.c_str());
-                                data_hist_proj->GetYaxis()->SetTitle(ytitle.c_str());
-
-                                data_hist_proj->SetLineColor(kBlack);
-                                data_hist_proj->SetLineWidth(2);
-                                data_hist_proj->SetMarkerStyle(kFullCircle);
-                                data_hist_proj->SetMarkerColor(kBlack);
-                                data_hist_proj->SetMarkerSize(1);
+                                data_hist_slice = data_hist.ProjectionX("dataslc", ybin, ybin);
+                                data_hist_slice->SetTitle(dat_str.c_str());
+                                data_hist_slice->GetYaxis()->SetTitle(ytitle.c_str());
+                                data_hist_slice->SetLineColor(kBlack);
+                                data_hist_slice->SetLineWidth(2);
+                                data_hist_slice->SetMarkerStyle(kFullCircle);
+                                data_hist_slice->SetMarkerColor(kBlack);
+                                data_hist_slice->SetMarkerSize(1);
                             }
 
-                            plot_hist1ds(&c, &cv_hist_proj, channel_errband, {}, {}, bf_hist_proj, post_channel_errband, data_hist_proj, &dat_str, {}, ybin_str, ratio_titles, filename, bounds, {});
+                            plot_hist1ds(&c, &cv_hist_slice, channel_errband, {}, {}, bf_hist_slice, post_channel_errband, data_hist_slice, &dat_str, {}, ybin_str, ratio_titles, filename, bounds, {});
                         }
                     }
 
