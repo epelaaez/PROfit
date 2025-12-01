@@ -1,4 +1,5 @@
 #include "PROplot.h"
+#include <bits/stdc++.h>
 
 namespace PROfit{
 
@@ -298,6 +299,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
             cv_hist->SetLineColor(cvcol);
 
             if(bool(opt&PlotOptions::CVasStack)) {
+                log<LOG_DEBUG>(L"%1% || Using CVStack %2%") % __func__ % hist_titles.c_str();
                 if(data_hist){
                     cvstack->SetMaximum(  bounds.hasBound("ymax") ? bounds.getBound("ymax") : std::max(top_modifier*cvstack->GetMaximum(), top_modifier*data_hist->GetMaximum()));
                 }
@@ -523,21 +525,21 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
 
         std::string rat_y_title = bool(opt&PlotOptions::DataMCRatio) ? "Data/MC" : "Data/Best-Fit";
 
-        TCanvas c;
-        c.Print((filename+"[").c_str());
-
         std::string ytitle = bool(opt&PlotOptions::AreaNormalized)
             ? "Area Normalized"
             : bool(opt&PlotOptions::BinWidthScaled) 
             ? "Events/GeV" 
             : "Events";
 
+        TCanvas c;
+        c.Print((filename+"[").c_str());
+
         std::map<std::string, std::unique_ptr<TH1D>> cv1dhists;
         std::map<std::string, std::unique_ptr<TH2D>> cv2dhists;
+
         size_t global_subchannel_index = 0;
         size_t global_subchannel_index_2d = 0;
         size_t global_channel_index = 0;
-        int channel_start = 0;
 
         for(size_t mode = 0; mode < config.m_num_modes; ++mode) {
             for(size_t det = 0; det < config.m_num_detectors; ++det) {
@@ -555,6 +557,15 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                     std::string xtitle = config.m_channel_variable_units[channel][other_index];
                     std::string ratio_titles = ";"+xtitle+";"+rat_y_title;
 
+                    size_t channel_nbins_x = config.m_channel_variable_bins[channel][other_index].NBinsAlong(0);
+                    size_t channel_nbins_y = 1;
+                    if(config.m_channel_variable_dims[channel][other_index] == 2)  channel_nbins_y = config.m_channel_variable_bins[channel][other_index].NBinsAlong(1);
+                    int nbins_p_2dchan = channel_nbins_y*channel_nbins_x;
+                    int chan_offset = nbins_p_2dchan*channel;
+                    int mode_offset = mode*config.m_num_channels*nbins_p_2dchan; 
+                    int det_offset = det*config.m_num_modes*config.m_num_channels*nbins_p_2dchan; 
+                    int tot_offset = chan_offset + mode_offset + det_offset;
+
                     if(cv){
                         if(config.m_channel_variable_dims[channel][other_index] == 2){
                             cv2dhists = getCV2DHists(*cv, config, (bool)(opt & PlotOptions::BinWidthScaled), other_index);
@@ -562,24 +573,80 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                         cv1dhists = getCV1DHists(*cv, config, (bool)(opt & PlotOptions::BinWidthScaled), other_index);
                     }
 
-                    size_t channel_nbins = config.m_channel_variable_bins[channel][other_index].NBinsAlong(0);
                     Eigen::VectorXf bf_spec;
                     if(best_fit) {
                        bf_spec = config.GetChannelVariableBins(global_channel_index, other_index).ProjectSpectra(CollapseMatrix(config, best_fit->Spec(), other_index), 0);
+                       bf_spec_1d = new PROspec(channel_nbins_x);
+
+                       for(size_t bx = 0; bx < channel_nbins_x; bx++){
+                           if(config.m_channel_variable_dims[channel][other_index] == 2){
+                               for(size_t by = 0; by < channel_nbins_x; by++){
+                                   size_t b = bx + by*channel_nbins_x;
+                                   bf_spec_1d->QuickFill(bx, bf_spec_1d(bx)+bf_spec(b+tot_offset));
+                               }
+                           }
+                           else{
+                               bf_spec_1d->QuickFill(bx, bf_spec_1d(bx)+bf_spec(b+tot_offset));
+                           }
+                       }
+                    }
+
+                    // make errorband specific to 1d channel projection
+                    PROerrorbar *errband_1d = NULL;
+                    if(errband){
+                        // take current errband (single nbinx x nbiny x num_channels vector), initialize PROerrorbar with nbinx
+                        errband_1d = new PROerrorbar(channel_nbins_x);
+
+                        // sum error points, combine errors in quadrature
+                        for(size_t bx = 0; bx < channel_nbins_x; bx++){
+                            if(config.m_channel_variable_dims[channel][other_index] == 2){
+                                for(size_t by = 0; by < channel_nbins_x; by++){
+                                    size_t b = bx + by*channel_nbins_x;
+                                    errband_1d->error_point(bx) += errband->error_point(b+tot_offset);
+                                    errband_1d->error_up(bx) = std::sqrt(std::pow(errband->error_up(b+tot_offset), 2) + std::pow(errband_1d->error_up(bx), 2));
+                                    errband_1d->error_down(bx) = std::sqrt(std::pow(errband->error_down(b+tot_offset), 2) + std::pow(errband_1d->error_down(bx), 2));
+                                }
+                            }
+                            else{
+                                errband_1d->error_point(bx) = errband->error_point(bx+tot_offset);
+                                errband_1d->error_up(bx) = errband->error_up(bx+tot_offset);
+                                errband_1d->error_down(bx) = errband->error_down(bx+tot_offset);
+                            }
+                        }
+                    }
+
+                    PROerrorbar *posterrband_1d = NULL;
+                    if(posterrband){
+                        posterrband_1d = new PROerrorbar(channel_nbins_x);
+
+                        for(size_t bx = 0; bx < channel_nbins_x; bx++){
+                            if(config.m_channel_variable_dims[channel][other_index] == 2){
+                                for(size_t by = 0; by < channel_nbins_y; by++){
+                                    size_t b = bx + by*channel_nbins_x;
+                                    posterrband_1d->error_point(bx) += posterrband->error_point(b+tot_offset);
+                                    posterrband_1d->error_up(bx) = std::sqrt(std::pow(posterrband->error_up(b+tot_offset), 2) + std::pow(posterrband_1d->error_up(bx), 2));
+                                    posterrband_1d->error_down(bx) = std::sqrt(std::pow(posterrband->error_down(b+tot_offset), 2) + std::pow(posterrband_1d->error_down(bx), 2));
+                                }
+                            }
+                            else{
+                                posterrband_1d->error_point(bx) = posterrband->error_point(bx+tot_offset);
+                                posterrband_1d->error_up(bx) = posterrband->error_up(bx+tot_offset);
+                                posterrband_1d->error_down(bx) = posterrband->error_down(bx+tot_offset);
+                            }
+                        }
                     }
 
                     if(config.m_channel_variable_dims[channel][other_index] == 2){
                         std::string joined_title = config.m_channel_variable_units[channel][other_index];
-                        string del = ",";
+                        string del = ";";
                         auto pos = joined_title.find(del);
                         std::string xtitle2d = joined_title.substr(0, pos);
+                        xtitle = joined_title.substr(0, pos);
                         std::string ytitle2d = joined_title.erase(0, pos + del.length());
                         ratio_titles = ";"+xtitle2d+";"+rat_y_title;
                         std::string hist_title = config.m_detector_plotnames[det]  + " "+ config.m_channel_plotnames[channel]+" CV;"+xtitle2d+";"+ytitle2d;
 
-                        size_t channel_nbins_x = config.m_channel_variable_bins[channel][other_index].NBinsAlong(0);
                         std::vector<float> edges_x = config.m_channel_variable_bins[channel][other_index].Edges(0);
-                        size_t channel_nbins_y = config.m_channel_variable_bins[channel][other_index].NBinsAlong(1);
                         std::vector<float> edges_y = config.m_channel_variable_bins[channel][other_index].Edges(1);
                         const std::string& subchannel_name  = config.m_fullnames[global_subchannel_index_2d];
 
@@ -597,12 +664,6 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
 
                         std::string data_hist_title = config.m_detector_plotnames[det]  + " "+ config.m_channel_plotnames[channel]+" Data;"+xtitle2d+";"+ytitle2d;
                         TH2D data_hist(data_hist_title.c_str(),data_hist_title.c_str(), channel_nbins_x, edges_x.data(), channel_nbins_y, edges_y.data());
-
-                        int nbins_p_chan = channel_nbins_y*channel_nbins_x;
-                        int chan_offset = nbins_p_chan*channel;
-                        int mode_offset = mode*config.m_num_channels*nbins_p_chan; 
-                        int det_offset = det*config.m_num_modes*config.m_num_channels*nbins_p_chan; 
-                        int tot_offset = chan_offset + mode_offset + det_offset;
 
                         if(best_fit){
                             Eigen::VectorXf tmp_bf = best_fit->Spec();
@@ -634,7 +695,6 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                             pdata.Draw();
                             c.Print(filename.c_str());
                         }
-
 
                         global_subchannel_index_2d += config.m_num_subchannels[channel];
 
@@ -692,12 +752,13 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                     }
 
                     std::vector<float> edges = config.m_channel_variable_bins[channel][other_index].Edges();
+
                     std::string hist_titles = config.m_mode_plotnames[mode]+" "+config.m_detector_plotnames[det]  + " "+ config.m_channel_plotnames[channel]+";"+xtitle+";"+ytitle;
-                    TH1D cv_hist(("cv_hist"+std::to_string(global_channel_index)).c_str(), hist_titles.c_str(), channel_nbins, edges.data());
+                    TH1D cv_hist(("cv_hist"+std::to_string(global_channel_index)).c_str(), hist_titles.c_str(), channel_nbins_x, edges.data());
                     cv_hist.SetLineWidth(2);
 
                     cv_hist.SetFillStyle(0);
-                    for(size_t bin = 0; bin < channel_nbins; ++bin) {
+                    for(size_t bin = 0; bin < channel_nbins_x; ++bin) {
                         cv_hist.SetBinContent(bin+1, 0);
                     }
                     if(bool(opt&PlotOptions::BinWidthScaled))
@@ -733,27 +794,24 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                     TGraphAsymmErrors *channel_errband = NULL;
                     if(errband) {
                         channel_errband = new TGraphAsymmErrors(&cv_hist);
-                        int channel_start =  config.GetCollapsedGlobalVariableBinStart(global_channel_index, other_index);
 
-                        for(size_t bin = 0; bin < channel_nbins; ++bin) {
+                        for(size_t bin = 0; bin < channel_nbins_x; ++bin) {
                             float scale = 1.0;
                             if(bool(opt&PlotOptions::AreaNormalized) || bool(opt&PlotOptions::BinWidthScaled)) {
-                                scale = channel_errband->GetPointY(bin) / errband->error_point(bin+channel_start);
+                                scale = channel_errband->GetPointY(bin) / errband_1d->error_point(bin);
                             }
 
-                            channel_errband->SetPointEYhigh(bin, scale*(errband->error_up(bin+channel_start)));
-                            channel_errband->SetPointEYlow(bin, scale*(errband->error_down(bin+channel_start)));
+                            channel_errband->SetPointEYhigh(bin, scale*(errband_1d->error_up(bin)));
+                            channel_errband->SetPointEYlow(bin, scale*(errband_1d->error_down(bin)));
                         }
                     }
 
                     TH1D* bf_hist = NULL;
                     if(best_fit) {
-                    bf_hist = new TH1D(("bf"+std::to_string(global_channel_index)).c_str(), "", channel_nbins, edges.data());
-                        size_t total_bins = config.GetChannelVariableBins(global_channel_index, other_index).NBins();
-                        for(size_t bin = 0; bin < channel_nbins; ++bin) {
-                            bf_hist->SetBinContent(bin+1, bf_spec(bin+channel_start));
+                    bf_hist = new TH1D(("bf"+std::to_string(global_channel_index)).c_str(), "", channel_nbins_x, edges.data());
+                        for(size_t bin = 0; bin < channel_nbins_x; ++bin) {
+                            bf_hist->SetBinContent(bin+1, bf_spec_1d(bin));
                         }
-
                         if(bool(opt&PlotOptions::BinWidthScaled))
                             bf_hist->Scale(1, "width");
                         if(bool(opt&PlotOptions::AreaNormalized))
@@ -763,14 +821,13 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                     TGraphAsymmErrors *post_channel_errband = NULL;
                     if(posterrband) {
                         post_channel_errband = new TGraphAsymmErrors(bf_hist);
-                        int channel_start =  config.GetCollapsedGlobalVariableBinStart(global_channel_index, other_index);
-                        for(size_t bin = 0; bin < channel_nbins; ++bin) {
+                        for(size_t bin = 0; bin < channel_nbins_x; ++bin) {
                             float scale = 1.0;
                             if(bool(opt&PlotOptions::AreaNormalized) || bool(opt&PlotOptions::BinWidthScaled)) {
-                                scale = post_channel_errband->GetPointY(bin) / (posterrband->error_point(bin+channel_start));
+                                scale = post_channel_errband->GetPointY(bin) / (posterrband_1d->error_point(bin));
                             }
-                            post_channel_errband->SetPointEYhigh(bin, scale*(posterrband->error_up(bin+channel_start)));
-                            post_channel_errband->SetPointEYlow(bin, scale*(posterrband->error_down(bin+channel_start)));
+                            post_channel_errband->SetPointEYhigh(bin, scale*(posterrband_1d->error_up(bin)));
+                            post_channel_errband->SetPointEYlow(bin, scale*(posterrband_1d->error_down(bin)));
                         }
                     }
                        
