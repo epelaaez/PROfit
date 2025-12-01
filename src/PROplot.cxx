@@ -127,46 +127,7 @@ namespace PROfit{
 
         return ret;
     }
-/*
-    std::map<std::string, std::vector<std::pair<std::unique_ptr<TGraph>,std::unique_ptr<TGraph>>>> 
-        getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
-            std::map<std::string, std::vector<std::pair<std::unique_ptr<TGraph>,std::unique_ptr<TGraph>>>> spline_graphs;
 
-            for(size_t i = 0; i < systs.GetNSplines(); ++i) {
-                const std::string &name = systs.spline_names[i];
-                const Spline &spline = systs.GrabSpline(name);
-                //using Spline = std::vector<std::vector<std::pair<float, std::array<float, 4>>>>;
-                std::vector<std::pair<std::unique_ptr<TGraph>,std::unique_ptr<TGraph>>> bin_graphs;
-                size_t nbins =  config.m_num_variable_bins_total[systs.spline_binnings[i]];
-                bin_graphs.reserve(nbins);
-
-                for(size_t j = 0; j < nbins; ++j) {
-                    const std::vector<std::pair<float, std::array<float, 4>>> &spline_for_bin = spline[j];
-                    std::unique_ptr<TGraph> curve = std::make_unique<TGraph>();
-                    std::unique_ptr<TGraph> fixed_pts = std::make_unique<TGraph>();
-                    for(size_t k = 0; k < spline_for_bin.size(); ++k) {
-                        //const auto &[lo, coeffs] = spline_for_bin[k];
-                        float lo = spline_for_bin[k].first;
-                        std::array<float, 4> coeffs = spline_for_bin[k].second;
-                        float hi = k < spline_for_bin.size() - 1 ? spline_for_bin[k+1].first : systs.spline_hi[i];
-                        auto fn = [coeffs](float shift){
-                            return coeffs[0] + coeffs[1]*shift + coeffs[2]*shift*shift + coeffs[3]*shift*shift*shift;
-                        };
-                        fixed_pts->SetPoint(fixed_pts->GetN(), lo, fn(0)); 
-                        if(k == spline_for_bin.size() - 1)
-                            fixed_pts->SetPoint(fixed_pts->GetN(), hi, fn(hi - lo));
-                        float width = (hi - lo) / 20;
-                        for(size_t l = 0; l < 20; ++l)
-                            curve->SetPoint(curve->GetN(), lo + l * width, fn(l * width));
-                    }
-                    bin_graphs.push_back(std::make_pair(std::move(fixed_pts), std::move(curve)));
-                }
-                spline_graphs[name] = std::move(bin_graphs);
-            }
-
-            return spline_graphs;
-        }
-*/
 std::map<std::string, std::vector<std::pair<std::unique_ptr<TGraph>, std::unique_ptr<TGraph>>>>
 getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
     std::map<std::string, std::vector<std::pair<std::unique_ptr<TGraph>, std::unique_ptr<TGraph>>>> spline_graphs;
@@ -263,6 +224,25 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
             ebar.error_point(i) = cv(i)*scale_factor;
         }
         return ebar;
+    }
+
+    // sort through generic PROspec and combine bins to get projection
+    Eigen::VectorXf make_1d_spec(Eigen::VectorXf input_spec, size_t nbinsx, size_t nbinsy=1, int offset = 0, int dims=1){
+
+        Eigen::VectorXf output_spec_1d = Eigen::VectorXf::Zero(nbinsx);
+        for(size_t bx = 0; bx < nbinsx; bx++){
+            if(dims == 2){
+                for(size_t by = 0; by < nbinsy; by++){
+                    size_t b = bx + by*nbinsx;
+                    output_spec_1d(bx) = output_spec_1d(bx)+input_spec(b+offset);
+                }
+            }
+            else{
+                output_spec_1d(bx) = input_spec(bx+offset);
+            }
+        }
+
+        return output_spec_1d;
     }
 
     void plot_hist1ds(TCanvas* c, TH1D* cv_hist, TGraphAsymmErrors* errband, THStack* cvstack, std::vector<std::pair<std::string, const char*>>* subplots, TH1D* bf_hist, TGraphAsymmErrors* posterrband, TH1D* data_hist, std::string* dat_str, PlotOptions opt, std::string hist_titles, std::string ratio_titles, const std::string &filename, PlotBounds &bounds, TText* text){
@@ -366,8 +346,6 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
             TGraphErrors *g = new TGraphErrors(data_hist->GetNbinsX());
             float datmax =-999;
             for (int i = 1; i <= data_hist->GetNbinsX(); ++i) {
-
-
                 double x = data_hist->GetBinCenter(i);
                 double y = data_hist->GetBinContent(i);
                 double ex = 0;
@@ -578,23 +556,15 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                         cv1dhists = getCV1DHists(*cv, config, (bool)(opt & PlotOptions::BinWidthScaled), other_index);
                     }
 
-                    // collapse 2d info to 1d projections for best_fit, errband, posterrband
                     Eigen::VectorXf bf_spec;
                     Eigen::VectorXf bf_spec_1d = Eigen::VectorXf::Zero(channel_nbins_x);
-                    if(best_fit) {
-                       bf_spec = config.GetChannelVariableBins(global_channel_index, other_index).ProjectSpectra(CollapseMatrix(config, best_fit->Spec(), other_index), 0);
-                       for(size_t bx = 0; bx < channel_nbins_x; bx++){
-                           if(config.m_channel_variable_dims[channel][other_index] == 2){
-                               for(size_t by = 0; by < channel_nbins_x; by++){
-                                   size_t b = bx + by*channel_nbins_x;
-                                   bf_spec_1d(bx) = bf_spec_1d(bx)+bf_spec(b+tot_offset);
-                               }
-                           }
-                           else{
-                               bf_spec_1d(bx) = bf_spec(bx+tot_offset);
-                           }
-                       }
+                    if(best_fit){ 
+                        bf_spec = config.GetChannelVariableBins(global_channel_index, other_index).ProjectSpectra(CollapseMatrix(config, best_fit->Spec(), other_index), 0);
+                        bf_spec_1d = make_1d_spec(bf_spec, channel_nbins_x, channel_nbins_y, tot_offset, config.m_channel_variable_dims[channel][other_index]);
                     }
+
+                    Eigen::VectorXf data_spec_1d = Eigen::VectorXf::Zero(channel_nbins_x);
+                    if(data) data_spec_1d = make_1d_spec(data->Spec(), channel_nbins_x, channel_nbins_y, tot_offset, config.m_channel_variable_dims[channel][other_index]);
 
                     PROerrorbar *errband_1d = NULL;
                     if(errband){
@@ -663,38 +633,40 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                         p2d.Draw();
                         c.Print(filename.c_str());
 
-                        std::string bf_hist_title = config.m_detector_plotnames[det]  + " "+ config.m_channel_plotnames[channel]+" Best-Fit;"+xtitle2d+";"+ytitle2d;
-                        TH2D bf_hist(bf_hist_title.c_str(),bf_hist_title.c_str(), channel_nbins_x, edges_x.data(), channel_nbins_y, edges_y.data());
-
-                        std::string data_hist_title = config.m_detector_plotnames[det]  + " "+ config.m_channel_plotnames[channel]+" Data;"+xtitle2d+";"+ytitle2d;
-                        TH2D data_hist(data_hist_title.c_str(),data_hist_title.c_str(), channel_nbins_x, edges_x.data(), channel_nbins_y, edges_y.data());
-
+                        TH2D* bf_hist = NULL;
                         if(best_fit){
+                            std::string bf_hist_title = config.m_detector_plotnames[det]  + " "+ config.m_channel_plotnames[channel]+" Best-Fit;"+xtitle2d+";"+ytitle2d;
+                            bf_hist = new TH2D(bf_hist_title.c_str(),bf_hist_title.c_str(), channel_nbins_x, edges_x.data(), channel_nbins_y, edges_y.data());
+
                             Eigen::VectorXf tmp_bf = best_fit->Spec();
                             for(size_t xbin = 0; xbin < channel_nbins_x; xbin++){
                                 for(size_t ybin = 0; ybin < channel_nbins_y; ybin++) {
-                                    bf_hist.SetBinContent(xbin+1, ybin, tmp_bf(xbin*channel_nbins_y+ybin+tot_offset));
+                                    bf_hist->SetBinContent(xbin+1, ybin, tmp_bf(xbin*channel_nbins_y+ybin+tot_offset));
                                 }
                             }
 
                             TPad pbfd("pbfd", "pbfd", 0, 0, 1, 1);
                             pbfd.cd();
-                            bf_hist.Draw("colz");
+                            bf_hist->Draw("colz");
                             c.cd();
                             pbfd.Draw();
                             c.Print(filename.c_str());
                         }
 
+                        TH2D* data_hist = NULL;
                         if(data){
+                            std::string data_hist_title = config.m_detector_plotnames[det]  + " "+ config.m_channel_plotnames[channel]+" Data;"+xtitle2d+";"+ytitle2d;
+                            data_hist = new TH2D(data_hist_title.c_str(),data_hist_title.c_str(), channel_nbins_x, edges_x.data(), channel_nbins_y, edges_y.data());
+
                             Eigen::VectorXf tmp_data = data->Spec();
                             for(size_t xbin = 0; xbin < channel_nbins_x; xbin++){
                                 for(size_t ybin = 0; ybin < channel_nbins_y; ybin++) {
-                                    data_hist.SetBinContent(xbin+1, ybin+1, tmp_data(xbin*channel_nbins_y+ybin+tot_offset));
+                                    data_hist->SetBinContent(xbin+1, ybin+1, tmp_data(xbin*channel_nbins_y+ybin+tot_offset));
                                 }
                             }
                             TPad pdata("pdata", "pdata", 0, 0, 1, 1);
                             pdata.cd();
-                            data_hist.Draw("colz");
+                            data_hist->Draw("colz");
                             c.cd();
                             pdata.Draw();
                             c.Print(filename.c_str());
@@ -730,13 +702,13 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                             cv_hist_slice.GetYaxis()->SetTitle(ytitle.c_str());
                             TH1D *bf_hist_slice = NULL;
                             if(best_fit){
-                                bf_hist_slice = bf_hist.ProjectionX("bfslc", ybin, ybin);
+                                bf_hist_slice = bf_hist->ProjectionX("bfslc", ybin, ybin);
                                 bf_hist_slice->SetTitle(ybin_str.c_str());
                                 bf_hist_slice->GetYaxis()->SetTitle(ytitle.c_str());
                             }
                             TH1D* data_hist_slice = NULL;
                             if(data){
-                                data_hist_slice = data_hist.ProjectionX("dataslc", ybin, ybin);
+                                data_hist_slice = data_hist->ProjectionX("dataslc", ybin, ybin);
                                 data_hist_slice->SetTitle(dat_str.c_str());
                                 data_hist_slice->GetYaxis()->SetTitle(ytitle.c_str());
                                 data_hist_slice->SetLineColor(kBlack);
@@ -807,7 +779,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
 
                     TH1D* bf_hist = NULL;
                     if(best_fit) {
-                    bf_hist = new TH1D(("bf"+std::to_string(global_channel_index)).c_str(), "", channel_nbins_x, edges.data());
+                        bf_hist = new TH1D(("bf"+std::to_string(global_channel_index)).c_str(), "", channel_nbins_x, edges.data());
                         for(size_t bin = 0; bin < channel_nbins_x; ++bin) {
                             bf_hist->SetBinContent(bin+1, bf_spec_1d(bin));
                         }
@@ -815,6 +787,23 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                             bf_hist->Scale(1, "width");
                         if(bool(opt&PlotOptions::AreaNormalized))
                             bf_hist->Scale(1.0/bf_hist->Integral());
+                    }
+
+                    TH1D* data_hist = NULL;
+                    if(data) {
+                        data_hist = new TH1D(("data"+std::to_string(global_channel_index)).c_str(), "", channel_nbins_x, edges.data());
+                        for(size_t bin = 0; bin < channel_nbins_x; ++bin) {
+                            data_hist->SetBinContent(bin+1, data_spec_1d(bin));
+                        }
+                        data_hist->SetLineColor(kBlack);
+                        data_hist->SetLineWidth(2);
+                        data_hist->SetMarkerStyle(kFullCircle);
+                        data_hist->SetMarkerColor(kBlack);
+                        data_hist->SetMarkerSize(1);
+                        if(bool(opt&PlotOptions::BinWidthScaled))
+                            data_hist->Scale(1, "width");
+                        if(bool(opt&PlotOptions::AreaNormalized))
+                            data_hist->Scale(1.0/data_hist->Integral());
                     }
 
                     TGraphAsymmErrors *post_channel_errband = NULL;
@@ -829,21 +818,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                             post_channel_errband->SetPointEYlow(bin, scale*(posterrband_1d->error_down(bin)));
                         }
                     }
-                       
-                    TH1D data_hist;
-                    if(data) {
-                        data_hist = data->toTH1D(config, global_channel_index, other_index);
-                        data_hist.SetLineColor(kBlack);
-                        data_hist.SetLineWidth(2);
-                        data_hist.SetMarkerStyle(kFullCircle);
-                        data_hist.SetMarkerColor(kBlack);
-                        data_hist.SetMarkerSize(1);
-                        if(bool(opt&PlotOptions::BinWidthScaled))
-                            data_hist.Scale(1, "width");
-                        if(bool(opt&PlotOptions::AreaNormalized))
-                            data_hist.Scale(1.0/data_hist.Integral());
-                    }
-
+                      
                     TGraphAsymmErrors *ratio_err;
 
                     TText* text = NULL;
@@ -855,7 +830,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                         }
                     }
 
-                    plot_hist1ds(&c, &cv_hist, channel_errband, cvstack, &subplots, bf_hist, post_channel_errband, &data_hist, &dat_str, opt, hist_titles, ratio_titles, filename, bounds, text);
+                    plot_hist1ds(&c, &cv_hist, channel_errband, cvstack, &subplots, bf_hist, post_channel_errband, data_hist, &dat_str, opt, hist_titles, ratio_titles, filename, bounds, text);
                     ++global_channel_index;
                 }
             }
