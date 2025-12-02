@@ -312,13 +312,14 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
 
             TH1 *leg_hack = (TH1*)cv_hist->Clone((std::string(cv_hist->GetTitle())+"leg_hack").c_str());
             if(errband){
+                log<LOG_DEBUG>(L"%1% || Using errband %2%") % __func__ % hist_titles.c_str();
                 leg_hack->SetFillStyle(3144);
                 leg_hack->SetFillColorAlpha(cvcol, 0.2);
                 leg_hack->SetLineColor(cvcol);
                 leg_hack->SetLineWidth(2);
                 leg->AddEntry(leg_hack,"CV Prediction #pm 1#sigma" ,"fl");
             }else{
-                leg->AddEntry(leg_hack, "CV Prediction #pm 1#sigma", "l");
+                leg->AddEntry(leg_hack, "CV Prediction", "l");
             }
         }
 
@@ -343,6 +344,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
 
         if(data_hist) {
 
+            log<LOG_DEBUG>(L"%1% || Using data %2%") % __func__ % hist_titles.c_str();
             TGraphErrors *g = new TGraphErrors(data_hist->GetNbinsX());
             float datmax =-999;
             for (int i = 1; i <= data_hist->GetNbinsX(); ++i) {
@@ -404,6 +406,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
 
         TGraphAsymmErrors *ratio_err;
         if(bool(opt&PlotOptions::DataMCRatio) || bool(opt&PlotOptions::DataPostfitRatio)) {
+            log<LOG_DEBUG>(L"%1% || Using ratio %2%") % __func__ % hist_titles.c_str();
             p2->cd();
 
             ratio_err = new TGraphAsymmErrors(); 
@@ -497,10 +500,12 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
 
         leg->Draw("same");
         c->Print(filename.c_str());
+        log<LOG_DEBUG>(L"%1% || Finishing Plotting 1D Histogram %2%") % __func__ % hist_titles.c_str();
     }
 
     void plot_channels(const std::string &filename, const PROconfig &config, std::optional<PROspec> cv, std::optional<PROspec> best_fit, std::optional<PROdata> data, std::optional<PROerrorbar> errband, std::optional<PROerrorbar> posterrband, std::vector<TPaveText> &texts, PlotBounds &bounds, PlotOptions opt, int other_index) {
 
+        log<LOG_DEBUG>(L"%1% || Starting plot_channels") % __func__;
         std::string rat_y_title = bool(opt&PlotOptions::DataMCRatio) ? "Data/MC" : "Data/Best-Fit";
 
         std::string ytitle = bool(opt&PlotOptions::AreaNormalized)
@@ -564,7 +569,9 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                     }
 
                     Eigen::VectorXf data_spec_1d = Eigen::VectorXf::Zero(channel_nbins_x);
-                    if(data) data_spec_1d = make_1d_spec(data->Spec(), channel_nbins_x, channel_nbins_y, tot_offset, config.m_channel_variable_dims[channel][other_index]);
+                    if(data){
+                        data_spec_1d = make_1d_spec(data->Spec(), channel_nbins_x, channel_nbins_y, tot_offset, config.m_channel_variable_dims[channel][other_index]);
+                    }
 
                     PROerrorbar *errband_1d = NULL;
                     if(errband){
@@ -574,7 +581,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                         // sum error points, combine errors in quadrature
                         for(size_t bx = 0; bx < channel_nbins_x; bx++){
                             if(config.m_channel_variable_dims[channel][other_index] == 2){
-                                for(size_t by = 0; by < channel_nbins_x; by++){
+                                for(size_t by = 0; by < channel_nbins_y; by++){
                                     size_t b = bx + by*channel_nbins_x;
                                     errband_1d->error_point(bx) += errband->error_point(b+tot_offset);
                                     errband_1d->error_up(bx) = std::sqrt(std::pow(errband->error_up(b+tot_offset), 2) + std::pow(errband_1d->error_up(bx), 2));
@@ -836,6 +843,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
             }
         }
         c.Print((filename+"]").c_str());
+        log<LOG_DEBUG>(L"%1% || Finishing plot_channels") % __func__;
     }
 
 
