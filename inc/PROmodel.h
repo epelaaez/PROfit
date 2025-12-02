@@ -726,7 +726,7 @@ std::unique_ptr<PROmodel> get_model_from_string(const PROconfig& config, const P
         return std::unique_ptr<PROmodel>(new PRO3p1(prop,config.m_model_parameter_map));
     } else if(name == "3+1_3C") {
         return std::unique_ptr<PROmodel>(new PRO3p1_3C(prop,config.m_model_parameter_map));
-    } else if(name == "3+1_decay") {
+    } else if(name == "3+1_decay_invis") {
         return std::unique_ptr<PROmodel>(new PRO3p1_decay_invis(prop,config.m_model_parameter_map));
     }
     log<LOG_ERROR>(L"%1% || Unrecognized model name %2%. Try numudis, nueapp, nuedis, 3+1 or 3+1_3C for now. Terminating.") % __func__ % name.c_str();
