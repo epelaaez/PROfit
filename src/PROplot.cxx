@@ -233,7 +233,8 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
         for(size_t bx = 0; bx < nbinsx; bx++){
             if(dims == 2){
                 for(size_t by = 0; by < nbinsy; by++){
-                    size_t b = bx + by*nbinsx;
+                    // default is (x1, y1)...(x1,yn), (x2,y1)...
+                    size_t b = bx*nbinsy + by;
                     output_spec_1d(bx) = output_spec_1d(bx)+input_spec(b+offset);
                 }
             }
@@ -343,18 +344,13 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
         }
 
         if(data_hist) {
-
             log<LOG_DEBUG>(L"%1% || Using data %2%") % __func__ % hist_titles.c_str();
             TGraphErrors *g = new TGraphErrors(data_hist->GetNbinsX());
-            float datmax =-999;
             for (int i = 1; i <= data_hist->GetNbinsX(); ++i) {
                 double x = data_hist->GetBinCenter(i);
                 double y = data_hist->GetBinContent(i);
                 double ex = 0;
                 double ey = data_hist->GetBinError(i);
-                if(y>datmax){
-                    datmax=y;
-                }
                 // g->SetPoint(i - 1, x, y);
                 g->SetPoint(i, x, y);
                 // g->SetPointError(i - 1, ex, ey);
@@ -629,9 +625,16 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
 
                         std::vector<float> edges_x = config.m_channel_variable_bins[channel][other_index].Edges(0);
                         std::vector<float> edges_y = config.m_channel_variable_bins[channel][other_index].Edges(1);
-                        const std::string& subchannel_name  = config.m_fullnames[global_subchannel_index_2d];
 
-                        TH2D* cv_hist = cv2dhists[subchannel_name].get();
+			// this needs to be a sum over all subchannels
+			//
+                        TH2D* cv_hist = new TH2D(hist_title.c_str(),hist_title.c_str(), channel_nbins_x, edges_x.data(), channel_nbins_y, edges_y.data());
+                        for(size_t subchannel = 0; subchannel < config.m_num_subchannels[channel]; ++subchannel){
+                            const std::string& subchannel_name  = config.m_fullnames[global_subchannel_index_2d];
+                            cv_hist->Add(cv2dhists[subchannel_name].get());
+                            ++global_subchannel_index_2d;
+                        }
+
                         TPad p2d("p2d", "p2d", 0, 0, 1, 1);
                         p2d.cd();
                         cv_hist->SetTitle(hist_title.c_str());
@@ -679,7 +682,6 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                             c.Print(filename.c_str());
                         }
 
-                        global_subchannel_index_2d += config.m_num_subchannels[channel];
 
                         float scale = 1.0;
 
