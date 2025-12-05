@@ -1,4 +1,5 @@
 #include "PROplot.h"
+#include "TStyle.h"
 #include <bits/stdc++.h>
 
 namespace PROfit{
@@ -229,6 +230,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
     // sort through generic PROspec and combine bins to get projection
     Eigen::VectorXf make_1d_spec(Eigen::VectorXf input_spec, size_t nbinsx, size_t nbinsy=1, int offset = 0, int dims=1){
 
+        log<LOG_DEBUG>(L"%1% || Making 1d spec nbinsx %2% nbinsy %3% offset %4% dims %5%") % __func__ % nbinsx % nbinsy % offset % dims;
         Eigen::VectorXf output_spec_1d = Eigen::VectorXf::Zero(nbinsx);
         for(size_t bx = 0; bx < nbinsx; bx++){
             if(dims == 2){
@@ -560,7 +562,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                     Eigen::VectorXf bf_spec;
                     Eigen::VectorXf bf_spec_1d = Eigen::VectorXf::Zero(channel_nbins_x);
                     if(best_fit){ 
-                        bf_spec = config.GetChannelVariableBins(global_channel_index, other_index).ProjectSpectra(CollapseMatrix(config, best_fit->Spec(), other_index), 0);
+			bf_spec = CollapseMatrix(config, best_fit->Spec(), other_index);
                         bf_spec_1d = make_1d_spec(bf_spec, channel_nbins_x, channel_nbins_y, tot_offset, config.m_channel_variable_dims[channel][other_index]);
                     }
 
@@ -614,6 +616,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                     }
 
                     if(config.m_channel_variable_dims[channel][other_index] == 2){
+			gStyle->SetPalette(kViridis);
                         std::string joined_title = config.m_channel_variable_units[channel][other_index];
                         string del = ";";
                         auto pos = joined_title.find(del);
@@ -648,10 +651,10 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                             std::string bf_hist_title = config.m_detector_plotnames[det]  + " "+ config.m_channel_plotnames[channel]+" Best-Fit;"+xtitle2d+";"+ytitle2d;
                             bf_hist = new TH2D(bf_hist_title.c_str(),bf_hist_title.c_str(), channel_nbins_x, edges_x.data(), channel_nbins_y, edges_y.data());
 
-                            Eigen::VectorXf tmp_bf = best_fit->Spec();
+                            Eigen::VectorXf tmp_bf = CollapseMatrix(config, best_fit->Spec(), other_index);
                             for(size_t xbin = 0; xbin < channel_nbins_x; xbin++){
                                 for(size_t ybin = 0; ybin < channel_nbins_y; ybin++) {
-                                    bf_hist->SetBinContent(xbin+1, ybin, tmp_bf(xbin*channel_nbins_y+ybin+tot_offset));
+                                    bf_hist->SetBinContent(xbin+1, ybin+1, tmp_bf(xbin*channel_nbins_y+ybin + tot_offset));
                                 }
                             }
 
@@ -688,7 +691,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                         for(size_t ybin = 1; ybin <= channel_nbins_y; ybin++) {
                             TGraphAsymmErrors *post_channel_errband = NULL; 
                             if(posterrband) {
-                                post_channel_errband = new TGraphAsymmErrors(cv_hist->ProjectionX("slc", ybin, ybin));
+                                post_channel_errband = new TGraphAsymmErrors(bf_hist->ProjectionX("slc", ybin, ybin));
                                 for(size_t xbin = 0; xbin < channel_nbins_x; ++xbin) {
                                     post_channel_errband->SetPointEYhigh(xbin, scale*(posterrband->error_up((ybin-1)*channel_nbins_x+xbin+tot_offset)));
                                     post_channel_errband->SetPointEYlow(xbin, scale*(posterrband->error_down((ybin-1)*channel_nbins_x+xbin+tot_offset)));
