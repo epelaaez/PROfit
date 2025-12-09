@@ -52,7 +52,6 @@ namespace PROfit {
             for(int i = 0; i < shifts.size(); ++i) {
                 size_t binning = insyst.spline_binnings[i];
 
-
                 //const Eigen::MatrixXf &hist = inprop.variable_hist_storage(binning,var_index);
                 //direct access with inprop.variable_hist_storage(binning,var_index,j,k)
                 for(size_t k = 0; k < inconfig.m_num_variable_bins_total[var_index]; ++k) {
@@ -70,25 +69,64 @@ namespace PROfit {
                     }
                 }
             }
-
+            
+            std::vector<float> le_arr;
             for(long int i = 0; i < inconfig.m_num_variable_bins_total[inmodel.ivar]; ++i) {
-                float le = inprop.variable_midbin[inmodel.ivar][i];
+                le_arr.push_back(inprop.variable_midbin[inmodel.ivar][i]);
+            }
 
-                for(size_t j = 0; j < inmodel.model_functions.size(); ++j) {
-                    float oscw = inmodel.model_functions[j](phys, le);
-                    if (inmodel.hists[var_index][j].data() == nullptr) {
-                        log<LOG_ERROR>(L"Null matrix at var_index=%1%, j=%2%") % var_index % j;
-                        continue;
+            auto probs = inmodel.get_probs(phys, le_arr);
+
+            // print Ue4sq and Um4sq
+            if (std::pow(10.0f, phys(1)) > 0.05) {
+                log<LOG_ERROR>(L"%1% || Temporary printout with phys(1) = %2%, binned spectrum for variable %3%") % __func__ % phys(1) % var_index;
+                for(size_t j = 0; j < inmodel.prob_types.size(); ++j) {
+                    float max_prob = 0.0f;
+                    float min_prob = 1.0f;
+                    for(size_t i = 0; i < le_arr.size(); ++i) {
+                        max_prob = std::max(max_prob, probs[i][j]);
+                        min_prob = std::min(min_prob, probs[i][j]);
                     }
+                    log<LOG_ERROR>(L"%1% || For probability type %2%, probability is from %3% - %4%") % __func__ % j % max_prob % min_prob;
+                }
+            }
 
+            // Validate dimensions before accessing hists
+            for(size_t j = 0; j < inmodel.prob_types.size(); ++j) {
+                if (inmodel.hists[var_index][j].data() == nullptr) {
+                    log<LOG_ERROR>(L"Null matrix at var_index=%1%, j=%2%") % var_index % j;
+                    continue;
+                }
+                if ((size_t)inmodel.hists[var_index][j].rows() != le_arr.size()) {
+                    log<LOG_ERROR>(L"FillSpectra binned: hists[%1%][%2%] has %3% rows but le_arr has %4% elements (ivar=%5%). Stopping.")
+                        % var_index % j % inmodel.hists[var_index][j].rows() % le_arr.size() % inmodel.ivar;
+                    exit(EXIT_FAILURE);
+                }
+                if ((size_t)inmodel.hists[var_index][j].cols() != myspectrum.GetNbins()) {
+                    log<LOG_ERROR>(L"FillSpectra binned: hists[%1%][%2%] has %3% cols but output spectrum has %4% bins. Stopping.")
+                        % var_index % j % inmodel.hists[var_index][j].cols() % myspectrum.GetNbins();
+                    exit(EXIT_FAILURE);
+                }
+            }
+
+            for(size_t i = 0; i < le_arr.size(); ++i) {
+                for(size_t j = 0; j < inmodel.prob_types.size(); ++j) {
                     for(size_t k = 0; k < myspectrum.GetNbins(); ++k) {
-                        myspectrum.Fill(k, systw(k) * oscw * inmodel.hists[var_index][j](i, k));
+                        myspectrum.Fill(k, systw(k) * probs[i][j] * inmodel.hists[var_index][j](i, k));
                     }
                 }
             }
         } else {
-            for(size_t i = 0; i<inprop.NEvent(); ++i){
-                float oscw  =  inmodel.model_functions[inprop.model_rule[i]](phys, inprop.VariableValue(inmodel.ivar, i));
+            log<LOG_ERROR>(L"%1% || Filling unbinned spectrum for variable %2%") % __func__ % var_index;
+            std::vector<float> le_arr;
+            for(size_t i = 0; i < inprop.NEvent(); ++i) {
+                le_arr.push_back(inprop.VariableValue(inmodel.ivar, i));
+            }
+
+            auto probs = inmodel.get_probs(phys, le_arr);
+
+            for(size_t i = 0; i < inprop.NEvent(); ++i) {
+                float oscw = probs[i][inprop.model_rule[i]];
                 float add_w = inprop.added_weights[i]; 
                 const int reco_bin = inprop.VariableBinIndex(var_index, i);
 
@@ -100,7 +138,6 @@ namespace PROfit {
                 }
                 float finalw = oscw * systw * add_w;
                 myspectrum.Fill(reco_bin, finalw);
-
             }
         }
         return myspectrum;
@@ -118,6 +155,8 @@ namespace PROfit {
 
         int i_osc_tmp =1;
         if (binned) {
+            std::vector<float> hist_w_arr;
+            std::vector<float> le_arr;
             for(long int i = 0; i < inprop.variable_hist_storage(i_osc_tmp,inconfig.i_prime).rows(); ++i) {
                 float le = inprop.variable_midbin[i_osc_tmp][i];
                 float hist_w = 1.0 ;
@@ -140,21 +179,29 @@ namespace PROfit {
                     }
                 }
 
-                for(size_t j = 0; j < inmodel.model_functions.size(); ++j) {
-                    float oscw = inmodel.model_functions[j](phys, le);
+                hist_w_arr.push_back(hist_w);
+                le_arr.push_back(le);
+            }
+
+            auto probs = inmodel.get_probs(phys, le_arr);
+
+            for(size_t i = 0; i < le_arr.size(); ++i) {
+                for(size_t j = 0; j < inmodel.prob_types.size(); ++j) {
                     for(size_t k = 0; k < myspectrum.GetNbins(); ++k) {
-                        myspectrum.Fill(k, hist_w * oscw * inmodel.hists[inconfig.i_prime][j](i, k));
+                        myspectrum.Fill(k, hist_w_arr[i] * probs[i][j] * inmodel.hists[inconfig.i_prime][j](i, k));
                     }
                 }
             }
-        } else {
-            for(size_t i = 0; i<inprop.NEvent(); ++i){
 
-                float oscw  = phys.size() != 0 ? 
-                    inmodel.model_functions[inprop.model_rule[i]](phys, inprop.VariableValue(inmodel.ivar, i)) :
-                    1;	
-                float add_w = inprop.added_weights[i];
-                float hist_w = 1.0 ;
+        } else {
+            std::vector<float> le_arr;
+            std::vector<float> hist_w_arr;
+            std::vector<float> add_w_arr;
+            for(size_t i = 0; i < inprop.NEvent(); ++i) {
+                le_arr.push_back(inprop.VariableValue(inmodel.ivar, i));
+                add_w_arr.push_back(inprop.added_weights[i]);
+
+                float hist_w = 1.0;
 
                 //Figure out what subchannel the event is in
                 size_t subchan = inconfig.GetSubchannelIndexFromVariableGlobalBin(inprop.VariableBinIndex(i_osc_tmp, i), i_osc_tmp);
@@ -172,7 +219,15 @@ namespace PROfit {
                     }
                 }
 
-                float finalw = oscw * add_w * hist_w;
+                hist_w_arr.push_back(hist_w);
+            }
+
+            auto probs = inmodel.get_probs(phys, le_arr);
+
+            for(size_t i = 0; i < inprop.NEvent(); ++i) {
+                float oscw = phys.size() != 0 ? probs[i][inprop.model_rule[i]] : 1.0f;
+
+                float finalw = oscw * add_w_arr[i] * hist_w_arr[i];
                 myspectrum.Fill(inprop.VariableBinIndex(inconfig.i_prime, i), finalw);
             }
         }

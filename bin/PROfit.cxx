@@ -1227,7 +1227,7 @@ int main(int argc, char* argv[])
     }
     if(*proplot_command){
 
-        log<LOG_INFO>(L"%1% || Making a PROsyst thats full covarinace for future error bar creation (might be slow) ")% __func__ ;
+        log<LOG_INFO>(L"%1% || Making a PROsyst thats full covariance for future error bar creation (might be slow) ")% __func__ ;
         PROsyst allcovsyst = variable_systs[config.i_prime].allsplines2cov(config, prop, *model, CVParams, dseed(PROseed::global_rng));
 
         PlotOptions opt = PlotOptions::CVasStack;
