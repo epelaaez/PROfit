@@ -81,8 +81,8 @@ int main(int argc, char* argv[])
     size_t maxevents;
     int global_seed = -1;
     std::string log_file = "";
-    std::string fit_preset = "good";
-    static const std::unordered_set<std::string> allowed_preset = {"good","fast","overkill"};
+    std::vector<std::string> fit_preset = {"good","fast"};
+    static const std::unordered_set<std::string> allowed_preset = {"good","fast","overkill","sensitivity"};
     bool with_splines = false, binwidth_scale = false, area_normalized = false;
     std::map<std::string, float> fake_data_osc_params;
     std::map<std::string, float> cv_osc_params;
@@ -128,7 +128,7 @@ int main(int argc, char* argv[])
     app.add_option("-i, --inject", fake_data_osc_params, "Physics parameters to inject as fake-data true signal. Example: dmsq 3 sinsq2thmm 0.25")->expected(-1);
     app.add_option("--inject-cv", cv_osc_params, "Physics parameters to inject as CV. Example: dmsq 3 sinsq2thmm 0.25")->expected(-1);
     app.add_option("-s, --seed", global_seed, "A global seed for PROseed rng. Default to -1 for hardware rng seed.")->default_val(-1);
-    app.add_option("-p,--preset", fit_preset, "Preset fitting params. Available `fast`, `good` and `overkill` .");
+    app.add_option("-p,--preset", fit_preset, "Preset fitting params. Available `fast`, `good` and `overkill` Takes up to a vector of 2, first for global. 2nd for scan.");
     app.add_option("--fit-options", global_fit_options, "Parameters for single, detailed global best fit LBFGSB. See PROfitter.h or run --fit-help for available settings.");
     app.add_option("--scan-fit-options", scan_fit_options, "Parameters for simpier, multiple best fits in PROfile/surface LBFGSB.");
     app.add_flag("--fit-help", show_fit_help, "Show detailed help for all fitting parameters (L-BFGS-B, PSO, MCMC, etc.)");
@@ -543,20 +543,22 @@ int main(int argc, char* argv[])
     }
 
 
-    log<LOG_INFO>(L"%1% || Starting from fit preset :  %2%.")% __func__ % fit_preset.c_str();
-    if (allowed_preset.find(fit_preset) == allowed_preset.end()) {
-        log<LOG_ERROR>(L"%1% || ERROR allowed fit_presets are good, fast or overkill. You entred : %2%.")% __func__ % fit_preset.c_str();
-        return 1;
+    log<LOG_INFO>(L"%1% || Starting from fit preset :  %2%.")% __func__ % fit_preset;
+    for(auto &fit_pre: fit_preset){
+        if (allowed_preset.find(fit_pre) == allowed_preset.end()) {
+            log<LOG_ERROR>(L"%1% || ERROR allowed fit_presets are good, fast, sensitivity or overkill. You entred : %2%.")% __func__ % fit_pre.c_str();
+            return 1;
+        }
     }
     //Some global minimizer params
     // This runs for the single best gobal fit
-    PROfitterConfig fitConfig(global_fit_options, fit_preset, false);
+    PROfitterConfig fitConfig(global_fit_options, fit_preset.front(), false);
 
 
 
     //Some Scan minimizer params.
     // This runs lots during PROfile and surface. 
-    PROfitterConfig scanFitConfig(scan_fit_options, "fast", true);
+    PROfitterConfig scanFitConfig(scan_fit_options, fit_preset.back(), true);
 
 
 

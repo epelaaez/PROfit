@@ -115,6 +115,25 @@ namespace PROfit {
                 harmonic_num_test_points = 200;
             }
 
+            else if(fit_preset == "sensitivity"){
+                param.epsilon = 1e-5;
+                param.epsilon_rel = 1e-5;
+                param.max_iterations = 250;
+                param.max_linesearch = 30;
+                param.delta = 1e-6;
+                param.wolfe = 0.90;
+                param.ftol = 1e-4;
+                param.m = 6;
+                param.max_submin =10;
+                param.min_step = std::numeric_limits<float>::epsilon();
+
+                n_latin_points = 100;
+                n_swarm_particles = 10;
+                n_swarm_iterations = 10;
+                n_localfit=2;
+            }
+
+
 
 
             std::string whichFit = ( isScan? "Simplier Scan" : "Detailed Global");
