@@ -798,7 +798,7 @@ int main(int argc, char* argv[])
         PlotOptions opt = PlotOptions::DataPostfitRatio;
         if(binwidth_scale) opt |= PlotOptions::BinWidthScaled;
         if(area_normalized) opt |= PlotOptions::AreaNormalized;
-        plot_channels((final_output_tag+"_PROfile_hists.pdf"), config, cv, bf, data, err_band, post_err_band, texts, pbounds, opt);
+        plot_channels((final_output_tag+"_PROfile_hists.pdf"), config, cv, bf, data, err_band, post_err_band, {}, {}, texts, pbounds, opt);
 
         TCanvas c;
         c.Print((final_output_tag+"_postfit_posteriors.pdf[").c_str());
@@ -1165,7 +1165,7 @@ int main(int argc, char* argv[])
         std::vector<PROspec> variable_cvs;
         for(size_t io = 0; io < config.m_num_variables; ++io) {
             variable_cvs.push_back(FillSpectra(config, prop, variable_systs[config.i_prime],*model,CVpparams, !eventbyevent, io));
-            plot_channels(final_output_tag+"_PROplot_Variable_"+std::to_string(io)+"_CV.pdf", config, variable_cvs.back(), {}, {}, {}, {}, notext, pbounds, opt, io);
+            plot_channels(final_output_tag+"_PROplot_Variable_"+std::to_string(io)+"_CV.pdf", config, variable_cvs.back(), {}, {}, {}, {}, {}, {}, notext, pbounds, opt, io);
         }
 
         std::string filename = final_output_tag+"_fractional_systematics.pdf";
@@ -1351,7 +1351,7 @@ int main(int argc, char* argv[])
             if(!config.m_channel_variable_plot_bool.at(io))continue;// For now skip the L/E 250 bin. 
             other_err_bands.push_back(getErrorBand(config, prop, variable_systs[io], *model, variable_cvs[io], CVpparams, binwidth_scale, io));
             plot_channels(final_output_tag+"_PROplot_Variable_"+std::to_string(io)+"_ErrorBand.pdf", config, variable_cvs[io], {}, variable_data[io], 
-                    other_err_bands.back(), {}, other_channel_chitexts[io], pbounds, opt | PlotOptions::DataMCRatio, io);
+                    other_err_bands.back(), {}, {}, {}, other_channel_chitexts[io], pbounds, opt | PlotOptions::DataMCRatio, io);
         }
 
 
@@ -1554,7 +1554,6 @@ int main(int argc, char* argv[])
     //***********************************************************************
     if(*proglobal_command){
 
-
         PROmetric *metric_to_use = systs_only_profile ? null_metric : metric;
         size_t nparams = metric_to_use->nParams();
         size_t nphys = metric_to_use->GetModel().nparams;
@@ -1583,6 +1582,9 @@ int main(int argc, char* argv[])
         Eigen::VectorXf best_fit = fitter.best_fit;
         Eigen::MatrixXf post_covar = fitter.Covariance();
         fitter.calcFreqSeedPoints(*metric_to_use);
+
+        PROsyst pre_allcovsyst = variable_systs[config.i_prime].allsplines2cov(config, prop, *model, CVpparams, dseed(PROseed::global_rng));
+        PROsyst post_allcovsyst = variable_systs[config.i_prime].allsplines2cov(config, prop, *model, best_fit, dseed(PROseed::global_rng));
 
         for(size_t i=0; i< fitter.freq_seed_points.size(); i++){
             float chi_freq = fitter.freq_seed_values.at(i);
@@ -1731,10 +1733,10 @@ int main(int argc, char* argv[])
         //chi2text.SetTextSize(0.035); 
         texts.push_back(chi2text);
 
-        PlotOptions opt = PlotOptions::DataPostfitRatio;
+        PlotOptions opt = PlotOptions::DataMCRatio;
         if(binwidth_scale) opt |= PlotOptions::BinWidthScaled;
         if(area_normalized) opt |= PlotOptions::AreaNormalized;
-        plot_channels((final_output_tag+"_PROglobal_hists.pdf"), config, cv, bf, data, err_band, post_err_band, texts, pbounds,opt);
+        plot_channels((final_output_tag+"_PROglobal_hists.pdf"), config, cv, bf, data, err_band, post_err_band, pre_allcovsyst, post_allcovsyst, texts, pbounds,opt);
 
 
     }
