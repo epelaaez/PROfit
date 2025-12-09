@@ -1232,7 +1232,6 @@ int main(int argc, char* argv[])
                         leg->AddEntry(cv_hist, "No Oscillations", "l");
                         std::string oscstr = "";//"#splitline{Oscilations:}{";
                         for(size_t j=0;j<model->nparams;j++){
-                            // TODO: change_log_here
                             float val_maybe_log = model->is_log10[j] ? std::pow(10.0f, fake_data_osc_param_vector(j)) : fake_data_osc_param_vector(j);
                             oscstr+=model->pretty_param_names[j]+ " : "+ to_string_prec(val_maybe_log,3) +" "+model->pretty_param_units[j] + (j==0 ? ", " : "" );
                         }

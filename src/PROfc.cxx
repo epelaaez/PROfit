@@ -81,7 +81,6 @@ void fc_worker(fc_args args) {
 
         args.out->push_back({
                 chi2_syst, chi2_osc, 
-                // TODO: change_log_here
                 (model->is_log10[0] ? std::pow(10.0f, fitter_osc.best_fit(0)) : fitter_osc.best_fit(0)),
                 (model->is_log10[1] ? std::pow(10.0f, fitter_osc.best_fit(1)) : fitter_osc.best_fit(1)),
                 fitter.best_fit.segment(2, nparams - 2) , 
