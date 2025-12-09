@@ -152,7 +152,8 @@ float PROCNP::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
                 // If this new gradient evaluation point violates unitarity, set the gradient to a large value
                 if(model.model_constraint){
                     if(!model.model_constraint(param_plus)){
-                        log<LOG_ERROR>(L"%1% || WARNING In PROCNP: Gradient evaluation point violates unitarity. Setting gradient to large value.") % __func__;
+                        //log<LOG_ERROR>(L"%1% || WARNING In PROCNP: Gradient evaluation point violates unitarity. Setting gradient to large value.") % __func__;
+
                         gradient(i) = sign * 1e10;
                         continue;
                     }
