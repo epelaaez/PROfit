@@ -313,6 +313,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
             m_channel_variable_bins.push_back({});
             m_channel_variable_units.push_back({});
+            m_channel_variable_dims.push_back({});
 
 
             tinyxml2::XMLElement *pBin2DO = pChan->FirstChildElement("bins2D"); // 2D Bins
@@ -335,6 +336,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                     log<LOG_DEBUG>(L"%1% || This variable has a NO other binning (or attribute min,max,nbins)  ") % __func__ ;
                     m_channel_variable_bins.back().push_back(PROconfig::Binning());
                     m_channel_variable_units.back().push_back("");
+                    m_channel_variable_dims.back().push_back(2);
                     m_channel_variable_plot_bool.push_back(true);
                 }else{
                     log<LOG_DEBUG>(L"%1% || This variable has an Variable Binning.   ") % __func__  ;
@@ -391,6 +393,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
                     m_channel_variable_bins.back().push_back(PROconfig::Binning(std::vector<std::vector<float>>({binedge_x, binedge_y})));
                     m_channel_variable_units.back().push_back(ounits ? ounits : "");
+                    m_channel_variable_dims.back().push_back(2);
                 }
                 pBin2DO = pBin2DO->NextSiblingElement("bins2D");
             }
@@ -398,7 +401,6 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
             tinyxml2::XMLElement *pBinO = pChan->FirstChildElement("bins"); // 1D Bins
             while(pBinO){
-
                 expected_attrs = {"min","max","nbins","edges","unit","plot"};
                 for (const tinyxml2::XMLAttribute* attr = pBinO->FirstAttribute(); attr; attr = attr->Next()) {
                     std::string name = attr->Name();
@@ -419,6 +421,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                     log<LOG_DEBUG>(L"%1% || This variable has a NO other binning (or attribute min,max,nbins)  ") % __func__ ;
                     m_channel_variable_bins.back().push_back(PROconfig::Binning());
                     m_channel_variable_units.back().push_back("");
+                    m_channel_variable_dims.back().push_back(1);
                     m_channel_variable_plot_bool.push_back(true);
                 }else{
                     log<LOG_DEBUG>(L"%1% || This variable has an Variable Binning.   ") % __func__  ;
@@ -454,6 +457,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
                     m_channel_variable_bins.back().push_back({binedge});
                     m_channel_variable_units.back().push_back(ounits ? ounits : "");
+                    m_channel_variable_dims.back().push_back(1);
                 }
                 pBinO = pBinO->NextSiblingElement("bins");
             }
@@ -1401,6 +1405,7 @@ void PROconfig::remove_unused_channel(){
         std::vector<std::vector<Binning>> temp_channel_other_bins(m_num_channels);
 
         std::vector<std::string> temp_channel_names(m_num_channels);
+        std::vector<std::vector<int>> temp_variable_dims(m_num_channels);
         std::vector<std::string> temp_channel_plotnames(m_num_channels);
         std::vector<std::string> temp_channel_units(m_num_channels);
         std::vector<std::vector<std::string>> temp_channel_other_units(m_num_channels);
@@ -1806,9 +1811,9 @@ uint32_t PROconfig::CalcHash() const{
 
 ROOTFormula::ROOTFormula(const std::string &name, const std::string &formula, TTree *t) {
     std::stringstream formula_reader(formula);
-    // split the formula at a "," into multiple values
+    // split the formula at a ";" into multiple values. used to be "," but that breaks arguments
     std::string this_formula;
-    while(std::getline(formula_reader, this_formula, ',')) {
+    while(std::getline(formula_reader, this_formula, ';')) {
         fs.push_back(std::make_unique<TTreeFormula>(name.c_str(), this_formula.c_str(), t));
     }
     treeNumber = -1;
@@ -1844,7 +1849,7 @@ std::string ROOTFormula::FormulaName() const {
     std::string ret;
     bool delim = false;
     for (const std::unique_ptr<TTreeFormula> &f: fs) {
-        if (delim) ret += ',';
+        if (delim) ret += ';';
         ret += f->PrintValue();
         delim = true;
     }

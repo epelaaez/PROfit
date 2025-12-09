@@ -46,7 +46,7 @@
 using namespace PROfit;
 
 log_level_t GLOBAL_LEVEL = LOG_INFO;
-log_level_t FILE_LEVEL = LOG_INFO;  
+log_level_t FILE_LEVEL = LOG_INFO;
 
 std::wostream *OSTREAM = &wcout;
 
@@ -225,13 +225,16 @@ int main(int argc, char* argv[])
             FILE_LEVEL = GLOBAL_LEVEL;
         }
 
-        log_impl::EnableFileLogging(log_file,FILE_LEVEL);
+        log_impl::EnableFileLogging(log_file, FILE_LEVEL);
     }
 
     pbounds.Load(bound_list);
 
     log<LOG_WARNING>(L" %1% ") % getIcon().c_str()  ;
     std::string final_output_tag =analysis_tag +"_"+output_tag;
+
+
+
 
     log<LOG_WARNING>(L"%1% || ##################################################################") % __func__  ;
     log<LOG_WARNING>(L"%1% || ####################### PROfit version v%2% ######################") % __func__ % PROJECT_VERSION_STR ;
@@ -1237,7 +1240,7 @@ int main(int argc, char* argv[])
 
         std::vector<std::map<std::string, std::unique_ptr<TH1D>>> other_hists;
         for(size_t io = 0; io < config.m_num_variables; ++io) {
-            other_hists.push_back(getCVHists(variable_cvs[io], config, binwidth_scale, io));
+            other_hists.push_back(getCV1DHists(variable_cvs[io], config, binwidth_scale, io));
         }
 
         TCanvas c;
@@ -1246,7 +1249,7 @@ int main(int argc, char* argv[])
             c.Print((final_output_tag +"_PROplot_Osc.pdf"+ "[").c_str(), "pdf");
 
             PROspec osc_spec = FillSpectra(config, prop, variable_systs[config.i_prime], *model, fakeDataParams, !eventbyevent,config.i_prime );
-            std::map<std::string, std::unique_ptr<TH1D>> osc_hists = getCVHists(osc_spec, config, binwidth_scale);
+            std::map<std::string, std::unique_ptr<TH1D>> osc_hists = getCV1DHists(osc_spec, config, binwidth_scale);
             size_t global_subchannel_index = 0;
             for(size_t im = 0; im < config.m_num_modes; im++){
                 for(size_t id =0; id < config.m_num_detectors; id++){
@@ -1484,7 +1487,7 @@ int main(int argc, char* argv[])
 
         if((fake_data_osc_params.size())) {
             PROspec osc_spec = FillSpectra(config, prop, variable_systs[config.i_prime], *model, fakeDataParams, !eventbyevent,config.i_prime);
-            std::map<std::string, std::unique_ptr<TH1D>> osc_hists = getCVHists(osc_spec, config, binwidth_scale);
+            std::map<std::string, std::unique_ptr<TH1D>> osc_hists = getCV1DHists(osc_spec, config, binwidth_scale);
             fout.mkdir("Osc_hists");
             fout.cd("Osc_hists");
             for(const auto &[name, hist]: osc_hists) {
