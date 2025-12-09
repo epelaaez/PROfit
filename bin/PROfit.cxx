@@ -371,7 +371,6 @@ int main(int argc, char* argv[])
 
 
     //Spline fake data injection studies
-    //Spline CV  injection studies [NEED TO GO AFTER the remove exclude systs]
     Eigen::VectorXf fakedataparams = Eigen::VectorXf::Constant(model->nparams + variable_systs[config.i_prime].GetNSplines(), 0);
     for(size_t i = 0; i < model->nparams; ++i) fakedataparams(i) = fake_data_osc_param_vector(i);
     for(const auto& [name, shift]: injected_systs) {
@@ -552,7 +551,7 @@ int main(int argc, char* argv[])
     Eigen::VectorXf CVParams = Eigen::VectorXf::Constant(model->nparams + variable_systs[config.i_prime].GetNSplines(), 0);
 
     //Spline CV  injection studies [NEED TO GO AFTER the remove exclude systs]
-    for(const auto& [name, shift]: injected_systs) {
+    for(const auto& [name, shift]: cv_injected_systs) {
         log<LOG_INFO>(L"%1% || Injected syst: %2% shifted by %3%") % __func__ % name.c_str() % shift;
 
         auto it = std::find(variable_systs[config.i_prime].spline_names.begin(), variable_systs[config.i_prime].spline_names.end(), name);
