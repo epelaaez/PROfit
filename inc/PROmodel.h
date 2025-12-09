@@ -353,7 +353,7 @@ public:
     }
 
     float Pmue(float dmsq, float Ue4sq, float Um4sq, float le) const{
-        dmsq = maybe_convert_log("dmsq", dmsq);
+        dmsq =  maybe_convert_log("dmsq", dmsq);
         Ue4sq = maybe_convert_log("Ue4^2", Ue4sq);
         Um4sq = maybe_convert_log("Um4^2", Um4sq);
 
@@ -484,6 +484,7 @@ public:
         nparams = 3;
         param_names = {"dmsq", "sinsq2thee", "sinsqth24"}; 
         pretty_param_names = {"#Deltam^{2}", "sin^{2}2#theta_{ee}", "sin^{2}#theta_{24}"}; 
+        is_log10 = {true, true,true};
         lb = Eigen::VectorXf(3);
         ub = Eigen::VectorXf(3);
         default_val = Eigen::VectorXf(3);
@@ -498,8 +499,8 @@ public:
     }
 
     float Pmue(float dmsq, float sinsq2thee, [[maybe_unused]]float sinsqth24, float le) const{
-        dmsq = std::pow(10.0f, dmsq);
-        float sinsq2thmue = pow(10.f,sinsqth24)*std::pow(10.0f, sinsq2thee);
+        dmsq = maybe_convert_log("dmsq",dmsq);
+        float sinsq2thmue = maybe_convert_log("sinsqth24",sinsqth24)*maybe_convert_log("sinsq2thee", sinsq2thee);
         
         if(sinsq2thmue > 1) {
             log<LOG_ERROR>(L"%1% || sinsq2thmue is %2% which is greater than 1. Setting to 1.")
@@ -527,8 +528,9 @@ public:
     }
 
     float Pmumu(float dmsq, float sinsq2thee, [[maybe_unused]]float sinsqth24, float le) const{
-        dmsq = std::pow(10.0f, dmsq);
-        float Um4sq = std::pow(10.0f, sinsqth24)/2.0*(1.0+sqrt(1-std::pow(10.0f,sinsq2thee)));
+        float Um4sq = maybe_convert_log("sinsqth24",sinsqth24)/2.0*(1.0+sqrt(1- maybe_convert_log("sinsq2thee", sinsq2thee)));
+        dmsq =maybe_convert_log("dmsq",dmsq);
+        
 
         float sinterm = std::sin(1.27*dmsq*(le));
         float prob    = 1.0f - 4.0f*Um4sq*(1.0f-Um4sq)*sinterm*sinterm;
@@ -544,8 +546,8 @@ public:
 
     float Pee(float dmsq, float sinsq2thee, [[maybe_unused]]float sinsqth24, float le) const{
 
-        dmsq = std::pow(10.0f, dmsq);
-        sinsq2thee = std::pow(10.0f, sinsq2thee);
+        dmsq =maybe_convert_log("dmsq",dmsq);
+        sinsq2thee =maybe_convert_log("sinsq2thee",sinsq2thee);
 
         float sinterm = std::sin(1.27*dmsq*(le));
         float prob    = 1.0f - sinsq2thee*sinterm*sinterm;
@@ -599,7 +601,7 @@ public:
         param_names = {"dmsq", "sinsq2thmue", "xi"}; 
         pretty_param_names = {"#Deltam^{2}", "sin^{2}2#theta_{#mue}", "#xi"}; 
         pretty_param_units = {"eV^{2}", "", ""};
-        is_log10 = {true, true, true};
+        is_log10 = {true, true, false};
         build_param_index();
         lb = Eigen::VectorXf(3);
         ub = Eigen::VectorXf(3);

@@ -1,6 +1,5 @@
 #include "PROplot.h"
 #include "TStyle.h"
-#include <bits/stdc++.h>
 
 namespace PROfit{
 
