@@ -304,6 +304,12 @@ int main(int argc, char* argv[])
         prop.scale(config, scale_map);
     }
 
+    //Before building, if we fixed a nuisence parameter to a value, lets shift to that value.
+    for(auto &sys: fixed_params){
+           float def = config.m_mcgen_variation_prior_centers.count(sys) ? config.m_mcgen_variation_prior_centers[sys] : 0.0;
+           config.m_mcgen_variation_prior_centers[sys]= cv_injected_systs.count(sys) ? cv_injected_systs.at(sys) : def ;
+    }
+
     //Build a PROsyst to sort and analyze all systematics
     //PROsyst systs(prop, config, systsstructs.front(), shapeonly);
     std::vector<PROsyst> variable_systs;

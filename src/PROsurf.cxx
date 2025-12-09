@@ -836,14 +836,6 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
 
         if(w<model.nparams) graphs[w]->SetLineColor(kBlue-7);
 
-        if(w>=model.nparams){
-            gprior->Draw("L same");
-            gprior->SetLineStyle(2);
-            gprior->SetLineWidth(2);
-            gprior->SetLineColor(kRed-7);
-            graphs[w]->GetYaxis()->SetRangeUser(0, std::min(graphs[w]->GetHistogram()->GetMaximum(),10.0));
-        }
-
         if(graphs[w]->GetN()==1){//1 point, its been fixed. Just draw a line
             float x_val = graphs[w]->GetPointX(0);
             TLine* linet = new TLine(x_val, 0, x_val, 1);
@@ -852,6 +844,15 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
             linet->SetLineColor(kGreen+2);  // Set color (black for visibility)
             linet->Draw();
         }
+        else if(w>=model.nparams){
+            gprior->Draw("L same");
+            gprior->SetLineStyle(2);
+            gprior->SetLineWidth(2);
+            gprior->SetLineColor(kRed-7);
+            graphs[w]->GetYaxis()->SetRangeUser(0, std::min(graphs[w]->GetHistogram()->GetMaximum(),10.0));
+        }
+
+
 
         if(w==model.nparams-1){
             //on past physics param, lets do a quick zoom, stepping back though the physics param
