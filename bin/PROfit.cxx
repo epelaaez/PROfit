@@ -1656,7 +1656,7 @@ int main(int argc, char* argv[])
         Eigen::MatrixXf post_covar = fitter.Covariance();
         if(!global_fixed[0] || !systs_only) fitter.calcFreqSeedPoints(*metric);
 
-        PROsyst pre_allcovsyst = variable_systs[config.i_prime].allsplines2cov(config, prop, *model, CVparams, dseed(PROseed::global_rng));
+        PROsyst pre_allcovsyst = variable_systs[config.i_prime].allsplines2cov(config, prop, *model, CVParams, dseed(PROseed::global_rng));
         PROsyst post_allcovsyst = variable_systs[config.i_prime].allsplines2cov(config, prop, *model, best_fit, dseed(PROseed::global_rng));
 
         for(size_t i=0; i< fitter.freq_seed_points.size(); i++){
