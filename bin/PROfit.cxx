@@ -87,9 +87,11 @@ int main(int argc, char* argv[])
     std::map<std::string, float> fake_data_osc_params;
     std::map<std::string, float> cv_osc_params;
     std::map<std::string, float> injected_systs;
+    std::map<std::string, float> cv_injected_systs;
+    std::vector<std::string> fixed_params;
     std::vector<std::string> syst_list, systs_excluded;
     bool MCMC_prefit_errors = false;
-    bool systs_only_profile = false;
+    bool systs_only = false;
 
     float xlo, xhi, ylo, yhi;
     std::array<float, 2> xlims, ylims;
@@ -127,6 +129,7 @@ int main(int argc, char* argv[])
     app.add_option("-d, --data", data_xml, "Load from a seperate data xml/data file instead of signal injection. Only used with plot subcommand.")->default_str("");
     app.add_option("-i, --inject", fake_data_osc_params, "Physics parameters to inject as fake-data true signal. Example: dmsq 3 sinsq2thmm 0.25")->expected(-1);
     app.add_option("--inject-cv", cv_osc_params, "Physics parameters to inject as CV. Example: dmsq 3 sinsq2thmm 0.25")->expected(-1);
+    app.add_option("--fix", fixed_params, "Fix Certain Physics or Systematics parameters. Fixed to CV.");
     app.add_option("-s, --seed", global_seed, "A global seed for PROseed rng. Default to -1 for hardware rng seed.")->default_val(-1);
     app.add_option("-p,--preset", fit_preset, "Preset fitting params. Available `fast`, `good` and `overkill` Takes up to a vector of 2, first for global. 2nd for scan.");
     app.add_option("--fit-options", global_fit_options, "Parameters for single, detailed global best fit LBFGSB. See PROfitter.h or run --fit-help for available settings.");
@@ -134,6 +137,7 @@ int main(int argc, char* argv[])
     app.add_flag("--fit-help", show_fit_help, "Show detailed help for all fitting parameters (L-BFGS-B, PSO, MCMC, etc.)");
 
     app.add_option("--inject-systs", injected_systs, "Systematic shifts to inject. Map of name and shift value in sigmas. Only spline systs are supported right now.");
+    app.add_option("--inject-systs-cv", cv_injected_systs, "Systematic shifts to inject.  as CV Map of name and shift value in sigmas. Only spline systs are supported right now.");
     app.add_option("--syst-list", syst_list, "Override list of systematics to use (note: all systs must be in the xml).");
     app.add_option("--exclude-systs", systs_excluded, "List of systematics to exclude.")->excludes("--syst-list"); 
 
@@ -148,6 +152,8 @@ int main(int argc, char* argv[])
     app.add_flag("--statonly", statonly, "Run a stats only surface instead of fitting systematics");
     app.add_flag("--force",force,"Force loading binary data even if hash is incorrect (Be Careful!)");
     app.add_flag("--no-xrootd",noxrootd,"Do not use XRootD, which is enabled by default");
+    app.add_flag("--syst-only", systs_only, "Force fitting over nuisance parameters only, currently just --fix's them");
+
     auto* shape_flag = app.add_flag("--shapeonly", shapeonly, "Run a shape only analysis");
     auto* rate_flag = app.add_flag("--rateonly", rateonly, "Run a rate only analysis");
     shape_flag->excludes(rate_flag);   
@@ -179,7 +185,6 @@ int main(int argc, char* argv[])
 
     //PROfile, make N profile'd chi^2 for each physics and nuisence parameters
     CLI::App *profile_command = app.add_subcommand("profile", "Make a 1D profiled chi2 for each physics and nuisence parameter.");
-    profile_command->add_flag("--syst-only", systs_only_profile, "Profile over nuisance parameters only");
     profile_command->add_flag("--mcmc-prefit", MCMC_prefit_errors, "Use MCMC to sample the systematic priors for the pre-fit error band.");
 
     //PROplot, plot things
@@ -302,6 +307,12 @@ int main(int argc, char* argv[])
         prop.scale(config, scale_map);
     }
 
+    //Before building, if we fixed a nuisence parameter to a value, lets shift to that value.
+    for(auto &sys: fixed_params){
+           float def = config.m_mcgen_variation_prior_centers.count(sys) ? config.m_mcgen_variation_prior_centers[sys] : 0.0;
+           config.m_mcgen_variation_prior_centers[sys]= cv_injected_systs.count(sys) ? cv_injected_systs.at(sys) : def ;
+    }
+
     //Build a PROsyst to sort and analyze all systematics
     //PROsyst systs(prop, config, systsstructs.front(), shapeonly);
     std::vector<PROsyst> variable_systs;
@@ -318,10 +329,19 @@ int main(int argc, char* argv[])
 
 
 
+    //Seed time
+    PROseed myseed(nthread, global_seed);
+    std::uniform_int_distribution<uint32_t> dseed(0, std::numeric_limits<uint32_t>::max());
+
+
+
     std::unique_ptr<PROmodel> model = get_model_from_string(config, prop);
     std::unique_ptr<PROmodel> null_model = std::make_unique<NullModel>(prop);
 
     Eigen::VectorXf fake_data_osc_param_vector = model->default_val;
+    Eigen::VectorXf cv_osc_param_vector = model->default_val;
+
+    //loop over input fake data physics params and check/set
     for(const auto &[name, value]: fake_data_osc_params) {
         const auto it = std::find(model->param_names.begin(), model->param_names.end(), name);
         if(it == std::end(model->param_names)) {
@@ -335,7 +355,7 @@ int main(int argc, char* argv[])
         fake_data_osc_param_vector(loc) = std::log10(value);
     }
 
-    Eigen::VectorXf cv_osc_param_vector = model->default_val;
+    //loop over input CV physics params and check/set
     for(const auto &[name, value]: cv_osc_params) {
         const auto it = std::find(model->param_names.begin(), model->param_names.end(), name);
         if(it == std::end(model->param_names)) {
@@ -350,15 +370,9 @@ int main(int argc, char* argv[])
     }
 
 
-    //Seed time
-    PROseed myseed(nthread, global_seed);
-    std::uniform_int_distribution<uint32_t> dseed(0, std::numeric_limits<uint32_t>::max());
-
-
-    //Spline injection studies
-    Eigen::VectorXf allparams = Eigen::VectorXf::Constant(model->nparams + variable_systs[config.i_prime].GetNSplines(), 0);
-    Eigen::VectorXf systparams = Eigen::VectorXf::Constant(variable_systs[config.i_prime].GetNSplines(), 0);
-    for(size_t i = 0; i < model->nparams; ++i) allparams(i) = fake_data_osc_param_vector(i);
+    //Spline fake data injection studies
+    Eigen::VectorXf fakedataparams = Eigen::VectorXf::Constant(model->nparams + variable_systs[config.i_prime].GetNSplines(), 0);
+    for(size_t i = 0; i < model->nparams; ++i) fakedataparams(i) = fake_data_osc_param_vector(i);
     for(const auto& [name, shift]: injected_systs) {
         log<LOG_INFO>(L"%1% || Injected syst: %2% shifted by %3%") % __func__ % name.c_str() % shift;
 
@@ -377,9 +391,10 @@ int main(int argc, char* argv[])
 
         }
         int idx = std::distance(variable_systs[config.i_prime].spline_names.begin(), it);
-        allparams(idx+model->nparams) = shift;
-        systparams(idx) = shift;
+        fakedataparams(idx+model->nparams) = shift;
     }
+
+    
 
     //Some logic for EITHER injecting fake/mock data of oscillated signal/syst shifts OR using real data
     //Main data for the i_prime fitting.
@@ -457,7 +472,7 @@ int main(int argc, char* argv[])
     else{
         log<LOG_INFO>(L"%1% || Going to get fake data set up for each variable.") % __func__ ;
         for(size_t io = 0; io < config.m_num_variables; ++io) {
-            PROspec data_spec = config.m_channel_variable_plot_bool.at(io) ?  FillSpectra(config, prop, variable_systs[io], *model, allparams, !eventbyevent, io) : PROspec(config.m_num_variable_bins_total[io]) ;
+            PROspec data_spec = config.m_channel_variable_plot_bool.at(io) ?  FillSpectra(config, prop, variable_systs[io], *model, fakedataparams, !eventbyevent, io) : PROspec(config.m_num_variable_bins_total[io]) ;
             if(poisson_throw) data_spec = PROspec::PoissonVariation(data_spec, dseed(myseed.global_rng));
             Eigen::VectorXf data_vec = CollapseMatrix(config, data_spec.Spec(), io);
             variable_data.push_back(PROdata(data_vec, data_vec.array().sqrt()));
@@ -532,14 +547,37 @@ int main(int argc, char* argv[])
     }
 
     //Pysics parameter input
-    Eigen::VectorXf pparams = Eigen::VectorXf::Constant(model->nparams + variable_systs[config.i_prime].GetNSplines(), 0);
-    Eigen::VectorXf CVpparams = Eigen::VectorXf::Constant(model->nparams + variable_systs[config.i_prime].GetNSplines(), 0);
+    Eigen::VectorXf fakeDataParams = Eigen::VectorXf::Constant(model->nparams + variable_systs[config.i_prime].GetNSplines(), 0);
+    Eigen::VectorXf CVParams = Eigen::VectorXf::Constant(model->nparams + variable_systs[config.i_prime].GetNSplines(), 0);
+
+    //Spline CV  injection studies [NEED TO GO AFTER the remove exclude systs]
+    for(const auto& [name, shift]: cv_injected_systs) {
+        log<LOG_INFO>(L"%1% || Injected syst: %2% shifted by %3%") % __func__ % name.c_str() % shift;
+
+        auto it = std::find(variable_systs[config.i_prime].spline_names.begin(), variable_systs[config.i_prime].spline_names.end(), name);
+        if(it == variable_systs[config.i_prime].spline_names.end()) {
+            for(const auto &[xml_name, plot_name]: config.m_mcgen_variation_plotname_map) {
+                if(name == plot_name) {
+                    it = std::find(variable_systs[config.i_prime].spline_names.begin(), variable_systs[config.i_prime].spline_names.end(), xml_name);
+                    break;
+                }
+            }
+            if(it == variable_systs[config.i_prime].spline_names.end()) {
+                log<LOG_ERROR>(L"%1% || Error: Unrecognized spline %2%. Ignoring this injected shift.") % __func__ % name.c_str();
+                continue;
+            }
+
+        }
+        int idx = std::distance(variable_systs[config.i_prime].spline_names.begin(), it);
+        CVParams(idx+model->nparams) = shift;
+    }
+
     for(long i = 0; i < fake_data_osc_param_vector.size(); ++i) {
-        pparams(i) = fake_data_osc_param_vector(i);
-        CVpparams(i) = model->default_val(i);
+        fakeDataParams(i) = fake_data_osc_param_vector(i);
+        CVParams(i) = model->default_val(i);
     }
     for(long i = 0; i < cv_osc_param_vector.size(); ++i) {
-        CVpparams(i) = cv_osc_param_vector(i);
+        CVParams(i) = cv_osc_param_vector(i);
     }
 
 
@@ -562,22 +600,66 @@ int main(int argc, char* argv[])
 
 
 
+    //Section to set bounds, as well as fix 
+    size_t N_phys_params = model->nparams;
+    size_t N_syst_params = variable_systs[config.i_prime].GetNSplines();
+    size_t N_params = N_phys_params+N_syst_params;
+
+    Eigen::VectorXf global_lb = Eigen::VectorXf::Constant(N_params, -3.0);
+    Eigen::VectorXf global_ub = Eigen::VectorXf::Constant(N_params, 3.0);
+    std::vector<int> global_fixed(N_params,0); 
+    log<LOG_INFO>(L"%1% || We are hoping to FIX : %2% ") % __func__ % fixed_params;
+    for(size_t i = 0; i < N_phys_params; ++i) {
+                std::string name = model->param_names[i];
+                std::string pname = model->pretty_param_names[i];
+                if( systs_only || std::find(fixed_params.begin(), fixed_params.end(), pname) != fixed_params.end() || std::find(fixed_params.begin(), fixed_params.end(), name) != fixed_params.end()){
+                    log<LOG_INFO>(L"%1% || We are FIXING physics parameter %2% (%3%) at value %4% ") % __func__ % i % name.c_str() % CVParams(i);  
+                    model->lb(i) = CVParams(i);
+                    model->ub(i) = CVParams(i);
+                    global_fixed.at(i)=1;
+                }
+                global_lb(i) = model->lb(i);
+                global_ub(i) = model->ub(i);
+
+           
+    }
+    for(size_t i = N_phys_params; i < N_params; ++i) {
+                std::string name = variable_systs[config.i_prime].spline_names[i-N_phys_params];
+                std::string pname =config.m_mcgen_variation_plotname_map.at(name); 
+
+                if( std::find(fixed_params.begin(), fixed_params.end(), name) != fixed_params.end() || std::find(fixed_params.begin(), fixed_params.end(), pname) != fixed_params.end()){
+                    log<LOG_INFO>(L"%1% || We are FIXING syst parameter %2% (%3%) at value %4% ") % __func__ % i % name.c_str() % CVParams(i);  
+                    variable_systs[config.i_prime].spline_hi[i-N_phys_params] = CVParams(i);
+                    variable_systs[config.i_prime].spline_lo[i-N_phys_params] = CVParams(i);
+                    global_fixed.at(i)=1;
+                }
+                global_lb(i) = variable_systs[config.i_prime].spline_lo[i-N_phys_params];
+                global_ub(i) = variable_systs[config.i_prime].spline_hi[i-N_phys_params];
+
+    }
+    if( (fixed_params.size()!=std::accumulate(global_fixed.begin(), global_fixed.end(), 0)) && !systs_only ){
+            log<LOG_ERROR>(L"%1% || ERROR. The fixed parameters you passed, check they exist? the number of fixed params is not the same as input params.") % __func__;
+            log<LOG_ERROR>(L"%1% || ERROR. fixed_params %2% ") % __func__ % fixed_params;
+            log<LOG_ERROR>(L"%1% || ERROR. global_fixed %2% : sum %3% ") % __func__ % global_fixed % ((int)std::accumulate(global_fixed.begin(), global_fixed.end(), 0)) ;
+            exit(EXIT_FAILURE);
+    }
+
+
     //Metric Time
     //Metrics are for i_prime only for now
-    PROmetric *metric, *null_metric;
+    PROmetric *metric;
     if(chi2 == "PROchi") {
         metric = new PROchi("", config, prop, &(variable_systs[config.i_prime]), *model, data, eventbyevent ? PROmetric::EventByEvent : PROmetric::BinnedChi2,shapeonly);
-        null_metric = new PROchi("", config, prop, &(variable_systs[config.i_prime]), *null_model, data, eventbyevent ? PROmetric::EventByEvent : PROmetric::BinnedChi2,shapeonly);
     } else if(chi2 == "PROCNP") {
         metric = new PROCNP("", config, prop, &(variable_systs[config.i_prime]), *model, data, eventbyevent ? PROmetric::EventByEvent : PROmetric::BinnedChi2,shapeonly);
-        null_metric = new PROCNP("", config, prop, &(variable_systs[config.i_prime]), *null_model, data, eventbyevent ? PROmetric::EventByEvent : PROmetric::BinnedChi2,shapeonly);
     } else if(chi2 == "Poisson") {
         metric = new PROpoisson("", config, prop, &(variable_systs[config.i_prime]), *model, data, eventbyevent ? PROmetric::EventByEvent : PROmetric::BinnedChi2,shapeonly);
-        null_metric = new PROpoisson("", config, prop, &(variable_systs[config.i_prime]), *null_model, data, eventbyevent ? PROmetric::EventByEvent : PROmetric::BinnedChi2,shapeonly);
     } else {
         log<LOG_ERROR>(L"%1% || Unrecognized chi2 function %2%") % __func__ % chi2.c_str();
         abort();
     }
+
+
 
     //Covariance colors, move this eslewher
     const Int_t NCont = 255;
@@ -602,7 +684,6 @@ int main(int argc, char* argv[])
     gStyle->SetNumberContours(NCont);
 
 
-    // Need a second one for case where we do syst_only profile and surface in same command
     Eigen::VectorXf global_fit_result, global_fit_result_surf;
     float global_fit_chi2 = -1, global_fit_chi2_surf = -1;
 
@@ -614,14 +695,10 @@ int main(int argc, char* argv[])
 
     if(*profile_command){
 
-        PROmetric *metric_to_use = systs_only_profile ? null_metric : metric;
-        size_t nparams = metric_to_use->nParams();
-        size_t nphys = metric_to_use->GetModel().nparams;
-        PROfitter fitter(metric_to_use->UpperBound(), metric_to_use->LowerBound(), fitConfig);
-        metric_to_use->setBounds(metric_to_use->UpperBound(), metric_to_use->LowerBound());
+        PROfitter fitter(global_ub, global_lb, fitConfig);
+        metric->setBounds(global_ub, global_ub);
 
         log<LOG_INFO>(L"%1% || ########### Starting Global Best Fit Minimizing ############") % __func__;
-
 
         std::vector<std::pair<int, std::string>> global_PB_configs;
         global_PB_configs.push_back({fitConfig.n_latin_points, "(1) LatinHyperCube"});
@@ -637,10 +714,10 @@ int main(int argc, char* argv[])
             fitter.setProgressBar(&global_progress);
         }
 
-        float best_chi2 = fitter.Fit(*metric_to_use,CVpparams); 
+        float best_chi2 = fitter.Fit(*metric,CVParams); 
         Eigen::VectorXf best_fit = fitter.best_fit;
         Eigen::MatrixXf post_covar = fitter.Covariance();
-        if(!systs_only_profile) fitter.calcFreqSeedPoints(*metric_to_use);
+        if(!global_fixed[0] || !systs_only) fitter.calcFreqSeedPoints(*metric);
 
         for(size_t i=0; i< fitter.freq_seed_points.size(); i++){
             float chi_freq = fitter.freq_seed_values.at(i);
@@ -671,22 +748,21 @@ int main(int argc, char* argv[])
         log<LOG_INFO>(L"%1% || Global Best Fit chi^2: %2%") %__func__ % best_chi2;
         log<LOG_INFO>(L"%1% || at paramters: ") % __func__;
 
-        for(size_t i = 0; i< nparams; i++){
+        for(size_t i = 0; i< N_params; i++){
 
-            if(i<nphys){
-                log<LOG_INFO>(L"%1% || %2%  : %3% (log) %4% (nonlog) ") % __func__ % metric_to_use->GetModel().pretty_param_names[i].c_str() % best_fit(i) % pow(10,best_fit(i));
+            if(i<N_phys_params){
+                log<LOG_INFO>(L"%1% || %2%  : %3% (log) %4% (nonlog) ") % __func__ % metric->GetModel().pretty_param_names[i].c_str() % best_fit(i) % pow(10,best_fit(i));
             }else{
-                log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % metric_to_use->GetSysts().spline_names[i-nphys].c_str() % best_fit(i) ;
+                log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % metric->GetSysts().spline_names[i-N_phys_params].c_str() % best_fit(i) ;
             }
         }
         log<LOG_INFO>(L"%1% || ################################################") % __func__;
 
-        // TODO: Not sure I understand this covariance matrix
         log<LOG_INFO>(L"%1% || Starting a metropolis hastings chain to estimate the covariace matrix aroud the above best fit. Run and Burn is (%2%,%3%);") % __func__%fitConfig.MCMCiter % fitConfig.MCMCburn;
-        //Metropolis mh(simple_target{*metric_to_use}, simple_proposal(*metric_to_use, dseed(PROseed::global_rng)), best_fit, dseed(PROseed::global_rng));
-        Metropolis mh(simple_target{*metric_to_use}, adaptive_proposal(*metric_to_use, dseed(PROseed::global_rng)), best_fit, dseed(PROseed::global_rng));
+        //Metropolis mh(simple_target{*metric}, simple_proposal(*metric, dseed(PROseed::global_rng)), best_fit, dseed(PROseed::global_rng));
+        Metropolis mh(simple_target{*metric}, adaptive_proposal(*metric, dseed(PROseed::global_rng)), best_fit, dseed(PROseed::global_rng));
 
-        Eigen::MatrixXf covmat = Eigen::MatrixXf::Constant(nparams, nparams, 0);
+        Eigen::MatrixXf covmat = Eigen::MatrixXf::Constant(N_params, N_params, 0);
         size_t count = 0;
         const auto action = [&](const Eigen::VectorXf &value) {
             covmat += (value-best_fit) * (value-best_fit).transpose();
@@ -702,28 +778,28 @@ int main(int argc, char* argv[])
         Eigen::MatrixXf corrmat = inv_sqrt_diag.asDiagonal() * fraccovmat * inv_sqrt_diag.asDiagonal();
 
 
-        TH2D corrhist("crh", "", nparams, 0, nparams, nparams, 0, nparams);
-        TH2D fraccovhist("fch", "", nparams, 0, nparams, nparams, 0, nparams);
-        TH2D covhist("ch", "", nparams, 0, nparams, nparams, 0, nparams);
+        TH2D corrhist("crh", "", N_params, 0, N_params, N_params, 0, N_params);
+        TH2D fraccovhist("fch", "", N_params, 0, N_params, N_params, 0, N_params);
+        TH2D covhist("ch", "", N_params, 0, N_params, N_params, 0, N_params);
         TH2D physhist;
-        if(nphys > 0) physhist = TH2D("ph","", nparams, 0, nparams, nphys, 0, nphys);
-        for(size_t i = 0; i < nparams; ++i) {
-            std::string label = i < metric_to_use->GetModel().nparams 
-                ? metric_to_use->GetModel().pretty_param_names[i]
-                : config.m_mcgen_variation_plotname_map[metric_to_use->GetSysts().spline_names[i-metric_to_use->GetModel().nparams]].c_str();
+        if(N_phys_params > 0) physhist = TH2D("ph","", N_params, 0, N_params, N_phys_params, 0, N_phys_params);
+        for(size_t i = 0; i < N_params; ++i) {
+            std::string label = i < N_phys_params 
+                ? metric->GetModel().pretty_param_names[i]
+                : config.m_mcgen_variation_plotname_map[metric->GetSysts().spline_names[i-N_phys_params]].c_str();
             covhist.GetXaxis()->SetBinLabel(i+1, label.c_str());
             covhist.GetYaxis()->SetBinLabel(i+1, label.c_str());
             fraccovhist.GetXaxis()->SetBinLabel(i+1, label.c_str());
             fraccovhist.GetYaxis()->SetBinLabel(i+1, label.c_str());
             corrhist.GetXaxis()->SetBinLabel(i+1, label.c_str());
             corrhist.GetYaxis()->SetBinLabel(i+1, label.c_str());
-            if(nphys > 0) physhist.GetXaxis()->SetBinLabel(i+1, label.c_str());
-            if(i < metric_to_use->GetModel().nparams) physhist.GetYaxis()->SetBinLabel(i+1, label.c_str());
-            for(size_t j = 0; j < nparams; ++j) {
+            if(N_phys_params > 0) physhist.GetXaxis()->SetBinLabel(i+1, label.c_str());
+            if(i < N_phys_params) physhist.GetYaxis()->SetBinLabel(i+1, label.c_str());
+            for(size_t j = 0; j < N_params; ++j) {
                 covhist.SetBinContent(i+1, j+1, covmat(i,j));
                 fraccovhist.SetBinContent(i+1, j+1, fraccovmat(i,j));
                 corrhist.SetBinContent(i+1, j+1, corrmat(i,j));
-                if(j < metric_to_use->GetModel().nparams)
+                if(j < N_phys_params)
                     physhist.SetBinContent(i+1, j+1, covmat(i,j));
             }
         }
@@ -746,18 +822,18 @@ int main(int argc, char* argv[])
         TLine line;
         line.SetLineColor(kBlack);
         line.SetLineWidth(2);
-        line.DrawLine(nphys, 0, nphys, nparams);
-        line.DrawLine(0, nphys, nparams, nphys);
+        line.DrawLine(N_phys_params, 0, N_phys_params, N_params);
+        line.DrawLine(0, N_phys_params, N_params, N_phys_params);
         c1.Print((final_output_tag+"_postfit_correlation_matrix.pdf").c_str());
-        if(nphys > 0) {
+        if(N_phys_params > 0) {
             physhist.Draw("colz");
             c1.Print("phys_cov.pdf");
         }
         log<LOG_INFO>(L"%1% || MCMC acceptance is  %2%. ") % __func__% ((double)count /fitConfig.MCMCiter);
 
         std::string hname = "#chi^{2}/ndf = " + to_string(best_chi2) + "/" + to_string(config.m_num_variable_bins_total_collapsed[config.i_prime]);
-        PROspec cv = FillSpectra(config, prop, metric_to_use->GetSysts(), metric_to_use->GetModel(), CVpparams , true,config.i_prime);
-        PROspec bf = FillSpectra(config, prop, metric_to_use->GetSysts(), metric_to_use->GetModel(), best_fit, true,config.i_prime);
+        PROspec cv = FillSpectra(config, prop, metric->GetSysts(), metric->GetModel(), CVParams , true,config.i_prime);
+        PROspec bf = FillSpectra(config, prop, metric->GetSysts(), metric->GetModel(), best_fit, true,config.i_prime);
         TH1D post_hist("ph", hname.c_str(), config.m_num_variable_bins_total_collapsed[config.i_prime], config.m_channel_variable_bins[config.i_prime][0].Edges().data());
         TH1D pre_hist("prh", hname.c_str(), config.m_num_variable_bins_total_collapsed[config.i_prime], config.m_channel_variable_bins[config.i_prime][0].Edges().data());
         for(size_t i = 0; i < config.m_num_variable_bins_total_collapsed[config.i_prime]; ++i) {
@@ -771,22 +847,26 @@ int main(int argc, char* argv[])
         Eigen::MatrixXf prior_covariance, spline_covariance;
         // Fix physics parameters
         std::vector<int> fixed_pars;
-        for(size_t i = 0; i < metric_to_use->GetModel().nparams; ++i) fixed_pars.push_back(i);
+        for(size_t i = 0; i < N_phys_params; ++i) fixed_pars.push_back(i);
+        for(size_t i = N_phys_params; i< global_fixed.size();i++){
+            if(global_fixed.at(i)==1)fixed_pars.push_back(i);
+        }
+
 
         log<LOG_INFO>(L"%1% || Starting global getErrorBand() ") % __func__;
-        Metropolis mh_pre(prior_only_target{*metric_to_use}, adaptive_proposal(*metric_to_use, dseed(PROseed::global_rng), fixed_pars), best_fit, dseed(PROseed::global_rng));
+        Metropolis mh_pre(prior_only_target{*metric}, adaptive_proposal(*metric, dseed(PROseed::global_rng), fixed_pars), best_fit, dseed(PROseed::global_rng));
         //log<LOG_INFO>(L"%1% ||ARSOut %2% ") % __func__ % cv.Spec();
         //log<LOG_INFO>(L"%1% || address %2%") % __func__ % &cv;
 
         PROerrorbar  err_band = 
             MCMC_prefit_errors
-            ? getMCMCErrorBand(mh_pre, fitConfig.MCMCburn, fitConfig.MCMCiter, config, prop, *metric_to_use, best_fit, priors, prior_covariance, binwidth_scale,config.i_prime)
-            : getErrorBand(config, prop, variable_systs[config.i_prime], *model, cv,CVpparams, binwidth_scale,config.i_prime);
+            ? getMCMCErrorBand(mh_pre, fitConfig.MCMCburn, fitConfig.MCMCiter, config, prop, *metric, best_fit, priors, prior_covariance, binwidth_scale,config.i_prime)
+            : getErrorBand(config, prop, variable_systs[config.i_prime], *model, cv,CVParams, binwidth_scale,config.i_prime);
 
-        //Metropolis mh_post(simple_target{*metric_to_use}, simple_proposal(*metric_to_use, dseed(PROseed::global_rng), 0.2, fixed_pars), best_fit, dseed(PROseed::global_rng));
-        Metropolis mh_post(simple_target{*metric_to_use}, adaptive_proposal(*metric_to_use, dseed(PROseed::global_rng), fixed_pars), best_fit, dseed(PROseed::global_rng));
+        //Metropolis mh_post(simple_target{*metric}, simple_proposal(*metric, dseed(PROseed::global_rng), 0.2, fixed_pars), best_fit, dseed(PROseed::global_rng));
+        Metropolis mh_post(simple_target{*metric}, adaptive_proposal(*metric, dseed(PROseed::global_rng), fixed_pars), best_fit, dseed(PROseed::global_rng));
         log<LOG_INFO>(L"%1% || Starting global getPostFitErrorBand() ") % __func__;
-        PROerrorbar post_err_band = getMCMCErrorBand(mh_post, fitConfig.MCMCburn, fitConfig.MCMCiter, config, prop, *metric_to_use, best_fit, posteriors, spline_covariance, binwidth_scale,config.i_prime);
+        PROerrorbar post_err_band = getMCMCErrorBand(mh_post, fitConfig.MCMCburn, fitConfig.MCMCiter, config, prop, *metric, best_fit, posteriors, spline_covariance, binwidth_scale,config.i_prime);
 
         std::vector<TPaveText> texts;
         TPaveText chi2text(0.55, 0.50, 0.85, 0.58, "NDC");
@@ -815,8 +895,8 @@ int main(int argc, char* argv[])
 
         TH2F spline_cov("pc", "", corrmat_nuis.cols(), 0, corrmat_nuis.cols(), corrmat_nuis.rows(), 0, corrmat_nuis.rows());
         for(int i = 0; i < corrmat_nuis.cols(); ++i) {
-            spline_cov.GetXaxis()->SetBinLabel(i+1, config.m_mcgen_variation_plotname_map[metric_to_use->GetSysts().spline_names[i]].c_str());
-            spline_cov.GetYaxis()->SetBinLabel(i+1, config.m_mcgen_variation_plotname_map[metric_to_use->GetSysts().spline_names[i]].c_str());
+            spline_cov.GetXaxis()->SetBinLabel(i+1, config.m_mcgen_variation_plotname_map[metric->GetSysts().spline_names[i]].c_str());
+            spline_cov.GetYaxis()->SetBinLabel(i+1, config.m_mcgen_variation_plotname_map[metric->GetSysts().spline_names[i]].c_str());
             for(int j = 0; j < corrmat_nuis.rows(); ++j) {
                 spline_cov.SetBinContent(i+1, j+1, corrmat_nuis(i,j));
             }
@@ -832,12 +912,12 @@ int main(int argc, char* argv[])
 
         std::vector<Eigen::VectorXf> seeds = fitter.freq_seed_points;//to be updated to v1.1.5 harmoincs [DONE]
         if(!seeds.size()) seeds.push_back(best_fit);
-        PROfile profile(config, metric_to_use->GetSysts(), metric_to_use->GetModel(), *metric_to_use, myseed, scanFitConfig, 
-                final_output_tag+"_PROfile", best_chi2, !systs_only_profile, nthread, seeds,
-                systs_only_profile ? systparams : allparams);
-        profile.Plot(config, metric_to_use->GetSysts(), metric_to_use->GetModel(), *metric_to_use, myseed,
-                final_output_tag+"_PROfile", !systs_only_profile, best_fit,
-                systs_only_profile ? systparams : allparams);
+        PROfile profile(config, metric->GetSysts(), metric->GetModel(), *metric, myseed, scanFitConfig, 
+                final_output_tag+"_PROfile", best_chi2, !systs_only, nthread, seeds,
+                fakedataparams);
+        profile.Plot(config, metric->GetSysts(), metric->GetModel(), *metric, myseed,
+                final_output_tag+"_PROfile", !systs_only, best_fit,
+                fakedataparams);
         TFile fout((final_output_tag+"_PROfile.root").c_str(), "RECREATE");
         profile.onesig.Write("one_sigma_errs");
         pre_hist.Write("cv");
@@ -853,28 +933,15 @@ int main(int argc, char* argv[])
     }
     if(*surface_command ){
 
-        size_t nparams = metric->GetModel().nparams + metric->GetSysts().GetNSplines();
-        if(global_fit_result.size() == 0 || global_fit_result.size() != (int)nparams) {
-            size_t nphys = metric->GetModel().nparams;
-            Eigen::VectorXf lb = Eigen::VectorXf::Constant(nparams, -3.0);
-            Eigen::VectorXf ub = Eigen::VectorXf::Constant(nparams, 3.0);
-            for(size_t i = 0; i < nphys; ++i) {
-                lb(i) = metric->GetModel().lb(i);
-                ub(i) = metric->GetModel().ub(i);
-            }
-            for(size_t i = nphys; i < nparams; ++i) {
-                lb(i) = metric->GetSysts().spline_lo[i-nphys];
-                ub(i) = metric->GetSysts().spline_hi[i-nphys];
-
-
-            }
-            PROfitter fitter(ub, lb, fitConfig);
-            metric->setBounds(lb, ub);
+        if(global_fit_result.size() == 0 || global_fit_result.size() != (int)N_params) {
+            
+            PROfitter fitter(global_ub, global_lb, fitConfig);
+            metric->setBounds(global_lb, global_ub);
 
             log<LOG_INFO>(L"%1% || ########### Starting Global Best Fit Minimizing ############") % __func__;
 
 
-            float fit_chi2 = fitter.Fit(*metric, CVpparams); 
+            float fit_chi2 = fitter.Fit(*metric, CVParams); 
             global_fit_chi2_surf = fit_chi2;
             Eigen::VectorXf best_fit = fitter.best_fit;
             if(global_fit_result.size() == 0) global_fit_result = best_fit;
@@ -886,12 +953,12 @@ int main(int argc, char* argv[])
             log<LOG_INFO>(L"%1% || Global Best Fit chi^2: %2%") %__func__ % fit_chi2;
             log<LOG_INFO>(L"%1% || at paramters: ") % __func__;
 
-            for(size_t i = 0; i< nparams; i++){
+            for(size_t i = 0; i< N_params; i++){
 
-                if(i<nphys){
+                if(i<N_phys_params){
                     log<LOG_INFO>(L"%1% || %2%  :  %3% (non-log %4%)") % __func__ % metric->GetModel().pretty_param_names[i].c_str() % best_fit(i) % pow(10,best_fit(i));
                 }else{
-                    log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % config.m_mcgen_variation_plotname_map.at(metric->GetSysts().spline_names[i-nphys]).c_str() % best_fit(i);
+                    log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % config.m_mcgen_variation_plotname_map.at(metric->GetSysts().spline_names[i-N_phys_params]).c_str() % best_fit(i);
                 }
             }
             log<LOG_INFO>(L"%1% || ################################################") % __func__;
@@ -979,10 +1046,10 @@ int main(int argc, char* argv[])
             binedges_y.push_back(logy ? std::pow(10, surface.edges_y(i)) : surface.edges_y(i));
 
         if(xlabel == "") 
-            xlabel = xaxis_idx < model->nparams ? model->pretty_param_names[xaxis_idx] : 
+            xlabel = xaxis_idx < N_phys_params ? model->pretty_param_names[xaxis_idx] : 
                 config.m_mcgen_variation_plotname_map[variable_systs[config.i_prime].spline_names[xaxis_idx]];
         if(ylabel == "") 
-            ylabel = yaxis_idx < model->nparams ? model->pretty_param_names[yaxis_idx] : 
+            ylabel = yaxis_idx < N_phys_params ? model->pretty_param_names[yaxis_idx] : 
                 config.m_mcgen_variation_plotname_map[variable_systs[config.i_prime].spline_names[yaxis_idx]];
         TH2D surf("surf", (";"+xlabel+";"+ylabel).c_str(), surface.nbinsx, binedges_x.data(), surface.nbinsy, binedges_y.data());
 
@@ -1011,11 +1078,11 @@ int main(int argc, char* argv[])
                 ybin = res.biny;
                 // If all fit points fail
                 if(!res.best_fit.size()) { tree.Fill(); continue; }
-                for(size_t i = 0; i < model->nparams; ++i) {
+                for(size_t i = 0; i < N_phys_params; ++i) {
                     best_fit[model->param_names[i]] = res.best_fit(i);
                 }
                 for(size_t i = 0; i < variable_systs[config.i_prime].GetNSplines(); ++i) {
-                    best_fit[variable_systs[config.i_prime].spline_names[i]] = res.best_fit(i + model->nparams);
+                    best_fit[variable_systs[config.i_prime].spline_names[i]] = res.best_fit(i + N_phys_params);
                 }
                 tree.Fill();
             }
@@ -1036,16 +1103,15 @@ int main(int argc, char* argv[])
         std::vector<PROsurf> brazil_band_surfaces;
         if(run_brazil && brazil_throws.size() == 0) {
             std::normal_distribution<float> d;
-            size_t nphys = metric->GetModel().nparams;
-            PROspec cv = FillSpectra(config, prop, metric->GetSysts(), metric->GetModel(), CVpparams , true,config.i_prime);
+            PROspec cv = FillSpectra(config, prop, metric->GetSysts(), metric->GetModel(), CVParams , true,config.i_prime);
 
             PROspec collapsed_cv = PROspec(CollapseMatrix(config, cv.Spec()), CollapseMatrix(config, cv.Error()));
             Eigen::MatrixXf L = metric->GetSysts().DecomposeFractionalCovariance(config, cv.Spec());
             for(size_t i = 0; i < 1000; ++i) {
-                Eigen::VectorXf throwp = pparams;
+                Eigen::VectorXf throwp = fakeDataParams;
                 Eigen::VectorXf throwC = Eigen::VectorXf::Constant(config.m_num_variable_bins_total_collapsed[config.i_prime], 0);
                 for(size_t i = 0; i < metric->GetSysts().GetNSplines(); i++)
-                    throwp(i+nphys) = d(PROseed::global_rng);
+                    throwp(i+N_phys_params) = d(PROseed::global_rng);
                 for(size_t i = 0; i < config.m_num_variable_bins_total[config.i_prime]; i++)
                     throwC(i) = d(PROseed::global_rng);
                 PROspec shifted = FillSpectra(config, prop, metric->GetSysts(), metric->GetModel(), throwp, eventbyevent ? PROmetric::EventByEvent : PROmetric::BinnedChi2);
@@ -1158,7 +1224,7 @@ int main(int argc, char* argv[])
     if(*proplot_command){
 
         log<LOG_INFO>(L"%1% || Making a PROsyst thats full covarinace for future error bar creation (might be slow) ")% __func__ ;
-        PROsyst allcovsyst = variable_systs[config.i_prime].allsplines2cov(config, prop, *model, CVpparams, dseed(PROseed::global_rng));
+        PROsyst allcovsyst = variable_systs[config.i_prime].allsplines2cov(config, prop, *model, CVParams, dseed(PROseed::global_rng));
 
         PlotOptions opt = PlotOptions::CVasStack;
         std::vector<TPaveText> notext;
@@ -1166,7 +1232,7 @@ int main(int argc, char* argv[])
         if(area_normalized) opt |= PlotOptions::AreaNormalized;
         std::vector<PROspec> variable_cvs;
         for(size_t io = 0; io < config.m_num_variables; ++io) {
-            variable_cvs.push_back(FillSpectra(config, prop, variable_systs[config.i_prime],*model,CVpparams, !eventbyevent, io));
+            variable_cvs.push_back(FillSpectra(config, prop, variable_systs[config.i_prime],*model,CVParams, !eventbyevent, io));
             plot_channels(final_output_tag+"_PROplot_Variable_"+std::to_string(io)+"_CV.pdf", config, variable_cvs.back(), {}, {}, {}, {}, notext, pbounds, opt, io);
         }
 
@@ -1183,7 +1249,7 @@ int main(int argc, char* argv[])
 
             c.Print((final_output_tag +"_PROplot_Osc.pdf"+ "[").c_str(), "pdf");
 
-            PROspec osc_spec = FillSpectra(config, prop, variable_systs[config.i_prime], *model, pparams, !eventbyevent,config.i_prime );
+            PROspec osc_spec = FillSpectra(config, prop, variable_systs[config.i_prime], *model, fakeDataParams, !eventbyevent,config.i_prime );
             std::map<std::string, std::unique_ptr<TH1D>> osc_hists = getCV1DHists(osc_spec, config, binwidth_scale);
             size_t global_subchannel_index = 0;
             for(size_t im = 0; im < config.m_num_modes; im++){
@@ -1232,7 +1298,7 @@ int main(int argc, char* argv[])
                         leg->SetLineWidth(0);
                         leg->AddEntry(cv_hist, "No Oscillations", "l");
                         std::string oscstr = "";//"#splitline{Oscilations:}{";
-                        for(size_t j=0;j<model->nparams;j++){
+                        for(size_t j=0;j<N_phys_params;j++){
                             oscstr+=model->pretty_param_names[j]+ " : "+ to_string_prec(pow(10,fake_data_osc_param_vector(j)),3) +" "+model->pretty_param_units[j] + (j==0 ? ", " : "" );
                         }
                         //oscstr+="}";
@@ -1351,7 +1417,7 @@ int main(int argc, char* argv[])
         std::vector<PROerrorbar> other_err_bands;
         for(size_t io = 0; io < config.m_num_variables; ++io) {
             if(!config.m_channel_variable_plot_bool.at(io))continue;// For now skip the L/E 250 bin. 
-            other_err_bands.push_back(getErrorBand(config, prop, variable_systs[io], *model, variable_cvs[io], CVpparams, binwidth_scale, io));
+            other_err_bands.push_back(getErrorBand(config, prop, variable_systs[io], *model, variable_cvs[io], CVParams, binwidth_scale, io));
             plot_channels(final_output_tag+"_PROplot_Variable_"+std::to_string(io)+"_ErrorBand.pdf", config, variable_cvs[io], {}, variable_data[io], 
                     other_err_bands.back(), {}, other_channel_chitexts[io], pbounds, opt | PlotOptions::DataMCRatio, io);
         }
@@ -1421,7 +1487,7 @@ int main(int argc, char* argv[])
         }
 
         if((fake_data_osc_params.size())) {
-            PROspec osc_spec = FillSpectra(config, prop, variable_systs[config.i_prime], *model, pparams, !eventbyevent,config.i_prime);
+            PROspec osc_spec = FillSpectra(config, prop, variable_systs[config.i_prime], *model, fakeDataParams, !eventbyevent,config.i_prime);
             std::map<std::string, std::unique_ptr<TH1D>> osc_hists = getCV1DHists(osc_spec, config, binwidth_scale);
             fout.mkdir("Osc_hists");
             fout.cd("Osc_hists");
@@ -1468,7 +1534,7 @@ int main(int argc, char* argv[])
 
     if(*profc_command) {
         size_t FCthreads = nthread > nuniv ? nuniv : nthread;
-        Eigen::MatrixXf cv_vec = FillSpectra(config, prop, metric->GetSysts(), metric->GetModel(), CVpparams , true,config.i_prime).Spec();
+        Eigen::MatrixXf cv_vec = FillSpectra(config, prop, metric->GetSysts(), metric->GetModel(), CVParams , true,config.i_prime).Spec();
 
         Eigen::MatrixXf L = variable_systs[config.i_prime].DecomposeFractionalCovariance(config, cv_vec);
 
@@ -1482,7 +1548,7 @@ int main(int argc, char* argv[])
         for(size_t i = 0; i < nthread; i++) {
             dchi2s.emplace_back();
             outs.emplace_back();
-            fc_args args{todo + (i >= addone), &dchi2s.back(), &outs.back(), config, prop, variable_systs[config.i_prime], chi2, pparams, L, scanFitConfig,(*myseed.getThreadSeeds())[i], (int)i, !eventbyevent};
+            fc_args args{todo + (i >= addone), &dchi2s.back(), &outs.back(), config, prop, variable_systs[config.i_prime], chi2, fakeDataParams, L, scanFitConfig,(*myseed.getThreadSeeds())[i], (int)i, !eventbyevent};
 
             threads.emplace_back([args]() {
                     PROfit::fc_worker(args);
@@ -1557,14 +1623,11 @@ int main(int argc, char* argv[])
     if(*proglobal_command){
 
 
-        PROmetric *metric_to_use = systs_only_profile ? null_metric : metric;
-        size_t nparams = metric_to_use->nParams();
-        size_t nphys = metric_to_use->GetModel().nparams;
-        PROfitter fitter(metric_to_use->UpperBound(), metric_to_use->LowerBound(), fitConfig);
-        metric_to_use->setBounds(metric_to_use->UpperBound(), metric_to_use->LowerBound());
+        PROfitter fitter(metric->UpperBound(), metric->LowerBound(), fitConfig);
+        metric->setBounds(metric->UpperBound(), metric->LowerBound());
 
         log<LOG_INFO>(L"%1% || ########### Print of inputs ############") % __func__;
-        //metric_to_use->print(allparams); //fix
+        //metric->print(fakedataparams); //fix
         log<LOG_INFO>(L"%1% || ########### Starting Global Best Fit Minimizing ############") % __func__;
 
         std::vector<std::pair<int, std::string>> global_PB_configs;
@@ -1581,10 +1644,10 @@ int main(int argc, char* argv[])
             fitter.setProgressBar(&global_progress);
         }
 
-        float best_chi2 = fitter.Fit(*metric_to_use,CVpparams); 
+        float best_chi2 = fitter.Fit(*metric,CVParams); 
         Eigen::VectorXf best_fit = fitter.best_fit;
         Eigen::MatrixXf post_covar = fitter.Covariance();
-        fitter.calcFreqSeedPoints(*metric_to_use);
+        if(!global_fixed[0] || !systs_only) fitter.calcFreqSeedPoints(*metric);
 
         for(size_t i=0; i< fitter.freq_seed_points.size(); i++){
             float chi_freq = fitter.freq_seed_values.at(i);
@@ -1615,20 +1678,20 @@ int main(int argc, char* argv[])
         log<LOG_INFO>(L"%1% || Global Best Fit chi^2: %2%") %__func__ % best_chi2;
         log<LOG_INFO>(L"%1% || at paramters: ") % __func__;
 
-        for(size_t i = 0; i< nparams; i++){
+        for(size_t i = 0; i< N_params; i++){
 
-            if(i<nphys){
-                log<LOG_INFO>(L"%1% || %2%  : %3% (log) %4% (nonlog) ") % __func__ % metric_to_use->GetModel().pretty_param_names[i].c_str() % best_fit(i) % pow(10,best_fit(i));
+            if(i<N_phys_params){
+                log<LOG_INFO>(L"%1% || %2%  : %3% (log) %4% (nonlog) ") % __func__ % metric->GetModel().pretty_param_names[i].c_str() % best_fit(i) % pow(10,best_fit(i));
             }else{
-                log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % config.m_mcgen_variation_plotname_map.at(metric->GetSysts().spline_names[i-nphys]).c_str() % best_fit(i);
+                log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % config.m_mcgen_variation_plotname_map.at(metric->GetSysts().spline_names[i-N_phys_params]).c_str() % best_fit(i);
             }
         }
         log<LOG_INFO>(L"%1% || ################################################") % __func__;
 
         log<LOG_INFO>(L"%1% || Starting a metropolis hastings chain to estimate the covariace matrix aroud the above best fit. Run and Burn is (%2%,%3%);") % __func__%fitConfig.MCMCiter % fitConfig.MCMCburn;
-        Metropolis mh(simple_target{*metric_to_use}, adaptive_proposal(*metric_to_use, dseed(PROseed::global_rng)), best_fit, dseed(PROseed::global_rng));
+        Metropolis mh(simple_target{*metric}, adaptive_proposal(*metric, dseed(PROseed::global_rng)), best_fit, dseed(PROseed::global_rng));
 
-        Eigen::MatrixXf covmat = Eigen::MatrixXf::Constant(nparams, nparams, 0);
+        Eigen::MatrixXf covmat = Eigen::MatrixXf::Constant(N_params, N_params, 0);
         size_t count = 0;
         const auto action = [&](const Eigen::VectorXf &value) {
             covmat += (value-best_fit) * (value-best_fit).transpose();
@@ -1644,28 +1707,28 @@ int main(int argc, char* argv[])
         Eigen::MatrixXf corrmat = inv_sqrt_diag.asDiagonal() * fraccovmat * inv_sqrt_diag.asDiagonal();
 
 
-        TH2D corrhist("crh", "", nparams, 0, nparams, nparams, 0, nparams);
-        TH2D fraccovhist("fch", "", nparams, 0, nparams, nparams, 0, nparams);
-        TH2D covhist("ch", "", nparams, 0, nparams, nparams, 0, nparams);
+        TH2D corrhist("crh", "", N_params, 0, N_params, N_params, 0, N_params);
+        TH2D fraccovhist("fch", "", N_params, 0, N_params, N_params, 0, N_params);
+        TH2D covhist("ch", "", N_params, 0, N_params, N_params, 0, N_params);
         TH2D physhist;
-        if(nphys > 0) physhist = TH2D("ph","", nparams, 0, nparams, nphys, 0, nphys);
-        for(size_t i = 0; i < nparams; ++i) {
-            std::string label = i < metric_to_use->GetModel().nparams 
-                ? metric_to_use->GetModel().pretty_param_names[i]
-                : config.m_mcgen_variation_plotname_map[metric_to_use->GetSysts().spline_names[i-metric_to_use->GetModel().nparams]].c_str();
+        if(N_phys_params > 0) physhist = TH2D("ph","", N_params, 0, N_params, N_phys_params, 0, N_phys_params);
+        for(size_t i = 0; i < N_params; ++i) {
+            std::string label = i < N_phys_params 
+                ? metric->GetModel().pretty_param_names[i]
+                : config.m_mcgen_variation_plotname_map[metric->GetSysts().spline_names[i-N_phys_params]].c_str();
             covhist.GetXaxis()->SetBinLabel(i+1, label.c_str());
             covhist.GetYaxis()->SetBinLabel(i+1, label.c_str());
             fraccovhist.GetXaxis()->SetBinLabel(i+1, label.c_str());
             fraccovhist.GetYaxis()->SetBinLabel(i+1, label.c_str());
             corrhist.GetXaxis()->SetBinLabel(i+1, label.c_str());
             corrhist.GetYaxis()->SetBinLabel(i+1, label.c_str());
-            if(nphys > 0) physhist.GetXaxis()->SetBinLabel(i+1, label.c_str());
-            if(i < metric_to_use->GetModel().nparams) physhist.GetYaxis()->SetBinLabel(i+1, label.c_str());
-            for(size_t j = 0; j < nparams; ++j) {
+            if(N_phys_params > 0) physhist.GetXaxis()->SetBinLabel(i+1, label.c_str());
+            if(i < N_phys_params) physhist.GetYaxis()->SetBinLabel(i+1, label.c_str());
+            for(size_t j = 0; j < N_params; ++j) {
                 covhist.SetBinContent(i+1, j+1, covmat(i,j));
                 fraccovhist.SetBinContent(i+1, j+1, fraccovmat(i,j));
                 corrhist.SetBinContent(i+1, j+1, corrmat(i,j));
-                if(j < metric_to_use->GetModel().nparams)
+                if(j < N_phys_params)
                     physhist.SetBinContent(i+1, j+1, covmat(i,j));
             }
         }
@@ -1684,18 +1747,18 @@ int main(int argc, char* argv[])
         TLine line;
         line.SetLineColor(kBlack);
         line.SetLineWidth(2);
-        line.DrawLine(nphys, 0, nphys, nparams);
-        line.DrawLine(0, nphys, nparams, nphys);
+        line.DrawLine(N_phys_params, 0, N_phys_params, N_params);
+        line.DrawLine(0, N_phys_params, N_params, N_phys_params);
         c1.Print((final_output_tag+"_postfit_correlation_matrix.pdf").c_str());
-        if(nphys > 0) {
+        if(N_phys_params > 0) {
             physhist.Draw("colz");
             c1.Print("phys_cov.pdf");
         }
         log<LOG_INFO>(L"%1% || MCMC acceptance is  %2%. ") % __func__% ((double)count /fitConfig.MCMCiter);
 
         std::string hname = "#chi^{2}/ndf = " + to_string(best_chi2) + "/" + to_string(config.m_num_variable_bins_total_collapsed[config.i_prime]);
-        PROspec cv = FillSpectra(config, prop, metric_to_use->GetSysts(), metric_to_use->GetModel(), CVpparams , true,config.i_prime);
-        PROspec bf = FillSpectra(config, prop, metric_to_use->GetSysts(), metric_to_use->GetModel(), best_fit, true,config.i_prime);
+        PROspec cv = FillSpectra(config, prop, metric->GetSysts(), metric->GetModel(), CVParams , true,config.i_prime);
+        PROspec bf = FillSpectra(config, prop, metric->GetSysts(), metric->GetModel(), best_fit, true,config.i_prime);
 
         TH1D post_hist("ph", hname.c_str(), config.m_num_variable_bins_total_collapsed[config.i_prime], config.m_channel_variable_bins[config.i_prime][0].Edges().data());
         TH1D pre_hist("prh", hname.c_str(), config.m_num_variable_bins_total_collapsed[config.i_prime], config.m_channel_variable_bins[config.i_prime][0].Edges().data());
@@ -1710,19 +1773,23 @@ int main(int argc, char* argv[])
         Eigen::MatrixXf prior_covariance, spline_covariance;
         // Fix physics parameters
         std::vector<int> fixed_pars;
-        for(size_t i = 0; i < metric_to_use->GetModel().nparams; ++i) fixed_pars.push_back(i);
+        for(size_t i = 0; i < N_phys_params; ++i) fixed_pars.push_back(i);
+        for(size_t i = N_phys_params; i< global_fixed.size();i++){
+            if(global_fixed.at(i)==1)fixed_pars.push_back(i);
+        }
+
 
         log<LOG_INFO>(L"%1% || Starting global getErrorBand() ") % __func__;
-        Metropolis mh_pre(prior_only_target{*metric_to_use}, adaptive_proposal(*metric_to_use, dseed(PROseed::global_rng), fixed_pars), best_fit, dseed(PROseed::global_rng));
+        Metropolis mh_pre(prior_only_target{*metric}, adaptive_proposal(*metric, dseed(PROseed::global_rng), fixed_pars), best_fit, dseed(PROseed::global_rng));
 
         PROerrorbar  err_band = 
             MCMC_prefit_errors
-            ? getMCMCErrorBand(mh_pre, fitConfig.MCMCburn, fitConfig.MCMCiter, config, prop, *metric_to_use, best_fit, priors, prior_covariance, binwidth_scale,config.i_prime)
-            : getErrorBand(config, prop, variable_systs[config.i_prime], *model, cv,CVpparams, binwidth_scale,config.i_prime);
+            ? getMCMCErrorBand(mh_pre, fitConfig.MCMCburn, fitConfig.MCMCiter, config, prop, *metric, best_fit, priors, prior_covariance, binwidth_scale,config.i_prime)
+            : getErrorBand(config, prop, variable_systs[config.i_prime], *model, cv,CVParams, binwidth_scale,config.i_prime);
 
-        Metropolis mh_post(simple_target{*metric_to_use}, adaptive_proposal(*metric_to_use, dseed(PROseed::global_rng), fixed_pars), best_fit, dseed(PROseed::global_rng));
+        Metropolis mh_post(simple_target{*metric}, adaptive_proposal(*metric, dseed(PROseed::global_rng), fixed_pars), best_fit, dseed(PROseed::global_rng));
         log<LOG_INFO>(L"%1% || Starting global getPostFitErrorBand() ") % __func__;
-        PROerrorbar post_err_band = getMCMCErrorBand(mh_post, fitConfig.MCMCburn, fitConfig.MCMCiter, config, prop, *metric_to_use, best_fit, posteriors, spline_covariance, binwidth_scale,config.i_prime);
+        PROerrorbar post_err_band = getMCMCErrorBand(mh_post, fitConfig.MCMCburn, fitConfig.MCMCiter, config, prop, *metric, best_fit, posteriors, spline_covariance, binwidth_scale,config.i_prime);
 
         std::vector<TPaveText> texts;
         TPaveText chi2text(0.55, 0.50, 0.85, 0.58, "NDC");
@@ -1764,14 +1831,14 @@ int main(int argc, char* argv[])
 
         global_fit_out << "Global best fit:\n";
 
-        bool use_phys = (size_t)global_fit_result.size() == metric->GetModel().nparams + metric->GetSysts().GetNSplines();
+        bool use_phys = (size_t)global_fit_result.size() == N_phys_params + metric->GetSysts().GetNSplines();
         for(long i = 0; i < global_fit_result.size(); i++){
 
-            if(use_phys && i < (long)metric->GetModel().nparams){
+            if(use_phys && i < (long)N_phys_params){
                 log<LOG_INFO>(L"%1% || %2%  : %3% (log) %4% (nonlog) ") % __func__ % metric->GetModel().pretty_param_names[i].c_str() % global_fit_result(i) % pow(10,global_fit_result(i));
                 global_fit_out << metric->GetModel().param_names[i] << " : " << global_fit_result(i) << "\n";
             }else{
-                long idx = use_phys ? i - metric->GetModel().nparams : i;
+                long idx = use_phys ? i - N_phys_params : i;
                 log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % config.m_mcgen_variation_plotname_map.at(metric->GetSysts().spline_names[idx]).c_str() % global_fit_result(i);
 
                 global_fit_out <<  config.m_mcgen_variation_plotname_map.at(metric->GetSysts().spline_names[idx])
@@ -1794,7 +1861,7 @@ int main(int argc, char* argv[])
         log<LOG_INFO>(L"%1% || at paramters: ") % __func__;
 
         for(long i = 0; i < global_fit_result.size(); i++){
-            if(i < (long)metric->GetModel().nparams){
+            if(i < (long)N_phys_params){
                 log<LOG_INFO>(L"%1% || %2%  : %3% (log) %4% (nonlog) ") % __func__ % metric->GetModel().pretty_param_names[i].c_str() % global_fit_result(i) % pow(10,global_fit_result(i));
                 global_fit_out << metric->GetModel().param_names[i] << " : " << global_fit_result(i) << "\n";
             }else{
