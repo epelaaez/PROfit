@@ -285,6 +285,7 @@ namespace PROfit{
             std::vector<std::string> m_channel_units; 		
 
             std::vector<std::vector<std::string>> m_channel_variable_units;
+            std::vector<std::vector<int>> m_channel_variable_dims;
 
             std::vector<std::vector<std::string >> m_subchannel_names; 
             std::vector<std::vector<std::string >> m_subchannel_plotnames; 

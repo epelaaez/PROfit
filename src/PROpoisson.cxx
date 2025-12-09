@@ -111,7 +111,6 @@ float PROpoisson::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &grad
                     continue;
                 }
             }
-
             PROspec result = FillSpectra(config, peller, *syst, model, tmpParams, strat != EventByEvent);
 
             const Eigen::VectorXf vdata = shape_only 

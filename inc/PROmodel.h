@@ -447,6 +447,119 @@ public:
     }
 };
 
+class PRO3p1_3A : public PROmodel {
+public:
+    PRO3p1_3A(const PROpeller &prop, const std::map<std::string,int> &parameter_map) {
+
+        model_functions.push_back([this]([[maybe_unused]] const Eigen::VectorXf &v, float) {(void)this; return 1.0; });
+        model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pmumu(v(0),v(1),v(2),le); });
+        model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pmue(v(0),v(1),v(2),le); });
+        model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pee(v(0),v(1),v(2),le); });
+        if(parameter_map.find("L/E") == parameter_map.end()) {
+            log<LOG_ERROR>(L"%1%, %2% || Missing expected parameter: 'L/E'. Make sure its in your model section of XML.") % __func__ % __LINE__;
+            throw std::runtime_error("Missing parameter: L/E");
+        }
+        ivar = parameter_map.at("L/E");
+
+        //constraints
+        model_constraint = [this](const Eigen::VectorXf &v){return 1;};
+
+
+         size_t nvar = prop.variable_mc_stat_err.size();
+        hists.resize(nvar);
+        for(size_t v = 0; v <nvar ;v++){
+            for(size_t m = 0; m < model_functions.size(); ++m) {
+                hists.at(v).emplace_back(Eigen::MatrixXf::Constant(prop.variable_hist_storage(ivar,v).rows(), prop.variable_hist_storage(ivar,v).cols(),0.0));
+                Eigen::MatrixXf &h = hists.at(v).back();
+                for(size_t i = 0; i < prop.NEvent(); ++i) {
+                    if(prop.model_rule[i] != (int)m) continue;
+                    int tbin = prop.VariableBinIndex(ivar, i), rbin = prop.VariableBinIndex(v, i);
+                    if(tbin<0 || rbin<0)continue;
+                    h(tbin, rbin) += prop.added_weights[i];
+                }
+            }
+        }
+
+
+        nparams = 3;
+        param_names = {"dmsq", "sinsq2thee", "sinsqth24"}; 
+        pretty_param_names = {"#Deltam^{2}", "sin^{2}2#theta_{ee}", "sin^{2}#theta_{24}"}; 
+        lb = Eigen::VectorXf(3);
+        ub = Eigen::VectorXf(3);
+        default_val = Eigen::VectorXf(3);
+        lb << -2, -std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity();
+        ub << 2, -1e-3, -1e-3;
+        //default_val << -std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity();
+        default_val << -2, -8, -8;
+    };
+
+    int UnitarityConstraint(const Eigen::VectorXf &v){
+        return   1;
+    }
+
+    float Pmue(float dmsq, float sinsq2thee, [[maybe_unused]]float sinsqth24, float le) const{
+        dmsq = std::pow(10.0f, dmsq);
+        float sinsq2thmue = pow(10.f,sinsqth24)*std::pow(10.0f, sinsq2thee);
+        
+        if(sinsq2thmue > 1) {
+            log<LOG_ERROR>(L"%1% || sinsq2thmue is %2% which is greater than 1. Setting to 1.")
+                % __func__ % sinsq2thmue;
+            sinsq2thmue = 1;
+        }
+        if(sinsq2thmue < 0) {
+            log<LOG_ERROR>(L"%1% || sinsq2thmue is %2% which is less than 0. Setting to 0.")
+                % __func__ % sinsq2thmue;
+            sinsq2thmue = 0;
+        }
+
+        float sinterm = std::sin(1.27f*dmsq*(le));
+        float prob    = sinsq2thmue*sinterm*sinterm;
+
+        if(prob<0.0 || prob >1.0){
+            log<LOG_ERROR>(L"%1% || Your probability %2% is outside the bounds of math."
+                           L"dmsq = %3%, sinsq2thmue = %4%, L/E = %5%")
+                % __func__ % prob % dmsq % sinsq2thmue % le;
+            log<LOG_ERROR>(L"%1% || Terminating.") % __func__;
+            exit(EXIT_FAILURE);
+        }
+
+        return prob;
+    }
+
+    float Pmumu(float dmsq, float sinsq2thee, [[maybe_unused]]float sinsqth24, float le) const{
+        dmsq = std::pow(10.0f, dmsq);
+        float Um4sq = std::pow(10.0f, sinsqth24)/2.0*(1.0+sqrt(1-std::pow(10.0f,sinsq2thee)));
+
+        float sinterm = std::sin(1.27*dmsq*(le));
+        float prob    = 1.0f - 4.0f*Um4sq*(1.0f-Um4sq)*sinterm*sinterm;
+
+        if(prob<0.0 || prob >1.0){
+            log<LOG_ERROR>(L"%1% || Your probability %2% is outside the bounds of math. dmsq = %3%, Um4sq = %4%, sinsq2thee = %5%, sinsqth24 = %6%, L/E = %7%") % __func__ % prob % dmsq % Um4sq % sinsq2thee % sinsqth24 % le;
+            log<LOG_ERROR>(L"%1% || Terminating.") % __func__;
+            exit(EXIT_FAILURE);
+        }
+
+        return prob;
+    }
+
+    float Pee(float dmsq, float sinsq2thee, [[maybe_unused]]float sinsqth24, float le) const{
+
+        dmsq = std::pow(10.0f, dmsq);
+        sinsq2thee = std::pow(10.0f, sinsq2thee);
+
+        float sinterm = std::sin(1.27*dmsq*(le));
+        float prob    = 1.0f - sinsq2thee*sinterm*sinterm;
+
+        if(prob<0.0 || prob >1.0){
+            log<LOG_ERROR>(L"%1% || Your probability %2% is outside the bounds of math. dmsq = %3%,sinsq2thee = %4%, sinsqth24 = %5%, L/E = %6%") % __func__ % prob % dmsq % sinsq2thee % sinsqth24 % le;
+            log<LOG_ERROR>(L"%1% || Terminating.") % __func__;
+            exit(EXIT_FAILURE);
+        }
+
+        return prob;
+    }
+};
+
 
 class PRO3p1_3C : public PROmodel {
 public:

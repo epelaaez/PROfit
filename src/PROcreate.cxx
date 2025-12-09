@@ -614,14 +614,13 @@ namespace PROfit {
                         branches[ib]->branch_monte_carlo_weight_formula->LoadEvent(i);
                     }
                     for(auto &b: branches[ib]->branch_variable_formulas) {
-                         b->LoadEvent(i);
+                        b->LoadEvent(i);
                     }
                 }
                 
                 // Refresh the systematics loaders
                 if (chains[fid]->GetTreeNumber() != currentTreeNumber) {
                     currentTreeNumber = chains[fid]->GetTreeNumber();
-
 
                    for(size_t is = 0; is != total_num_systematics; ++is){
                         if(syst_vector[0][is].HasWeightFormula()){
@@ -844,7 +843,6 @@ namespace PROfit {
         int det = channel_group % inconfig.m_num_detectors;
 
         mc_weight *= inconfig.m_det_pot[det] / mcpot;
-
 
         int model_rule = branch->GetModelRule();
 
