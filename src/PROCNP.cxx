@@ -149,6 +149,16 @@ float PROCNP::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
                 Eigen::VectorXf param_plus = param;
                 param_plus(i) = param(i) + sign*h;
 
+                // If this new gradient evaluation point violates unitarity, set the gradient to a large value
+                if(model.model_constraint){
+                    if(!model.model_constraint(param_plus)){
+                        //log<LOG_ERROR>(L"%1% || WARNING In PROCNP: Gradient evaluation point violates unitarity. Setting gradient to large value.") % __func__;
+
+                        gradient(i) = sign * 1e10;
+                        continue;
+                    }
+                }
+
                 float chi2_oneside;
                 // Calculate chi2_plus or chi2_minus, depending on boundary
                 PROspec result = FillSpectra(config, peller, *syst, model, param_plus, strat != EventByEvent,config.i_prime);
@@ -189,8 +199,12 @@ float PROCNP::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
                 // Calculate chi2 at both points
                 float chi2_plus, chi2_minus;
 
-                // Plus point
-                {
+                // plus point
+                if(model.model_constraint && !model.model_constraint(param_plus)){
+                    // If this new gradient evaluation point violates unitarity, set the gradient to a large value
+                    //log<LOG_ERROR>(L"%1% || WARNING In PROCNP: Gradient evaluation point violates unitarity. Setting gradient to large value.") % __func__;
+                    chi2_plus = 1e10;
+                } else {
                     PROspec result = FillSpectra(config, peller, *syst, model, param_plus, strat != EventByEvent,config.i_prime);
 
                     Eigen::MatrixXf new_collapsed_stat_covariance = collapsed_stat_covariance;
@@ -213,8 +227,12 @@ float PROCNP::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
                     chi2_plus = (delta.transpose())*inverted_collapsed_full_covariance*(delta) + pull;
                 }
 
-                // Minus point
-                {
+                // minus point
+                if(model.model_constraint && !model.model_constraint(param_minus)){
+                    // If this new gradient evaluation point violates unitarity, set the gradient to a large value
+                    //log<LOG_ERROR>(L"%1% || WARNING In PROCNP: Gradient evaluation point violates unitarity. Setting gradient to large value.") % __func__;
+                    chi2_minus = 1e10;
+                } else {
                     PROspec result = FillSpectra(config, peller, *syst, model, param_minus, strat != EventByEvent,config.i_prime);
 
                     Eigen::MatrixXf new_collapsed_stat_covariance = collapsed_stat_covariance;
@@ -382,6 +400,16 @@ void PROCNP::print(const Eigen::VectorXf &param){
         //log<LOG_DEBUG>(L"%1% || Created physics subvector with size %2%") % __func__ % subvector1.size();
         Eigen::VectorXf subvector2 = tmpParams.segment(model.nparams, syst->GetNSplines());
         //log<LOG_DEBUG>(L"%1% || Created spline subvector with size %2%") % __func__ % subvector2.size();
+
+        // If this new gradient evaluation point violates unitarity, set the gradient to a large value
+        if(model.model_constraint){
+            if(!model.model_constraint(subvector1)){
+                //log<LOG_ERROR>(L"%1% || WARNING In PROCNP: Gradient evaluation point violates unitarity. Setting gradient to large value.") % __func__;
+                gradient(i) = sgn * 1e10;
+                continue;
+            }
+        }
+
         PROspec result = FillSpectra(config, peller, *syst, model, tmpParams, strat != EventByEvent);
         // Calcuate Full Covariance matrix
         Eigen::MatrixXf inverted_collapsed_full_covariance(config.m_num_variable_bins_total_collapsed[config.i_prime],config.m_num_variable_bins_total_collapsed[config.i_prime]);

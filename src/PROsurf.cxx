@@ -83,6 +83,8 @@ std::vector<float> combined_sparse_seed(float Amin, float Amax, std::vector<floa
 
 
 PROsurf::PROsurf(PROmetric &metric,  size_t x_idx, size_t y_idx, size_t nbinsx, LogLin llx, float x_lo, float x_hi, size_t nbinsy, LogLin lly, float y_lo, float y_hi) : metric(metric), x_idx(x_idx), y_idx(y_idx), nbinsx(nbinsx), nbinsy(nbinsy), edges_x(Eigen::VectorXf::Constant(nbinsx + 1, 0)), edges_y(Eigen::VectorXf::Constant(nbinsy + 1, 0)), surface(nbinsx, nbinsy) {
+          
+    // If it's a log axis, we always convert to log space in order to define the grid
     if(llx == LogAxis) {
         x_lo = std::log10(x_lo);
         x_hi = std::log10(x_hi);
@@ -91,10 +93,31 @@ PROsurf::PROsurf(PROmetric &metric,  size_t x_idx, size_t y_idx, size_t nbinsx, 
         y_lo = std::log10(y_lo);
         y_hi = std::log10(y_hi);
     }
+    
+    for(size_t i = 0; i < nbinsx + 1; i++) {
+        float edge_val = x_lo + i * (x_hi - x_lo) / nbinsx;
+        if (llx == LogAxis) edge_val = std::pow(10, edge_val); // Now bin edges are back to linear space
+        if (metric.GetModel().is_log10[x_idx])
+            edges_x(i) = std::log10(edge_val);
+        else
+            edges_x(i) = edge_val;
+    }
+    for(size_t i = 0; i < nbinsy + 1; i++) {
+        float edge_val = y_lo + i * (y_hi - y_lo) / nbinsy;
+        if (lly == LogAxis) edge_val = std::pow(10, edge_val); // Now bin edges are back to linear space
+        if (metric.GetModel().is_log10[y_idx])
+            edges_y(i) = std::log10(edge_val);
+        else
+            edges_y(i) = edge_val;
+    }
+
+    /*
     for(size_t i = 0; i < nbinsx + 1; i++)
-        edges_x(i) = x_lo + i * (x_hi - x_lo) / nbinsx;
+        log<LOG_ERROR>(L"%1% || xbin edge %2%: %3%") % __func__ % i % edges_x(i);
     for(size_t i = 0; i < nbinsy + 1; i++)
-        edges_y(i) = y_lo + i * (y_hi - y_lo) / nbinsy;
+        log<LOG_ERROR>(L"%1% || ybin edge %2%: %3%") % __func__ % i % edges_y(i);
+    */
+
 }
 
 void PROsurf::FillSurfaceStat(const PROconfig &config, const PROfitterConfig &fitconfig, std::string filename) {
@@ -197,35 +220,41 @@ std::vector<profOut> PROfile::PROfilePointHelper(const PROsyst *systs, const PRO
         std::vector<float> test_values;
 
         //if not physis do normal
-        if(!isphys){
-            //if lower bound is 0 or both pos/both negative (aka not sym around zero)
-            if(lb(which_spline)==0 || (lb(which_spline)*ub(which_spline) >0) ){
-                for (int j = 0; j <= nstep; ++j) {
-                    float which_value =  std::isinf(lb(which_spline)) ? -3 + (ub(which_spline) - (-3)) * j / (float)nstep :   lb(which_spline) + (ub(which_spline) - lb(which_spline)) * j / (float)nstep;
-                    test_values.push_back(which_value);       
+        
+        
+        if(lb(which_spline)==ub(which_spline)){//its fixed. Dont run it
+            test_values.push_back(ub(which_spline));
+        }else{
+            if(!isphys){
+                //if lower bound is 0 or both pos/both negative (aka not sym around zero)
+                if(lb(which_spline)==0 || (lb(which_spline)*ub(which_spline) >0) ){
+                    for (int j = 0; j <= nstep; ++j) {
+                        float which_value =  std::isinf(lb(which_spline)) ? -3 + (ub(which_spline) - (-3)) * j / (float)nstep :   lb(which_spline) + (ub(which_spline) - lb(which_spline)) * j / (float)nstep;
+                        test_values.push_back(which_value);       
+                    }
+                }else{
+                    for (int j = 0; j <= nstep; ++j) {
+                        int k;
+                        if (j <= nstep - nstep / 2) {
+                            k = nstep / 2 + j;  // Forward direction
+                        } else {
+                            k = nstep - j;  // Backward direction
+                        }
+                        float which_value =  std::isinf(lb(which_spline)) ? -3 + (ub(which_spline) - (-3)) * k / (float)nstep :   lb(which_spline) + (ub(which_spline) - lb(which_spline)) * k / (float)nstep;
+                        test_values.push_back(which_value);       
+                    }
                 }
             }else{
-                for (int j = 0; j <= nstep; ++j) {
-                    int k;
-                    if (j <= nstep - nstep / 2) {
-                        k = nstep / 2 + j;  // Forward direction
-                    } else {
-                        k = nstep - j;  // Backward direction
-                    }
-                    float which_value =  std::isinf(lb(which_spline)) ? -3 + (ub(which_spline) - (-3)) * k / (float)nstep :   lb(which_spline) + (ub(which_spline) - lb(which_spline)) * k / (float)nstep;
-                    test_values.push_back(which_value);       
+                //if its physics, grab seed points, need to include those
+                std::vector<float> seed_values(seed_points.size());
+                std::transform(seed_points.begin(), seed_points.end(), seed_values.begin(), [which_spline](const auto& vec) { return vec[which_spline]; });
+                float mod = 0.5;
+                while(test_values.size()<nstep*1.5){
+                    test_values = combined_sparse_seed(std::isinf(lb(which_spline)) ? -3 : lb(which_spline), ub(which_spline), seed_values, nstep*mod, 2);
+                    mod=mod*1.2;
                 }
+                log<LOG_INFO>(L"%1% || PROfileing over physics parameter number %2% has %3% uniform points, and %4% local ones for a total of %5% points. ") % __func__ %  which_spline % int(nstep*0.5) %int((2*2+1)*seed_values.size()) % test_values.size();
             }
-        }else{
-            //if its physics, grab seed points, need to include those
-            std::vector<float> seed_values(seed_points.size());
-            std::transform(seed_points.begin(), seed_points.end(), seed_values.begin(), [which_spline](const auto& vec) { return vec[which_spline]; });
-            float mod = 0.5;
-            while(test_values.size()<nstep*1.5){
-                test_values = combined_sparse_seed(std::isinf(lb(which_spline)) ? -3 : lb(which_spline), ub(which_spline), seed_values, nstep*mod, 2);
-                mod=mod*1.2;
-            }
-            log<LOG_INFO>(L"%1% || PROfileing over physics parameter number %2% has %3% uniform points, and %4% local ones for a total of %5% points. ") % __func__ %  which_spline % int(nstep*0.5) %int((2*2+1)*seed_values.size()) % test_values.size();
         }
 
         //log<LOG_INFO>(L"%1% || PLONK which_spline %2% has testpt order %3% ") % __func__ %  which_spline % test_values;
@@ -455,10 +484,12 @@ std::vector<surfOut> PROsurf::FillCurve(const PROfitterConfig &fitconfig, PROsee
 void PROsurf::PlotCurve(const PROconfig &config, const PROmodel &model, const PROsyst &syst, const std::vector<surfOut> & cpoints, std::string final_output_tag, bool logx, bool logy, size_t xaxis_idx,size_t yaxis_idx, std::vector<float> &A, std::vector<float> &B, size_t n_points){
 
     std::vector<float> binedges_x, binedges_y;
+    // Edges are stored in model's native space (log if is_log10, linear otherwise)
+    // Convert to linear for ROOT histogram bin edges
     for(size_t i = 0; i < this->nbinsx+1; i++)
-        binedges_x.push_back(logx ? std::pow(10, this->edges_x(i)) : this->edges_x(i));
+        binedges_x.push_back(model.is_log10[xaxis_idx] ? std::pow(10, this->edges_x(i)) : this->edges_x(i));
     for(size_t i = 0; i < this->nbinsy+1; i++)
-        binedges_y.push_back(logy ? std::pow(10, this->edges_y(i)) : this->edges_y(i));
+        binedges_y.push_back(model.is_log10[yaxis_idx] ? std::pow(10, this->edges_y(i)) : this->edges_y(i));
 
      std::string xlabel = xaxis_idx < model.nparams ? model.pretty_param_names.at(xaxis_idx) : 
             config.m_mcgen_variation_plotname_map.at(syst.spline_names.at(xaxis_idx));
@@ -830,13 +861,23 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
 
         if(w<model.nparams) graphs[w]->SetLineColor(kBlue-7);
 
-        if(w>=model.nparams){
+        if(graphs[w]->GetN()==1){//1 point, its been fixed. Just draw a line
+            float x_val = graphs[w]->GetPointX(0);
+            TLine* linet = new TLine(x_val, 0, x_val, 1);
+            linet->SetLineStyle(1);  // Dotted line style (1 is solid, 2 is dashed, 3 is dotted)
+            linet->SetLineWidth(2);  // Thin line
+            linet->SetLineColor(kGreen+2);  // Set color (black for visibility)
+            linet->Draw();
+        }
+        else if(w>=model.nparams){
             gprior->Draw("L same");
             gprior->SetLineStyle(2);
             gprior->SetLineWidth(2);
             gprior->SetLineColor(kRed-7);
             graphs[w]->GetYaxis()->SetRangeUser(0, std::min(graphs[w]->GetHistogram()->GetMaximum(),10.0));
         }
+
+
 
         if(w==model.nparams-1){
             //on past physics param, lets do a quick zoom, stepping back though the physics param
@@ -857,6 +898,15 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
                 graphClone->GetYaxis()->SetLabelSize(0.04);            
                 graphClone->GetXaxis()->SetTitleSize(0.04);             
                 graphClone->GetXaxis()->SetLabelSize(0.04);            
+
+                if(graphClone->GetN()==1){//1 point, its been fixed. Just draw a line
+                    float x_val = graphClone->GetPointX(0);
+                    TLine* linet = new TLine(x_val, 0, x_val, 1);
+                    linet->SetLineStyle(1);  // Dotted line style (1 is solid, 2 is dashed, 3 is dotted)
+                    linet->SetLineWidth(2);  // Thin line
+                    linet->SetLineColor(kGreen+2);  // Set color (black for visibility)
+                    linet->Draw();
+                }
 
                 log<LOG_INFO>(L"%1% || Zoom boundaries X %2% %3% Y %4% %5%  ") % __func__ % pd % pu % 0.0 % (std::max(graphClone->Eval(pu),graphClone->Eval(pd))*1.1)  ;
 
@@ -942,11 +992,7 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
     //if (twosig) {
     //    TGraphAsymmErrors *h2 = new TGraphAsymmErrors(barvalues.size(),barvalues.data(), bfvalues.data(), barvalues_err.data(), barvalues_err.data(), values2_down.data(), values2_up.data());
     //    h2->SetFillColor(38);
-    //    h2->SetStats(0);
-    //    h2->SetTitle("");
-    //    h2->Draw("A2");
-    //    h2->GetYaxis()->SetTitle("");
-    //}
+    //    h2->Se
 
 
     TLine l(0,0,nBins+0.5,0);

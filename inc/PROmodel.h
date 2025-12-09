@@ -13,6 +13,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <unordered_map>
 
 namespace PROfit {
 
@@ -28,6 +29,28 @@ public:
     std::function<int(const Eigen::VectorXf&)> model_constraint;
     std::vector<std::vector<Eigen::MatrixXf>> hists; //2D hists for binned oscilattion, one for each model function, and the N-variables 
                                         //Todo: make this a vector of length n_variables, and fill them all. For now 1 is "special". 
+
+    std::vector<bool> is_log10; // Track whether each physics parameter is stored in log10 space.
+    // Fast lookup from parameter name to index
+    std::unordered_map<std::string, size_t> param_name_to_index;
+    inline void build_param_index() {
+        param_name_to_index.clear();
+        for(size_t i = 0; i < param_names.size(); ++i){
+            param_name_to_index[param_names[i]] = i;
+        }
+    }
+
+    // Convert a parameter to linear space if it is stored as log10, using its name.
+    inline float maybe_convert_log(const std::string &param_name, float value) const {
+        auto it = param_name_to_index.find(param_name);
+        if(it == param_name_to_index.end()){
+            log<LOG_ERROR>(L"%1% || Parameter name '%2%' not found in this model. Terminating.") % __func__ % param_name.c_str();
+            exit(EXIT_FAILURE);
+        }
+        size_t idx = it->second;
+        return is_log10[idx] ? std::pow(10.0f, value) : value;
+    }
+
 };
 
 class NullModel : public PROmodel {
@@ -50,6 +73,7 @@ public:
                 }
             }
         }
+        is_log10.clear();
     }
 };
 
@@ -84,6 +108,8 @@ public:
         param_names = {"dmsq", "sinsq2thmm"}; 
         pretty_param_names = {"#Deltam^{2}", "sin^{2}2#theta_{#mu#mu}"}; 
         pretty_param_units = {"eV^{2}", ""}; 
+        is_log10 = {true, true};
+        build_param_index();
         lb = Eigen::VectorXf(2);
         ub = Eigen::VectorXf(2);
         default_val = Eigen::VectorXf(2);
@@ -95,8 +121,8 @@ public:
 
     /* Function: 3+1 numu->numue disapperance prob in SBL approx */
     float Pmumu(float dmsq, float sinsq2thmumu, float le) const{
-        dmsq = std::pow(10.0f, dmsq);
-        sinsq2thmumu = std::pow(10.0f, sinsq2thmumu);
+        dmsq = maybe_convert_log("dmsq", dmsq);
+        sinsq2thmumu = maybe_convert_log("sinsq2thmm", sinsq2thmumu);
 
         if(sinsq2thmumu > 1) {
             //log<LOG_ERROR>(L"%1% || sinsq2thmumu is %2% which is greater than 1. Setting to 1.")     % __func__ % sinsq2thmumu;
@@ -108,7 +134,7 @@ public:
             sinsq2thmumu = 0;
         }
 
-        float sinterm = std::sin(1.27f*dmsq*(le));
+        float sinterm = std::sin(1.266932679f*dmsq*(le));
         float prob    = 1.0f - (sinsq2thmumu*sinterm*sinterm);
 
         if(prob<0.0 || prob >1.0 ){;//|| std::isnan(prob)){
@@ -152,6 +178,8 @@ public:
         param_names = {"dmsq", "sinsq2thme"}; 
         pretty_param_names = {"#Deltam^{2}", "sin^{2}2#theta_{#mue}"}; 
         pretty_param_units = {"eV^{2}", ""}; 
+        is_log10 = {true, true};
+        build_param_index();
         lb = Eigen::VectorXf(2);
         ub = Eigen::VectorXf(2);
         default_val = Eigen::VectorXf(2);
@@ -168,8 +196,8 @@ public:
     };
 
     float Pmue(float dmsq, float sinsq2thmue, float le) const{
-        dmsq = std::pow(10.0f, dmsq);
-        sinsq2thmue = std::pow(10.0f, sinsq2thmue);
+        dmsq = maybe_convert_log("dmsq", dmsq);
+        sinsq2thmue = maybe_convert_log("sinsq2thme", sinsq2thmue);
 
         if(sinsq2thmue > 1) {
             //log<LOG_ERROR>(L"%1% || sinsq2thmue is %2% which is greater than 1. Setting to 1.")  % __func__ % sinsq2thmue;
@@ -181,7 +209,7 @@ public:
             sinsq2thmue = 0;
         }
 
-        float sinterm = std::sin(1.27f*dmsq*(le));
+        float sinterm = std::sin(1.266932679f*dmsq*(le));
         float prob    = sinsq2thmue*sinterm*sinterm;
 
         if(prob<0.0 || prob >1.0){
@@ -227,6 +255,8 @@ public:
         param_names = {"dmsq", "sinsq2thee"}; 
         pretty_param_names = {"#Deltam^{2}", "sin^{2}2#theta_{ee}"}; 
         pretty_param_units = {"eV^{2}", ""}; 
+        is_log10 = {true, true};
+        build_param_index();
         lb = Eigen::VectorXf(2);
         ub = Eigen::VectorXf(2);
         default_val = Eigen::VectorXf(2);
@@ -238,8 +268,8 @@ public:
 
     /* Function: 3+1 nue->nue disapperance prob in SBL approx */
     float Pee(float dmsq, float sinsq2thee, float le) const{
-        dmsq = std::pow(10.0f, dmsq);
-        sinsq2thee = std::pow(10.0f, sinsq2thee);
+        dmsq = maybe_convert_log("dmsq", dmsq);
+        sinsq2thee = maybe_convert_log("sinsq2thee", sinsq2thee);
 
         if(sinsq2thee > 1) {
             //log<LOG_ERROR>(L"%1% || sinsq2thee is %2% which is greater than 1. Setting to 1.")     % __func__ % sinsq2thee;
@@ -251,7 +281,7 @@ public:
             sinsq2thee = 0;
         }
 
-        float sinterm = std::sin(1.27f*dmsq*(le));
+        float sinterm = std::sin(1.266932679f*dmsq*(le));
         float prob    = 1.0f - (sinsq2thee*sinterm*sinterm);
 
         if(prob<0.0 || prob >1.0 ){;//|| std::isnan(prob)){
@@ -285,7 +315,7 @@ public:
         model_constraint = [this](const Eigen::VectorXf &v){return this->UnitarityConstraint(v);};
 
 
-         size_t nvar = prop.variable_mc_stat_err.size();
+        size_t nvar = prop.variable_mc_stat_err.size();
         hists.resize(nvar);
         for(size_t v = 0; v <nvar ;v++){
             for(size_t m = 0; m < model_functions.size(); ++m) {
@@ -305,6 +335,8 @@ public:
         param_names = {"dmsq", "Ue4^2", "Um4^2"}; 
         pretty_param_names = {"#Deltam^{2}", "|U_{e4}|^{2}", "|U_{#mu4}|^{2}"}; 
         pretty_param_units = {"eV^{2}", "",""}; 
+        is_log10 = {true, true, true};
+        build_param_index();
         lb = Eigen::VectorXf(3);
         ub = Eigen::VectorXf(3);
         default_val = Eigen::VectorXf(3);
@@ -315,13 +347,15 @@ public:
     };
 
     int UnitarityConstraint(const Eigen::VectorXf &v){
-        return   (pow(10,v(1))+pow(10,v(2))<1 ? 1 : 0);      
+        const float Ue4sq = maybe_convert_log("Ue4^2", v(param_name_to_index.at("Ue4^2")));
+        const float Um4sq = maybe_convert_log("Um4^2", v(param_name_to_index.at("Um4^2")));
+        return   ((Ue4sq+Um4sq)<1 ? 1 : 0);      
     }
 
     float Pmue(float dmsq, float Ue4sq, float Um4sq, float le) const{
-        dmsq = std::pow(10.0f, dmsq);
-        Ue4sq = std::pow(10.0f, Ue4sq);
-        Um4sq = std::pow(10.0f, Um4sq);
+        dmsq =  maybe_convert_log("dmsq", dmsq);
+        Ue4sq = maybe_convert_log("Ue4^2", Ue4sq);
+        Um4sq = maybe_convert_log("Um4^2", Um4sq);
 
         if(Ue4sq > 1) {
             log<LOG_ERROR>(L"%1% || Ue4sq is %2% which is greater than 1. Setting to 1.") 
@@ -344,7 +378,7 @@ public:
             Um4sq = 0;
         }
 
-        float sinterm = std::sin(1.27f*dmsq*(le));
+        float sinterm = std::sin(1.266932679f*dmsq*(le));
         float prob    = 4.0f*Ue4sq*Um4sq*sinterm*sinterm;
 
         if(prob<0.0 || prob >1.0){
@@ -359,8 +393,8 @@ public:
     }
 
     float Pmumu(float dmsq, [[maybe_unused]]float Ue4sq, float Um4sq, float le) const{
-        dmsq = std::pow(10.0f, dmsq);
-        Um4sq = std::pow(10.0f, Um4sq);
+        dmsq = maybe_convert_log("dmsq", dmsq);
+        Um4sq = maybe_convert_log("Um4^2", Um4sq);
 
         if(Um4sq > 1) {
             log<LOG_ERROR>(L"%1% || Um4sq is %2% which is greater than 1. Setting to 1.")
@@ -373,7 +407,7 @@ public:
             Um4sq = 0;
         }
 
-        float sinterm = std::sin(1.27*dmsq*(le));
+        float sinterm = std::sin(1.266932679f*dmsq*(le));
         float prob    = 1.0f - 4.0f*Um4sq*(1.0f-Um4sq)*sinterm*sinterm;
 
         if(prob<0.0 || prob >1.0){
@@ -386,8 +420,8 @@ public:
     }
 
     float Pee(float dmsq, float Ue4sq, [[maybe_unused]]float Um4sq, float le) const{
-        dmsq = std::pow(10.0f, dmsq);
-        Ue4sq = std::pow(10.0f, Ue4sq);
+        dmsq = maybe_convert_log("dmsq", dmsq);
+        Ue4sq = maybe_convert_log("Ue4^2", Ue4sq);
 
         if(Ue4sq > 1) {
             log<LOG_ERROR>(L"%1% || Ue4sq is %2% which is greater than 1. Setting to 1.")
@@ -400,11 +434,126 @@ public:
             Ue4sq = 0;
         }
 
-        float sinterm = std::sin(1.27*dmsq*(le));
+        float sinterm = std::sin(1.266932679f*dmsq*(le));
         float prob    = 1.0f - 4.0f*Ue4sq*(1.0f-Ue4sq)*sinterm*sinterm;
 
         if(prob<0.0 || prob >1.0){
             log<LOG_ERROR>(L"%1% || Your probability %2% is outside the bounds of math. dmsq = %3%, Ue4sq = %4%, L/E = %5%") % __func__ % prob % dmsq % Ue4sq % le;
+            log<LOG_ERROR>(L"%1% || Terminating.") % __func__;
+            exit(EXIT_FAILURE);
+        }
+
+        return prob;
+    }
+};
+
+class PRO3p1_3A : public PROmodel {
+public:
+    PRO3p1_3A(const PROpeller &prop, const std::map<std::string,int> &parameter_map) {
+
+        model_functions.push_back([this]([[maybe_unused]] const Eigen::VectorXf &v, float) {(void)this; return 1.0; });
+        model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pmumu(v(0),v(1),v(2),le); });
+        model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pmue(v(0),v(1),v(2),le); });
+        model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pee(v(0),v(1),v(2),le); });
+        if(parameter_map.find("L/E") == parameter_map.end()) {
+            log<LOG_ERROR>(L"%1%, %2% || Missing expected parameter: 'L/E'. Make sure its in your model section of XML.") % __func__ % __LINE__;
+            throw std::runtime_error("Missing parameter: L/E");
+        }
+        ivar = parameter_map.at("L/E");
+
+        //constraints
+        model_constraint = [this](const Eigen::VectorXf &v){return 1;};
+
+
+         size_t nvar = prop.variable_mc_stat_err.size();
+        hists.resize(nvar);
+        for(size_t v = 0; v <nvar ;v++){
+            for(size_t m = 0; m < model_functions.size(); ++m) {
+                hists.at(v).emplace_back(Eigen::MatrixXf::Constant(prop.variable_hist_storage(ivar,v).rows(), prop.variable_hist_storage(ivar,v).cols(),0.0));
+                Eigen::MatrixXf &h = hists.at(v).back();
+                for(size_t i = 0; i < prop.NEvent(); ++i) {
+                    if(prop.model_rule[i] != (int)m) continue;
+                    int tbin = prop.VariableBinIndex(ivar, i), rbin = prop.VariableBinIndex(v, i);
+                    if(tbin<0 || rbin<0)continue;
+                    h(tbin, rbin) += prop.added_weights[i];
+                }
+            }
+        }
+
+
+        nparams = 3;
+        param_names = {"dmsq", "sinsq2thee", "sinsqth24"}; 
+        pretty_param_names = {"#Deltam^{2}", "sin^{2}2#theta_{ee}", "sin^{2}#theta_{24}"}; 
+        is_log10 = {true, true,true};
+        lb = Eigen::VectorXf(3);
+        ub = Eigen::VectorXf(3);
+        default_val = Eigen::VectorXf(3);
+        lb << -2, -std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity();
+        ub << 2, -1e-3, -1e-3;
+        //default_val << -std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity();
+        default_val << -2, -8, -8;
+    };
+
+    int UnitarityConstraint(const Eigen::VectorXf &v){
+        return   1;
+    }
+
+    float Pmue(float dmsq, float sinsq2thee, [[maybe_unused]]float sinsqth24, float le) const{
+        dmsq = maybe_convert_log("dmsq",dmsq);
+        float sinsq2thmue = maybe_convert_log("sinsqth24",sinsqth24)*maybe_convert_log("sinsq2thee", sinsq2thee);
+        
+        if(sinsq2thmue > 1) {
+            log<LOG_ERROR>(L"%1% || sinsq2thmue is %2% which is greater than 1. Setting to 1.")
+                % __func__ % sinsq2thmue;
+            sinsq2thmue = 1;
+        }
+        if(sinsq2thmue < 0) {
+            log<LOG_ERROR>(L"%1% || sinsq2thmue is %2% which is less than 0. Setting to 0.")
+                % __func__ % sinsq2thmue;
+            sinsq2thmue = 0;
+        }
+
+        float sinterm = std::sin(1.27f*dmsq*(le));
+        float prob    = sinsq2thmue*sinterm*sinterm;
+
+        if(prob<0.0 || prob >1.0){
+            log<LOG_ERROR>(L"%1% || Your probability %2% is outside the bounds of math."
+                           L"dmsq = %3%, sinsq2thmue = %4%, L/E = %5%")
+                % __func__ % prob % dmsq % sinsq2thmue % le;
+            log<LOG_ERROR>(L"%1% || Terminating.") % __func__;
+            exit(EXIT_FAILURE);
+        }
+
+        return prob;
+    }
+
+    float Pmumu(float dmsq, float sinsq2thee, [[maybe_unused]]float sinsqth24, float le) const{
+        float Um4sq = maybe_convert_log("sinsqth24",sinsqth24)/2.0*(1.0+sqrt(1- maybe_convert_log("sinsq2thee", sinsq2thee)));
+        dmsq =maybe_convert_log("dmsq",dmsq);
+        
+
+        float sinterm = std::sin(1.27*dmsq*(le));
+        float prob    = 1.0f - 4.0f*Um4sq*(1.0f-Um4sq)*sinterm*sinterm;
+
+        if(prob<0.0 || prob >1.0){
+            log<LOG_ERROR>(L"%1% || Your probability %2% is outside the bounds of math. dmsq = %3%, Um4sq = %4%, sinsq2thee = %5%, sinsqth24 = %6%, L/E = %7%") % __func__ % prob % dmsq % Um4sq % sinsq2thee % sinsqth24 % le;
+            log<LOG_ERROR>(L"%1% || Terminating.") % __func__;
+            exit(EXIT_FAILURE);
+        }
+
+        return prob;
+    }
+
+    float Pee(float dmsq, float sinsq2thee, [[maybe_unused]]float sinsqth24, float le) const{
+
+        dmsq =maybe_convert_log("dmsq",dmsq);
+        sinsq2thee =maybe_convert_log("sinsq2thee",sinsq2thee);
+
+        float sinterm = std::sin(1.27*dmsq*(le));
+        float prob    = 1.0f - sinsq2thee*sinterm*sinterm;
+
+        if(prob<0.0 || prob >1.0){
+            log<LOG_ERROR>(L"%1% || Your probability %2% is outside the bounds of math. dmsq = %3%,sinsq2thee = %4%, sinsqth24 = %5%, L/E = %6%") % __func__ % prob % dmsq % sinsq2thee % sinsqth24 % le;
             log<LOG_ERROR>(L"%1% || Terminating.") % __func__;
             exit(EXIT_FAILURE);
         }
@@ -432,7 +581,7 @@ public:
         model_constraint = [this](const Eigen::VectorXf &v){return this->UnitarityConstraint(v);};
 
 
-         size_t nvar = prop.variable_mc_stat_err.size();
+        size_t nvar = prop.variable_mc_stat_err.size();
         hists.resize(nvar);
         for(size_t v = 0; v <nvar ;v++){
             for(size_t m = 0; m < model_functions.size(); ++m) {
@@ -451,6 +600,9 @@ public:
         nparams = 3;
         param_names = {"dmsq", "sinsq2thmue", "xi"}; 
         pretty_param_names = {"#Deltam^{2}", "sin^{2}2#theta_{#mue}", "#xi"}; 
+        pretty_param_units = {"eV^{2}", "", ""};
+        is_log10 = {true, true, false};
+        build_param_index();
         lb = Eigen::VectorXf(3);
         ub = Eigen::VectorXf(3);
         default_val = Eigen::VectorXf(3);
@@ -461,12 +613,14 @@ public:
     };
 
     int UnitarityConstraint(const Eigen::VectorXf &v){
-        return   (sqrt(pow(10,v(1)))*cosh(v(2))<0.999 ? 1 : 0);      
+        const float sinsq2thmue = maybe_convert_log("sinsq2thmue", v(param_name_to_index.at("sinsq2thmue")));
+        const float xi = maybe_convert_log("xi", v(param_name_to_index.at("xi")));
+        return   (std::sqrt(sinsq2thmue)*std::cosh(xi)<0.999 ? 1 : 0);      
     }
 
     float Pmue(float dmsq, float sinsq2thmue, [[maybe_unused]]float xi, float le) const{
-        dmsq = std::pow(10.0f, dmsq);
-        sinsq2thmue = std::pow(10.0f, sinsq2thmue);
+        dmsq = maybe_convert_log("dmsq", dmsq);
+        sinsq2thmue = maybe_convert_log("sinsq2thmue", sinsq2thmue);
         
         if(sinsq2thmue > 1) {
             log<LOG_ERROR>(L"%1% || sinsq2thmue is %2% which is greater than 1. Setting to 1.")
@@ -479,7 +633,7 @@ public:
             sinsq2thmue = 0;
         }
 
-        float sinterm = std::sin(1.27f*dmsq*(le));
+        float sinterm = std::sin(1.266932679f*dmsq*(le));
         float prob    = sinsq2thmue*sinterm*sinterm;
 
         if(prob<0.0 || prob >1.0){
@@ -494,12 +648,12 @@ public:
     }
 
     float Pmumu(float dmsq, float sinsq2thmue, float xi, float le) const{
-        dmsq = std::pow(10.0f, dmsq);
-        sinsq2thmue = std::pow(10.0f, sinsq2thmue);
+        dmsq = maybe_convert_log("dmsq", dmsq);
+        sinsq2thmue = maybe_convert_log("sinsq2thmue", sinsq2thmue);
 
         float Um4sq=(std::exp(xi) * std::sqrt(sinsq2thmue)) / 2.0;
 
-        float sinterm = std::sin(1.27*dmsq*(le));
+        float sinterm = std::sin(1.266932679f*dmsq*(le));
         float prob    = 1.0f - 4.0f*Um4sq*(1.0f-Um4sq)*sinterm*sinterm;
 
         if(prob<0.0 || prob >1.0){
@@ -512,12 +666,12 @@ public:
     }
 
     float Pee(float dmsq, float sinsq2thmue, float xi, float le) const{
-        dmsq = std::pow(10.0f, dmsq);
-        sinsq2thmue = std::pow(10.0f, sinsq2thmue);
+        dmsq = maybe_convert_log("dmsq", dmsq);
+        sinsq2thmue = maybe_convert_log("sinsq2thmue", sinsq2thmue);
 
         float Ue4sq=(std::exp(-xi) * std::sqrt(sinsq2thmue)) / 2.0;
 
-        float sinterm = std::sin(1.27*dmsq*(le));
+        float sinterm = std::sin(1.266932679f*dmsq*(le));
         float prob    = 1.0f - 4.0f*Ue4sq*(1.0f-Ue4sq)*sinterm*sinterm;
 
         if(prob<0.0 || prob >1.0){
@@ -529,6 +683,196 @@ public:
         return prob;
     }
 };
+
+
+class PRO3p1_decay_invis : public PROmodel {
+public:
+    PRO3p1_decay_invis(const PROpeller &prop, const std::map<std::string,int> &parameter_map) {
+        // 3+1+decay to invisible particles, example from IceCube: https://arxiv.org/pdf/2204.00612
+        // (invisible means no active or sterile-oscillating-to-active neutrinos after the decay)
+
+        model_functions.push_back([this]([[maybe_unused]] const Eigen::VectorXf &v, float) {(void)this; return 1.0; });
+        model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pmumu(v(0),v(1),v(2),v(3),le); });
+        model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pmue(v(0),v(1),v(2),v(3),le); });
+        model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pee(v(0),v(1),v(2),v(3),le); });
+        if(parameter_map.find("L/E") == parameter_map.end()) {
+            log<LOG_ERROR>(L"%1%, %2% || Missing expected parameter: 'L/E'. Make sure its in your model section of XML.") % __func__ % __LINE__;
+            throw std::runtime_error("Missing parameter: L/E");
+        }
+        ivar = parameter_map.at("L/E");
+
+        model_constraint = [this](const Eigen::VectorXf &v){return this->UnitarityConstraint(v);};
+
+        size_t nvar = prop.variable_mc_stat_err.size();
+        hists.resize(nvar);
+        for(size_t v = 0; v <nvar ;v++){
+            for(size_t m = 0; m < model_functions.size(); ++m) {
+                hists.at(v).emplace_back(Eigen::MatrixXf::Constant(prop.variable_hist_storage(ivar,v).rows(), prop.variable_hist_storage(ivar,v).cols(),0.0));
+                Eigen::MatrixXf &h = hists.at(v).back();
+                for(size_t i = 0; i < prop.NEvent(); ++i) {
+                    if(prop.model_rule[i] != (int)m) continue;
+                    int tbin = prop.VariableBinIndex(ivar, i), rbin = prop.VariableBinIndex(v, i);
+                    if(tbin<0 || rbin<0)continue;
+                    h(tbin, rbin) += prop.added_weights[i];
+                }
+            }
+        }
+
+        nparams = 4;
+        param_names = {"dmsq", "Ue4^2", "Um4^2", "g2"}; 
+        pretty_param_names = {"#Deltam^{2}", "|U_{e4}|^{2}", "|U_{#mu4}|^{2}", "g^{2}"}; 
+        pretty_param_units = {"eV^{2}", "", "", ""}; 
+        is_log10 = {true, true, true, false};
+        build_param_index();
+        lb = Eigen::VectorXf(4);
+        ub = Eigen::VectorXf(4);
+        default_val = Eigen::VectorXf(4);
+        lb << -2, -std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity(), 0;
+        ub << 2, -1e-4, -1e-4, 10;
+        default_val << -2, -8, -8, 0;
+    };
+
+    int UnitarityConstraint(const Eigen::VectorXf &v){
+        // ensures positive g2 in addition to the usual unitarity constraints
+        const float Ue4sq = maybe_convert_log("Ue4^2", v(param_name_to_index.at("Ue4^2")));
+        const float Um4sq = maybe_convert_log("Um4^2", v(param_name_to_index.at("Um4^2")));
+        const float g2 = maybe_convert_log("g2", v(param_name_to_index.at("g2")));
+        return   ((Ue4sq+Um4sq)<1 && g2>0 ? 1 : 0);      
+    }
+
+    // Equations from Jesse Mendez, slide 5 bottom https://microboone-docdb.fnal.gov/cgi-bin/sso/RetrieveFile?docid=45475&filename=2025-10-31-mendez-sterile-deacy.pdf&version=1
+    //
+    // Derivation from references:
+    // See equation 10 here, written in terms of L_osc and L_dec: https://journals.aps.org/prd/pdf/10.1103/PhysRevD.110.075002
+    //     This is the only term in equation 9 if we set the visible decay term to zero (P_dec == 0)
+    // Using Delta = 1/4 1/(hbar c) * (m / 1 eV)^2 * ((L / 1 km) / (E / 1 GeV)) = 1/4 m^2 L/E (natural units) = 1.266932679 m^2 L / E (km and GeV units)
+    // L_osc = 2 pi E / m^2 (just after equation 10)
+    // Simplifying this term: pi L / L_osc = pi L / (2 pi E / m^2) = 1/2 m^2 L/E = 2 Delta
+    // From equation 1 of https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.129.151801: tau = 16 pi / (g^2 m)
+    // L_dec = (relativistic gamma factor) * c * tau = E/m * tau = E/m * 16 pi / (g^2 m) = 16 pi E / (g^2 m^2)
+    // Simplifying this term: L / (2 L_dec) = g^2 m^2 L / (32 pi E) = g^2 / 8 pi * (1/4 m^2 L/E) = g^2 / 8 pi * Delta
+    // Final formula: P_ab = delta_ab - 2 delta_ab |U_a4 U_b4| [1 - exp(-g^2 / 8 pi * Delta) cos(2 Delta)]
+    //                       + |U_a4 U_b4|^2 [1 - 2 exp(-g^2 / 8 pi * Delta) cos(2 Delta) + exp(-g^2 / 4 pi * Delta)]
+    //
+    // Another reference for 3+1+invisible decay: Equation 15 of https://journals.aps.org/prd/pdf/10.1103/PhysRevD.97.055017
+    //     P_aa = cos^4(theta) + 1/2 exp_term cos(2 Delta) sin^2(2 theta) + exp_term^2 sin^4(theta)
+    //          = (1 - sin^2(theta))^2 + 1/2 exp_term cos(2 Delta) (4 cos^2(theta) sin^2(theta)) + exp_term^2 sin^4(theta)
+    //          = (1 - 2 sin^2(theta) + sin^4(theta)) + 1/2 exp_term cos(2 Delta) (4 sin^2(theta) - 4 sin^4(theta)) + exp_term^2 sin^4(theta)
+    //          = 1 - 2 sin^2(theta) + sin^4(theta) + 2 exp_term cos(2 Delta) sin^2(theta) - 2 exp_term cos(2 Delta) sin^4(theta) + exp_term^2 sin^4(theta)
+    //          = 1 - 2 sin^2(theta) [1 - exp_term cos(2 Delta)] + sin^4(theta) [1 - 2 exp_term cos(2 Delta) + exp_term^2]
+    // Taking our full equation, looking at just the disappearance case, and substituting |U_a4|^2 = sin^2(theta):
+    //     P_aa = 1 - 2 |U_a4|^2 [1 - exp_term cos(2 Delta)] + |U_a4|^4 [1 - 2 exp_term cos(2 Delta) + exp_term^2]
+    //          = 1 - 2 sin^2(theta) [1 - exp_term cos(2 Delta)] + sin^4(theta) [1 - 2 exp_term cos(2 Delta) + exp_term^2]
+    // This exactly matches the equation above, confirming that the references are consistent.
+
+    float Pmue(float dmsq, float Ue4sq, float Um4sq, float g2, float le) const{
+        dmsq = maybe_convert_log("dmsq", dmsq);
+        Ue4sq = maybe_convert_log("Ue4^2", Ue4sq);
+        Um4sq = maybe_convert_log("Um4^2", Um4sq);
+        g2 = maybe_convert_log("g2", g2);
+
+        if (Ue4sq > 1 || Ue4sq < 0 || Um4sq > 1 || Um4sq < 0 || g2 < 0) {
+            log<LOG_ERROR>(L"%1% || Parameter(s) out of bounds. Setting to limits. Values: Ue4sq=%2%, Um4sq=%3%, g2=%4%, dmsq=%5%, le=%6%")
+                % __func__ % Ue4sq % Um4sq % g2 % dmsq % le;
+            if (Ue4sq > 1) Ue4sq = 1;
+            if (Ue4sq < 0) Ue4sq = 0;
+            if (Um4sq > 1) Um4sq = 1;
+            if (Um4sq < 0) Um4sq = 0;
+            if (g2 < 0) g2 = 0;
+            exit(EXIT_FAILURE);
+        }
+
+        float delta = 1.266932679f*dmsq*le;
+        float costerm = std::cos(2.0f*delta);
+        float expterm = std::exp(-g2*delta/(8.0f*3.14159f));
+        float prob    = Ue4sq*Um4sq*(1.0f-2.0f*expterm*costerm + expterm*expterm);
+        //exit(0);
+
+        // numerical precision issues can cause small negative probabilities
+        if(-1e-6f < prob && prob<0.0f){
+            prob = 0.0f;
+        }
+
+        if(prob<0.0 || prob >1.0 || std::isnan(prob)){
+            log<LOG_ERROR>(L"%1% || Your probability %2% is outside the 0-1 range. dmsq = %3%, Ue4sq = %4%, Um4sq = %5%, g2 = %6%, L/E = %7%") % __func__ % prob % dmsq % Ue4sq % Um4sq % g2 % le;
+            log<LOG_ERROR>(L"delta = %1%, costerm = %2%, expterm = %3%") % delta % costerm % expterm;
+            log<LOG_ERROR>(L"%1% || Terminating.") % __func__;
+            exit(EXIT_FAILURE);
+        }
+
+        return prob;
+    }
+
+    float Pmumu(float dmsq, [[maybe_unused]]float Ue4sq, float Um4sq, float g2, float le) const{
+        dmsq = maybe_convert_log("dmsq", dmsq);
+        Um4sq = maybe_convert_log("Um4^2", Um4sq);
+        g2 = maybe_convert_log("g2", g2);
+
+        if (Um4sq > 1 || Um4sq < 0 || g2 < 0) {
+            log<LOG_ERROR>(L"%1% || Parameter(s) out of bounds. Setting to limits. Values: Um4sq=%2%, g2=%3%, dmsq=%4%, le=%5%")
+                % __func__ % Um4sq % g2 % dmsq % le;
+            if (Um4sq > 1) Um4sq = 1;
+            if (Um4sq < 0) Um4sq = 0;
+            if (g2 < 0) g2 = 0;
+            exit(EXIT_FAILURE);
+        }
+
+        float delta = 1.266932679f*dmsq*le;
+        float costerm = std::cos(2.0f*delta);
+        float expterm = std::exp(-g2*delta/(8.0f*3.14159f));
+        float prob    = 1.0f - 2.0f*Um4sq*(1.0f-expterm*costerm) + Um4sq*Um4sq*(1.0f-2.0f*expterm*costerm + expterm*expterm);
+
+        // numerical precision issues can cause small negative probabilities
+        if(-1e-6f < prob && prob<0.0f){
+            prob = 0.0f;
+        }
+
+        if(prob<0.0 || prob >1.0 || std::isnan(prob)){
+            log<LOG_ERROR>(L"%1% || Your probability %2% is the 0-1 range. dmsq = %3%, Um4sq = %4%, g2 = %5%, L/E = %6%") % __func__ % prob % dmsq % Um4sq % g2 % le;
+            log<LOG_ERROR>(L"delta = %1%, costerm = %2%, expterm = %3%") % delta % costerm % expterm;
+            log<LOG_ERROR>(L"%1% || Terminating.") % __func__;
+            exit(EXIT_FAILURE);
+        }
+
+        return prob;
+    }
+
+    float Pee(float dmsq, float Ue4sq, [[maybe_unused]]float Um4sq, float g2, float le) const{
+        dmsq = maybe_convert_log("dmsq", dmsq);
+        Ue4sq = maybe_convert_log("Ue4^2", Ue4sq);
+        g2 = maybe_convert_log("g2", g2);
+
+        if (Ue4sq > 1 || Ue4sq < 0 || g2 < 0) {
+            log<LOG_ERROR>(L"%1% || Parameter(s) out of bounds. Setting to limits. Values: Ue4sq=%2%, g2=%3%, dmsq=%4%, le=%5%")
+                % __func__ % Ue4sq % g2 % dmsq % le;
+            if (Ue4sq > 1) Ue4sq = 1;
+            if (Ue4sq < 0) Ue4sq = 0;
+            if (g2 < 0) g2 = 0;
+            exit(EXIT_FAILURE);
+        }
+
+        float delta = 1.266932679f*dmsq*le;
+        float costerm = std::cos(2.0f*delta);
+        float expterm = std::exp(-g2*delta/(8.0f*3.14159f));
+        float prob    = 1.0f - 2.0f*Ue4sq*(1.0f-expterm*costerm) + Ue4sq*Ue4sq*(1.0f-2.0f*expterm*costerm + expterm*expterm);
+
+        // numerical precision issues can cause small negative probabilities
+        if(-1e-6f < prob && prob<0.0f){
+            prob = 0.0f;
+        }
+
+        if(prob<0.0 || prob >1.0 || std::isnan(prob)){
+            log<LOG_ERROR>(L"%1% || Your probability %2% is outside the 0-1 range. dmsq = %3%, Ue4sq = %4%, g2 = %5%, L/E = %6%") % __func__ % prob % dmsq % Ue4sq % g2 % le;
+            log<LOG_ERROR>(L"delta = %1%, costerm = %2%, expterm = %3%") % delta % costerm % expterm;
+            log<LOG_ERROR>(L"term1 = %1%, term2 = %2%, term3 = %3%") % 1.0f % (-2.0f*Ue4sq*(1.0f-expterm*costerm)) % (Ue4sq*Ue4sq*(1.0f-2.0f*expterm*costerm + expterm*expterm));
+            log<LOG_ERROR>(L"%1% || Terminating.") % __func__;
+            exit(EXIT_FAILURE);
+        }
+
+        return prob;
+    }
+};
+
 
 
 // Main interface to different models
@@ -546,6 +890,8 @@ std::unique_ptr<PROmodel> get_model_from_string(const PROconfig& config, const P
         return std::unique_ptr<PROmodel>(new PRO3p1(prop,config.m_model_parameter_map));
     } else if(name == "3+1_3C") {
         return std::unique_ptr<PROmodel>(new PRO3p1_3C(prop,config.m_model_parameter_map));
+    } else if(name == "3+1_decay_invis") {
+        return std::unique_ptr<PROmodel>(new PRO3p1_decay_invis(prop,config.m_model_parameter_map));
     }
     log<LOG_ERROR>(L"%1% || Unrecognized model name %2%. Try numudis, nueapp, nuedis, 3+1 or 3+1_3C for now. Terminating.") % __func__ % name.c_str();
     exit(EXIT_FAILURE);

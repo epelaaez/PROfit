@@ -139,10 +139,12 @@ void savePROsurf(const PROfit::PROsurf &surface,
     const std::string &rootfile="", const std::string &pdffile="") {
 
   std::vector<float> binedges_x, binedges_y;
+  // Edges are stored in model's native space (log if is_log10, linear otherwise)
+  // Convert to linear for ROOT histogram bin edges
   for(size_t i = 0; i < surface.nbinsx+1; i++)
-    binedges_x.push_back(logx ? std::pow(10, surface.edges_x(i)) : surface.edges_x(i));
+    binedges_x.push_back(surface.metric.GetModel().is_log10[surface.x_idx] ? std::pow(10, surface.edges_x(i)) : surface.edges_x(i));
   for(size_t i = 0; i < surface.nbinsy+1; i++)
-    binedges_y.push_back(logy ? std::pow(10, surface.edges_y(i)) : surface.edges_y(i));
+    binedges_y.push_back(surface.metric.GetModel().is_log10[surface.y_idx] ? std::pow(10, surface.edges_y(i)) : surface.edges_y(i));
   
   TH2D surf("surf", (";"+xlabel+";"+ylabel).c_str(), surface.nbinsx, binedges_x.data(), surface.nbinsy, binedges_y.data());
 
