@@ -83,6 +83,8 @@ std::vector<float> combined_sparse_seed(float Amin, float Amax, std::vector<floa
 
 
 PROsurf::PROsurf(PROmetric &metric,  size_t x_idx, size_t y_idx, size_t nbinsx, LogLin llx, float x_lo, float x_hi, size_t nbinsy, LogLin lly, float y_lo, float y_hi) : metric(metric), x_idx(x_idx), y_idx(y_idx), nbinsx(nbinsx), nbinsy(nbinsy), edges_x(Eigen::VectorXf::Constant(nbinsx + 1, 0)), edges_y(Eigen::VectorXf::Constant(nbinsy + 1, 0)), surface(nbinsx, nbinsy) {
+          
+    // If it's a log axis, we always convert to log space in order to define the grid
     if(llx == LogAxis) {
         x_lo = std::log10(x_lo);
         x_hi = std::log10(x_hi);
@@ -91,10 +93,31 @@ PROsurf::PROsurf(PROmetric &metric,  size_t x_idx, size_t y_idx, size_t nbinsx, 
         y_lo = std::log10(y_lo);
         y_hi = std::log10(y_hi);
     }
+    
+    for(size_t i = 0; i < nbinsx + 1; i++) {
+        float edge_val = x_lo + i * (x_hi - x_lo) / nbinsx;
+        if (llx == LogAxis) edge_val = std::pow(10, edge_val); // Now bin edges are back to linear space
+        if (metric.GetModel().is_log10[x_idx])
+            edges_x(i) = std::log10(edge_val);
+        else
+            edges_x(i) = edge_val;
+    }
+    for(size_t i = 0; i < nbinsy + 1; i++) {
+        float edge_val = y_lo + i * (y_hi - y_lo) / nbinsy;
+        if (lly == LogAxis) edge_val = std::pow(10, edge_val); // Now bin edges are back to linear space
+        if (metric.GetModel().is_log10[y_idx])
+            edges_y(i) = std::log10(edge_val);
+        else
+            edges_y(i) = edge_val;
+    }
+
+    /*
     for(size_t i = 0; i < nbinsx + 1; i++)
-        edges_x(i) = x_lo + i * (x_hi - x_lo) / nbinsx;
+        log<LOG_ERROR>(L"%1% || xbin edge %2%: %3%") % __func__ % i % edges_x(i);
     for(size_t i = 0; i < nbinsy + 1; i++)
-        edges_y(i) = y_lo + i * (y_hi - y_lo) / nbinsy;
+        log<LOG_ERROR>(L"%1% || ybin edge %2%: %3%") % __func__ % i % edges_y(i);
+    */
+
 }
 
 void PROsurf::FillSurfaceStat(const PROconfig &config, const PROfitterConfig &fitconfig, std::string filename) {
@@ -455,10 +478,12 @@ std::vector<surfOut> PROsurf::FillCurve(const PROfitterConfig &fitconfig, PROsee
 void PROsurf::PlotCurve(const PROconfig &config, const PROmodel &model, const PROsyst &syst, const std::vector<surfOut> & cpoints, std::string final_output_tag, bool logx, bool logy, size_t xaxis_idx,size_t yaxis_idx, std::vector<float> &A, std::vector<float> &B, size_t n_points){
 
     std::vector<float> binedges_x, binedges_y;
+    // Edges are stored in model's native space (log if is_log10, linear otherwise)
+    // Convert to linear for ROOT histogram bin edges
     for(size_t i = 0; i < this->nbinsx+1; i++)
-        binedges_x.push_back(logx ? std::pow(10, this->edges_x(i)) : this->edges_x(i));
+        binedges_x.push_back(model.is_log10[xaxis_idx] ? std::pow(10, this->edges_x(i)) : this->edges_x(i));
     for(size_t i = 0; i < this->nbinsy+1; i++)
-        binedges_y.push_back(logy ? std::pow(10, this->edges_y(i)) : this->edges_y(i));
+        binedges_y.push_back(model.is_log10[yaxis_idx] ? std::pow(10, this->edges_y(i)) : this->edges_y(i));
 
      std::string xlabel = xaxis_idx < model.nparams ? model.pretty_param_names.at(xaxis_idx) : 
             config.m_mcgen_variation_plotname_map.at(syst.spline_names.at(xaxis_idx));

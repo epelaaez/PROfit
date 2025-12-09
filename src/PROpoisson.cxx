@@ -102,6 +102,16 @@ float PROpoisson::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &grad
             
             Eigen::VectorXf subvector1 = tmpParams.segment(0, nparams - nsyst);
             Eigen::VectorXf subvector2 = tmpParams.segment(nparams - nsyst, nsyst);
+
+            // If this new gradient evaluation point violates unitarity, set the gradient to a large value
+            if(model.model_constraint){
+                if(!model.model_constraint(subvector1)){
+                    //log<LOG_ERROR>(L"%1% || WARNING In PROpoisson: Gradient evaluation point violates unitarity. Setting gradient to large value.") % __func__;
+                    gradient(i) = sgn * 1e10;
+                    continue;
+                }
+            }
+
             PROspec result = FillSpectra(config, peller, *syst, model, tmpParams, strat != EventByEvent);
 
             const Eigen::VectorXf vdata = shape_only 

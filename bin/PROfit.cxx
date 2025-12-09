@@ -329,7 +329,8 @@ int main(int argc, char* argv[])
             return 1;
         }
         int loc = std::distance(model->param_names.begin(), it);
-        fake_data_osc_param_vector(loc) = std::log10(value);
+        fake_data_osc_param_vector(loc) = model->is_log10[loc] ? std::log10(value) : value;
+        log<LOG_INFO>(L"%1% Set fake data injected parameter %2% to value %3%, internally %4%") % __func__ % name.c_str() % value % fake_data_osc_param_vector(loc);
     }
 
     Eigen::VectorXf cv_osc_param_vector = model->default_val;
@@ -343,7 +344,8 @@ int main(int argc, char* argv[])
             return 1;
         }
         int loc = std::distance(model->param_names.begin(), it);
-        cv_osc_param_vector(loc) = std::log10(value);
+        cv_osc_param_vector(loc) = model->is_log10[loc] ? std::log10(value) : value;
+        log<LOG_INFO>(L"%1% Set CV injected parameter %2% to value %3%, internally %4%") % __func__ % name.c_str() % value % fake_data_osc_param_vector(loc);
     }
 
 
@@ -968,10 +970,12 @@ int main(int argc, char* argv[])
         }
 
         std::vector<float> binedges_x, binedges_y;
+        // Edges are stored in model's native space (log if is_log10, linear otherwise)
+        // Convert to linear for ROOT histogram bin edges
         for(size_t i = 0; i < surface.nbinsx+1; i++)
-            binedges_x.push_back(logx ? std::pow(10, surface.edges_x(i)) : surface.edges_x(i));
+            binedges_x.push_back(model->is_log10[xaxis_idx] ? std::pow(10, surface.edges_x(i)) : surface.edges_x(i));
         for(size_t i = 0; i < surface.nbinsy+1; i++)
-            binedges_y.push_back(logy ? std::pow(10, surface.edges_y(i)) : surface.edges_y(i));
+            binedges_y.push_back(model->is_log10[yaxis_idx] ? std::pow(10, surface.edges_y(i)) : surface.edges_y(i));
 
         if(xlabel == "") 
             xlabel = xaxis_idx < model->nparams ? model->pretty_param_names[xaxis_idx] : 
@@ -1228,7 +1232,9 @@ int main(int argc, char* argv[])
                         leg->AddEntry(cv_hist, "No Oscillations", "l");
                         std::string oscstr = "";//"#splitline{Oscilations:}{";
                         for(size_t j=0;j<model->nparams;j++){
-                            oscstr+=model->pretty_param_names[j]+ " : "+ to_string_prec(pow(10,fake_data_osc_param_vector(j)),3) +" "+model->pretty_param_units[j] + (j==0 ? ", " : "" );
+                            // TODO: change_log_here
+                            float val_maybe_log = model->is_log10[j] ? std::pow(10.0f, fake_data_osc_param_vector(j)) : fake_data_osc_param_vector(j);
+                            oscstr+=model->pretty_param_names[j]+ " : "+ to_string_prec(val_maybe_log,3) +" "+model->pretty_param_units[j] + (j==0 ? ", " : "" );
                         }
                         //oscstr+="}";
 
