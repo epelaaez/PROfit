@@ -145,6 +145,15 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
                 Eigen::VectorXf param_plus = param;
                 param_plus(i) = param(i) + sign*h;
 
+                // If this new gradient evaluation point violates unitarity, set the gradient to a large value
+                if(model.model_constraint){
+                    if(!model.model_constraint(param_plus.segment(0, model.nparams))){
+                        //log<LOG_ERROR>(L"%1% || WARNING In PROchi: Gradient evaluation point violates unitarity. Setting gradient to large value.") % __func__;
+                        gradient(i) = sign * 1e10;
+                        continue;
+                    }
+                }
+
                 float chi2_oneside;
                 // Calculate chi2_plus or chi2_minus, depending on boundary
                 PROspec result = FillSpectra(config, peller, *syst, model, param_plus, strat != EventByEvent,config.i_prime);
@@ -177,7 +186,10 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
                 float chi2_plus, chi2_minus;
 
                 // Plus point
-                {
+                if(model.model_constraint && !model.model_constraint(param_plus.segment(0, model.nparams))){
+                    //log<LOG_ERROR>(L"%1% || WARNING In PROchi: Gradient evaluation point (plus) violates unitarity. Setting chi2_plus to large value.") % __func__;
+                    chi2_plus = 1e10;
+                } else {
                     PROspec result = FillSpectra(config, peller, *syst, model, param_plus, strat != EventByEvent,config.i_prime);
 
                     Eigen::MatrixXf diag = result.Spec().array().matrix().asDiagonal();
@@ -192,10 +204,13 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
                 }
 
                 // Minus point
-                {
+                if(model.model_constraint && !model.model_constraint(param_minus.segment(0, model.nparams))){
+                    //log<LOG_ERROR>(L"%1% || WARNING In PROchi: Gradient evaluation point (minus) violates unitarity. Setting chi2_minus to large value.") % __func__;
+                    chi2_minus = 1e10;
+                } else {
                     PROspec result = FillSpectra(config, peller, *syst, model, param_minus, strat != EventByEvent,config.i_prime);
 
-
+                    Eigen::MatrixXf diag = result.Spec().array().matrix().asDiagonal();
                     Eigen::MatrixXf full_covariance = diag*(syst->fractional_covariance)*diag;
                     Eigen::MatrixXf collapsed_full_covariance = CollapseMatrix(config, full_covariance);
                     Eigen::MatrixXf inverted_collapsed_full_covariance = (collapsed_stat_covariance + collapsed_full_covariance).inverse();
