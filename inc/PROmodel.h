@@ -649,6 +649,7 @@ public:
                 return this->Pee(v(0), v(1), v(2), le);
             }
         );
+        prob_types = {0, 1, 2, 3};
 
         // -----------------------------------------
         // 2) L/E variable index
@@ -1177,6 +1178,7 @@ public:
             [this](const Eigen::VectorXf &v, float le) { return this->Pmue(v, le); });
         model_functions.push_back(
             [this](const Eigen::VectorXf &v, float le) { return this->Pee(v, le); });
+        prob_types = {0, 1, 2, 3};
 
         if(parameter_map.find("L/E") == parameter_map.end()) {
             log<LOG_ERROR>(L"%1%, %2% || Missing expected parameter: 'L/E'. Make sure its in your model section of XML.")
