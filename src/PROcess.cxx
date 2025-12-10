@@ -75,7 +75,17 @@ namespace PROfit {
                 le_arr.push_back(inprop.variable_midbin[inmodel.ivar][i]);
             }
 
+            log<LOG_INFO>(L"%1% || Starting prob calculation %2%") % __func__ % var_index;
+            auto start = std::chrono::high_resolution_clock::now();
+
             auto probs = inmodel.get_probs(phys, le_arr);
+
+            auto end = std::chrono::high_resolution_clock::now();
+            std::chrono::duration<double> duration = end - start;
+            log<LOG_INFO>(L"%1% || L/E loop took %2% seconds") % __func__ % duration.count();
+
+            log<LOG_INFO>(L"%1% || Starting null matrix check  %2%") % __func__ % var_index;
+            auto start2 = std::chrono::high_resolution_clock::now();
 
             for(size_t j = 0; j < inmodel.prob_types.size(); ++j) {
                 if (inmodel.hists[var_index][j].data() == nullptr) {
@@ -84,13 +94,38 @@ namespace PROfit {
                 }
             }
 
-            for(size_t i = 0; i < le_arr.size(); ++i) {
-                for(size_t j = 0; j < inmodel.prob_types.size(); ++j) {
-                    for(size_t k = 0; k < myspectrum.GetNbins(); ++k) {
-                        myspectrum.Fill(k, systw(k) * probs[i][j] * inmodel.hists[var_index][j](i, k));
+            auto end2 = std::chrono::high_resolution_clock::now();
+            std::chrono::duration<double> duration2 = end2 - start2;
+            log<LOG_INFO>(L"%1% || null matrix check took %2% seconds") % __func__ % duration2.count();
+
+            log<LOG_INFO>(L"%1% || Starting filling %2%") % __func__ % var_index;
+            auto start3 = std::chrono::high_resolution_clock::now();
+
+            // Cache pointers to avoid repeated vector/matrix indirection
+            const float* probs_data = probs.data();
+            const size_t probs_rows = probs.rows();
+            const float* systw_data = systw.data();
+            const size_t nbins = myspectrum.GetNbins();
+            
+            // Cache hist matrix pointers for each probability type
+            const std::vector<Eigen::MatrixXf>& hists_for_var = inmodel.hists[var_index];
+            
+            for(size_t j = 0; j < inmodel.prob_types.size(); ++j) {
+                const float* hist_data = hists_for_var[j].data();
+                const size_t hist_rows = hists_for_var[j].rows();
+                
+                for(size_t i = 0; i < le_arr.size(); ++i) {
+                    const float prob_ij = probs_data[i + j * probs_rows];
+                    for(size_t k = 0; k < nbins; ++k) {
+                        // Column-major: element (i,k) is at index i + k * rows
+                        myspectrum.Fill(k, systw_data[k] * prob_ij * hist_data[i + k * hist_rows]);
                     }
                 }
             }
+
+            auto end3 = std::chrono::high_resolution_clock::now();
+            std::chrono::duration<double> duration3 = end3 - start3;
+            log<LOG_INFO>(L"%1% || filling took %2% seconds") % __func__ % duration3.count();
 
         } else {
 
@@ -102,7 +137,7 @@ namespace PROfit {
             auto probs = inmodel.get_probs(phys, le_arr);
 
             for(size_t i = 0; i < inprop.NEvent(); ++i) {
-                float oscw = probs[i][inprop.model_rule[i]];
+                float oscw = probs(i, inprop.model_rule[i]);
                 float add_w = inprop.added_weights[i]; 
                 const int reco_bin = inprop.VariableBinIndex(var_index, i);
 
@@ -161,10 +196,22 @@ namespace PROfit {
 
             auto probs = inmodel.get_probs(phys, le_arr);
 
-            for(size_t i = 0; i < le_arr.size(); ++i) {
-                for(size_t j = 0; j < inmodel.prob_types.size(); ++j) {
-                    for(size_t k = 0; k < myspectrum.GetNbins(); ++k) {
-                        myspectrum.Fill(k, hist_w_arr[i] * probs[i][j] * inmodel.hists[inconfig.i_prime][j](i, k));
+            // Cache pointers to avoid repeated vector/matrix indirection
+            const float* probs_data = probs.data();
+            const size_t probs_rows = probs.rows();
+            const size_t nbins = myspectrum.GetNbins();
+            
+            // Cache hist matrix pointers for each probability type
+            const std::vector<Eigen::MatrixXf>& hists_for_var = inmodel.hists[inconfig.i_prime];
+            
+            for(size_t j = 0; j < inmodel.prob_types.size(); ++j) {
+                const float* hist_data = hists_for_var[j].data();
+                const size_t hist_rows = hists_for_var[j].rows();
+                
+                for(size_t i = 0; i < le_arr.size(); ++i) {
+                    const float weighted_prob_ij = hist_w_arr[i] * probs_data[i + j * probs_rows];
+                    for(size_t k = 0; k < nbins; ++k) {
+                        myspectrum.Fill(k, weighted_prob_ij * hist_data[i + k * hist_rows]);
                     }
                 }
             }
@@ -201,7 +248,7 @@ namespace PROfit {
             auto probs = inmodel.get_probs(phys, le_arr);
 
             for(size_t i = 0; i < inprop.NEvent(); ++i) {
-                float oscw = phys.size() != 0 ? probs[i][inprop.model_rule[i]] : 1.0f;
+                float oscw = phys.size() != 0 ? probs(i, inprop.model_rule[i]) : 1.0f;
 
                 float finalw = oscw * add_w_arr[i] * hist_w_arr[i];
                 myspectrum.Fill(inprop.VariableBinIndex(inconfig.i_prime, i), finalw);

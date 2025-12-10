@@ -35,14 +35,14 @@ public:
     std::vector<bool> is_log10; // Track whether each physics parameter is stored in log10 space.
 
     // Compute oscillation probabilities for all L/E values and all probability types
-    // Returns probs[le_index][prob_type_index]
+    // Returns probs(le_index, prob_type_index) as an Eigen::MatrixXf for cache-friendly access
     // Can be overridden for faster computation, computing multiple types of probabilities at multiple L/E values together
-    virtual std::vector<std::vector<float>> get_probs(const Eigen::VectorXf &phys, const std::vector<float> &le_arr) const {
+    virtual Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<float> &le_arr) const {
         //log<LOG_ERROR>(L"%1% || Using non-unified get_probs function for model") % __func__;
-        std::vector<std::vector<float>> probs(le_arr.size(), std::vector<float>(prob_types.size()));
+        Eigen::MatrixXf probs(le_arr.size(), prob_types.size());
         for(size_t i = 0; i < le_arr.size(); ++i) {
             for(size_t j = 0; j < prob_types.size(); ++j) {
-                probs[i][j] = model_functions[j](phys, le_arr[i]);
+                probs(i, j) = model_functions[j](phys, le_arr[i]);
             }
         }
 
@@ -170,7 +170,7 @@ public:
         return prob;
     }
 
-    std::vector<std::vector<float>> get_probs(const Eigen::VectorXf &phys, const std::vector<float> &le_arr) const override {
+    Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<float> &le_arr) const override {
         //log<LOG_ERROR>(L"%1% || Using unified, optimized get_probs function for model") % __func__;
         // Precompute physics parameters once
         float dmsq = maybe_convert_log("dmsq", phys(0));
@@ -181,16 +181,16 @@ public:
         if(sinsq2thmumu > 1) sinsq2thmumu = 1;
         if(sinsq2thmumu < 0) sinsq2thmumu = 0;
 
-        std::vector<std::vector<float>> probs(le_arr.size(), std::vector<float>(model_functions.size()));
+        Eigen::MatrixXf probs(le_arr.size(), model_functions.size());
 
         for(size_t i = 0; i < le_arr.size(); ++i) {
 
             // no oscillation
-            probs[i][0] = 1.0f;
+            probs(i, 0) = 1.0f;
 
             // P_mumu
             float sinterm = std::sin(freq * le_arr[i]);
-            probs[i][1] = 1.0f - (sinsq2thmumu * sinterm * sinterm);
+            probs(i, 1) = 1.0f - (sinsq2thmumu * sinterm * sinterm);
         }
 
         return probs;
@@ -1119,7 +1119,7 @@ public:
     }
 
     
-    std::vector<std::vector<float>> get_probs(const Eigen::VectorXf &phys, const std::vector<float> &le_arr) const override {
+    Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<float> &le_arr) const override {
         //log<LOG_ERROR>(L"%1% || Using unified, optimized get_probs function for model") % __func__;
 
         // Precompute physics parameters once
@@ -1132,25 +1132,25 @@ public:
 
         float freq = 1.266932679f * dmsq;
 
-        std::vector<std::vector<float>> probs(le_arr.size(), std::vector<float>(model_functions.size()));
+        Eigen::MatrixXf probs(le_arr.size(), model_functions.size());
 
         for(size_t i = 0; i < le_arr.size(); ++i) {
             
             // no oscillation
-            probs[i][0] = 1.0f;
+            probs(i, 0) = 1.0f;
 
             float delta = freq*le_arr[i];
             float costerm = std::cos(2.0f*delta);
             float expterm = std::exp(-g2*delta/(8.0f*3.14159f));
 
             // P_mumu
-            probs[i][1] = 1.0f - 2.0f*Um4sq*(1.0f-expterm*costerm) + Um4sq*Um4sq*(1.0f-2.0f*expterm*costerm + expterm*expterm);
+            probs(i, 1) = 1.0f - 2.0f*Um4sq*(1.0f-expterm*costerm) + Um4sq*Um4sq*(1.0f-2.0f*expterm*costerm + expterm*expterm);
 
             // P_mue
-            probs[i][2] = Ue4sq*Um4sq*(1.0f-2.0f*expterm*costerm + expterm*expterm);
+            probs(i, 2) = Ue4sq*Um4sq*(1.0f-2.0f*expterm*costerm + expterm*expterm);
 
             // P_ee
-            probs[i][3] = 1.0f - 2.0f*Ue4sq*(1.0f-expterm*costerm) + Ue4sq*Ue4sq*(1.0f-2.0f*expterm*costerm + expterm*expterm);
+            probs(i, 3) = 1.0f - 2.0f*Ue4sq*(1.0f-expterm*costerm) + Ue4sq*Ue4sq*(1.0f-2.0f*expterm*costerm + expterm*expterm);
 
         }
 
