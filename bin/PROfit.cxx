@@ -1825,6 +1825,47 @@ int main(int argc, char* argv[])
     //***********************************************************************
 
     if(*protest_command){
+        log<LOG_INFO>(L"%1% || PROtest: Testing FillSpectra with fixed seed random spline throws") % __func__;
+        
+        size_t n_splines = metric->GetSysts().GetNSplines();
+        size_t n_tests = 3;
+        
+        // Fixed seed for reproducibility across code versions
+        std::mt19937 test_rng(12345);
+        std::normal_distribution<float> d(0.0f, 1.0f);
+        
+        for(size_t test = 0; test < n_tests; ++test) {
+            log<LOG_INFO>(L"%1% || ===== TEST %2% =====") % __func__ % (test + 1);
+            
+            // Create params: physics from CVParams, random splines
+            Eigen::VectorXf testParams = Eigen::VectorXf::Zero(N_phys_params + n_splines);
+            for(size_t i = 0; i < N_phys_params; ++i) {
+                testParams(i) = CVParams(i);
+            }
+            for(size_t i = 0; i < n_splines; ++i) {
+                testParams(N_phys_params + i) = d(test_rng);
+            }
+
+            log<LOG_INFO>(L"%1% || Test %2% Parameters:") % __func__ % (test + 1);
+            for(size_t i = 0; i < testParams.size(); ++i) {
+                log<LOG_INFO>(L"%1% || Test %2% Parameter %3%: %4%") % __func__ % (test + 1) % i % testParams(i);
+            }
+            
+            // Fill spectrum
+            PROspec spec = FillSpectra(config, prop, metric->GetSysts(), metric->GetModel(), testParams, true, config.i_prime);
+            
+            // Print all bin values
+            log<LOG_INFO>(L"%1% || Test %2% Spectrum (%3% bins):") % __func__ % (test + 1) % spec.Spec().size();
+            for(long b = 0; b < spec.Spec().size(); ++b) {
+                log<LOG_INFO>(L"%1% || Test %2% bin %3%: %4%") % __func__ % (test + 1) % b % spec.Spec()(b);
+            }
+            log<LOG_INFO>(L"%1% || Test %2% Total: %3%") % __func__ % (test + 1) % spec.Spec().sum();
+        }
+
+    }
+
+    /*
+    if(*protest_command){
         log<LOG_INFO>(L"%1% || PROtest. Place anything here, a playground for testing things.") % __func__;
         //PrintVariableInfo(config);
         auto start = std::chrono::high_resolution_clock::now();
@@ -1837,6 +1878,7 @@ int main(int argc, char* argv[])
         log<LOG_INFO>(L"%1% || PROtest took %2% seconds total, or %3% per call of FillSpectra; ") % __func__ % duration.count() % float(duration.count()/(double(N)));
         //***************************** END *********************************
     }
+    */
 
     /*
     if(*protest_command){
