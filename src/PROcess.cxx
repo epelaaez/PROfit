@@ -77,35 +77,10 @@ namespace PROfit {
 
             auto probs = inmodel.get_probs(phys, le_arr);
 
-            // print Ue4sq and Um4sq
-            if (std::pow(10.0f, phys(1)) > 0.05) {
-                log<LOG_ERROR>(L"%1% || Temporary printout with phys(1) = %2%, binned spectrum for variable %3%") % __func__ % phys(1) % var_index;
-                for(size_t j = 0; j < inmodel.prob_types.size(); ++j) {
-                    float max_prob = 0.0f;
-                    float min_prob = 1.0f;
-                    for(size_t i = 0; i < le_arr.size(); ++i) {
-                        max_prob = std::max(max_prob, probs[i][j]);
-                        min_prob = std::min(min_prob, probs[i][j]);
-                    }
-                    log<LOG_ERROR>(L"%1% || For probability type %2%, probability is from %3% - %4%") % __func__ % j % max_prob % min_prob;
-                }
-            }
-
-            // Validate dimensions before accessing hists
             for(size_t j = 0; j < inmodel.prob_types.size(); ++j) {
                 if (inmodel.hists[var_index][j].data() == nullptr) {
                     log<LOG_ERROR>(L"Null matrix at var_index=%1%, j=%2%") % var_index % j;
                     continue;
-                }
-                if ((size_t)inmodel.hists[var_index][j].rows() != le_arr.size()) {
-                    log<LOG_ERROR>(L"FillSpectra binned: hists[%1%][%2%] has %3% rows but le_arr has %4% elements (ivar=%5%). Stopping.")
-                        % var_index % j % inmodel.hists[var_index][j].rows() % le_arr.size() % inmodel.ivar;
-                    exit(EXIT_FAILURE);
-                }
-                if ((size_t)inmodel.hists[var_index][j].cols() != myspectrum.GetNbins()) {
-                    log<LOG_ERROR>(L"FillSpectra binned: hists[%1%][%2%] has %3% cols but output spectrum has %4% bins. Stopping.")
-                        % var_index % j % inmodel.hists[var_index][j].cols() % myspectrum.GetNbins();
-                    exit(EXIT_FAILURE);
                 }
             }
 
@@ -116,8 +91,9 @@ namespace PROfit {
                     }
                 }
             }
+
         } else {
-            log<LOG_ERROR>(L"%1% || Filling unbinned spectrum for variable %2%") % __func__ % var_index;
+
             std::vector<float> le_arr;
             for(size_t i = 0; i < inprop.NEvent(); ++i) {
                 le_arr.push_back(inprop.VariableValue(inmodel.ivar, i));

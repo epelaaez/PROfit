@@ -1118,7 +1118,7 @@ public:
         return prob;
     }
 
-    /*
+    
     std::vector<std::vector<float>> get_probs(const Eigen::VectorXf &phys, const std::vector<float> &le_arr) const override {
         //log<LOG_ERROR>(L"%1% || Using unified, optimized get_probs function for model") % __func__;
 
@@ -1156,7 +1156,7 @@ public:
 
         return probs;
     }
-    */
+    
 };
 
 class PRO3p2 : public PROmodel {
