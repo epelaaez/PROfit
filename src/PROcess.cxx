@@ -48,6 +48,9 @@ namespace PROfit {
         Eigen::VectorXf shifts = params.segment(inmodel.nparams, params.size() - inmodel.nparams);
 
         if(binned) {
+            log<LOG_INFO>(L"%1% || Starting systw calculation %2%") % __func__ % var_index;
+            auto start_systw = std::chrono::high_resolution_clock::now();
+
             Eigen::VectorXf systw = Eigen::VectorXf::Constant(inconfig.m_num_variable_bins_total[var_index], 1);
             for(int i = 0; i < shifts.size(); ++i) {
                 size_t binning = insyst.spline_binnings[i];
@@ -69,11 +72,22 @@ namespace PROfit {
                     }
                 }
             }
+
+            auto end_systw = std::chrono::high_resolution_clock::now();
+            std::chrono::duration<double> duration_systw = end_systw - start_systw;
+            log<LOG_INFO>(L"%1% || systw calculation took %2% seconds") % __func__ % duration_systw.count();
+
+            log<LOG_INFO>(L"%1% || Starting le_arr building %2%") % __func__ % var_index;
+            auto start_le = std::chrono::high_resolution_clock::now();
             
             std::vector<float> le_arr;
             for(long int i = 0; i < inconfig.m_num_variable_bins_total[inmodel.ivar]; ++i) {
                 le_arr.push_back(inprop.variable_midbin[inmodel.ivar][i]);
             }
+
+            auto end_le = std::chrono::high_resolution_clock::now();
+            std::chrono::duration<double> duration_le = end_le - start_le;
+            log<LOG_INFO>(L"%1% || le_arr building took %2% seconds") % __func__ % duration_le.count();
 
             log<LOG_INFO>(L"%1% || Starting prob calculation %2%") % __func__ % var_index;
             auto start = std::chrono::high_resolution_clock::now();
@@ -101,27 +115,22 @@ namespace PROfit {
             log<LOG_INFO>(L"%1% || Starting filling %2%") % __func__ % var_index;
             auto start3 = std::chrono::high_resolution_clock::now();
 
-            // Cache pointers to avoid repeated vector/matrix indirection
-            const float* probs_data = probs.data();
-            const size_t probs_rows = probs.rows();
-            const float* systw_data = systw.data();
-            const size_t nbins = myspectrum.GetNbins();
-            
-            // Cache hist matrix pointers for each probability type
-            const std::vector<Eigen::MatrixXf>& hists_for_var = inmodel.hists[var_index];
+            // Use matrix-vector multiplication instead of triple nested loop
+            // Original: spec[k] = Σᵢⱼ systw[k] * probs(i,j) * hists[j](i,k)
+            // Rewritten: spec = systw ⊙ Σⱼ (hists[j]ᵀ × probs.col(j))
+            Eigen::VectorXf result = Eigen::VectorXf::Zero(myspectrum.GetNbins());
             
             for(size_t j = 0; j < inmodel.prob_types.size(); ++j) {
-                const float* hist_data = hists_for_var[j].data();
-                const size_t hist_rows = hists_for_var[j].rows();
-                
-                for(size_t i = 0; i < le_arr.size(); ++i) {
-                    const float prob_ij = probs_data[i + j * probs_rows];
-                    for(size_t k = 0; k < nbins; ++k) {
-                        // Column-major: element (i,k) is at index i + k * rows
-                        myspectrum.Fill(k, systw_data[k] * prob_ij * hist_data[i + k * hist_rows]);
-                    }
-                }
+                // hists[var_index][j] has shape (le_arr.size(), nbins)
+                // probs.col(j) has shape (le_arr.size(),)
+                // Result: (nbins, le_arr.size()) × (le_arr.size(),) = (nbins,)
+                result.noalias() += inmodel.hists[var_index][j].transpose() * probs.col(j);
             }
+            
+            // Apply systematic weights and create spectrum
+            Eigen::VectorXf final_spec = systw.cwiseProduct(result);
+            Eigen::VectorXf final_error = final_spec.array().abs().sqrt();
+            myspectrum = PROspec(final_spec, final_error);
 
             auto end3 = std::chrono::high_resolution_clock::now();
             std::chrono::duration<double> duration3 = end3 - start3;
@@ -196,25 +205,20 @@ namespace PROfit {
 
             auto probs = inmodel.get_probs(phys, le_arr);
 
-            // Cache pointers to avoid repeated vector/matrix indirection
-            const float* probs_data = probs.data();
-            const size_t probs_rows = probs.rows();
-            const size_t nbins = myspectrum.GetNbins();
+            // Use matrix-vector multiplication instead of triple nested loop
+            // Convert hist_w_arr to Eigen vector for element-wise operations
+            Eigen::Map<const Eigen::VectorXf> hist_w_vec(hist_w_arr.data(), hist_w_arr.size());
             
-            // Cache hist matrix pointers for each probability type
-            const std::vector<Eigen::MatrixXf>& hists_for_var = inmodel.hists[inconfig.i_prime];
+            Eigen::VectorXf result = Eigen::VectorXf::Zero(myspectrum.GetNbins());
             
             for(size_t j = 0; j < inmodel.prob_types.size(); ++j) {
-                const float* hist_data = hists_for_var[j].data();
-                const size_t hist_rows = hists_for_var[j].rows();
-                
-                for(size_t i = 0; i < le_arr.size(); ++i) {
-                    const float weighted_prob_ij = hist_w_arr[i] * probs_data[i + j * probs_rows];
-                    for(size_t k = 0; k < nbins; ++k) {
-                        myspectrum.Fill(k, weighted_prob_ij * hist_data[i + k * hist_rows]);
-                    }
-                }
+                // Weight probs by hist_w, then do matrix-vector multiply
+                Eigen::VectorXf weighted_probs = hist_w_vec.cwiseProduct(probs.col(j));
+                result.noalias() += inmodel.hists[inconfig.i_prime][j].transpose() * weighted_probs;
             }
+            
+            Eigen::VectorXf final_error = result.array().abs().sqrt();
+            myspectrum = PROspec(result, final_error);
 
         } else {
             std::vector<float> le_arr;
