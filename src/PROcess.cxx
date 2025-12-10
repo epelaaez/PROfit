@@ -51,31 +51,48 @@ namespace PROfit {
             //log<LOG_INFO>(L"%1% || Starting systw calculation %2%") % __func__ % var_index;
             //auto start_systw = std::chrono::high_resolution_clock::now();
 
-            Eigen::VectorXf systw = Eigen::VectorXf::Constant(inconfig.m_num_variable_bins_total[var_index], 1);
+            const size_t nbins_var = inconfig.m_num_variable_bins_total[var_index];
+            Eigen::VectorXf systw = Eigen::VectorXf::Constant(nbins_var, 1);
+            
             for(int i = 0; i < shifts.size(); ++i) {
                 size_t binning = insyst.spline_binnings[i];
 
-                //const Eigen::MatrixXf &hist = inprop.variable_hist_storage(binning,var_index);
-                //direct access with inprop.variable_hist_storage(binning,var_index,j,k)
-                for(size_t k = 0; k < inconfig.m_num_variable_bins_total[var_index]; ++k) {
-                    if(binning == var_index){
+                if(binning == var_index) {
+                    // Case 1: Same binning - direct multiplication
+                    for(size_t k = 0; k < nbins_var; ++k) {
                         systw(k) *= insyst.GetSplineShift(i, shifts(i), k);
                     }
-                    else {
-                        float val = 0, unweighted = 0;
-                        for(long int j = 0; j < inconfig.m_num_variable_bins_total[binning]; ++j) {
-                            float binsystw = insyst.GetSplineShift(i, shifts(i), j);
-                            val += binsystw * inprop.variable_hist_storage(binning,var_index,j, k);
-                            unweighted += inprop.variable_hist_storage(binning,var_index,j, k);
+                } else {
+                    // Case 2: Different binning - use matrix-vector multiplication
+                    const size_t nbins_binning = inconfig.m_num_variable_bins_total[binning];
+                    
+                    // Get all spline shifts for this systematic
+                    Eigen::VectorXf spline_shifts(nbins_binning);
+                    for(size_t j = 0; j < nbins_binning; ++j) {
+                        spline_shifts(j) = insyst.GetSplineShift(i, shifts(i), j);
+                    }
+                    
+                    // Get the histogram matrix
+                    const auto& hist = inprop.variable_hist_storage(binning, var_index);
+                    
+                    // Compute weighted and unweighted sums using matrix operations
+                    // weighted_sum[k] = sum_j(spline_shifts[j] * hist(j, k))
+                    // unweighted_sum[k] = sum_j(hist(j, k))
+                    Eigen::VectorXf weighted_sum = hist.transpose() * spline_shifts;
+                    Eigen::VectorXf unweighted_sum = hist.colwise().sum().transpose();
+                    
+                    // Apply the ratio where unweighted > 0
+                    for(size_t k = 0; k < nbins_var; ++k) {
+                        if(unweighted_sum(k) > 0) {
+                            systw(k) *= weighted_sum(k) / unweighted_sum(k);
                         }
-                        if(unweighted > 0) systw(k) *= val/unweighted;
                     }
                 }
             }
 
             //auto end_systw = std::chrono::high_resolution_clock::now();
             //std::chrono::duration<double> duration_systw = end_systw - start_systw;
-            //log<LOG_INFO>(L"%1% || systw calculation took %2% seconds") % __func__ % duration_systw.count();
+            //log<LOG_INFO>(L"%1% || systw calculation took %2% ms") % __func__ % (duration_systw.count() * 1000.);
 
             //log<LOG_INFO>(L"%1% || Starting le_arr building %2%") % __func__ % var_index;
             //auto start_le = std::chrono::high_resolution_clock::now();
