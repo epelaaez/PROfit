@@ -638,20 +638,21 @@ public:
         // 4) Parameters and bounds
         // v(0) = dmsq_log      = log10(Δm²_41)
         // v(1) = s2mumu_log    = log10(sin²2θ_μμ)
-        // v(2) = sB            ∈ [0,1]
+        // v(2) = sinsqth24prime = log10(sin²θ_24′)
         // -----------------------------------------
         nparams = 3;
-        param_names        = {"dmsq", "sinsq2thmumu", "sB"};
-        pretty_param_names = {"#Deltam^{2}", "sin^{2}2#theta_{#mu#mu}", "s^{B}"};
-        is_log10         = {true, true, false};
+        param_names        = {"dmsq", "sinsq2thmumu", "sinsqth24prime"};
+        pretty_param_names = {"#Deltam^{2}", "sin^{2}2#theta_{#mu#mu}", "sin^{2}2#theta_24^{'}"};
+        pretty_param_units = {"eV^{2}", "",""};
+        is_log10         = {true, true, true};
 
         lb          = Eigen::VectorXf(3);
         ub          = Eigen::VectorXf(3);
         default_val = Eigen::VectorXf(3);
-        lb << -2.0f, -std::numeric_limits<float>::infinity(), 0.001f;
-        ub <<  2.0f, -1e-3f, 1.0f;
+        lb << -2.0f, -std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity();
+        ub <<  2.0f, -1e-3f, -1e-3 ;
         // Some reasonable defaults
-        default_val << -2.0f, -8.0f, 0.0f;
+        default_val << -2.0f, -8.0f, -8.0f;
 
         // -----------------------------------------
         // 5) Unitarity / physicality constraint
@@ -668,12 +669,12 @@ public:
     // 0 ≤ sB ≤ 1 and Ue4² + Uμ4² < 1
     // ---------------------------------------------
     int UnitarityConstraint(const Eigen::VectorXf &v) {
-        float s2mumu = std::pow(10.0f, v(1));  // sin²2θμμ
-        float sB     = v(2);                   // ratio parameter
+        float sinsq2thmumu = std::pow(10.0f, v(1));  // sin²2θμμ
+        float sinsqth24prime = std::pow(10.0f, v(2));                   // ratio parameter
 
-        float rad = 1.0f - s2mumu;
+        float rad = 1.0f - sinsq2thmumu;
         float Um4sq = (1.0f - std::sqrt(rad)) / 2.0f;
-        float Ue4sq = sB * (1.0f - Um4sq);     // from definition of sB
+        float Ue4sq = sinsqth24prime * (1.0f - Um4sq);     // from definition of sB
 
         return Um4sq + Ue4sq < 0.999 ? 1 :0;  // allowed
     }
@@ -681,13 +682,13 @@ public:
     // ---------------------------------------------
     // νμ → νμ disappearance
     // ---------------------------------------------
-    float Pmumu(float dmsq_log, float s2mumu_log, float sB, float le) const {
-        float dmsq   = std::pow(10.0f, dmsq_log);
-        float s2mumu = std::pow(10.0f, s2mumu_log);
+    float Pmumu(float dmsq, float sinsq2thmumu, float sinsqth24prime, float le) const {
+        dmsq   = std::pow(10.0f, dmsq);
+        sinsq2thmumu = std::pow(10.0f, sinsq2thmumu);
 
 
         float sinterm = std::sin(1.27f * dmsq * le);
-        float prob    = 1.0f - s2mumu * sinterm * sinterm;
+        float prob    = 1.0f - sinsq2thmumu * sinterm * sinterm;
 
         if (prob < 0.0f || prob > 1.0f) {
             log<LOG_ERROR>(
@@ -704,13 +705,13 @@ public:
     // ---------------------------------------------
     // νμ → νe appearance
     // ---------------------------------------------
-    float Pmue(float dmsq_log, float s2mumu_log, float sB, float le) const {
-        float dmsq   = std::pow(10.0f, dmsq_log);
-        float s2mumu = std::pow(10.0f, s2mumu_log);
+    float Pmue(float dmsq, float sinsq2thmumu, float sinsqth24prime, float le) const {
+        dmsq   = std::pow(10.0f, dmsq);
+        sinsq2thmumu = std::pow(10.0f, sinsq2thmumu);
 
-        float rad = 1.0f - s2mumu;
+        float rad = 1.0f - sinsq2thmumu;
         float Um4sq = (1.0f - std::sqrt(rad)) / 2.0f;
-        float Ue4sq = sB * (1.0f - Um4sq);
+        float Ue4sq = sinsqth24prime * (1.0f - Um4sq);
 
         float sinterm = std::sin(1.27f * dmsq * le);
         float prob    = 4.0f * Um4sq * Ue4sq * sinterm * sinterm;
@@ -730,13 +731,13 @@ public:
     // ---------------------------------------------
     // νe → νe disappearance
     // ---------------------------------------------
-    float Pee(float dmsq_log, float s2mumu_log, float sB, float le) const {
-        float dmsq   = std::pow(10.0f, dmsq_log);
-        float s2mumu = std::pow(10.0f, s2mumu_log);
+    float Pee(float dmsq, float sinsq2thmumu, float sinsqth24prime, float le) const {
+        dmsq   = std::pow(10.0f, dmsq);
+        sinsq2thmumu = std::pow(10.0f, sinsq2thmumu);
 
-        float rad = 1.0f - s2mumu;
+        float rad = 1.0f - sinsq2thmumu;
         float Um4sq = (1.0f - std::sqrt(rad)) / 2.0f;
-        float Ue4sq = sB * (1.0f - Um4sq);  
+        float Ue4sq = sinsqth24prime * (1.0f - Um4sq);  
 
 
         float sinterm = std::sin(1.27f * dmsq * le);
