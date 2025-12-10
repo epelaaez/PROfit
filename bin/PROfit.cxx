@@ -1828,7 +1828,7 @@ int main(int argc, char* argv[])
         log<LOG_INFO>(L"%1% || PROtest. Place anything here, a playground for testing things.") % __func__;
         //PrintVariableInfo(config);
         auto start = std::chrono::high_resolution_clock::now();
-        int N=3;
+        int N=1000;
         for(int i=0; i< N; i++){
             FillSpectra(config, prop, metric->GetSysts(), metric->GetModel(), fakeDataParams , true,config.i_prime);
         }

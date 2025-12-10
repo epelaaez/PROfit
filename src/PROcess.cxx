@@ -48,8 +48,8 @@ namespace PROfit {
         Eigen::VectorXf shifts = params.segment(inmodel.nparams, params.size() - inmodel.nparams);
 
         if(binned) {
-            log<LOG_INFO>(L"%1% || Starting systw calculation %2%") % __func__ % var_index;
-            auto start_systw = std::chrono::high_resolution_clock::now();
+            //log<LOG_INFO>(L"%1% || Starting systw calculation %2%") % __func__ % var_index;
+            //auto start_systw = std::chrono::high_resolution_clock::now();
 
             Eigen::VectorXf systw = Eigen::VectorXf::Constant(inconfig.m_num_variable_bins_total[var_index], 1);
             for(int i = 0; i < shifts.size(); ++i) {
@@ -73,33 +73,33 @@ namespace PROfit {
                 }
             }
 
-            auto end_systw = std::chrono::high_resolution_clock::now();
-            std::chrono::duration<double> duration_systw = end_systw - start_systw;
-            log<LOG_INFO>(L"%1% || systw calculation took %2% seconds") % __func__ % duration_systw.count();
+            //auto end_systw = std::chrono::high_resolution_clock::now();
+            //std::chrono::duration<double> duration_systw = end_systw - start_systw;
+            //log<LOG_INFO>(L"%1% || systw calculation took %2% seconds") % __func__ % duration_systw.count();
 
-            log<LOG_INFO>(L"%1% || Starting le_arr building %2%") % __func__ % var_index;
-            auto start_le = std::chrono::high_resolution_clock::now();
+            //log<LOG_INFO>(L"%1% || Starting le_arr building %2%") % __func__ % var_index;
+            //auto start_le = std::chrono::high_resolution_clock::now();
             
             std::vector<float> le_arr;
             for(long int i = 0; i < inconfig.m_num_variable_bins_total[inmodel.ivar]; ++i) {
                 le_arr.push_back(inprop.variable_midbin[inmodel.ivar][i]);
             }
 
-            auto end_le = std::chrono::high_resolution_clock::now();
-            std::chrono::duration<double> duration_le = end_le - start_le;
-            log<LOG_INFO>(L"%1% || le_arr building took %2% seconds") % __func__ % duration_le.count();
+            //auto end_le = std::chrono::high_resolution_clock::now();
+            //std::chrono::duration<double> duration_le = end_le - start_le;
+            //log<LOG_INFO>(L"%1% || le_arr building took %2% seconds") % __func__ % duration_le.count();
 
-            log<LOG_INFO>(L"%1% || Starting prob calculation %2%") % __func__ % var_index;
-            auto start = std::chrono::high_resolution_clock::now();
+            //log<LOG_INFO>(L"%1% || Starting prob calculation %2%") % __func__ % var_index;
+            //auto start = std::chrono::high_resolution_clock::now();
 
             auto probs = inmodel.get_probs(phys, le_arr);
 
-            auto end = std::chrono::high_resolution_clock::now();
-            std::chrono::duration<double> duration = end - start;
-            log<LOG_INFO>(L"%1% || L/E loop took %2% seconds") % __func__ % duration.count();
+            //auto end = std::chrono::high_resolution_clock::now();
+            //std::chrono::duration<double> duration = end - start;
+            //log<LOG_INFO>(L"%1% || L/E loop took %2% seconds") % __func__ % duration.count();
 
-            log<LOG_INFO>(L"%1% || Starting null matrix check  %2%") % __func__ % var_index;
-            auto start2 = std::chrono::high_resolution_clock::now();
+            //log<LOG_INFO>(L"%1% || Starting null matrix check  %2%") % __func__ % var_index;
+            //auto start2 = std::chrono::high_resolution_clock::now();
 
             for(size_t j = 0; j < inmodel.prob_types.size(); ++j) {
                 if (inmodel.hists[var_index][j].data() == nullptr) {
@@ -108,12 +108,12 @@ namespace PROfit {
                 }
             }
 
-            auto end2 = std::chrono::high_resolution_clock::now();
-            std::chrono::duration<double> duration2 = end2 - start2;
-            log<LOG_INFO>(L"%1% || null matrix check took %2% seconds") % __func__ % duration2.count();
+            //auto end2 = std::chrono::high_resolution_clock::now();
+            //std::chrono::duration<double> duration2 = end2 - start2;
+            //log<LOG_INFO>(L"%1% || null matrix check took %2% seconds") % __func__ % duration2.count();
 
-            log<LOG_INFO>(L"%1% || Starting filling %2%") % __func__ % var_index;
-            auto start3 = std::chrono::high_resolution_clock::now();
+            //log<LOG_INFO>(L"%1% || Starting filling %2%") % __func__ % var_index;
+            //auto start3 = std::chrono::high_resolution_clock::now();
 
             // Use matrix-vector multiplication instead of triple nested loop
             // Original: spec[k] = Σᵢⱼ systw[k] * probs(i,j) * hists[j](i,k)
@@ -132,9 +132,9 @@ namespace PROfit {
             Eigen::VectorXf final_error = final_spec.array().abs().sqrt();
             myspectrum = PROspec(final_spec, final_error);
 
-            auto end3 = std::chrono::high_resolution_clock::now();
-            std::chrono::duration<double> duration3 = end3 - start3;
-            log<LOG_INFO>(L"%1% || filling took %2% seconds") % __func__ % duration3.count();
+            //auto end3 = std::chrono::high_resolution_clock::now();
+            //std::chrono::duration<double> duration3 = end3 - start3;
+            //log<LOG_INFO>(L"%1% || filling took %2% seconds") % __func__ % duration3.count();
 
         } else {
 

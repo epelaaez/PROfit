@@ -105,6 +105,7 @@ public:
         // these get combined into one get_probs function in the constructor, but we can override this for faster computation
         model_functions.push_back([this]([[maybe_unused]] const Eigen::VectorXf &v, float) {(void)this; return 1.0;});
         model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pmumu(v(0),v(1),le);});
+        prob_types = {0, 1};
 
         if(parameter_map.find("L/E") == parameter_map.end()) {
             log<LOG_ERROR>(L"%1%, %2% || Missing expected parameter: 'L/E'.Make sure its in your model section of XML. ") % __func__ % __LINE__;
@@ -202,6 +203,7 @@ public:
     PROnueapp(const PROpeller &prop,const std::map<std::string,int> &parameter_map) {
         model_functions.push_back([this]([[maybe_unused]] const Eigen::VectorXf &v, float) {(void)this; return 1.0;});
         model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pmue(v(0),v(1),le);});
+        prob_types = {0, 1};
         if(parameter_map.find("L/E") == parameter_map.end()) {
             log<LOG_ERROR>(L"%1%, %2% || Missing expected parameter: 'L/E'. Make sure its in your model section of XML.") % __func__ % __LINE__;
             throw std::runtime_error("Missing parameter: L/E");
@@ -277,7 +279,7 @@ public:
     PROnuedis(const PROpeller &prop,const std::map<std::string,int> &parameter_map) {
         model_functions.push_back([this]([[maybe_unused]] const Eigen::VectorXf &v, float) {(void)this; return 1.0;});
         model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pee(v(0),v(1),le);});
-        
+        prob_types = {0, 1};
 
         if(parameter_map.find("L/E") == parameter_map.end()) {
             log<LOG_ERROR>(L"%1%, %2% || Missing expected parameter: 'L/E'.Make sure its in your model section of XML. ") % __func__ % __LINE__;
@@ -353,6 +355,7 @@ public:
         model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pmumu(v(0),v(1),v(2),le); });
         model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pmue(v(0),v(1),v(2),le); });
         model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pee(v(0),v(1),v(2),le); });
+        prob_types = {0, 1, 2, 3};
         if(parameter_map.find("L/E") == parameter_map.end()) {
             log<LOG_ERROR>(L"%1%, %2% || Missing expected parameter: 'L/E'. Make sure its in your model section of XML.") % __func__ % __LINE__;
             throw std::runtime_error("Missing parameter: L/E");
@@ -503,6 +506,7 @@ public:
         model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pmumu(v(0),v(1),v(2),le); });
         model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pmue(v(0),v(1),v(2),le); });
         model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pee(v(0),v(1),v(2),le); });
+        prob_types = {0, 1, 2, 3};
         if(parameter_map.find("L/E") == parameter_map.end()) {
             log<LOG_ERROR>(L"%1%, %2% || Missing expected parameter: 'L/E'. Make sure its in your model section of XML.") % __func__ % __LINE__;
             throw std::runtime_error("Missing parameter: L/E");
@@ -814,6 +818,7 @@ public:
         model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pmumu(v(0),v(1),v(2),le); });
         model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pmue(v(0),v(1),v(2),le); });
         model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pee(v(0),v(1),v(2),le); });
+        prob_types = {0, 1, 2, 3};
         if(parameter_map.find("L/E") == parameter_map.end()) {
             log<LOG_ERROR>(L"%1%, %2% || Missing expected parameter: 'L/E'. Make sure its in your model section of XML.") % __func__ % __LINE__;
             throw std::runtime_error("Missing parameter: L/E");
@@ -941,6 +946,7 @@ public:
         model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pmumu(v(0),v(1),v(2),v(3),le); });
         model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pmue(v(0),v(1),v(2),v(3),le); });
         model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pee(v(0),v(1),v(2),v(3),le); });
+        prob_types = {0, 1, 2, 3};
         if(parameter_map.find("L/E") == parameter_map.end()) {
             log<LOG_ERROR>(L"%1%, %2% || Missing expected parameter: 'L/E'. Make sure its in your model section of XML.") % __func__ % __LINE__;
             throw std::runtime_error("Missing parameter: L/E");
@@ -1118,7 +1124,6 @@ public:
         return prob;
     }
 
-    
     Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<float> &le_arr) const override {
         //log<LOG_ERROR>(L"%1% || Using unified, optimized get_probs function for model") % __func__;
 
