@@ -1823,6 +1823,22 @@ int main(int argc, char* argv[])
     //******************** TEST AREA TEST AREA     **************************
     //***********************************************************************
     //***********************************************************************
+
+    if(*protest_command){
+        log<LOG_INFO>(L"%1% || PROtest. Place anything here, a playground for testing things.") % __func__;
+        //PrintVariableInfo(config);
+        auto start = std::chrono::high_resolution_clock::now();
+        int N=1000;
+        for(int i=0; i< N; i++){
+            FillSpectra(config, prop, metric->GetSysts(), metric->GetModel(), fakeDataParams , true,config.i_prime);
+        }
+        auto end = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double> duration = end - start;
+        log<LOG_INFO>(L"%1% || PROtest took %2% seconds total, or %3% per call of FillSpectra; ") % __func__ % duration.count() % float(duration.count()/(double(N)));
+        //***************************** END *********************************
+    }
+
+    /*
     if(*protest_command){
         log<LOG_INFO>(L"%1% || PROtest. Place anything here, a playground for testing things .") % __func__;
         //PrintVariableInfo(config);
@@ -1839,6 +1855,7 @@ int main(int argc, char* argv[])
 
         //***************************** END *********************************
     }
+    */
 
     std::ofstream global_fit_out;
     if(global_fit_result.size() > 0) {
