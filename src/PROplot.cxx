@@ -741,6 +741,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
         size_t global_subchannel_index = 0;
         size_t global_subchannel_index_2d = 0;
         size_t global_channel_index = 0;
+        int tot_offset = 0;
 
         for(size_t mode = 0; mode < config.m_num_modes; ++mode) {
             for(size_t det = 0; det < config.m_num_detectors; ++det) {
@@ -765,12 +766,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                     size_t channel_nbins_y = 1;
                     if(config.m_channel_variable_dims[channel][other_index] == 2)  channel_nbins_y = config.m_channel_variable_bins[channel][other_index].NBinsAlong(1);
 
-                    // try to get the total offset outside of the histogram binning
                     int nbins_p_2dchan = channel_nbins_y*channel_nbins_x;
-                    int chan_offset = nbins_p_2dchan*channel;
-                    int mode_offset = mode*config.m_num_channels*nbins_p_2dchan; 
-                    int det_offset = det*config.m_num_modes*config.m_num_channels*nbins_p_2dchan; 
-                    int tot_offset = chan_offset + mode_offset + det_offset;
 
                     if(cv){
                         if(config.m_channel_variable_dims[channel][other_index] == 2){
@@ -1038,6 +1034,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                         bf_hists.push_back(*bf_hist);
 
 		    }
+                    tot_offset += nbins_p_2dchan;
                 }
             }
         }
