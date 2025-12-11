@@ -695,6 +695,7 @@ namespace PROfit{
 
         if(bf_hist) {
             bf_hist->SetLineStyle(kSolid);
+            bf_hist->SetLineWidth(2);
             bf_hist->SetLineColor(bfcol);
 
             if(cv_hist) bf_hist->Draw("hist same");
