@@ -1757,7 +1757,7 @@ std::unique_ptr<PROmodel> get_model_from_string(const PROconfig& config, const P
         return std::unique_ptr<PROmodel>(new PROnuedis(prop,config.m_model_parameter_map));
     } else if(name == "3+1") {
         return std::unique_ptr<PROmodel>(new PRO3p1(prop,config.m_model_parameter_map));
-    else if(name == "3+1_angles") {
+    } else if(name == "3+1_angles") {
         return std::unique_ptr<PROmodel>(new PRO3p1_angles(prop,config.m_model_parameter_map));
     } else if(name == "3+1_3A") {
         return std::unique_ptr<PROmodel>(new PRO3p1_3A(prop,config.m_model_parameter_map));
