@@ -691,8 +691,8 @@ public:
 
         if(prob<0.0 || prob >1.0){
             log<LOG_ERROR>(L"%1% || Your probability %2% is outside the bounds of math."
-                           L"dmsq = %3%, s214 = %4%, s24 = %5%, L/E = %6%")
-                % __func__ % prob % dmsq % s214 % s24 % le;
+                           L"dmsq = %3%, s214 = %4%,  L/E = %5%")
+                % __func__ % prob % dmsq % s214   % le;
             log<LOG_ERROR>(L"%1% || Terminating.") % __func__;
             exit(EXIT_FAILURE);
         }
@@ -704,8 +704,8 @@ public:
 
         // Precompute physics parameters once
         float dmsq = maybe_convert_log("dmsq", phys(0));
-        float s214 = maybe_convert_log("sinsq2th14", sinsq2th14);
-        float s24 = maybe_convert_log("sinsqth24", sinsqth24);
+        float s214 = maybe_convert_log("sinsq2th14", phys(1));
+        float s24 = maybe_convert_log("sinsqth24", phys(2));
         float c14 = (1.0+sqrt(1.0-s214))/2.0f;
 
         Eigen::MatrixXf probs(le_arr.size(), model_functions.size());
@@ -1760,6 +1760,8 @@ std::unique_ptr<PROmodel> get_model_from_string(const PROconfig& config, const P
         return std::unique_ptr<PROmodel>(new PROnuedis(prop,config.m_model_parameter_map));
     } else if(name == "3+1") {
         return std::unique_ptr<PROmodel>(new PRO3p1(prop,config.m_model_parameter_map));
+    else if(name == "3+1_angles") {
+        return std::unique_ptr<PROmodel>(new PRO3p1_angles(prop,config.m_model_parameter_map));
     } else if(name == "3+1_3A") {
         return std::unique_ptr<PROmodel>(new PRO3p1_3A(prop,config.m_model_parameter_map));
     } else if(name == "3+1_3B") {
@@ -1771,7 +1773,7 @@ std::unique_ptr<PROmodel> get_model_from_string(const PROconfig& config, const P
     } else if(name == "3+2") {
         return std::unique_ptr<PROmodel>(new PRO3p2(prop, config.m_model_parameter_map));
     }
-    log<LOG_ERROR>(L"%1% || Unrecognized model name %2%. Try numudis, nueapp, nuedis, 3+1 or 3+1_3C for now. Terminating.") % __func__ % name.c_str();
+    log<LOG_ERROR>(L"%1% || Unrecognized model name %2%. Try numudis, nueapp, nuedis, 3+1, 3+1_angles, 3+1_3(A,B,C) and 3+1_decay_invis, 3+2. for now. Terminating.") % __func__ % name.c_str();
     exit(EXIT_FAILURE);
 }
 
