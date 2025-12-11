@@ -415,7 +415,7 @@ namespace PROfit{
                 data_ratio->SetMarkerSize(1);
 
                 TLegend* leg = new TLegend(0.15, 0.7, 0.89, 0.89);
-                
+
                 // Error band graphs
                 TGraphAsymmErrors* channel_errband = new TGraphAsymmErrors(&cv_num);
                 TGraphAsymmErrors* post_channel_errband = nullptr;
@@ -602,6 +602,8 @@ namespace PROfit{
         leg->SetFillStyle(0);
         leg->SetLineWidth(0);
 
+
+
         Color_t cvcol =  TColor::GetColor(66, 103, 210);
         if(!bf_hist)cvcol=kBlack;
         Color_t bfcol = TColor::GetColor(234, 67, 53);
@@ -622,7 +624,26 @@ namespace PROfit{
         p2->SetBottomMargin(0.3);
 
         double top_modifier = 1.35;
+        double y_max = 0.0;
 
+        if(cv_hist) {
+            y_max = std::max(y_max, cv_hist->GetMaximum());
+        }
+        if(bf_hist) {
+            y_max = std::max(y_max, bf_hist->GetMaximum());
+        }
+        if(data_hist) {
+            y_max = std::max(y_max, data_hist->GetMaximum());
+        }
+        if(bool(opt&PlotOptions::CVasStack) && cvstack) {
+            y_max = std::max(y_max, cvstack->GetMaximum());
+        }
+
+        y_max *= top_modifier;
+        if(bounds.hasBound("ymax")) {
+             y_max = bounds.getBound("ymax");
+        }
+        
         if(cv_hist) {
 
             cv_hist->SetLineColor(cvcol);
@@ -630,15 +651,12 @@ namespace PROfit{
 
             if(bool(opt&PlotOptions::CVasStack)) {
                 log<LOG_DEBUG>(L"%1% || Using CVStack %2%") % __func__ % hist_titles.c_str();
-                if(data_hist){
-                    cvstack->SetMaximum(  bounds.hasBound("ymax") ? bounds.getBound("ymax") : std::max(top_modifier*cvstack->GetMaximum(), top_modifier*data_hist->GetMaximum()));
-                }
-                else{
-                    cvstack->SetMaximum(  bounds.hasBound("ymax") ? bounds.getBound("ymax") : top_modifier*cvstack->GetMaximum());
-                }
+
                 cvstack->Draw("hist");
                 cvstack->SetTitle(hist_titles.c_str());
                 cv_hist->Draw("same hist");
+
+                cvstack->SetMaximum(y_max);
 
                 TList* hist_list = cvstack->GetHists();
                 TIter next(hist_list); 
@@ -652,9 +670,11 @@ namespace PROfit{
                     }
                     sc = sc + 1;
                 }
+
+
             }
             else{
-                cv_hist->SetMaximum( bounds.hasBound("ymax") ? bounds.getBound("ymax") :  top_modifier*cv_hist->GetMaximum());
+                cv_hist->SetMaximum(y_max);
                 cv_hist->SetMinimum(0.01);
                 cv_hist->Draw("hist");
             }
@@ -715,7 +735,6 @@ namespace PROfit{
             TH1 *leg_hack = (TH1*)data_hist->Clone((std::string(data_hist->GetTitle())).c_str());
             leg->AddEntry(leg_hack, dat_str->c_str(), "lp");
         }
-
 
         if(errband) {
             errband->SetFillStyle(3144);
