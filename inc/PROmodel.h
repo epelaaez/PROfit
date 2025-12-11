@@ -272,6 +272,34 @@ public:
 
         return prob;
     }
+
+    Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<float> &le_arr) const override {
+        //log<LOG_ERROR>(L"%1% || Using unified, optimized get_probs function for model") % __func__;
+        // Precompute physics parameters once
+        float dmsq = maybe_convert_log("dmsq", phys(0));
+        float sinsq2thmue = maybe_convert_log("sinsq2thmue", phys(1));
+
+        float freq = 1.266932679f * dmsq;
+
+        if(sinsq2thmue > 1) sinsq2thmue = 1;
+        if(sinsq2thmue < 0) sinsq2thmue = 0;
+
+        Eigen::MatrixXf probs(le_arr.size(), model_functions.size());
+
+        for(size_t i = 0; i < le_arr.size(); ++i) {
+
+            // no oscillation
+            probs(i, 0) = 1.0f;
+
+            // P_mumu
+            float sinterm = std::sin(freq * le_arr[i]);
+            probs(i, 1) = (sinsq2thmue * sinterm * sinterm);
+        }
+
+        return probs;
+    }
+
+
 };
 
 class PROnuedis : public PROmodel {
@@ -344,6 +372,34 @@ public:
 
         return prob;
     }
+
+    Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<float> &le_arr) const override {
+        //log<LOG_ERROR>(L"%1% || Using unified, optimized get_probs function for model") % __func__;
+        // Precompute physics parameters once
+        float dmsq = maybe_convert_log("dmsq", phys(0));
+        float sinsq2thee = maybe_convert_log("sinsq2thee", phys(1));
+
+        float freq = 1.266932679f * dmsq;
+
+        if(sinsq2thee > 1) sinsq2thee = 1;
+        if(sinsq2thee < 0) sinsq2thee = 0;
+
+        Eigen::MatrixXf probs(le_arr.size(), model_functions.size());
+
+        for(size_t i = 0; i < le_arr.size(); ++i) {
+
+            // no oscillation
+            probs(i, 0) = 1.0f;
+
+            // P_mumu
+            float sinterm = std::sin(freq * le_arr[i]);
+            probs(i, 1) = 1.0f-(sinsq2thee * sinterm * sinterm);
+        }
+
+        return probs;
+    }
+
+
 };
 
 
@@ -496,6 +552,184 @@ public:
 
         return prob;
     }
+
+    Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<float> &le_arr) const override {
+        //log<LOG_ERROR>(L"%1% || Using unified, optimized get_probs function for model") % __func__;
+
+        // Precompute physics parameters once
+        float dmsq = maybe_convert_log("dmsq", phys(0));
+        float Ue4sq = maybe_convert_log("Ue4^2", phys(1));
+        float Um4sq = maybe_convert_log("Um4^2", phys(2));
+
+        float freq = 1.266932679f * dmsq;
+
+        Eigen::MatrixXf probs(le_arr.size(), model_functions.size());
+
+        for(size_t i = 0; i < le_arr.size(); ++i) {
+            
+            float sinterm = std::sin(1.266932679f*dmsq*(le_arr[i]));
+
+            // no oscillation
+            probs(i, 0) = 1.0f;
+
+
+            // P_mumu
+            probs(i, 1) = 1.0f - 4.0f*Um4sq*(1.0f-Um4sq)*sinterm*sinterm;
+
+            // P_mue
+            probs(i, 2) = 4.0f*Ue4sq*Ue4sq*sinterm*sinterm;
+
+            // P_ee
+            probs(i, 3) = 1.0f - 4.0f*Ue4sq*(1.0f-Ue4sq)*sinterm*sinterm;
+
+        }
+
+        return probs;
+    }
+};
+
+
+class PRO3p1_angles : public PROmodel {
+public:
+    PRO3p1_angles(const PROpeller &prop, const std::map<std::string,int> &parameter_map) {
+
+        model_functions.push_back([this]([[maybe_unused]] const Eigen::VectorXf &v, float) {(void)this; return 1.0; });
+        model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pmumu(v(0),v(1),v(2),le); });
+        model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pmue(v(0),v(1),v(2),le); });
+        model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pee(v(0),v(1),v(2),le); });
+        prob_types = {0, 1, 2, 3};
+        if(parameter_map.find("L/E") == parameter_map.end()) {
+            log<LOG_ERROR>(L"%1%, %2% || Missing expected parameter: 'L/E'. Make sure its in your model section of XML.") % __func__ % __LINE__;
+            throw std::runtime_error("Missing parameter: L/E");
+        }
+        ivar = parameter_map.at("L/E");
+
+        //constraints
+        model_constraint = [this](const Eigen::VectorXf &v){return this->UnitarityConstraint(v);};
+
+
+        size_t nvar = prop.variable_mc_stat_err.size();
+        hists.resize(nvar);
+        for(size_t v = 0; v <nvar ;v++){
+            for(size_t m = 0; m < model_functions.size(); ++m) {
+                hists.at(v).emplace_back(Eigen::MatrixXf::Constant(prop.variable_hist_storage(ivar,v).rows(), prop.variable_hist_storage(ivar,v).cols(),0.0));
+                Eigen::MatrixXf &h = hists.at(v).back();
+                for(size_t i = 0; i < prop.NEvent(); ++i) {
+                    if(prop.model_rule[i] != (int)m) continue;
+                    int tbin = prop.VariableBinIndex(ivar, i), rbin = prop.VariableBinIndex(v, i);
+                    if(tbin<0 || rbin<0)continue;
+                    h(tbin, rbin) += prop.added_weights[i];
+                }
+            }
+        }
+
+
+        nparams = 3;
+        param_names = {"dmsq", "sinsq2th14", "sinsqth24"}; 
+        pretty_param_names = {"#Deltam^{2}", "sin^{2}2#theta_{14}", "sin^{2}#theta_{24}"}; 
+        pretty_param_units = {"eV^{2}", "",""}; 
+        is_log10 = {true, true, true};
+        build_param_index();
+        lb = Eigen::VectorXf(3);
+        ub = Eigen::VectorXf(3);
+        default_val = Eigen::VectorXf(3);
+        lb << -2, -std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity();
+        ub << 2, -1e-4, -1e-4;
+        //default_val << -std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity();
+        default_val << -2, -8, -8;
+    };
+
+    int UnitarityConstraint(const Eigen::VectorXf &v){
+        return   1;      
+    }
+
+    float Pmue(float dmsq, float sinsq2th14, float sinsqth24, float le) const{
+        dmsq =  maybe_convert_log("dmsq", dmsq);
+        float s214 = maybe_convert_log("sinsq2th14", sinsq2th14);
+        float s24 = maybe_convert_log("sinsqth24", sinsqth24);
+
+        float sinterm = std::sin(1.266932679f*dmsq*(le));
+        float prob    = s214*s24*sinterm*sinterm;
+
+        if(prob<0.0 || prob >1.0){
+            log<LOG_ERROR>(L"%1% || Your probability %2% is outside the bounds of math."
+                           L"dmsq = %3%, s214 = %4%, s24 = %5%, L/E = %6%")
+                % __func__ % prob % dmsq % s214 % s24 % le;
+            log<LOG_ERROR>(L"%1% || Terminating.") % __func__;
+            exit(EXIT_FAILURE);
+        }
+
+        return prob;
+    }
+
+    float Pmumu(float dmsq, float sinsq2th14, float sinsqth24, float le) const{
+        dmsq =  maybe_convert_log("dmsq", dmsq);
+        float s214 = maybe_convert_log("sinsq2th14", sinsq2th14);
+        float s24 = maybe_convert_log("sinsqth24", sinsqth24);
+        float c14 = (1.0+sqrt(1.0-s214))/2.0f;
+
+        float sinterm = std::sin(1.266932679f*dmsq*(le));
+        float prob    = 1.0f - (c14*s24*(1.0f-c14*s24))*sinterm*sinterm;
+
+
+        if(prob<0.0 || prob >1.0){
+            log<LOG_ERROR>(L"%1% || Your probability %2% is outside the bounds of math."
+                           L"dmsq = %3%, s214 = %4%, s24 = %5%, L/E = %6%")
+                % __func__ % prob % dmsq % s214 % s24 % le;
+            log<LOG_ERROR>(L"%1% || Terminating.") % __func__;
+            exit(EXIT_FAILURE);
+        }
+        return prob;
+    }
+
+    float Pee(float dmsq, float sinsq2th14, [[maybe_unused]]float sinsqth24, float le) const{
+        dmsq = maybe_convert_log("dmsq", dmsq);
+        float s214 = maybe_convert_log("sinsq2th14", sinsq2th14);
+
+        float sinterm = std::sin(1.266932679f*dmsq*(le));
+        float prob    = 1.0f - s214*sinterm*sinterm;
+
+        if(prob<0.0 || prob >1.0){
+            log<LOG_ERROR>(L"%1% || Your probability %2% is outside the bounds of math."
+                           L"dmsq = %3%, s214 = %4%,  L/E = %5%")
+                % __func__ % prob % dmsq % s214   % le;
+            log<LOG_ERROR>(L"%1% || Terminating.") % __func__;
+            exit(EXIT_FAILURE);
+        }
+        return prob;
+    }
+
+    Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<float> &le_arr) const override {
+        //log<LOG_ERROR>(L"%1% || Using unified, optimized get_probs function for model") % __func__;
+
+        // Precompute physics parameters once
+        float dmsq = maybe_convert_log("dmsq", phys(0));
+        float s214 = maybe_convert_log("sinsq2th14", phys(1));
+        float s24 = maybe_convert_log("sinsqth24", phys(2));
+        float c14 = (1.0+sqrt(1.0-s214))/2.0f;
+
+        Eigen::MatrixXf probs(le_arr.size(), model_functions.size());
+
+        for(size_t i = 0; i < le_arr.size(); ++i) {
+            
+            float sinterm = std::sin(1.266932679f*dmsq*(le_arr[i]));
+
+            // no oscillation
+            probs(i, 0) = 1.0f;
+
+            // P_mumu
+            probs(i, 1) = 1.0f - c14*s24*(1.0f-c14*s24)*sinterm*sinterm;
+
+            // P_mue
+            probs(i, 2) = s214*s24*sinterm*sinterm;
+
+            // P_ee
+            probs(i, 3) = 1.0f - s214*sinterm*sinterm;
+
+        }
+
+        return probs;
+    }
 };
 
 class PRO3p1_3A : public PROmodel {
@@ -567,7 +801,7 @@ public:
             sinsq2thmue = 0;
         }
 
-        float sinterm = std::sin(1.27f*dmsq*(le));
+        float sinterm = std::sin(1.266932679f*dmsq*(le));
         float prob    = sinsq2thmue*sinterm*sinterm;
 
         if(prob<0.0 || prob >1.0){
@@ -586,7 +820,7 @@ public:
         dmsq =maybe_convert_log("dmsq",dmsq);
         
 
-        float sinterm = std::sin(1.27*dmsq*(le));
+        float sinterm = std::sin(1.266932679f*dmsq*(le));
         float prob    = 1.0f - 4.0f*Um4sq*(1.0f-Um4sq)*sinterm*sinterm;
 
         if(prob<0.0 || prob >1.0){
@@ -603,7 +837,7 @@ public:
         dmsq =maybe_convert_log("dmsq",dmsq);
         sinsq2thee =maybe_convert_log("sinsq2thee",sinsq2thee);
 
-        float sinterm = std::sin(1.27*dmsq*(le));
+        float sinterm = std::sin(1.266932679f*dmsq*(le));
         float prob    = 1.0f - sinsq2thee*sinterm*sinterm;
 
         if(prob<0.0 || prob >1.0){
@@ -614,6 +848,41 @@ public:
 
         return prob;
     }
+
+    Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<float> &le_arr) const override {
+        //log<LOG_ERROR>(L"%1% || Using unified, optimized get_probs function for model") % __func__;
+
+        // Precompute physics parameters once
+        float dmsq = maybe_convert_log("dmsq", phys(0));
+        float sinsq2thee = maybe_convert_log("sinsq2thee", phys(1));
+        float sinsqth24 = maybe_convert_log("sinsqth24", phys(2));
+        
+        float Um4sq = sinsqth24/2.0*(1.0+sqrt(1.0f- sinsq2thee));
+        float sinsq2thmue = sinsqth24*sinsq2thee;
+
+        Eigen::MatrixXf probs(le_arr.size(), model_functions.size());
+
+        for(size_t i = 0; i < le_arr.size(); ++i) {
+            
+            float sinterm = std::sin(1.266932679f*dmsq*(le_arr[i]));
+
+            // no oscillation
+            probs(i, 0) = 1.0f;
+
+            // P_mumu
+            probs(i, 1) =  1.0f - 4.0f*Um4sq*(1.0f-Um4sq)*sinterm*sinterm;
+
+            // P_mue
+            probs(i, 2) = sinsq2thmue*sinterm*sinterm;
+
+            // P_ee
+            probs(i, 3) = 1.0f - sinsq2thee*sinterm*sinterm;
+
+        }
+
+        return probs;
+    }
+
 };
 
 class PRO3p1_3B : public PROmodel {
@@ -692,13 +961,14 @@ public:
         // 4) Parameters and bounds
         // v(0) = dmsq_log      = log10(Δm²_41)
         // v(1) = s2mumu_log    = log10(sin²2θ_μμ)
-        // v(2) = sinsqth24prime = log10(sin²θ_24′)
+        // v(2) = sB  (can be thought of as sinsqth24prime = log10(sin²θ_24′))
         // -----------------------------------------
         nparams = 3;
-        param_names        = {"dmsq", "sinsq2thmumu", "sinsqth24prime"};
-        pretty_param_names = {"#Deltam^{2}", "sin^{2}2#theta_{#mu#mu}", "sin^{2}2#theta_24^{'}"};
+        param_names        = {"dmsq", "sinsq2thmumu", "sB"};
+        pretty_param_names = {"#Deltam^{2}", "sin^{2}2#theta_{#mu#mu}", "sB"};
         pretty_param_units = {"eV^{2}", "",""};
         is_log10         = {true, true, true};
+        build_param_index();
 
         lb          = Eigen::VectorXf(3);
         ub          = Eigen::VectorXf(3);
@@ -724,11 +994,11 @@ public:
     // ---------------------------------------------
     int UnitarityConstraint(const Eigen::VectorXf &v) {
         float sinsq2thmumu = std::pow(10.0f, v(1));  // sin²2θμμ
-        float sinsqth24prime = std::pow(10.0f, v(2));                   // ratio parameter
+        float sB = std::pow(10.0f, v(2));                   // ratio parameter
 
         float rad = 1.0f - sinsq2thmumu;
         float Um4sq = (1.0f - std::sqrt(rad)) / 2.0f;
-        float Ue4sq = sinsqth24prime * (1.0f - Um4sq);     // from definition of sB
+        float Ue4sq = sB * (1.0f - Um4sq);     // from definition of sB
 
         return Um4sq + Ue4sq < 0.999 ? 1 :0;  // allowed
     }
@@ -741,7 +1011,7 @@ public:
         sinsq2thmumu = std::pow(10.0f, sinsq2thmumu);
 
 
-        float sinterm = std::sin(1.27f * dmsq * le);
+        float sinterm = std::sin(1.266932679f * dmsq * le);
         float prob    = 1.0f - sinsq2thmumu * sinterm * sinterm;
 
         if (prob < 0.0f || prob > 1.0f) {
@@ -759,22 +1029,18 @@ public:
     // ---------------------------------------------
     // νμ → νe appearance
     // ---------------------------------------------
-    float Pmue(float dmsq, float sinsq2thmumu, float sinsqth24prime, float le) const {
+    float Pmue(float dmsq, float sinsq2thmumu, float sB, float le) const {
         dmsq   = std::pow(10.0f, dmsq);
         sinsq2thmumu = std::pow(10.0f, sinsq2thmumu);
 
-        float rad = 1.0f - sinsq2thmumu;
-        float Um4sq = (1.0f - std::sqrt(rad)) / 2.0f;
-        float Ue4sq = sinsqth24prime * (1.0f - Um4sq);
-
-        float sinterm = std::sin(1.27f * dmsq * le);
-        float prob    = 4.0f * Um4sq * Ue4sq * sinterm * sinterm;
+        float sinterm = std::sin(1.266932679f * dmsq * le);
+        float prob    = sB*sinsq2thmumu;
 
         if (prob < 0.0f || prob > 1.0f) {
             log<LOG_ERROR>(
                 L"%1% || Pmue %2% outside [0,1]. "
-                L"dmsq = %3%, Um4sq = %4%, Ue4sq = %5%, L/E = %6%"
-            ) % __func__ % prob % dmsq % Um4sq % Ue4sq % le;
+                L"dmsq = %3%, sinsq2thmuu = %4%, sB = %5%, L/E = %6%"
+            ) % __func__ % prob % dmsq % sinsq2thmumu % sB % le;
             log<LOG_ERROR>(L"%1% || Terminating.") % __func__;
             exit(EXIT_FAILURE);
         }
@@ -785,16 +1051,16 @@ public:
     // ---------------------------------------------
     // νe → νe disappearance
     // ---------------------------------------------
-    float Pee(float dmsq, float sinsq2thmumu, float sinsqth24prime, float le) const {
+    float Pee(float dmsq, float sinsq2thmumu, float sB, float le) const {
         dmsq   = std::pow(10.0f, dmsq);
         sinsq2thmumu = std::pow(10.0f, sinsq2thmumu);
 
         float rad = 1.0f - sinsq2thmumu;
         float Um4sq = (1.0f - std::sqrt(rad)) / 2.0f;
-        float Ue4sq = sinsqth24prime * (1.0f - Um4sq);  
+        float Ue4sq = sB * (1.0f - Um4sq);  
 
 
-        float sinterm = std::sin(1.27f * dmsq * le);
+        float sinterm = std::sin(1.266932679f * dmsq * le);
         float prob    = 1.0f - 4.0f * Ue4sq * (1.0f - Ue4sq) * sinterm * sinterm;
 
         if (prob < 0.0f || prob > 1.0f) {
@@ -808,6 +1074,41 @@ public:
 
         return prob;
     }
+    
+    Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<float> &le_arr) const override {
+        //log<LOG_ERROR>(L"%1% || Using unified, optimized get_probs function for model") % __func__;
+
+        // Precompute physics parameters once
+        float dmsq = maybe_convert_log("dmsq", phys(0));
+        float sinsq2thmumu = maybe_convert_log("sinsq2thmumu", phys(1));
+        float sB = maybe_convert_log("sB", phys(2));
+        float Ue4sq = (sB/2.0)*(1.0+sqrt(1.0f-sinsq2thmumu));
+
+        Eigen::MatrixXf probs(le_arr.size(), model_functions.size());
+
+        for(size_t i = 0; i < le_arr.size(); ++i) {
+            
+            float sinterm = std::sin(1.266932679f*dmsq*(le_arr[i]));
+
+            // no oscillation
+            probs(i, 0) = 1.0f;
+
+            // P_mumu
+            probs(i, 1) =  1.0f - sinsq2thmumu * sinterm * sinterm;
+
+            // P_mue
+            probs(i, 2) =  sB*sinsq2thmumu* sinterm * sinterm;
+
+
+            // P_ee
+            probs(i, 3) = 1.0f-4.0f*(1-Ue4sq)*Ue4sq *sinterm*sinterm;
+
+        }
+
+        return probs;
+    }
+
+
 };
 
 
@@ -900,7 +1201,7 @@ public:
         dmsq = maybe_convert_log("dmsq", dmsq);
         sinsq2thmue = maybe_convert_log("sinsq2thmue", sinsq2thmue);
 
-        float Um4sq=(std::exp(xi) * std::sqrt(sinsq2thmue)) / 2.0;
+        float Um4sq=(std::exp(-xi) * std::sqrt(sinsq2thmue)) / 2.0;
 
         float sinterm = std::sin(1.266932679f*dmsq*(le));
         float prob    = 1.0f - 4.0f*Um4sq*(1.0f-Um4sq)*sinterm*sinterm;
@@ -918,7 +1219,7 @@ public:
         dmsq = maybe_convert_log("dmsq", dmsq);
         sinsq2thmue = maybe_convert_log("sinsq2thmue", sinsq2thmue);
 
-        float Ue4sq=(std::exp(-xi) * std::sqrt(sinsq2thmue)) / 2.0;
+        float Ue4sq=(std::exp(xi) * std::sqrt(sinsq2thmue)) / 2.0;
 
         float sinterm = std::sin(1.266932679f*dmsq*(le));
         float prob    = 1.0f - 4.0f*Ue4sq*(1.0f-Ue4sq)*sinterm*sinterm;
@@ -931,6 +1232,45 @@ public:
 
         return prob;
     }
+    
+    Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<float> &le_arr) const override {
+        //log<LOG_ERROR>(L"%1% || Using unified, optimized get_probs function for model") % __func__;
+
+        // Precompute physics parameters once
+        float dmsq = maybe_convert_log("dmsq", phys(0));
+        float sinsq2thmue = maybe_convert_log("sinsq2thmue", phys(1));
+        float xi = maybe_convert_log("xi", phys(2));
+
+        float sqrtsin = std::sqrt(sinsq2thmue);
+        float Um4sq=(std::exp(-xi) *sqrtsin ) / 2.0;
+        float Ue4sq=(std::exp(xi) *sqrtsin) / 2.0;
+
+
+        Eigen::MatrixXf probs(le_arr.size(), model_functions.size());
+
+        for(size_t i = 0; i < le_arr.size(); ++i) {
+            
+            float sinterm = std::sin(1.266932679f*dmsq*(le_arr[i]));
+
+            // no oscillation
+            probs(i, 0) = 1.0f;
+
+            // P_mumu
+            probs(i, 1) =  1.0f - 4.0f*(1-Um4sq)*Um4sq * sinterm * sinterm;
+
+            // P_mue
+            probs(i, 2) =  sinsq2thmue* sinterm * sinterm;
+
+
+            // P_ee
+            probs(i, 3) = 1.0f-4.0f*(1-Ue4sq)*Ue4sq *sinterm*sinterm;
+
+        }
+
+        return probs;
+    }
+
+
 };
 
 
@@ -1148,15 +1488,17 @@ public:
             float delta = freq*le_arr[i];
             float costerm = std::cos(2.0f*delta);
             float expterm = std::exp(-g2*delta/(8.0f*3.14159f));
+            float cos_mult_exp_term = costerm*expterm;
+            float osc_term =(1.0f-2.0f*cos_mult_exp_term + expterm*expterm);
 
             // P_mumu
-            probs(i, 1) = 1.0f - 2.0f*Um4sq*(1.0f-expterm*costerm) + Um4sq*Um4sq*(1.0f-2.0f*expterm*costerm + expterm*expterm);
+            probs(i, 1) = 1.0f - 2.0f*Um4sq*(1.0f-cos_mult_exp_term) + Um4sq*Um4sq*osc_term;
 
             // P_mue
-            probs(i, 2) = Ue4sq*Um4sq*(1.0f-2.0f*expterm*costerm + expterm*expterm);
+            probs(i, 2) = Ue4sq*Um4sq*osc_term;
 
             // P_ee
-            probs(i, 3) = 1.0f - 2.0f*Ue4sq*(1.0f-expterm*costerm) + Ue4sq*Ue4sq*(1.0f-2.0f*expterm*costerm + expterm*expterm);
+            probs(i, 3) = 1.0f - 2.0f*Ue4sq*(1.0f-cos_mult_exp_term) + Ue4sq*Ue4sq*osc_term;
 
         }
 
@@ -1275,9 +1617,9 @@ public:
     float phi54 = v(6);
 
     // Oscillation phases
-    float x41 = 1.27f * dm41 * le;
-    float x51 = 1.27f * dm51 * le;
-    float x54 = 1.27f * (dm51 - dm41) * le;
+    float x41 = 1.266932679f * dm41 * le;
+    float x51 = 1.266932679f * dm51 * le;
+    float x54 = 1.266932679f * (dm51 - dm41) * le;
 
     // Standard 3+2 appearance terms
     float term1 = 4.0f * Um4sq * Ue4sq * std::sin(x41) * std::sin(x41);
@@ -1316,9 +1658,9 @@ public:
     float Um5sq = std::pow(10.0f, v(5));
     float phi54 = v(6);
 
-    float x41 = 1.27f * dm41 * le;
-    float x51 = 1.27f * dm51 * le;
-    float x54 = 1.27f * (dm51 - dm41) * le;
+    float x41 = 1.266932679f * dm41 * le;
+    float x51 = 1.266932679f * dm51 * le;
+    float x54 = 1.266932679f * (dm51 - dm41) * le;
 
     float one_minus = 1.0f - Um4sq - Um5sq;
 
@@ -1368,9 +1710,9 @@ public:
     float Um5sq = std::pow(10.0f, v(5));
     float phi54 = v(6);
 
-    float x41 = 1.27f * dm41 * le;
-    float x51 = 1.27f * dm51 * le;
-    float x54 = 1.27f * (dm51 - dm41) * le;
+    float x41 = 1.266932679f * dm41 * le;
+    float x51 = 1.266932679f * dm51 * le;
+    float x54 = 1.266932679f * (dm51 - dm41) * le;
 
     float one_minus = 1.0f - Ue4sq - Ue5sq;
 
@@ -1415,6 +1757,8 @@ std::unique_ptr<PROmodel> get_model_from_string(const PROconfig& config, const P
         return std::unique_ptr<PROmodel>(new PROnuedis(prop,config.m_model_parameter_map));
     } else if(name == "3+1") {
         return std::unique_ptr<PROmodel>(new PRO3p1(prop,config.m_model_parameter_map));
+    } else if(name == "3+1_angles") {
+        return std::unique_ptr<PROmodel>(new PRO3p1_angles(prop,config.m_model_parameter_map));
     } else if(name == "3+1_3A") {
         return std::unique_ptr<PROmodel>(new PRO3p1_3A(prop,config.m_model_parameter_map));
     } else if(name == "3+1_3B") {
@@ -1426,7 +1770,7 @@ std::unique_ptr<PROmodel> get_model_from_string(const PROconfig& config, const P
     } else if(name == "3+2") {
         return std::unique_ptr<PROmodel>(new PRO3p2(prop, config.m_model_parameter_map));
     }
-    log<LOG_ERROR>(L"%1% || Unrecognized model name %2%. Try numudis, nueapp, nuedis, 3+1 or 3+1_3C for now. Terminating.") % __func__ % name.c_str();
+    log<LOG_ERROR>(L"%1% || Unrecognized model name %2%. Try numudis, nueapp, nuedis, 3+1, 3+1_angles, 3+1_3(A,B,C) and 3+1_decay_invis, 3+2. for now. Terminating.") % __func__ % name.c_str();
     exit(EXIT_FAILURE);
 }
 
