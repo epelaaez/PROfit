@@ -414,8 +414,8 @@ namespace PROfit{
                 data_ratio->SetMarkerColor(kBlack);
                 data_ratio->SetMarkerSize(1);
 
-                TLegend* leg = new TLegend(0.15, 0.6, 0.5, 0.89);
-
+                TLegend* leg = new TLegend(0.15, 0.7, 0.89, 0.89);
+                
                 // Error band graphs
                 TGraphAsymmErrors* channel_errband = new TGraphAsymmErrors(&cv_num);
                 TGraphAsymmErrors* post_channel_errband = nullptr;
@@ -524,7 +524,7 @@ namespace PROfit{
                 if(has_bf && bf_ratio) {
                     max_val = std::max(max_val, bf_ratio->GetMaximum());
                 }
-                cv_ratio->GetYaxis()->SetRangeUser(0.0, 2.0 * max_val);
+                cv_ratio->GetYaxis()->SetRangeUser(0.0, 1.33* max_val);
                 cv_ratio->SetTitle(ratio_label.c_str());
                 cv_ratio->Draw("hist");
 
@@ -554,6 +554,9 @@ namespace PROfit{
 
                 // Draw data
                 data_ratio->Draw("PE1 same");
+                leg->SetNColumns(3);
+                leg->SetFillStyle(0);
+                leg->SetLineWidth(0);
                 leg->Draw("same");
 
                 // Draw error ratio panel (bottom)
@@ -623,6 +626,7 @@ namespace PROfit{
         if(cv_hist) {
 
             cv_hist->SetLineColor(cvcol);
+            cv_hist->SetLineStyle(kDashed);
 
             if(bool(opt&PlotOptions::CVasStack)) {
                 log<LOG_DEBUG>(L"%1% || Using CVStack %2%") % __func__ % hist_titles.c_str();
@@ -661,6 +665,7 @@ namespace PROfit{
                 leg_hack->SetFillStyle(3144);
                 leg_hack->SetFillColorAlpha(cvcol, 0.2);
                 leg_hack->SetLineColor(cvcol);
+                leg_hack->SetLineStyle(kDashed);
                 leg_hack->SetLineWidth(2);
                 leg->AddEntry(leg_hack,"CV Prediction #pm 1#sigma" ,"fl");
             }else{
@@ -669,7 +674,7 @@ namespace PROfit{
         }
 
         if(bf_hist) {
-            bf_hist->SetLineStyle(kDashed);
+            bf_hist->SetLineStyle(kSolid);
             bf_hist->SetLineColor(bfcol);
 
             if(cv_hist) bf_hist->Draw("hist same");
