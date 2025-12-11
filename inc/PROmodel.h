@@ -277,7 +277,7 @@ public:
         //log<LOG_ERROR>(L"%1% || Using unified, optimized get_probs function for model") % __func__;
         // Precompute physics parameters once
         float dmsq = maybe_convert_log("dmsq", phys(0));
-        float sinsq2thmue = maybe_convert_log("sinsq2thmue", phys(1));
+        float sinsq2thmue = maybe_convert_log("sinsq2thme", phys(1));
 
         float freq = 1.266932679f * dmsq;
 
