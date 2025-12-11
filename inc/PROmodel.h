@@ -574,13 +574,13 @@ public:
 
 
             // P_mumu
-            probs(i, 1) = 1.0f - 4.0f*Um4sq*Um4sq*sinterm*sinterm;
+            probs(i, 1) = 1.0f - 4.0f*Um4sq*(1.0f-Um4sq)*sinterm*sinterm;
 
             // P_mue
             probs(i, 2) = 4.0f*Ue4sq*Ue4sq*sinterm*sinterm;
 
             // P_ee
-            probs(i, 3) = 1.0f - 4.0f*Ue4sq*Ue4sq*sinterm*sinterm;
+            probs(i, 3) = 1.0f - 4.0f*Ue4sq*(1.0f-Ue4sq)*sinterm*sinterm;
 
         }
 
@@ -801,7 +801,7 @@ public:
             sinsq2thmue = 0;
         }
 
-        float sinterm = std::sin(1.27f*dmsq*(le));
+        float sinterm = std::sin(1.266932679f*dmsq*(le));
         float prob    = sinsq2thmue*sinterm*sinterm;
 
         if(prob<0.0 || prob >1.0){
@@ -820,7 +820,7 @@ public:
         dmsq =maybe_convert_log("dmsq",dmsq);
         
 
-        float sinterm = std::sin(1.27*dmsq*(le));
+        float sinterm = std::sin(1.266932679f*dmsq*(le));
         float prob    = 1.0f - 4.0f*Um4sq*(1.0f-Um4sq)*sinterm*sinterm;
 
         if(prob<0.0 || prob >1.0){
@@ -837,7 +837,7 @@ public:
         dmsq =maybe_convert_log("dmsq",dmsq);
         sinsq2thee =maybe_convert_log("sinsq2thee",sinsq2thee);
 
-        float sinterm = std::sin(1.27*dmsq*(le));
+        float sinterm = std::sin(1.266932679f*dmsq*(le));
         float prob    = 1.0f - sinsq2thee*sinterm*sinterm;
 
         if(prob<0.0 || prob >1.0){
@@ -968,6 +968,7 @@ public:
         pretty_param_names = {"#Deltam^{2}", "sin^{2}2#theta_{#mu#mu}", "sB"};
         pretty_param_units = {"eV^{2}", "",""};
         is_log10         = {true, true, true};
+        build_param_index();
 
         lb          = Eigen::VectorXf(3);
         ub          = Eigen::VectorXf(3);
@@ -1010,7 +1011,7 @@ public:
         sinsq2thmumu = std::pow(10.0f, sinsq2thmumu);
 
 
-        float sinterm = std::sin(1.27f * dmsq * le);
+        float sinterm = std::sin(1.266932679f * dmsq * le);
         float prob    = 1.0f - sinsq2thmumu * sinterm * sinterm;
 
         if (prob < 0.0f || prob > 1.0f) {
@@ -1032,18 +1033,14 @@ public:
         dmsq   = std::pow(10.0f, dmsq);
         sinsq2thmumu = std::pow(10.0f, sinsq2thmumu);
 
-        float rad = 1.0f - sinsq2thmumu;
-        float Um4sq = (1.0f - std::sqrt(rad)) / 2.0f;
-        float Ue4sq = sB * (1.0f - Um4sq);
-
-        float sinterm = std::sin(1.27f * dmsq * le);
-        float prob    = 4.0f * Um4sq * Ue4sq * sinterm * sinterm;
+        float sinterm = std::sin(1.266932679f * dmsq * le);
+        float prob    = sB*sinsq2thmumu;
 
         if (prob < 0.0f || prob > 1.0f) {
             log<LOG_ERROR>(
                 L"%1% || Pmue %2% outside [0,1]. "
-                L"dmsq = %3%, Um4sq = %4%, Ue4sq = %5%, L/E = %6%"
-            ) % __func__ % prob % dmsq % Um4sq % Ue4sq % le;
+                L"dmsq = %3%, sinsq2thmuu = %4%, sB = %5%, L/E = %6%"
+            ) % __func__ % prob % dmsq % sinsq2thmumu % sB % le;
             log<LOG_ERROR>(L"%1% || Terminating.") % __func__;
             exit(EXIT_FAILURE);
         }
@@ -1063,7 +1060,7 @@ public:
         float Ue4sq = sB * (1.0f - Um4sq);  
 
 
-        float sinterm = std::sin(1.27f * dmsq * le);
+        float sinterm = std::sin(1.266932679f * dmsq * le);
         float prob    = 1.0f - 4.0f * Ue4sq * (1.0f - Ue4sq) * sinterm * sinterm;
 
         if (prob < 0.0f || prob > 1.0f) {
@@ -1620,9 +1617,9 @@ public:
     float phi54 = v(6);
 
     // Oscillation phases
-    float x41 = 1.27f * dm41 * le;
-    float x51 = 1.27f * dm51 * le;
-    float x54 = 1.27f * (dm51 - dm41) * le;
+    float x41 = 1.266932679f * dm41 * le;
+    float x51 = 1.266932679f * dm51 * le;
+    float x54 = 1.266932679f * (dm51 - dm41) * le;
 
     // Standard 3+2 appearance terms
     float term1 = 4.0f * Um4sq * Ue4sq * std::sin(x41) * std::sin(x41);
@@ -1661,9 +1658,9 @@ public:
     float Um5sq = std::pow(10.0f, v(5));
     float phi54 = v(6);
 
-    float x41 = 1.27f * dm41 * le;
-    float x51 = 1.27f * dm51 * le;
-    float x54 = 1.27f * (dm51 - dm41) * le;
+    float x41 = 1.266932679f * dm41 * le;
+    float x51 = 1.266932679f * dm51 * le;
+    float x54 = 1.266932679f * (dm51 - dm41) * le;
 
     float one_minus = 1.0f - Um4sq - Um5sq;
 
@@ -1713,9 +1710,9 @@ public:
     float Um5sq = std::pow(10.0f, v(5));
     float phi54 = v(6);
 
-    float x41 = 1.27f * dm41 * le;
-    float x51 = 1.27f * dm51 * le;
-    float x54 = 1.27f * (dm51 - dm41) * le;
+    float x41 = 1.266932679f * dm41 * le;
+    float x51 = 1.266932679f * dm51 * le;
+    float x54 = 1.266932679f * (dm51 - dm41) * le;
 
     float one_minus = 1.0f - Ue4sq - Ue5sq;
 
