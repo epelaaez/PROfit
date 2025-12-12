@@ -587,7 +587,7 @@ namespace PROfit{
 
                 log<LOG_INFO>(L"%1% || Created ratio plot: %2%") % __func__ % output_filename.c_str();
 
-                delete ratio_c;
+                //delete ratio_c;
             }
         }
 

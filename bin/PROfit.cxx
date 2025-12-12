@@ -1021,11 +1021,10 @@ int main(int argc, char* argv[])
 
         if(procurve_points.size()!=0){
 
-
             size_t mid = procurve_points.size() / 2;
             std::vector<float> A(procurve_points.begin(), procurve_points.begin() + mid);
             std::vector<float> B(procurve_points.begin() + mid, procurve_points.end());
-            size_t Ncurvep = 20;
+            size_t Ncurvep = grid_size.front();
             log<LOG_INFO>(L"%1% || Running a PROcurve from %2% to point %3% with %4% points") % __func__ % A% B %Ncurvep;
             
             std::vector<surfOut> cpoints = surface.FillCurve(fitConfig, myseed, nthread, A, B, Ncurvep);
