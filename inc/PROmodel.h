@@ -1851,7 +1851,7 @@ class PRO3p1_decay_vis_model1 : public PROmodel {
     
             std::vector<float> osc_3d_flavor_l_e_hist_counts(noosc_3d_flavor_l_e_hist_counts.size());
     
-            for(size_t curr_l_e_bin = 0; i < num_l_e_bins; ++i) {
+            for(size_t curr_l_e_bin = 0; curr_l_e_bin < num_l_e_bins; ++curr_l_e_bin) {
 
                 int l_bin = curr_l_e_bin % num_l_bins;
                 int e_bin = curr_l_e_bin / num_e_bins;
@@ -1895,7 +1895,7 @@ class PRO3p1_decay_vis_model1 : public PROmodel {
                 for (int initial_e_bin = e_bin; initial_e_bin < num_e_bins; ++initial_e_bin) {
 
                     float initial_e_value = e_min + initial_e_bin * e_bin_width;
-                    float s_dec = 2.0f * e / (initial_e_value*initial_e_value)
+                    float s_dec = 2.0f * e / (initial_e_value*initial_e_value);
 
                     int initial_2d_l_e_bin = l_bin * num_e_bins + initial_e_bin;
 
