@@ -1908,10 +1908,143 @@ class PRO3p1_decay_vis_model1 : public PROmodel {
                     osc_3d_flavor_l_e_hist_counts[2*num_l_e_bins + curr_l_e_bin] += p_dec_ee * s_dec * initial_noosc_nue_count;
                 }
             }
-    
             return osc_3d_flavor_l_e_hist_counts;
         }
-        
+    };
+
+
+class PRO3p1_decay_vis_model2 : public PROmodel {
+    public:
+        PRO3p1_decay_vis_model2(const PROpeller &prop, const std::map<std::string,int> &parameter_map) {
+            // 3+1+decay to lower energy neutrinos
+            // model 2 from https://journals.aps.org/prd/abstract/10.1103/PhysRevD.110.075002
+    
+            if(parameter_map.find("flavor_L_E_counts") == parameter_map.end()) {
+                log<LOG_ERROR>(L"%1%, %2% || Missing expected parameter: 'flavor_L_E_counts'. Make sure its in your model section of XML.") % __func__ % __LINE__;
+                throw std::runtime_error("Missing parameter: flavor_L_E_counts");
+            }
+            ivar = parameter_map.at("flavor_L_E_counts");
+    
+            model_constraint = [this](const Eigen::VectorXf &v){return this->UnitarityConstraint(v);};
+    
+            size_t nvar = prop.variable_mc_stat_err.size();
+            hists.resize(nvar);
+            for(size_t v = 0; v <nvar ;v++){
+                for(size_t m = 0; m < model_functions.size(); ++m) {
+                    hists.at(v).emplace_back(Eigen::MatrixXf::Constant(prop.variable_hist_storage(ivar,v).rows(), prop.variable_hist_storage(ivar,v).cols(),0.0));
+                    Eigen::MatrixXf &h = hists.at(v).back();
+                    for(size_t i = 0; i < prop.NEvent(); ++i) {
+                        if(prop.model_rule[i] != (int)m) continue;
+                        int tbin = prop.VariableBinIndex(ivar, i), rbin = prop.VariableBinIndex(v, i);
+                        if(tbin<0 || rbin<0)continue;
+                        h(tbin, rbin) += prop.added_weights[i];
+                    }
+                }
+            }
+    
+            nparams = 4;
+            param_names = {"dmsq", "Ue4^2", "Um4^2", "g_e"}; 
+            pretty_param_names = {"#Deltam^{2}", "|U_{e4}|^{2}", "|U_{#mu4}|^{2}", "g_{e}"}; 
+            pretty_param_units = {"eV^{2}", "", "", ""}; 
+            is_log10 = {true, true, true, false};
+            build_param_index();
+            lb = Eigen::VectorXf(4);
+            ub = Eigen::VectorXf(4);
+            default_val = Eigen::VectorXf(4);
+            lb << -2, -std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity(), 0;
+            ub << 2, -1e-4, -1e-4, 10;
+            default_val << -2, -8, -8, 0;
+        };
+    
+        int UnitarityConstraint(const Eigen::VectorXf &v){
+            // ensures positive g2 in addition to the usual unitarity constraints
+            const float Ue4sq = maybe_convert_log("Ue4^2", v(param_name_to_index.at("Ue4^2")));
+            const float Um4sq = maybe_convert_log("Um4^2", v(param_name_to_index.at("Um4^2")));
+            const float g_e = maybe_convert_log("g_e", v(param_name_to_index.at("g_e")));
+            return   ((Ue4sq+Um4sq)<1 && g_e>=0 ? 1 : 0);      
+        }
+    
+        // This function has to be totally different from get_probs used for the other models: This is a nonlocal function of the (L, E) histogram counts.
+        // We do all the oscillation/decay calculations in separate L bins
+        std::vector<float> get_3d_flavor_l_e_hist_counts(const Eigen::VectorXf &phys, const std::vector<float> &noosc_3d_flavor_l_e_hist_counts) {
+    
+            // Precompute physics parameters once
+            float dmsq = maybe_convert_log("dmsq", phys(0));
+            float Ue4sq = maybe_convert_log("Ue4^2", phys(1));
+            float Um4sq = maybe_convert_log("Um4^2", phys(2));
+            float g_e = maybe_convert_log("g_e", phys(3));
+
+            float Us4sq = 1.0f - Ue4sq - Um4sq; // assuming no tau mixing (small effect on NC events)
+            float freq = 1.266932679f * dmsq;
+
+            // Make sure that these match how noosc_3d_flavor_l_e_hist_counts is created!
+            int num_flavor_bins = 3;
+            int num_l_bins = 30;
+            float l_min = 0.0f; 
+            float l_max = 100.0f; 
+            float l_bin_width = (l_max - l_min) / num_l_bins;
+            int num_e_bins = 30;
+            float e_min = 0.01f;
+            float e_max = 5.0f;
+            float e_bin_width = (e_max - e_min) / num_e_bins;
+            int num_l_e_bins = num_l_bins * num_e_bins;
+    
+            std::vector<float> osc_3d_flavor_l_e_hist_counts(noosc_3d_flavor_l_e_hist_counts.size());
+    
+            for(size_t curr_l_e_bin = 0; curr_l_e_bin < num_l_e_bins; ++curr_l_e_bin) {
+
+                int l_bin = curr_l_e_bin % num_l_bins;
+                int e_bin = curr_l_e_bin / num_e_bins;
+
+                float l = l_min + l_bin * l_bin_width;
+                float e = e_min + e_bin * e_bin_width;
+                float le = l / e;
+
+                float noosc_numu_count = noosc_3d_flavor_l_e_hist_counts[curr_l_e_bin];
+                float noosc_fullosc_count = noosc_3d_flavor_l_e_hist_counts[num_l_e_bins + curr_l_e_bin];
+                float noosc_nue_count = noosc_3d_flavor_l_e_hist_counts[2*num_l_e_bins + curr_l_e_bin];
+
+                float delta = freq*le;
+                float costerm = std::cos(2.0f*delta);
+                float expterm = std::exp(-g_e*delta/(8.0f*3.14159f));
+                float cos_mult_exp_term = costerm*expterm;
+                float osc_term =(1.0f-2.0f*cos_mult_exp_term + expterm*expterm);
+
+                float p_osc_mumu = 1.0f - 2.0f*Um4sq*(1.0f-cos_mult_exp_term) + Um4sq*Um4sq*osc_term;
+                float p_osc_mue = Ue4sq*Um4sq*osc_term;
+                float p_osc_ee = 1.0f - 2.0f*Ue4sq*(1.0f-cos_mult_exp_term) + Ue4sq*Ue4sq*osc_term;
+
+                // oscillation part of the probability:
+                osc_3d_flavor_l_e_hist_counts[curr_l_e_bin] = p_osc_mumu * noosc_numu_count;
+                osc_3d_flavor_l_e_hist_counts[num_l_e_bins + curr_l_e_bin] = p_osc_mue * noosc_fullosc_count;
+                osc_3d_flavor_l_e_hist_counts[2*num_l_e_bins + curr_l_e_bin] = p_osc_ee * noosc_nue_count;
+    
+                // decay part of the probability:
+                
+                float one_minus_expterm_sq = 1.0f - expterm*expterm;
+
+                float p_dec_mumu = Um4sq * one_minus_expterm_sq;
+                float p_dec_mue = Ue4sq * one_minus_expterm_sq;
+                float p_dec_ee = Ue4sq * one_minus_expterm_sq;
+
+                // looping over all the larger energy bins in this same L bin (these could have decayed to this L, E value)
+                // In model 2, all the decays are to nues (does not affect numu disappearance channel)
+                for (int initial_e_bin = e_bin; initial_e_bin < num_e_bins; ++initial_e_bin) {
+
+                    float initial_e_value = e_min + initial_e_bin * e_bin_width;
+                    float s_dec = 2.0f * e / (initial_e_value*initial_e_value);
+
+                    int initial_2d_l_e_bin = l_bin * num_e_bins + initial_e_bin;
+
+                    float initial_noosc_fullosc_count = noosc_3d_flavor_l_e_hist_counts[num_l_e_bins + initial_2d_l_e_bin];
+                    float initial_noosc_nue_count = noosc_3d_flavor_l_e_hist_counts[2*num_l_e_bins + initial_2d_l_e_bin];
+
+                    osc_3d_flavor_l_e_hist_counts[num_l_e_bins + curr_l_e_bin] += p_dec_mue * s_dec * initial_noosc_fullosc_count;
+                    osc_3d_flavor_l_e_hist_counts[2*num_l_e_bins + curr_l_e_bin] += p_dec_ee * s_dec * initial_noosc_nue_count;
+                }
+            }
+            return osc_3d_flavor_l_e_hist_counts;
+        }
     };
 
 /**
