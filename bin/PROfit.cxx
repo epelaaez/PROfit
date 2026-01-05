@@ -83,7 +83,7 @@ int main(int argc, char* argv[])
     std::string log_file = "";
     std::vector<std::string> fit_preset = {"good","fast"};
     static const std::unordered_set<std::string> allowed_preset = {"good","fast","overkill","sensitivity"};
-    bool with_splines = false, binwidth_scale = false, area_normalized = false;
+    bool with_splines = false, binwidth_scale = false, area_normalized = false, data_mc_ratio = false;
     std::map<std::string, float> fake_data_osc_params;
     std::map<std::string, float> cv_osc_params;
     std::map<std::string, float> injected_systs;
@@ -143,6 +143,7 @@ int main(int argc, char* argv[])
 
     app.add_flag("--poisson-throw", poisson_throw, "Do a Poisson stats throw of fake data.");
     app.add_flag("--scale-by-width", binwidth_scale, "Scale histgrams by 1/(bin width).");
+    app.add_flag("--data-mc-ratio", data_mc_ratio, "For ratio plots, use data/pre-fit mc instead of data/best-fit mc.");
     app.add_option("--scale", scale_arg, "Scale detector POT by a given value.");
     app.add_option("--plot-bounds", bound_list, "Plot bounds, set by  string float pairs. Available strings are ymax,ratmin,ratmax."); 
 
@@ -879,7 +880,13 @@ int main(int argc, char* argv[])
         //chi2text.SetTextSize(0.035); 
         texts.push_back(chi2text);
 
-        PlotOptions opt = PlotOptions::DataPostfitRatio;
+	PlotOptions opt; 
+        if(data_mc_ratio){
+	    opt = PlotOptions::DataMCRatio;
+	} 
+	else{
+	    opt = PlotOptions::DataPostfitRatio;
+	}
         if(binwidth_scale) opt |= PlotOptions::BinWidthScaled;
         if(area_normalized) opt |= PlotOptions::AreaNormalized;
         plot_channels((final_output_tag+"_PROfile_hists.pdf"), config, cv, bf, data, err_band, post_err_band, {}, {}, texts, pbounds, opt);
@@ -1809,7 +1816,13 @@ int main(int argc, char* argv[])
         //chi2text.SetTextSize(0.035); 
         texts.push_back(chi2text);
 
-        PlotOptions opt = PlotOptions::DataPostfitRatio;
+	PlotOptions opt; 
+	if(data_mc_ratio){
+	    opt = PlotOptions::DataMCRatio;
+	} 
+	else{
+	    opt = PlotOptions::DataPostfitRatio;
+	}
         if(binwidth_scale) opt |= PlotOptions::BinWidthScaled;
         if(area_normalized) opt |= PlotOptions::AreaNormalized;
         plot_channels((final_output_tag+"_PROglobal_hists.pdf"), config, cv, bf, data, err_band, post_err_band, pre_allcovsyst, post_allcovsyst, texts, pbounds,opt);
