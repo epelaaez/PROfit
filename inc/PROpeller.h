@@ -131,8 +131,26 @@ namespace PROfit{
             // Helper functions to access variable values + bin indices.
             // The user can equally directly access the values, the function 
             // is here to make it explicit how values are ordered in the vector
-            float VariableValue(size_t i_variable, size_t i_event) const {return variable_values[i_variable][i_event];}
-            int VariableBinIndex(size_t i_variable, size_t i_event) const {return variable_bin_indices[i_variable][i_event];}
+            float VariableValue(size_t i_variable, size_t i_event) const {
+                if(i_variable >= variable_values.size()) {
+                    log<LOG_ERROR>(L"%1% || Variable index %2% is out of bounds. "
+                        L"You have %3% variables defined (indices 0-%4%). "
+                        L"Check that the 'variable_index' in your <parameter> tag matches your <bins>/<variable> definitions in the XML.")
+                        % __func__ % i_variable % variable_values.size() % (variable_values.size() > 0 ? variable_values.size() - 1 : 0);
+                    throw std::runtime_error("Variable index out of bounds in VariableValue");
+                }
+                return variable_values[i_variable][i_event];
+            }
+            int VariableBinIndex(size_t i_variable, size_t i_event) const {
+                if(i_variable >= variable_bin_indices.size()) {
+                    log<LOG_ERROR>(L"%1% || Variable index %2% is out of bounds. "
+                        L"You have %3% variables defined (indices 0-%4%). "
+                        L"Check that the 'variable_index' in your <parameter> tag matches your <bins>/<variable> definitions in the XML.")
+                        % __func__ % i_variable % variable_bin_indices.size() % (variable_bin_indices.size() > 0 ? variable_bin_indices.size() - 1 : 0);
+                    throw std::runtime_error("Variable index out of bounds in VariableBinIndex");
+                }
+                return variable_bin_indices[i_variable][i_event];
+            }
 
             size_t NVariable() const {return variable_values.size();}
             size_t NEvent() const {return added_weights.size();}
