@@ -110,6 +110,8 @@ int main(int argc, char* argv[])
     std::vector<std::string> mockreweights;
     std::vector<TH2D*> weighthists;
 
+    std::vector<std::string> mcmc_vars;
+
     std::map<std::string, float> bound_list;
     PlotBounds pbounds; 
     size_t nuniv;
@@ -198,6 +200,9 @@ int main(int argc, char* argv[])
 
     //PROglobal
     CLI::App *proglobal_command = app.add_subcommand("global", "Just do a single global fit.");
+
+    CLI::App *promcmc_command = app.add_subcommand("mcmc", "Get bayesian posteriors using MCMC");
+    promcmc_command->add_option("--vars", mcmc_vars, "Variables to find posteriors of.");
 
     //PROtest, test things
     CLI::App *protest_command = app.add_subcommand("protest", "Testing ground for rapid quick tests.");
@@ -1815,6 +1820,20 @@ int main(int argc, char* argv[])
         plot_channels((final_output_tag+"_PROglobal_hists.pdf"), config, cv, bf, data, err_band, post_err_band, pre_allcovsyst, post_allcovsyst, texts, pbounds,opt);
 
 
+    }
+
+    if(*promcmc_command) {
+        std::vector<Eigen::VectorXf> chain;
+        auto action = [&chain](const Eigen::VectorXf &pt) { chain.push_back(pt); };
+        simple_target target{*metric};
+        adaptive_proposal proposal(*metric, dseed(myseed.global_rng));
+        Eigen::VectorXf initial = Eigen::VectorXf::Zero(metric->GetModel().nparams + metric->GetSysts().GetNSplines());
+        Metropolis mcmc(target, proposal, initial, dseed(myseed.global_rng));
+        mcmc.run(100'000, 1'000'000, action);
+
+        std::vector<TH2D> twod;
+        std::vector<TH1D> oned;
+        
     }
 
     //***********************************************************************
