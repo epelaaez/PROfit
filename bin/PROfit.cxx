@@ -454,7 +454,7 @@ int main(int argc, char* argv[])
             data = alldata[0];
             //data.save(dataconfig,dataBinName);
             for(size_t io = 0; io < dataconfig.m_num_variables; ++io)
-                variable_data.push_back(alldata[io+1]);
+                variable_data.push_back(alldata[io]);
 
             log<LOG_INFO>(L"%1% || Done loading. Config hash (%2%) and binary loaded Data (%3%) hash are here. ") % __func__ %  dataconfig.hash % data.hash;
             if(dataconfig.hash!=data.hash){
@@ -1544,21 +1544,8 @@ int main(int argc, char* argv[])
     if(*profc_command) {
         float global_chi2 = 0, null_chi2 = 0;
         if(gof_pvalue || pvalue) {
-            size_t nparams = metric->GetModel().nparams + metric->GetSysts().GetNSplines();
-            size_t nphys = metric->GetModel().nparams;
-            Eigen::VectorXf lb = Eigen::VectorXf::Constant(nparams, -3.0);
-            Eigen::VectorXf ub = Eigen::VectorXf::Constant(nparams, 3.0);
-            for(size_t i = 0; i < nphys; ++i) {
-                lb(i) = metric->GetModel().lb(i);
-                ub(i) = metric->GetModel().ub(i);
-            }
-            for(size_t i = nphys; i < nparams; ++i) {
-                lb(i) = metric->GetSysts().spline_lo[i-nphys];
-                ub(i) = metric->GetSysts().spline_hi[i-nphys];
-            }
-            metric->setBounds(lb, ub);
-            PROfitter fitter(metric->UpperBound(), metric->LowerBound(), fitConfig);
-            metric->setBounds(metric->UpperBound(), metric->LowerBound());
+            PROfitter fitter(global_ub, global_lb, fitConfig);
+            metric->setBounds(global_ub, global_ub);
 
             std::vector<std::pair<int, std::string>> global_PB_configs;
             global_PB_configs.push_back({fitConfig.n_latin_points, "(1) LatinHyperCube"});
@@ -1579,7 +1566,7 @@ int main(int argc, char* argv[])
 
             for(size_t i=0; i< fitter.freq_seed_points.size(); i++){
                 float chi_freq = fitter.freq_seed_values.at(i);
-                 if(chi_freq < chi2){
+                 if(chi_freq < best_chi2){
                     log<LOG_INFO>(L"%1% || One of the harmonics of first pass best fit, is a lower chi :  %2% ") % __func__ % fitter.freq_seed_values.at(i);
                     log<LOG_INFO>(L"%1% || -- at params:  %2% ") % __func__ % fitter.freq_seed_points.at(i);
                     best_chi2 = chi_freq;
@@ -1707,7 +1694,7 @@ int main(int argc, char* argv[])
                     best_dmsq = fco.dmsq;
                     best_sinsq2t = fco.sinsq2tmm;
                     for(size_t i = 0; i < variable_systs[config.i_prime].GetNSplines(); ++i) {
-                        best_systs_osc[variable_systs[config.i_prime].spline_names[i]] = fco.best_fit_osc(i);
+                        if(!gof_pvalue) best_systs_osc[variable_systs[config.i_prime].spline_names[i]] = fco.best_fit_osc(i);
                         best_systs[variable_systs[config.i_prime].spline_names[i]] = fco.best_fit_syst(i);
                         syst_throw[variable_systs[config.i_prime].spline_names[i]] = fco.syst_throw(i);
                     }
@@ -1729,7 +1716,7 @@ int main(int argc, char* argv[])
                 for(const auto &fco: out) {
                     fcout << fco.chi2_osc << "," << fco.chi2_syst << "," << fco.dmsq << "," << fco.sinsq2tmm;
                     for(size_t i = 0; i < variable_systs[config.i_prime].GetNSplines(); ++i) {
-                        fcout << fco.best_fit_osc(i) << "," << fco.best_fit_syst(i) << "," << fco.syst_throw(i);
+                        fcout << (gof_pvalue ? 0 : fco.best_fit_osc(i)) << "," << fco.best_fit_syst(i) << "," << fco.syst_throw(i);
                     }
                     fcout << "\r\n";
                 }
