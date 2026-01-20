@@ -30,6 +30,7 @@
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <future>
 #include <cstdlib>
 #include <exception>
 #include <fstream>
@@ -53,6 +54,8 @@ std::wostream *OSTREAM = &wcout;
 std::wofstream LOG_FILE_STREAM;
 bool LOGGING_TO_FILE = false;
 
+//std::vector<Eigen::VectorXf> mcmc_worker(Eigen::VectorXf initial, PROmetric *metric, uint32_t seed);
+void mcmc_worker(std::vector<std::vector<Eigen::VectorXf>> &chains, Eigen::VectorXf initial, PROmetric *metric, uint32_t seed, size_t nchains);
 
 int main(int argc, char* argv[])
 {
@@ -444,7 +447,7 @@ int main(int argc, char* argv[])
             data = alldata[0];
             //data.save(dataconfig,dataBinName);
             for(size_t io = 0; io < dataconfig.m_num_variables; ++io)
-                variable_data.push_back(alldata[io+1]);
+                variable_data.push_back(alldata[io]);
 
             log<LOG_INFO>(L"%1% || Done processing Data from XML defined root files, and saving to binary output also: %2%") % __func__ % dataBinName.c_str();
         }else{
@@ -455,7 +458,7 @@ int main(int argc, char* argv[])
             data = alldata[0];
             //data.save(dataconfig,dataBinName);
             for(size_t io = 0; io < dataconfig.m_num_variables; ++io)
-                variable_data.push_back(alldata[io+1]);
+                variable_data.push_back(alldata[io]);
 
             log<LOG_INFO>(L"%1% || Done loading. Config hash (%2%) and binary loaded Data (%3%) hash are here. ") % __func__ %  dataconfig.hash % data.hash;
             if(dataconfig.hash!=data.hash){
@@ -1823,17 +1826,75 @@ int main(int argc, char* argv[])
     }
 
     if(*promcmc_command) {
-        std::vector<Eigen::VectorXf> chain;
-        auto action = [&chain](const Eigen::VectorXf &pt) { chain.push_back(pt); };
-        simple_target target{*metric};
-        adaptive_proposal proposal(*metric, dseed(myseed.global_rng));
-        Eigen::VectorXf initial = Eigen::VectorXf::Zero(metric->GetModel().nparams + metric->GetSysts().GetNSplines());
-        Metropolis mcmc(target, proposal, initial, dseed(myseed.global_rng));
-        mcmc.run(100'000, 1'000'000, action);
+        metric->setBounds(global_ub, global_lb);
+        size_t nparams = metric->GetModel().nparams + metric->GetSysts().GetNSplines();
+        std::uniform_real_distribution<float> latin_distribution(-2, 2);
+        size_t nchains = 40;
+        std::vector<std::vector<float>> samples = latin_hypercube_sampling(nchains, nparams, latin_distribution, myseed.global_rng);
+        recenter_latin_samples(samples, global_ub, global_lb);
+        std::vector<Eigen::VectorXf> samples_eigen; 
+        for(size_t i = 0; i < samples.size(); ++i)
+            samples_eigen.push_back(Eigen::VectorXf::Map(samples[i].data(), samples[i].size()));
+        //std::vector<std::future<std::vector<Eigen::VectorXf>>> chains;
+        std::vector<std::vector<std::vector<Eigen::VectorXf>>> chains;
+        chains.reserve(nthread);
+        std::vector<std::thread> threads;
+        size_t chains_per_thread = nchains / nthread;
+        for(size_t i = 0; i < nthread; ++i) {
+            //chains.emplace_back(std::async(std::launch::async, 
+            //            [sample = samples_eigen[i], tmetric = metric->Clone(), 
+            //             seed = myseed.getThreadSeeds()->at(i)]() {
+            //                return mcmc_worker(sample, tmetric, seed);
+            //}));
+            chains.emplace_back();
+            threads.emplace_back(
+                    [&, i](){
+                        mcmc_worker(chains[i], samples_eigen[i], metric->Clone(), myseed.getThreadSeeds()->at(i), chains_per_thread);
+                    });
+            //mcmc_worker, chains.back(), samples_eigen[i],
+            //                            metric->Clone(), myseed.getThreadSeeds()->at(i));
+        }
+        for(auto&& t : threads) {
+            t.join();
+        }
+        //auto action = [&chain](const Eigen::VectorXf &pt) { chain.push_back(pt); };
+        //simple_target target{*metric};
+        //adaptive_proposal proposal(*metric, dseed(myseed.global_rng));
+        //Eigen::VectorXf initial = Eigen::VectorXf::Zero(metric->GetModel().nparams + metric->GetSysts().GetNSplines());
+        //Metropolis mcmc(target, proposal, initial, dseed(myseed.global_rng));
+        //mcmc.run(100'000, 1'000'000, action);
 
         std::vector<TH2D> twod;
         std::vector<TH1D> oned;
-        
+        // TODO: This is hardcoded for numu disappearance right now
+        // TODO: How do we input binnings for these plots in a nice way?
+        // TODO: Is it better to write out the chain to a cvs/root file and plot externally?
+        twod.push_back(TH2D("two", ";sin^{2}2#theta_{#mu#mu};#Deltam^{2}_{41} [eV^{2}];MCMC Points",
+                             60, -2, 0, 60, -1, 2));
+        oned.push_back(TH1D("one1", ";sin^{2}2#theta_{#mu#mu};Posterior PDF", 60, -2, 0));
+        oned.push_back(TH1D("one2", ";#Deltam^{2}_{41} [eV^{2}];Posterior PDF", 60, -1, 2));
+        //for(auto &fut : chains) {
+        //    std::vector<Eigen::VectorXf> chain = fut.get();
+        for(const auto &tchains : chains) {
+            for(const auto &chain : tchains) {
+                for(const auto &p : chain) {
+                    twod[0].Fill(p(1), p(0));
+                    oned[0].Fill(p(1));
+                    oned[1].Fill(p(0));
+                }
+            }
+        }
+        TCanvas c;
+        c.Divide(2,2);
+        c.cd(1);
+        oned[0].Scale(1.0/oned[0].Integral());
+        oned[0].Draw("hist");
+        c.cd(3);
+        twod[0].Draw("colz");
+        c.cd(4);
+        oned[1].Scale(1.0/oned[1].Integral());
+        oned[1].Draw("hist");
+        c.Print("mcmc_corner_plot.pdf");
     }
 
     //***********************************************************************
@@ -1977,5 +2038,21 @@ int main(int argc, char* argv[])
     return 0;
 }
 
+//std::vector<Eigen::VectorXf> mcmc_worker(Eigen::VectorXf initial, PROmetric *metric, uint32_t seed) {
+void mcmc_worker(std::vector<std::vector<Eigen::VectorXf>> &chains, Eigen::VectorXf initial, PROmetric *metric, uint32_t seed, size_t nchains) {
+    //std::vector<Eigen::VectorXf> chain;
+    for(size_t i = 0; i < nchains; ++i) {
+        chains.emplace_back();
+        std::vector<Eigen::VectorXf> &chain = chains.back();
+        std::uniform_int_distribution<uint32_t> dseed(0, std::numeric_limits<uint32_t>::max());
+        std::mt19937 rng(seed);
+        auto action = [&chain](const Eigen::VectorXf &pt) { chain.push_back(pt); };
+        simple_target target{*metric};
+        adaptive_proposal proposal(*metric, dseed(rng));
+        Metropolis mcmc(target, proposal, initial, dseed(rng));
+        mcmc.run(100'000, 1'000'000, action);
+    }
+    //return chain;
+}
 
 

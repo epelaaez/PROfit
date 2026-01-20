@@ -33,7 +33,12 @@ namespace PROfit {
 
                 bool step() {
                     Eigen::VectorXf p = proposal(current);
-                    float acceptance = proposal.within_bound(p) ? std::min(1.0f, target(p)/target(current) * proposal.P(current, p)/proposal.P(p, current)) : 0;
+                    float acceptance;
+                    try {
+                    acceptance = proposal.within_bound(p) ? std::min(1.0f, target(p)/target(current) * proposal.P(current, p)/proposal.P(p, current)) : 0;
+                    } catch(...) {
+                        acceptance = 0;
+                    }
                     float u = uniform(rng);
 
                     if(u <= acceptance) {
@@ -66,7 +71,7 @@ namespace PROfit {
         PROmetric &metric;
 
         float operator()(Eigen::VectorXf &value) {
-            Eigen::VectorXf empty;
+            Eigen::VectorXf empty = value;
             return std::exp(-0.5f*metric(value, empty, false));
         }
     };
