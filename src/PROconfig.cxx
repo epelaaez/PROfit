@@ -838,7 +838,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 if(text) wt = std::string(text);
 
                 //check for known attributes
-                const std::vector<std::string> expected_attrs = {"type", "plotname", "binning", "knobvals", "tag", "prior", "center"};
+                const std::vector<std::string> expected_attrs = {"type", "plotname", "binning", "knobvals", "tag", "prior", "center", "force_0_cv"};
                 for (const tinyxml2::XMLAttribute* attr = pAllowList->FirstAttribute(); attr; attr = attr->Next()) {
                     std::string name = attr->Name();
                     if (std::find(expected_attrs.begin(), expected_attrs.end(), name) == expected_attrs.end()) {
@@ -855,6 +855,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 const char *tags = pAllowList->Attribute("tag");
                 const char *prior = pAllowList->Attribute("prior");
                 const char *center = pAllowList->Attribute("center");
+                const char *force_0_cv = pAllowList->Attribute("force_0_cv");
 
 
 
@@ -914,6 +915,10 @@ int PROconfig::LoadFromXML(const std::string &filename){
                     }
                     if(begin) tags_vec.push_back(std::string(begin, c));
                     m_mcgen_variation_tags[wt] = tags_vec;
+                }
+                if(force_0_cv && strcmp(force_0_cv, "true") == 0) {
+                    m_mcgen_variation_force_0_cv[wt] = true;
+                    log<LOG_INFO>(L"%1% || Parsed force_0_cv=true for systematic %2%") % __func__ % wt.c_str();
                 }
                 log<LOG_DEBUG>(L"%1% || Allowlisting variations: %2%") % __func__ % wt.c_str() ;
                 pAllowList = pAllowList->NextSiblingElement("allowlist");

@@ -65,6 +65,7 @@ namespace PROfit{
 
         std::vector<int> norm_bins;
         float norm_value;
+        bool force_0_cv = false; // if true, normalize spline shifts by shift at knob=0
 
         //boost serialization
         template<class Archive>
@@ -83,6 +84,7 @@ namespace PROfit{
             ar & hash;
             ar & norm_bins;
             ar & norm_value;
+            ar & force_0_cv;
         }
 
 

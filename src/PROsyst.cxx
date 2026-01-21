@@ -516,14 +516,19 @@ void PROsyst::FillSpline(const SystStruct& syst) {
 
 
     bool found0 = false;
+    int knob0_index = -1;  // Index of knobval=0 in ratios vector
     std::vector<float> knobvals;
     for (size_t i = 0; i < syst.p_multi_spec.size(); ++i) {
         if (syst.knobval[i] > 0 && !found0) {
             ratios.push_back(*syst.p_cv / *syst.p_cv);
             knobvals.push_back(0);
+            knob0_index = ratios.size() - 1;
             found0 = true;
         }
-        if (syst.knobval[i] == 0) found0 = true;
+        if (syst.knobval[i] == 0) {
+            found0 = true;
+            knob0_index = ratios.size();  // Will be set after push_back below
+        }
 
         float mod = shape_only ? cv_integral / syst.p_multi_spec[i]->Spec().sum() : 1.0;
         ratios.push_back(((*syst.p_multi_spec[i]) * mod) / *syst.p_cv);
@@ -532,6 +537,18 @@ void PROsyst::FillSpline(const SystStruct& syst) {
     if (!found0) {
         ratios.push_back(*syst.p_cv / *syst.p_cv);
         knobvals.push_back(0);
+        knob0_index = ratios.size() - 1;
+    }
+
+    // If force_0_cv is set, normalize all ratios by the ratio at knob=0
+    // This ensures that at shift=0, the spline returns exactly 1.0 (no change to CV)
+    if (syst.force_0_cv && knob0_index >= 0) {
+        log<LOG_INFO>(L"%1% || Applying force_0_cv normalization for systematic %2%") % __func__ % syst.systname.c_str();
+        // IMPORTANT: Make a copy, not a reference! Otherwise we modify the divisor during the loop.
+        PROspec ratio_at_0 = ratios[knob0_index];
+        for (size_t i = 0; i < ratios.size(); ++i) {
+            ratios[i] = ratios[i] / ratio_at_0;
+        }
     }
 
     int nbins = syst.p_cv->GetNbins();

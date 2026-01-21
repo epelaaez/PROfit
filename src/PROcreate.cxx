@@ -423,6 +423,11 @@ namespace PROfit {
                     sv.back().knobval = sv.back().knob_index;
                     std::sort(sv.back().knobval.begin(), sv.back().knobval.end());
                     sv.back().binning = binningindex;
+                    // Check if force_0_cv is set for this systematic
+                    if(inconfig.m_mcgen_variation_force_0_cv.find(sys_name) != inconfig.m_mcgen_variation_force_0_cv.end()) {
+                        sv.back().force_0_cv = inconfig.m_mcgen_variation_force_0_cv.at(sys_name);
+                        log<LOG_INFO>(L"%1% || Setting force_0_cv=true for systematic %2%") % __func__ % sys_name.c_str();
+                    }
                 }
                 if(sys_mode == "flat"){
                     log<LOG_INFO>(L"%1% || Systematic variation %2% is a match for a flat covariance systematic. Processing a such. ") % __func__ % sys_name.c_str();

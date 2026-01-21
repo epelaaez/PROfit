@@ -225,8 +225,16 @@ def process_branch(c, branch, evws, mcpot, subchannel_index, syst_vector, syst_a
                 pass # TODO -- implement other binning
 
             s.FillCV(spline_bin[valid], mc_weight[valid])
-            for i_univ, shift in enumerate(s.knobval):
-                s.FillUniverse(i_univ, spline_bin[valid], (mc_weight*additional_weight*evw.shift(shift))[valid])
+            
+            # If force_0_cv is set, normalize shifts by the shift at knob=0
+            # Note: This is also implemented in PROsyst::FillSpline for the C++ code path
+            if s.force_0_cv:
+                cv_shift = evw.shift(0)
+                for i_univ, shift in enumerate(s.knobval):
+                    s.FillUniverse(i_univ, spline_bin[valid], (mc_weight*additional_weight*evw.shift(shift)/cv_shift)[valid])
+            else:
+                for i_univ, shift in enumerate(s.knobval):
+                    s.FillUniverse(i_univ, spline_bin[valid], (mc_weight*additional_weight*evw.shift(shift))[valid])
         else:
             s.FillCV(global_bin[valid], mc_weight[valid])
             for i_univ in range(s.GetNUniverse()):

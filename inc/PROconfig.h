@@ -347,6 +347,7 @@ namespace PROfit{
             std::vector<std::tuple<std::string, std::string, float>> m_mcgen_correlations;
             std::map<std::string, float> m_mcgen_variation_prior;
             std::map<std::string, float> m_mcgen_variation_prior_centers;
+            std::map<std::string, bool> m_mcgen_variation_force_0_cv; //map of systematics with force_0_cv=true (normalize shifts by shift at knob=0)
       
             //FIX skepic
             std::vector<std::string> systematic_name;
