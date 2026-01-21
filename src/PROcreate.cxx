@@ -135,7 +135,7 @@ namespace PROfit {
             std::vector<std::string> filesForChain;
 
             if (fn.find(".root") != std::string::npos) {
-                log<LOG_INFO>(L"%1% || Starting a (single) TCHain, loading file %2%") % __func__  % fn.c_str();
+                log<LOG_INFO>(L"%1% || Starting a (single) TChain, loading file %2%") % __func__  % fn.c_str();
                 filesForChain.push_back(useXrootD ? convertToXRootD(fn) : fn);
             }else{
 
@@ -664,6 +664,25 @@ namespace PROfit {
         time_t time_took = time(nullptr) - start_time;
         log<LOG_INFO>(L"%1% || Finish reading files, it took %2% seconds..") % __func__ % time_took;
         log<LOG_INFO>(L"%1% || DONE") %__func__ ;
+
+        // Cleanup TChain objects to avoid ROOT/Cling JIT crash during global cleanup
+        log<LOG_DEBUG>(L"%1% || Cleaning up TChain objects...") % __func__;
+        for(int fid = 0; fid < num_files; ++fid) {
+            // Delete friend chains first (they were added to main chain)
+            for(auto* friendChain : friendChains[fid]) {
+                if(friendChain) {
+                    delete friendChain;
+                }
+            }
+            friendChains[fid].clear();
+            
+            // Delete main chain
+            if(chains[fid]) {
+                delete chains[fid];
+                chains[fid] = nullptr;
+            }
+        }
+        log<LOG_DEBUG>(L"%1% || TChain cleanup complete.") % __func__;
 
         return 0;
     }

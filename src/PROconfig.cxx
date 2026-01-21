@@ -1814,7 +1814,13 @@ ROOTFormula::ROOTFormula(const std::string &name, const std::string &formula, TT
     // split the formula at a ";" into multiple values. used to be "," but that breaks arguments
     std::string this_formula;
     while(std::getline(formula_reader, this_formula, ';')) {
-        fs.push_back(std::make_unique<TTreeFormula>(name.c_str(), this_formula.c_str(), t));
+        auto f = std::make_unique<TTreeFormula>(name.c_str(), this_formula.c_str(), t);
+        // Check if formula compiled successfully
+        if (f->GetNdim() == 0 && f->GetNcodes() == 0) {
+            log<LOG_ERROR>(L"%1% || ERROR: TTreeFormula not compiled correctly for formula: %2%") % __func__ % this_formula.c_str();
+            exit(EXIT_FAILURE);
+        }
+        fs.push_back(std::move(f));
     }
     treeNumber = -1;
 }
