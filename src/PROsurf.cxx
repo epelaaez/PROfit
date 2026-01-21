@@ -120,7 +120,7 @@ PROsurf::PROsurf(PROmetric &metric,  size_t x_idx, size_t y_idx, size_t nbinsx, 
 
 }
 
-void PROsurf::FillSurfaceStat(const PROconfig &config, const PROfitterConfig &fitconfig, std::string filename) {
+void PROsurf::FillSurfaceStat(const PROconfig &config, const PROfitterConfig &fitconfig, std::string filename, const Eigen::VectorXf &cv_params) {
     std::ofstream chi_file;
     if(!filename.empty()){
         chi_file.open(filename);
@@ -139,18 +139,19 @@ void PROsurf::FillSurfaceStat(const PROconfig &config, const PROfitterConfig &fi
     // I think this will be needed for stat fits with more than 2 physics parameters
     (void)fitconfig;
 
-    PROsyst dummy_syst;
-    dummy_syst.fractional_covariance = Eigen::MatrixXf::Constant(config.m_num_variable_bins_total[config.i_prime], config.m_num_variable_bins_total[config.i_prime], 0);
-    Eigen::VectorXf empty_vec;
-
     PROmetric *local_metric = metric.Clone();
-    local_metric->override_systs(dummy_syst);
+    // When doing actual fits here we need to set the bounds of the metric
+    // so the bounds of the systs are the cv values
     float min_chi = 1e9;
+    Eigen::VectorXf dummy_grad = cv_params;
+    Eigen::VectorXf params = cv_params;
 
     for(size_t i = 0; i < nbinsx; i++) {
         for(size_t j = 0; j < nbinsy; j++) {
-            Eigen::VectorXf physics_params{{(float)edges_y(j), (float)edges_x(i)}};
-            float fx = (*local_metric)(physics_params, empty_vec, false);
+            // TODO: Make this work for models with more than 2 parameters
+            params(0) = (float)edges_y(j);
+            params(1) = (float)edges_x(j);
+            float fx = (*local_metric)(params, dummy_grad, false);
             if(fx < min_chi) min_chi = fx;
             surface(i, j) = fx;
         }
