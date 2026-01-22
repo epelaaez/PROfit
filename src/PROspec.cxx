@@ -17,8 +17,19 @@ PROspec PROspec::PoissonVariation(const PROspec &s, uint32_t seed) {
     PROspec newSpec(s.nbins);
 
     for(size_t i = 0; i < s.nbins; i++) {
-        std::poisson_distribution<> d(s.GetBinContent(i));
-        newSpec.Fill(i, d(gen));
+        float bin_content = s.GetBinContent(i);
+        if(bin_content < 0) {
+            log<LOG_ERROR>(L"%1% || Cannot perform Poisson variation: bin %2% has negative content %3%. ") 
+                % __func__ % i % bin_content;
+            log<LOG_ERROR>(L"Terminating.");
+            exit(EXIT_FAILURE);
+        }
+        else if(bin_content == 0) {
+            newSpec.Fill(i, 0);
+        } else {
+            std::poisson_distribution<> d(bin_content);
+            newSpec.Fill(i, d(gen));
+        }
     }
 
     return newSpec;
