@@ -531,6 +531,13 @@ void PROsyst::FillSpline(const SystStruct& syst) {
         }
 
         float mod = shape_only ? cv_integral / syst.p_multi_spec[i]->Spec().sum() : 1.0;
+        /*
+        if (mod < 0) {
+            log<LOG_ERROR>(L"%1% || Spline shift weight is negative with value %2% for systematic %3%") % __func__ % mod % syst.systname.c_str();
+            log<LOG_ERROR>(L"Terminating.");
+            exit(EXIT_FAILURE);
+        }
+        */
         ratios.push_back(((*syst.p_multi_spec[i]) * mod) / *syst.p_cv);
         knobvals.push_back(syst.knobval[i]);
     }

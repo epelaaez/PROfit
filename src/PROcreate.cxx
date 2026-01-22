@@ -75,6 +75,13 @@ namespace PROfit {
     }
 
     void SystStruct::FillUniverse(int universe, int global_bin, float event_weight){
+        /*
+        if (event_weight < 0) {
+            log<LOG_ERROR>(L"%1% || Event weight is negative with value %2% for systematic %3%") % __func__ % event_weight % systname.c_str();
+            log<LOG_ERROR>(L"Terminating.");
+            exit(EXIT_FAILURE);
+        }
+        */
         p_multi_spec.at(universe)->QuickFill(global_bin, event_weight);
         return;
     }
