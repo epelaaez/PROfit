@@ -440,10 +440,10 @@ int main(int argc, char* argv[])
             //Process the CAF files to grab and fill spectrum directly
             std::vector<PROdata> alldata = CreatePROdata(dataconfig);
             PROdata::saveVector(dataconfig, alldata, dataBinName);
-            data = alldata[0];
+            data = alldata[config.i_prime];
             //data.save(dataconfig,dataBinName);
             for(size_t io = 0; io < dataconfig.m_num_variables; ++io)
-                variable_data.push_back(alldata[io+1]);
+                variable_data.push_back(alldata[io]);
 
             log<LOG_INFO>(L"%1% || Done processing Data from XML defined root files, and saving to binary output also: %2%") % __func__ % dataBinName.c_str();
         }else{
@@ -451,7 +451,7 @@ int main(int argc, char* argv[])
             //data.load(dataBinName);
             std::vector<PROdata> alldata;
             PROdata::loadVector(alldata, dataBinName);
-            data = alldata[0];
+            data = alldata[config.i_prime];
             //data.save(dataconfig,dataBinName);
             for(size_t io = 0; io < dataconfig.m_num_variables; ++io)
                 variable_data.push_back(alldata[io]);
