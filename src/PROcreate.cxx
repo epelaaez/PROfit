@@ -413,6 +413,11 @@ namespace PROfit {
                     sv.back().SetWeightFormula(sys_weight_formula);
                     sv.back().SetMode(sys_mode);
                 }
+                // Check if scale is set for this systematic
+                if(inconfig.m_mcgen_variation_scale.find(sys_name) != inconfig.m_mcgen_variation_scale.end()) {
+                    sv.back().scale = inconfig.m_mcgen_variation_scale.at(sys_name);
+                    log<LOG_INFO>(L"%1% || Setting scale=%2% for systematic %3%") % __func__ % sv.back().scale % sys_name.c_str();
+                }
                 if(sys_mode == "spline") {
                     bool override_knobs = inconfig.m_mcgen_variation_knobval_override.find(sys_name) != inconfig.m_mcgen_variation_knobval_override.end();
                     if(!override_knobs && map_systematic_knob_vals.find(sys_name) == map_systematic_knob_vals.end()) {
@@ -938,7 +943,9 @@ namespace PROfit {
                     }
                 }
                 for(int iuni = 0; iuni < var_syst_objs.front()->GetNUniverse(); ++iuni){
-                    float sys_wei = run_syst ? additional_weight * static_cast<float>(map_iter->second->at(iuni) ) :  1.0;
+                    float raw_weight = static_cast<float>(map_iter->second->at(iuni));
+                    float scaled_weight = raw_weight * var_syst_objs.front()->scale; // apply scale factor (default 1.0)
+                    float sys_wei = run_syst ? additional_weight * scaled_weight :  1.0;
                     for(size_t io = 0; io < inconfig.m_num_variables; ++io) {
                         if(var_bin_indices[io] >= 0){
                             var_syst_objs[io]->FillUniverse(iuni, var_bin_indices[io], mc_weight * sys_wei);

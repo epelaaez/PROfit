@@ -66,6 +66,7 @@ namespace PROfit{
         std::vector<int> norm_bins;
         float norm_value;
         bool force_0_cv = false; // if true, normalize spline shifts by shift at knob=0
+        float scale = 1.0f; // scale factor to apply to weights (e.g., 0.001 for weights stored as x1000)
 
         //boost serialization
         template<class Archive>
@@ -85,6 +86,7 @@ namespace PROfit{
             ar & norm_bins;
             ar & norm_value;
             ar & force_0_cv;
+            ar & scale;
         }
 
 
