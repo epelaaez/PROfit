@@ -113,6 +113,8 @@ int main(int argc, char* argv[])
     std::map<std::string, float> bound_list;
     PlotBounds pbounds; 
     size_t nuniv;
+    bool gof_pvalue = false;
+    bool pvalue = false;
 
 
     //Global Arguments for all PROfit enables subcommands.
@@ -196,6 +198,8 @@ int main(int argc, char* argv[])
     //PROfc, Feldmand-Cousins
     CLI::App *profc_command = app.add_subcommand("fc", "Run Feldman-Cousins for this injected signal");
     profc_command->add_option("-u,--universes", nuniv, "Number of Feldman Cousins universes to throw")->default_val(1000);
+    profc_command->add_flag("--gof", gof_pvalue, "Get GOF pvalue");
+    profc_command->add_flag("--pval", pvalue, "Get FC pvalue")->excludes("--gof");
 
     //PROglobal
     CLI::App *proglobal_command = app.add_subcommand("global", "Just do a single global fit.");
@@ -437,10 +441,10 @@ int main(int argc, char* argv[])
             //Process the CAF files to grab and fill spectrum directly
             std::vector<PROdata> alldata = CreatePROdata(dataconfig);
             PROdata::saveVector(dataconfig, alldata, dataBinName);
-            data = alldata[0];
+            data = alldata[config.i_prime];
             //data.save(dataconfig,dataBinName);
             for(size_t io = 0; io < dataconfig.m_num_variables; ++io)
-                variable_data.push_back(alldata[io+1]);
+                variable_data.push_back(alldata[io]);
 
             log<LOG_INFO>(L"%1% || Done processing Data from XML defined root files, and saving to binary output also: %2%") % __func__ % dataBinName.c_str();
         }else{
@@ -448,10 +452,10 @@ int main(int argc, char* argv[])
             //data.load(dataBinName);
             std::vector<PROdata> alldata;
             PROdata::loadVector(alldata, dataBinName);
-            data = alldata[0];
+            data = alldata[config.i_prime];
             //data.save(dataconfig,dataBinName);
             for(size_t io = 0; io < dataconfig.m_num_variables; ++io)
-                variable_data.push_back(alldata[io+1]);
+                variable_data.push_back(alldata[io]);
 
             log<LOG_INFO>(L"%1% || Done loading. Config hash (%2%) and binary loaded Data (%3%) hash are here. ") % __func__ %  dataconfig.hash % data.hash;
             if(dataconfig.hash!=data.hash){
@@ -1545,9 +1549,75 @@ int main(int argc, char* argv[])
     //***********************************************************************
 
     if(*profc_command) {
+        float global_chi2 = 0, null_chi2 = 0;
+        if(gof_pvalue || pvalue) {
+            PROfitter fitter(global_ub, global_lb, fitConfig);
+            metric->setBounds(global_ub, global_ub);
+
+            std::vector<std::pair<int, std::string>> global_PB_configs;
+            global_PB_configs.push_back({fitConfig.n_latin_points, "(1) LatinHyperCube"});
+            global_PB_configs.push_back({fitConfig.n_swarm_iterations, "(2) ParticleSwarm"});
+            global_PB_configs.push_back({fitConfig.n_localfit, "(3) BestLBFGSB"});
+            global_PB_configs.push_back({fitConfig.harmonic_num_test_points, "(4) HarmonicScan"});
+            global_PB_configs.push_back({100, "(5) HarmonicLBFGSB"});
+            MultiPROgressBar global_progress(global_PB_configs);
+
+            if(progress_bar){
+                global_progress.initialize_display();
+                global_progress.start_display_thread(); 
+                fitter.setProgressBar(&global_progress);
+            }
+
+            float best_chi2 = fitter.Fit(*metric,CVParams); 
+            fitter.calcFreqSeedPoints(*metric);
+
+            for(size_t i=0; i< fitter.freq_seed_points.size(); i++){
+                float chi_freq = fitter.freq_seed_values.at(i);
+                 if(chi_freq < best_chi2){
+                    log<LOG_INFO>(L"%1% || One of the harmonics of first pass best fit, is a lower chi :  %2% ") % __func__ % fitter.freq_seed_values.at(i);
+                    log<LOG_INFO>(L"%1% || -- at params:  %2% ") % __func__ % fitter.freq_seed_points.at(i);
+                    best_chi2 = chi_freq;
+                    //best_fit = fitter.freq_seed_points.at(i);
+                }
+            }
+            global_chi2 = best_chi2;
+            global_progress.finish_all();
+        }
+        if(pvalue) {
+            size_t nparams = metric->GetModel().nparams + metric->GetSysts().GetNSplines();
+            size_t nphys = metric->GetModel().nparams;
+            Eigen::VectorXf lb = Eigen::VectorXf::Constant(nparams, -3.0);
+            Eigen::VectorXf ub = Eigen::VectorXf::Constant(nparams, 3.0);
+            for(size_t i = 0; i < nphys; ++i) {
+                lb(i) = metric->GetModel().default_val(i);
+                ub(i) = metric->GetModel().default_val(i);
+            }
+            for(size_t i = nphys; i < nparams; ++i) {
+                lb(i) = metric->GetSysts().spline_lo[i-nphys];
+                ub(i) = metric->GetSysts().spline_hi[i-nphys];
+            }
+            metric->setBounds(lb, ub);
+            PROfitter fitter(metric->UpperBound(), metric->LowerBound(), fitConfig);
+            metric->setBounds(metric->UpperBound(), metric->LowerBound());
+            std::vector<std::pair<int, std::string>> global_PB_configs;
+            global_PB_configs.push_back({fitConfig.n_latin_points, "(1) LatinHyperCube"});
+            global_PB_configs.push_back({fitConfig.n_swarm_iterations, "(2) ParticleSwarm"});
+            global_PB_configs.push_back({fitConfig.n_localfit, "(3) BestLBFGSB"});
+            global_PB_configs.push_back({180, "(4) HarmonicScan"});
+            global_PB_configs.push_back({100, "(5) HarmonicLBFGSB"});
+
+            MultiPROgressBar global_progress(global_PB_configs);
+            global_progress.initialize_display();
+            global_progress.start_display_thread(); 
+
+            fitter.setProgressBar(&global_progress);
+            float fit_chi2 = fitter.Fit(*metric); 
+            null_chi2 = fit_chi2;
+            global_progress.finish_all();
+        }
+
         size_t FCthreads = nthread > nuniv ? nuniv : nthread;
         Eigen::MatrixXf cv_vec = FillSpectra(config, prop, metric->GetSysts(), metric->GetModel(), CVParams , true,config.i_prime).Spec();
-
         Eigen::MatrixXf L = variable_systs[config.i_prime].DecomposeFractionalCovariance(config, cv_vec);
 
         std::vector<std::vector<float>> dchi2s;
@@ -1557,17 +1627,57 @@ int main(int argc, char* argv[])
         std::vector<std::thread> threads;
         size_t todo = nuniv/FCthreads;
         size_t addone = FCthreads - nuniv%FCthreads;
+        bool gof_mode = gof_pvalue;
+
+        std::vector<std::pair<int, std::string>> fc_PB_configs;
+        for (size_t i = 0; i < FCthreads; ++i) {
+                fc_PB_configs.push_back({int(nuniv/FCthreads), "Thread " + std::to_string(i)});
+        }
+        MultiPROgressBar fc_progress(fc_PB_configs);
+        fc_progress.initialize_display();
+        fc_progress.start_display_thread(); 
+
+
         for(size_t i = 0; i < nthread; i++) {
             dchi2s.emplace_back();
             outs.emplace_back();
-            fc_args args{todo + (i >= addone), &dchi2s.back(), &outs.back(), config, prop, variable_systs[config.i_prime], chi2, fakeDataParams, L, scanFitConfig,(*myseed.getThreadSeeds())[i], (int)i, !eventbyevent};
+            fc_args args{todo + (i >= addone), &dchi2s.back(), &outs.back(), config, prop, variable_systs[config.i_prime], chi2, fakeDataParams, L, scanFitConfig,(*myseed.getThreadSeeds())[i], (int)i, !eventbyevent, gof_mode};
 
-            threads.emplace_back([args]() {
-                    PROfit::fc_worker(args);
-                    });
+
+            threads.emplace_back([args, &fc_progress]() {
+                        PROfit::fc_worker(args, std::ref(fc_progress));
+                        });
         }
         for(auto&& t: threads) {
             t.join();
+        }
+        fc_progress.finish_all();
+
+        std::vector<float> flattened_dchi2s;
+        for(const auto& v: dchi2s) for(const auto& dchi2: v) flattened_dchi2s.push_back(dchi2);
+        std::sort(flattened_dchi2s.begin(), flattened_dchi2s.end());
+        log<LOG_INFO>(L"%1% || 90%% Feldman-Cousins delta chi2 after throwing %2% universes is %3%") 
+            % __func__ % nuniv % flattened_dchi2s[0.9*flattened_dchi2s.size()];
+        if(gof_pvalue) {
+            log<LOG_ERROR>(L"%1% || All: %2% ") % __func__ % flattened_dchi2s;
+            log<LOG_ERROR>(L"%1% || chi: %2% ") % __func__ % global_chi2;
+            auto it = std::lower_bound(flattened_dchi2s.begin(), flattened_dchi2s.end(), global_chi2);
+            size_t index =  std::distance(flattened_dchi2s.begin(),it);
+            size_t count_above = flattened_dchi2s.size()-index;
+            float pval = (float)count_above/(float)nuniv;
+            log<LOG_ERROR>(L"%1% || Finished throws. %2% %3%") % __func__ % index % count_above;
+            log<LOG_ERROR>(L"%1% || GOF pval after throwing %2% universes is %3%") % __func__ % nuniv % pval ;
+        }
+        if(pvalue) {
+            log<LOG_ERROR>(L"%1% || All Delta Chis: %2% ") % __func__ % flattened_dchi2s;
+            log<LOG_ERROR>(L"%1% || Delta chi bkg-min: %2% ") % __func__ % float(null_chi2 - global_chi2);
+            auto itFC = std::lower_bound(flattened_dchi2s.begin(), flattened_dchi2s.end(), float(null_chi2-global_chi2));
+            size_t indexFC =  std::distance(flattened_dchi2s.begin(),itFC);
+            size_t count_aboveFC = flattened_dchi2s.size()-indexFC;
+            float pvalFC = (float)count_aboveFC/(float)nuniv;
+
+            log<LOG_ERROR>(L"%1% || Finished throws. %2% %3%") % __func__ % indexFC % count_aboveFC;
+            log<LOG_ERROR>(L"%1% || FC Corrected pval after throwing %2% universes is %3%") % __func__ % nuniv % pvalFC ;
         }
 
         {
@@ -1591,7 +1701,7 @@ int main(int argc, char* argv[])
                     best_dmsq = fco.dmsq;
                     best_sinsq2t = fco.sinsq2tmm;
                     for(size_t i = 0; i < variable_systs[config.i_prime].GetNSplines(); ++i) {
-                        best_systs_osc[variable_systs[config.i_prime].spline_names[i]] = fco.best_fit_osc(i);
+                        if(!gof_pvalue) best_systs_osc[variable_systs[config.i_prime].spline_names[i]] = fco.best_fit_osc(i);
                         best_systs[variable_systs[config.i_prime].spline_names[i]] = fco.best_fit_syst(i);
                         syst_throw[variable_systs[config.i_prime].spline_names[i]] = fco.syst_throw(i);
                     }
@@ -1613,17 +1723,12 @@ int main(int argc, char* argv[])
                 for(const auto &fco: out) {
                     fcout << fco.chi2_osc << "," << fco.chi2_syst << "," << fco.dmsq << "," << fco.sinsq2tmm;
                     for(size_t i = 0; i < variable_systs[config.i_prime].GetNSplines(); ++i) {
-                        fcout << fco.best_fit_osc(i) << "," << fco.best_fit_syst(i) << "," << fco.syst_throw(i);
+                        fcout << (gof_pvalue ? 0 : fco.best_fit_osc(i)) << "," << fco.best_fit_syst(i) << "," << fco.syst_throw(i);
                     }
                     fcout << "\r\n";
                 }
             }
         }
-        std::vector<float> flattened_dchi2s;
-        for(const auto& v: dchi2s) for(const auto& dchi2: v) flattened_dchi2s.push_back(dchi2);
-        std::sort(flattened_dchi2s.begin(), flattened_dchi2s.end());
-        log<LOG_INFO>(L"%1% || 90%% Feldman-Cousins delta chi2 after throwing %2% universes is %3%") 
-            % __func__ % nuniv % flattened_dchi2s[0.9*flattened_dchi2s.size()];
     }
 
 
