@@ -75,6 +75,7 @@ namespace PROfit {
     }
 
     void SystStruct::FillUniverse(int universe, int global_bin, float event_weight){
+        
         /*
         if (event_weight < 0) {
             log<LOG_ERROR>(L"%1% || Event weight is negative with value %2% for systematic %3%") % __func__ % event_weight % systname.c_str();
@@ -82,6 +83,7 @@ namespace PROfit {
             exit(EXIT_FAILURE);
         }
         */
+        
         p_multi_spec.at(universe)->QuickFill(global_bin, event_weight);
         return;
     }
@@ -439,6 +441,11 @@ namespace PROfit {
                     if(inconfig.m_mcgen_variation_force_0_cv.find(sys_name) != inconfig.m_mcgen_variation_force_0_cv.end()) {
                         sv.back().force_0_cv = inconfig.m_mcgen_variation_force_0_cv.at(sys_name);
                         log<LOG_INFO>(L"%1% || Setting force_0_cv=true for systematic %2%") % __func__ % sys_name.c_str();
+                    }
+                    // Check if no_xs_weight_spline is set for this systematic
+                    if(inconfig.m_mcgen_variation_no_xs_weight_spline.find(sys_name) != inconfig.m_mcgen_variation_no_xs_weight_spline.end()) {
+                        sv.back().no_xs_weight_spline = inconfig.m_mcgen_variation_no_xs_weight_spline.at(sys_name);
+                        log<LOG_INFO>(L"%1% || Setting no_xs_weight_spline=true for systematic %2%") % __func__ % sys_name.c_str();
                     }
                 }
                 if(sys_mode == "flat"){
@@ -873,12 +880,16 @@ namespace PROfit {
         std::vector<BranchVariable::Value> vars = branch->GetVariables();
 
         int run_syst = branch->GetIncludeSystematics();
-        float mc_weight = branch->GetMonteCarloWeight();
+        float mc_weight_no_pot_scaling = branch->GetMonteCarloWeight();
+
+        //log<LOG_ERROR>(L"%1% || Initial mc_weight from GetMonteCarloWeight: %2%") % __func__ % mc_weight;
 
         int channel_group = subchannel_index / std::accumulate(inconfig.m_num_subchannels.begin(), inconfig.m_num_subchannels.end(), 0);
         int det = channel_group % inconfig.m_num_detectors;
 
-        mc_weight *= inconfig.m_det_pot[det] / mcpot;
+        float mc_weight = mc_weight_no_pot_scaling * inconfig.m_det_pot[det] / mcpot;
+
+        //log<LOG_ERROR>(L"%1% || Final mc_weight after det_pot scaling: %2%") % __func__ % mc_weight;
 
         int model_rule = branch->GetModelRule();
 
@@ -919,7 +930,7 @@ namespace PROfit {
             for(size_t io = 0; io < inconfig.m_num_variables; ++io)
                 var_syst_objs.push_back(&syst_vector[io][i]);
 
-            float additional_weight = syst_additional_weight.at(i);
+            float additional_weight = syst_additional_weight.at(i); // extra per-systematic weights, unrelated to the per-event additional_weight set in the xml file
             auto map_iter = eventweight_map.find(var_syst_objs.front()->GetSysName());
             int spline_bin = (var_syst_objs.front()->mode == "covariance") ? -1: var_bin_indices[var_syst_objs.front()->binning];
 
@@ -935,8 +946,12 @@ namespace PROfit {
                     
                     float w = static_cast<float>(map_iter->second->at(is));
                     if(std::isnan(w) || std::isinf(w)) w = 1;
-                    for(auto so: var_syst_objs)
-                        so->FillUniverse(u, spline_bin, mc_weight * additional_weight * w);
+                    for(auto so: var_syst_objs){
+                        if (so->no_xs_weight_spline)
+                            so->FillUniverse(u, spline_bin, mc_weight * additional_weight * w / mc_weight_no_pot_scaling);
+                        else
+                            so->FillUniverse(u, spline_bin, mc_weight * additional_weight * w);
+                    }
                 }
 
                 continue;

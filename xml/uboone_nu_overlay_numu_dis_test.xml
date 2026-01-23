@@ -35,7 +35,7 @@
 	<branch
         	associated_subchannel = "nu_UBOONE_nuoverlay_overlay"
         	model_rule            = "1"
-			additional_weight     = "0 < kine_reco_Enu"
+			additional_weight     = "(0 < kine_reco_Enu) * (weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
 		>
 		<variable>kine_reco_Enu</variable>
 		<variable>truth_nuEnergy</variable>
@@ -45,90 +45,91 @@
 
 
 <variation_list>
+
     <!-- MC Statistics -->
 	<allowlist type="mcstat" plotname="MC Stats" tag="other">MCStat</allowlist>
 
 
     <!-- Cross Section Systematics -->
 	
-	<allowlist type="spline" binning="var0" plotname="MACCQE" tag="QE" force_0_cv="true">MaCCQE_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="AxFFCCQEshape" knobvals="0, 1" tag="QE" force_0_cv="true">AxFFCCQEshape_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="VecFFCCQEshape" knobvals="0, 1" tag="QE" force_0_cv="true">VecFFCCQEshape_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="RPA_CCQE" tag="QE" force_0_cv="true">RPA_CCQE_UBGenie</allowlist> 
-	<allowlist type="spline" binning="var0" plotname="CoulombCCQE" tag="QE" force_0_cv="true">CoulombCCQE_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="MACCQE" tag="QE" force_0_cv="true" no_xs_weight_spline="true">MaCCQE_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="AxFFCCQEshape" knobvals="0, 1" tag="QE" force_0_cv="true" no_xs_weight_spline="true">AxFFCCQEshape_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="VecFFCCQEshape" knobvals="0, 1" tag="QE" force_0_cv="true" no_xs_weight_spline="true">VecFFCCQEshape_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="RPA_CCQE" tag="QE" force_0_cv="true" no_xs_weight_spline="true">RPA_CCQE_UBGenie</allowlist> 
+	<allowlist type="spline" binning="var0" plotname="CoulombCCQE" tag="QE" force_0_cv="true" no_xs_weight_spline="true">CoulombCCQE_UBGenie</allowlist>
 
-	<allowlist type="spline" binning="var0" plotname="NormCCMEC" knobvals="-2, -1, 0, 1, 2, 3" tag="MEC" force_0_cv="true">NormCCMEC_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="NormNCMEC" knobvals="-1, 0, 1, 2, 3" tag="MEC" force_0_cv="true">NormNCMEC_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="XSecShape_CCMEC" knobvals="0, 1" tag="MEC" force_0_cv="true">XSecShape_CCMEC_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="DecayAngMEC" knobvals="0, 1" tag="MEC" force_0_cv="true">DecayAngMEC_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="FracPN_CCMEC" tag="MEC" force_0_cv="true">FracPN_CCMEC_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="FracDelta_CCMEC" tag="MEC" force_0_cv="true">FracDelta_CCMEC_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="NormCCMEC" knobvals="-2, -1, 0, 1, 2, 3" tag="MEC" force_0_cv="true" no_xs_weight_spline="true">NormCCMEC_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="NormNCMEC" knobvals="-1, 0, 1, 2, 3" tag="MEC" force_0_cv="true" no_xs_weight_spline="true">NormNCMEC_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="XSecShape_CCMEC" knobvals="0, 1" tag="MEC" force_0_cv="true" no_xs_weight_spline="true">XSecShape_CCMEC_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="DecayAngMEC" knobvals="0, 1" tag="MEC" force_0_cv="true" no_xs_weight_spline="true">DecayAngMEC_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="FracPN_CCMEC" tag="MEC" force_0_cv="true" no_xs_weight_spline="true">FracPN_CCMEC_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="FracDelta_CCMEC" tag="MEC" force_0_cv="true" no_xs_weight_spline="true">FracDelta_CCMEC_UBGenie</allowlist>
 	
-	<allowlist type="spline" binning="var0" plotname="MaCCRES" tag="RES" force_0_cv="true">MaCCRES_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="MvCCRES" tag="RES" force_0_cv="true">MvCCRES_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="MaNCRES" tag="RES" force_0_cv="true">MaNCRES_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="MvNCRES" tag="RES" force_0_cv="true">MvNCRES_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="RDecBR1eta" tag="RES" force_0_cv="true">RDecBR1eta_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="Theta_Delta2Npi" knobvals="0, 1" tag="RES" force_0_cv="true">Theta_Delta2Npi_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="RDecBR1gamma" tag="RES" force_0_cv="true">RDecBR1gamma_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="ThetaDelta2NRad" knobvals="0, 1" tag="RES" force_0_cv="true">ThetaDelta2NRad_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="MaCCRES" tag="RES" force_0_cv="true" no_xs_weight_spline="true">MaCCRES_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="MvCCRES" tag="RES" force_0_cv="true" no_xs_weight_spline="true">MvCCRES_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="MaNCRES" tag="RES" force_0_cv="true" no_xs_weight_spline="true">MaNCRES_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="MvNCRES" tag="RES" force_0_cv="true" no_xs_weight_spline="true">MvNCRES_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="RDecBR1eta" tag="RES" force_0_cv="true" no_xs_weight_spline="true">RDecBR1eta_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="Theta_Delta2Npi" knobvals="0, 1" tag="RES" force_0_cv="true" no_xs_weight_spline="true">Theta_Delta2Npi_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="RDecBR1gamma" tag="RES" force_0_cv="true" no_xs_weight_spline="true">RDecBR1gamma_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="ThetaDelta2NRad" knobvals="0, 1" tag="RES" force_0_cv="true" no_xs_weight_spline="true">ThetaDelta2NRad_UBGenie</allowlist>
 
-	<allowlist type="spline" binning="var0" plotname="NormCCCOH" knobvals="-1, 0, 1, 2, 3" tag="COH" force_0_cv="true">NormCCCOH_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="NormNCCOH" knobvals="-1, 0, 1, 2, 3" tag="COH" force_0_cv="true">NormNCCOH_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="NormCCCOH" knobvals="-1, 0, 1, 2, 3" tag="COH" force_0_cv="true" no_xs_weight_spline="true">NormCCCOH_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="NormNCCOH" knobvals="-1, 0, 1, 2, 3" tag="COH" force_0_cv="true" no_xs_weight_spline="true">NormNCCOH_UBGenie</allowlist>
 	
-	<allowlist type="spline" binning="var0" plotname="MaNCEL" tag="NC" force_0_cv="true">MaNCEL_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="EtaNCEL" tag="NC" force_0_cv="true">EtaNCEL_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="MaNCEL" tag="NC" force_0_cv="true" no_xs_weight_spline="true">MaNCEL_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="EtaNCEL" tag="NC" force_0_cv="true" no_xs_weight_spline="true">EtaNCEL_UBGenie</allowlist>
 
-	<allowlist type="spline" binning="var0" plotname="AGKYxF1pi" tag="Hadr." force_0_cv="true">AGKYxF1pi_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="AGKYpT1pi" tag="Hadr." force_0_cv="true">AGKYpT1pi_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="AGKYxF1pi" tag="Hadr." force_0_cv="true" no_xs_weight_spline="true">AGKYxF1pi_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="AGKYpT1pi" tag="Hadr." force_0_cv="true" no_xs_weight_spline="true">AGKYpT1pi_UBGenie</allowlist>
 
-	<allowlist type="spline" binning="var0" plotname="NonRESBGvbarnNC1pi" tag="Non-RES" force_0_cv="true">NonRESBGvbarnNC1pi_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="NonRESBGvbarnNC2pi" tag="Non-RES" force_0_cv="true">NonRESBGvbarnNC2pi_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="NonRESBGvbarpNC1pi" tag="Non-RES" force_0_cv="true">NonRESBGvbarpNC1pi_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="NonRESBGvbarpNC2pi" tag="Non-RES" force_0_cv="true">NonRESBGvbarpNC2pi_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="NonRESBGvnNC1pi" tag="Non-RES" force_0_cv="true">NonRESBGvnNC1pi_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="NonRESBGvnNC2pi" tag="Non-RES" force_0_cv="true">NonRESBGvnNC2pi_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="NonRESBGvpNC1pi" tag="Non-RES" force_0_cv="true">NonRESBGvpNC1pi_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="NonRESBGvpNC2pi" tag="Non-RES" force_0_cv="true">NonRESBGvpNC2pi_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="NonRESBGvbarnCC1pi" tag="Non-RES" force_0_cv="true">NonRESBGvbarnCC1pi_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="NonRESBGvbarnCC2pi" tag="Non-RES" force_0_cv="true">NonRESBGvbarnCC2pi_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="NonRESBGvbarpCC1pi" tag="Non-RES" force_0_cv="true">NonRESBGvbarpCC1pi_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="NonRESBGvbarpCC2pi" tag="Non-RES" force_0_cv="true">NonRESBGvbarpCC2pi_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="NonRESBGvnCC1pi" tag="Non-RES" force_0_cv="true">NonRESBGvnCC1pi_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="NonRESBGvnCC2pi" tag="Non-RES" force_0_cv="true">NonRESBGvnCC2pi_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="NonRESBGvpCC1pi" tag="Non-RES" force_0_cv="true">NonRESBGvpCC1pi_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="NonRESBGvpCC2pi" tag="Non-RES" force_0_cv="true">NonRESBGvpCC2pi_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="NonRESBGvbarnNC1pi" tag="Non-RES" force_0_cv="true" no_xs_weight_spline="true">NonRESBGvbarnNC1pi_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="NonRESBGvbarnNC2pi" tag="Non-RES" force_0_cv="true" no_xs_weight_spline="true">NonRESBGvbarnNC2pi_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="NonRESBGvbarpNC1pi" tag="Non-RES" force_0_cv="true" no_xs_weight_spline="true">NonRESBGvbarpNC1pi_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="NonRESBGvbarpNC2pi" tag="Non-RES" force_0_cv="true" no_xs_weight_spline="true">NonRESBGvbarpNC2pi_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="NonRESBGvnNC1pi" tag="Non-RES" force_0_cv="true" no_xs_weight_spline="true">NonRESBGvnNC1pi_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="NonRESBGvnNC2pi" tag="Non-RES" force_0_cv="true" no_xs_weight_spline="true">NonRESBGvnNC2pi_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="NonRESBGvpNC1pi" tag="Non-RES" force_0_cv="true" no_xs_weight_spline="true">NonRESBGvpNC1pi_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="NonRESBGvpNC2pi" tag="Non-RES" force_0_cv="true" no_xs_weight_spline="true">NonRESBGvpNC2pi_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="NonRESBGvbarnCC1pi" tag="Non-RES" force_0_cv="true" no_xs_weight_spline="true">NonRESBGvbarnCC1pi_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="NonRESBGvbarnCC2pi" tag="Non-RES" force_0_cv="true" no_xs_weight_spline="true">NonRESBGvbarnCC2pi_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="NonRESBGvbarpCC1pi" tag="Non-RES" force_0_cv="true" no_xs_weight_spline="true">NonRESBGvbarpCC1pi_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="NonRESBGvbarpCC2pi" tag="Non-RES" force_0_cv="true" no_xs_weight_spline="true">NonRESBGvbarpCC2pi_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="NonRESBGvnCC1pi" tag="Non-RES" force_0_cv="true" no_xs_weight_spline="true">NonRESBGvnCC1pi_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="NonRESBGvnCC2pi" tag="Non-RES" force_0_cv="true" no_xs_weight_spline="true">NonRESBGvnCC2pi_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="NonRESBGvpCC1pi" tag="Non-RES" force_0_cv="true" no_xs_weight_spline="true">NonRESBGvpCC1pi_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="NonRESBGvpCC2pi" tag="Non-RES" force_0_cv="true" no_xs_weight_spline="true">NonRESBGvpCC2pi_UBGenie</allowlist>
 
-	<allowlist type="spline" binning="var0" plotname="AhtBY" tag="Struct." force_0_cv="true">AhtBY_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="BhtBY" tag="Struct." force_0_cv="true">BhtBY_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="CV1uBY" tag="Struct." force_0_cv="true">CV1uBY_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="CV2uBY" tag="Struct." force_0_cv="true">CV2uBY_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="AhtBY" tag="Struct." force_0_cv="true" no_xs_weight_spline="true">AhtBY_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="BhtBY" tag="Struct." force_0_cv="true" no_xs_weight_spline="true">BhtBY_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="CV1uBY" tag="Struct." force_0_cv="true" no_xs_weight_spline="true">CV1uBY_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="CV2uBY" tag="Struct." force_0_cv="true" no_xs_weight_spline="true">CV2uBY_UBGenie</allowlist>
 
-	<allowlist type="spline" binning="var0" plotname="MFP_pi" tag="FSI" force_0_cv="true">MFP_pi_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="MFP_N" tag="FSI" force_0_cv="true">MFP_N_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="FrCEx_pi" tag="FSI" force_0_cv="true">FrCEx_pi_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="FrInel_pi" tag="FSI" force_0_cv="true">FrInel_pi_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="FrAbs_pi" tag="FSI" force_0_cv="true">FrAbs_pi_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="FrCEx_N" tag="FSI" force_0_cv="true">FrCEx_N_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="FrInel_N" tag="FSI" force_0_cv="true">FrInel_N_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="FrAbs_N" tag="FSI" force_0_cv="true">FrAbs_N_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="MFP_pi" tag="FSI" force_0_cv="true" no_xs_weight_spline="true">MFP_pi_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="MFP_N" tag="FSI" force_0_cv="true" no_xs_weight_spline="true">MFP_N_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="FrCEx_pi" tag="FSI" force_0_cv="true" no_xs_weight_spline="true">FrCEx_pi_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="FrInel_pi" tag="FSI" force_0_cv="true" no_xs_weight_spline="true">FrInel_pi_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="FrAbs_pi" tag="FSI" force_0_cv="true" no_xs_weight_spline="true">FrAbs_pi_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="FrCEx_N" tag="FSI" force_0_cv="true" no_xs_weight_spline="true">FrCEx_N_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="FrInel_N" tag="FSI" force_0_cv="true" no_xs_weight_spline="true">FrInel_N_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="FrAbs_N" tag="FSI" force_0_cv="true" no_xs_weight_spline="true">FrAbs_N_UBGenie</allowlist>
 
-	<allowlist type="spline" binning="var0" plotname="xsr_scc_Fa3_SCC" tag="SCC" force_0_cv="true">xsr_scc_Fa3_SCC</allowlist>
-	<allowlist type="spline" binning="var0" plotname="xsr_scc_Fv3_SCC" tag="SCC" force_0_cv="true">xsr_scc_Fv3_SCC</allowlist>
+	<allowlist type="spline" binning="var0" plotname="xsr_scc_Fa3_SCC" tag="SCC" force_0_cv="true" no_xs_weight_spline="true">xsr_scc_Fa3_SCC</allowlist>
+	<allowlist type="spline" binning="var0" plotname="xsr_scc_Fv3_SCC" tag="SCC" force_0_cv="true" no_xs_weight_spline="true">xsr_scc_Fv3_SCC</allowlist>
 
 	
 	<!-- Flux Systematics -->
-	<allowlist type="spline" binning="var0" plotname="horncurrent" knobvals="-1, 0, 1" tag="Flux" force_0_cv="true">horncurrent_FluxUnisim</allowlist>
-	<allowlist type="spline" binning="var0" plotname="expskin" knobvals="-1, 0, 1" tag="Flux" force_0_cv="true">expskin_FluxUnisim</allowlist>
-	<allowlist type="spline" binning="var0" plotname="kminus" tag="Flux" force_0_cv="true">kminus_PrimaryHadronNormalization</allowlist>
-	<allowlist type="spline" binning="var0" plotname="kplus" tag="Flux" force_0_cv="true">kplus_PrimaryHadronFeynmanScaling</allowlist>
-	<allowlist type="spline" binning="var0" plotname="kzero" tag="Flux" force_0_cv="true">kzero_PrimaryHadronSanfordWang</allowlist>
-	<allowlist type="spline" binning="var0" plotname="nucleoninexsec" knobvals="-1, 0, 1" tag="Flux" force_0_cv="true">nucleoninexsec_FluxUnisim</allowlist>
-	<allowlist type="spline" binning="var0" plotname="nucleonqexsec" knobvals="-1, 0, 1" tag="Flux" force_0_cv="true">nucleonqexsec_FluxUnisim</allowlist>
-	<allowlist type="spline" binning="var0" plotname="nucleontotxsec" knobvals="-1, 0, 1" tag="Flux" force_0_cv="true">nucleontotxsec_FluxUnisim</allowlist>
-	<allowlist type="spline" binning="var0" plotname="pioninexsec" knobvals="-1, 0, 1" tag="Flux" force_0_cv="true">pioninexsec_FluxUnisim</allowlist>
-	<allowlist type="spline" binning="var0" plotname="pionqexsec" knobvals="-1, 0, 1" tag="Flux" force_0_cv="true">pionqexsec_FluxUnisim</allowlist>
-	<allowlist type="spline" binning="var0" plotname="piontotxsec" knobvals="-1, 0, 1" tag="Flux" force_0_cv="true">piontotxsec_FluxUnisim</allowlist> -->
+	<allowlist type="spline" binning="var0" plotname="horncurrent" knobvals="-1, 0, 1" tag="Flux" force_0_cv="true" no_xs_weight_spline="true">horncurrent_FluxUnisim</allowlist>
+	<allowlist type="spline" binning="var0" plotname="expskin" knobvals="-1, 0, 1" tag="Flux" force_0_cv="true" no_xs_weight_spline="true">expskin_FluxUnisim</allowlist>
+	<allowlist type="spline" binning="var0" plotname="kminus" tag="Flux" force_0_cv="true" no_xs_weight_spline="true">kminus_PrimaryHadronNormalization</allowlist>
+	<allowlist type="spline" binning="var0" plotname="kplus" tag="Flux" force_0_cv="true" no_xs_weight_spline="true">kplus_PrimaryHadronFeynmanScaling</allowlist>
+	<allowlist type="spline" binning="var0" plotname="kzero" tag="Flux" force_0_cv="true" no_xs_weight_spline="true">kzero_PrimaryHadronSanfordWang</allowlist>
+	<allowlist type="spline" binning="var0" plotname="nucleoninexsec" knobvals="-1, 0, 1" tag="Flux" force_0_cv="true" no_xs_weight_spline="true">nucleoninexsec_FluxUnisim</allowlist>
+	<allowlist type="spline" binning="var0" plotname="nucleonqexsec" knobvals="-1, 0, 1" tag="Flux" force_0_cv="true" no_xs_weight_spline="true">nucleonqexsec_FluxUnisim</allowlist>
+	<allowlist type="spline" binning="var0" plotname="nucleontotxsec" knobvals="-1, 0, 1" tag="Flux" force_0_cv="true" no_xs_weight_spline="true">nucleontotxsec_FluxUnisim</allowlist>
+	<allowlist type="spline" binning="var0" plotname="pioninexsec" knobvals="-1, 0, 1" tag="Flux" force_0_cv="true" no_xs_weight_spline="true">pioninexsec_FluxUnisim</allowlist>
+	<allowlist type="spline" binning="var0" plotname="pionqexsec" knobvals="-1, 0, 1" tag="Flux" force_0_cv="true" no_xs_weight_spline="true">pionqexsec_FluxUnisim</allowlist>
+	<allowlist type="spline" binning="var0" plotname="piontotxsec" knobvals="-1, 0, 1" tag="Flux" force_0_cv="true" no_xs_weight_spline="true">piontotxsec_FluxUnisim</allowlist>
 	<allowlist type="covariance" plotname="piplus_prod" tag="piprod">piplus_PrimaryHadronSWCentralSplineVariation</allowlist>
 	<allowlist type="covariance" plotname="piminus_prod" tag="piprod">piminus_PrimaryHadronSWCentralSplineVariation</allowlist>
 

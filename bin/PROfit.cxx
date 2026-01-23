@@ -298,7 +298,7 @@ int main(int argc, char* argv[])
     // For process-only command, exit early after MC processing is complete
     // This avoids unnecessary setup and potential cleanup issues with ROOT
     if(*process_command && !*profile_command && !*surface_command && !*protest_command && !*proglobal_command && !*proplot_command && !*profc_command) {
-        log<LOG_INFO>(L"%1% || Process command complete. Binary files saved successfully.") % __func__;
+        log<LOG_WARNING>(L"%1% || Process command complete. Binary files saved successfully.") % __func__;
         return 0;
     }
 
