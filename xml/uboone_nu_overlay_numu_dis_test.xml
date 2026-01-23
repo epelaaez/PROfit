@@ -39,7 +39,7 @@
 		>
 		<variable>kine_reco_Enu</variable>
 		<variable>truth_nuEnergy</variable>
-		<variable>1000*470/truth_nuEnergy</variable>	
+		<variable>1000.*(mcflux_dk2gen + mcflux_gen2vtx)/truth_nuEnergy</variable>	
 	</branch>
 </MCFile>
 
