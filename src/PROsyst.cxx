@@ -563,6 +563,12 @@ void PROsyst::FillSpline(const SystStruct& syst) {
     spline.bins = nbins;
     spline.segments_per_bin = knobvals.size(); 
 
+    if(syst.knobval.size() != syst.p_multi_spec.size()){
+        log<LOG_ERROR>(L"%1% || number of knobvals specified (%2%) does not match number of weight universes in file (%3%) for systematic %4%!") % __func__ % syst.knobval.size() % syst.p_multi_spec.size() % syst.systname.c_str();
+        log<LOG_ERROR>(L"Terminating.");
+        exit(EXIT_FAILURE);
+    }
+
     std::vector<SplineSegment> all_segments;
 
     for (size_t i = 0; i < nbins; ++i) {
