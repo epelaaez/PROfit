@@ -162,7 +162,9 @@ namespace PROfit{
                         auto fn = [coeffs](float shift) {
                             return coeffs[0] + coeffs[1] * shift + coeffs[2] * shift * shift + coeffs[3] * shift * shift * shift;
                         };
-                        fixed_pts->SetPoint(fixed_pts->GetN(), lo, fn(0));
+                        // Only plot knot points within the original knobval range (skip mirrored points for the two-universe case)
+                        if (lo >= systs.spline_lo[i])
+                            fixed_pts->SetPoint(fixed_pts->GetN(), lo, fn(0));
                         if (k == nsegs - 1)
                             fixed_pts->SetPoint(fixed_pts->GetN(), hi, fn(hi - lo));
                         float width = (hi - lo) / 20.0f;
