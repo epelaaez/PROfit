@@ -297,10 +297,10 @@ int main(int argc, char* argv[])
 
     // For process-only command, exit early after MC processing is complete
     // This avoids unnecessary setup and potential cleanup issues with ROOT
-    if(*process_command && !*profile_command && !*surface_command && !*protest_command && !*proglobal_command && !*proplot_command && !*profc_command) {
-        log<LOG_WARNING>(L"%1% || Process command complete. Binary files saved successfully.") % __func__;
-        return 0;
-    }
+    //if(*process_command && !*profile_command && !*surface_command && !*protest_command && !*proglobal_command && !*proplot_command && !*profc_command) {
+    //    log<LOG_WARNING>(L"%1% || Process command complete. Binary files saved successfully.") % __func__;
+    //    return 0;
+    //}
 
     //Scale events by some percentage of total detector POT
     if(scale_arg.size()) {
@@ -443,10 +443,11 @@ int main(int argc, char* argv[])
             //Process the CAF files to grab and fill spectrum directly
             std::vector<PROdata> alldata = CreatePROdata(dataconfig);
             PROdata::saveVector(dataconfig, alldata, dataBinName);
-            data = alldata[0];
+            data = alldata[config.i_prime];
             //data.save(dataconfig,dataBinName);
+            
             for(size_t io = 0; io < dataconfig.m_num_variables; ++io)
-                variable_data.push_back(alldata[io+1]);
+                variable_data.push_back(alldata[io]);
 
             log<LOG_INFO>(L"%1% || Done processing Data from XML defined root files, and saving to binary output also: %2%") % __func__ % dataBinName.c_str();
         }else{
@@ -454,10 +455,11 @@ int main(int argc, char* argv[])
             //data.load(dataBinName);
             std::vector<PROdata> alldata;
             PROdata::loadVector(alldata, dataBinName);
-            data = alldata[0];
+            data = alldata[config.i_prime];
             //data.save(dataconfig,dataBinName);
+
             for(size_t io = 0; io < dataconfig.m_num_variables; ++io)
-                variable_data.push_back(alldata[io+1]);
+                variable_data.push_back(alldata[io]);
 
             log<LOG_INFO>(L"%1% || Done loading. Config hash (%2%) and binary loaded Data (%3%) hash are here. ") % __func__ %  dataconfig.hash % data.hash;
             if(dataconfig.hash!=data.hash){
@@ -471,10 +473,10 @@ int main(int argc, char* argv[])
             }
         }
 
-        if(*profile_command || *surface_command || *protest_command){
+        /*if(*profile_command || *surface_command || *protest_command){
             log<LOG_ERROR>(L"%1% || ERROR --data can only be used with plot subcommand! ") % __func__  ;
             return 1;
-        }
+        }*/
 
 
     }//if no data, use injected or fake data;
