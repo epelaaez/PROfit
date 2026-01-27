@@ -796,22 +796,33 @@ namespace PROfit{
             if(data_hist){
                 for(int i = 0; i < data_hist->GetNbinsX(); ++i) {
                     float numerator = data_hist->GetBinContent(i+1);
-                    float denonminator = 
+                    float denominator = 
                         bool(opt&PlotOptions::DataMCRatio)
                         ? cv_hist->GetBinContent(i+1)
                         : bf_hist->GetBinContent(i+1);
 
-                    float rat = numerator/denonminator;
-                    if(isnan(rat)) rat = 1;
-                    ratio->SetBinError(i+1, data_hist->GetBinError(i+1)/denonminator);
+                    float rat = numerator/denominator;
+                    if(isnan(rat) || isinf(rat) || denominator == 0) rat = 1;
+                    float rat_err = (denominator != 0) ? data_hist->GetBinError(i+1)/denominator : 0;
+                    if(isnan(rat_err) || isinf(rat_err)) rat_err = 0;
+                    ratio->SetBinError(i+1, rat_err);
                     ratio->SetBinContent(i+1, rat);
                     one->SetBinContent(i+1, 1.0);
 
-                    ratio_err->SetPointEYhigh(i, ratio_err->GetErrorYhigh(i)/ratio_err->GetPointY(i));
-                    ratio_err->SetPointEYlow(i, ratio_err->GetErrorYlow(i)/ratio_err->GetPointY(i));
+                    // Avoid division by zero when normalizing error band
+                    float point_y = ratio_err->GetPointY(i);
+                    if(point_y != 0 && !isnan(point_y) && !isinf(point_y)) {
+                        ratio_err->SetPointEYhigh(i, ratio_err->GetErrorYhigh(i)/point_y);
+                        ratio_err->SetPointEYlow(i, ratio_err->GetErrorYlow(i)/point_y);
+                    } else {
+                        ratio_err->SetPointEYhigh(i, 0);
+                        ratio_err->SetPointEYlow(i, 0);
+                    }
                     ratio_err->SetPointY(i, 1.0);
-                    ymin = std::min(ymin, rat);
-                    ymax = std::max(ymax, rat);
+                    if(!isnan(rat) && !isinf(rat)) {
+                        ymin = std::min(ymin, rat);
+                        ymax = std::max(ymax, rat);
+                    }
                 }
 
                 for (int i = 0; i < ratio_err->GetN(); ++i) {
@@ -819,17 +830,31 @@ namespace PROfit{
                     y = ratio_err->GetPointY(i);
                     eyh = ratio_err->GetErrorYhigh(i);
                     eyl = ratio_err->GetErrorYlow(i);
-                    ymin = std::min(ymin, y - eyl);
-                    ymax = std::max(ymax, y + eyh);
-
+                    if(!isnan(y) && !isinf(y) && !isnan(eyh) && !isinf(eyh) && !isnan(eyl) && !isinf(eyl)) {
+                        ymin = std::min(ymin, y - eyl);
+                        ymax = std::max(ymax, y + eyh);
+                    }
                 }
             }
+            
+            // Ensure valid axis range - use defaults if no valid data
+            if(ymin >= ymax || ymin > 1e8 || ymax < -1e8) {
+                ymin = 0.5f;
+                ymax = 1.5f;
+            }
+            
             float yrange = ymax - ymin;
-            float ylow = ymin - 0.05 * yrange;  // 15% padding below
-            float yhigh = ymax + 0.05 * yrange; // 15% padding above
+            float ylow = ymin - 0.05 * yrange;  // 5% padding below
+            float yhigh = ymax + 0.05 * yrange; // 5% padding above
 
             float kmin = bounds.hasBound("ratmin") ? bounds.getBound("ratmin") : std::min(ylow,0.95f);
             float kmax = bounds.hasBound("ratmax") ? bounds.getBound("ratmax") : std::max(yhigh,1.05f);
+
+            // Final safety check to ensure kmin != kmax
+            if(kmin >= kmax) {
+                kmin = 0.5f;
+                kmax = 1.5f;
+            }
 
             one->SetMinimum(kmin);
             one->SetMaximum(kmax);
