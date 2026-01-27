@@ -95,20 +95,55 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
         : data.Spec();
 
     Eigen::MatrixXf collapsed_full_covariance = CollapseMatrix(config, full_covariance); 
-    collapsed_stat_covariance = ( normdata).matrix().asDiagonal();
-    inverted_collapsed_full_covariance = (collapsed_stat_covariance+ collapsed_full_covariance).inverse();
+    collapsed_stat_covariance = (normdata).matrix().asDiagonal();
 
-    Eigen::VectorXf delta  = CollapseMatrix(config,result.Spec()) - (shape_only ? data.Normalize(config,result) : data.Spec());
+    // remove rows and columns corresponding to empty data bin indices here, avoiding any nan chi2 calculations for bins with no data events
+    std::vector<Eigen::Index> non_empty_indices;
+    for (Eigen::Index i = 0; i < normdata.size(); ++i) {
+        if (normdata(i) > 0) {
+            non_empty_indices.push_back(i);
+        }
+    }
+    
+    size_t reduced_size = non_empty_indices.size();
+    if (reduced_size == 0) {
+        log<LOG_ERROR>(L"%1% || ERROR: All data bins are empty!") % __func__;
+        throw std::runtime_error("All data bins are empty in PROchi.");
+    }
+    
+    // Create reduced covariance matrices by removing empty bin rows/columns
+    Eigen::MatrixXf reduced_collapsed_full_covariance(reduced_size, reduced_size);
+    Eigen::MatrixXf reduced_collapsed_stat_covariance(reduced_size, reduced_size);
+    for (size_t i = 0; i < reduced_size; ++i) {
+        for (size_t j = 0; j < reduced_size; ++j) {
+            reduced_collapsed_full_covariance(i, j) = collapsed_full_covariance(non_empty_indices[i], non_empty_indices[j]);
+            reduced_collapsed_stat_covariance(i, j) = collapsed_stat_covariance(non_empty_indices[i], non_empty_indices[j]);
+        }
+    }
+
+    inverted_collapsed_full_covariance = (reduced_collapsed_stat_covariance + reduced_collapsed_full_covariance).inverse();
+
+    // Create reduced delta vector
+    Eigen::VectorXf collapsed_mc_spec = CollapseMatrix(config, result.Spec());
+    Eigen::VectorXf delta(reduced_size);
+    for (size_t i = 0; i < reduced_size; ++i) {
+        delta(i) = collapsed_mc_spec(non_empty_indices[i]) - normdata(non_empty_indices[i]);
+    }
+    
     float pull = Pull(subvector2);
     float covar_portion = (delta.transpose())*inverted_collapsed_full_covariance*(delta);
     float value = covar_portion + pull;
 
     if(std::isnan(value) || value!=value) {
-        log<LOG_ERROR>(L"%1% || ERROR: CNP chi2 is NaN (%2%). This is very bad.\n"
+        log<LOG_ERROR>(L"%1% || ERROR: PROchi chi2 is NaN (%2%). This is very bad.\n"
                 L"covar_portion: %3%\npull: %4%\ndelta: %5%\n"
                 L"mc spec: %6%\ndata spec: %7%")
             % __func__ % value % covar_portion % pull % delta % CollapseMatrix(config, result.Spec())
             % data.Spec();
+        // collapsed_stat_covariance, print diagonal
+        for (size_t i = 0; i < collapsed_stat_covariance.cols(); ++i) {
+            log<LOG_ERROR>(L"%1% || ERROR: collapsed_stat_covariance(%2%) = %3%") % __func__ % i % collapsed_stat_covariance(i,i);
+        }
         throw std::runtime_error("NANs in Chi().");
 
     }
@@ -161,9 +196,21 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
                 Eigen::MatrixXf diag = result.Spec().array().matrix().asDiagonal();
                 Eigen::MatrixXf full_covariance = diag*(syst->fractional_covariance)*diag;
                 Eigen::MatrixXf collapsed_full_covariance = CollapseMatrix(config, full_covariance);
-                Eigen::MatrixXf inverted_collapsed_full_covariance = (collapsed_stat_covariance + collapsed_full_covariance).inverse();
+                
+                // Reduce matrices using non_empty_indices
+                Eigen::MatrixXf grad_reduced_collapsed_full_covariance(reduced_size, reduced_size);
+                for (size_t ii = 0; ii < reduced_size; ++ii) {
+                    for (size_t jj = 0; jj < reduced_size; ++jj) {
+                        grad_reduced_collapsed_full_covariance(ii, jj) = collapsed_full_covariance(non_empty_indices[ii], non_empty_indices[jj]);
+                    }
+                }
+                Eigen::MatrixXf inverted_collapsed_full_covariance = (reduced_collapsed_stat_covariance + grad_reduced_collapsed_full_covariance).inverse();
 
-                Eigen::VectorXf delta = CollapseMatrix(config,result.Spec()) - normdata;
+                Eigen::VectorXf collapsed_mc = CollapseMatrix(config,result.Spec());
+                Eigen::VectorXf delta(reduced_size);
+                for (size_t ii = 0; ii < reduced_size; ++ii) {
+                    delta(ii) = collapsed_mc(non_empty_indices[ii]) - normdata(non_empty_indices[ii]);
+                }
                 Eigen::VectorXf subvector2 = param_plus.segment(model.nparams, syst->GetNSplines());
                 float pull = Pull(subvector2);
                 chi2_oneside = (delta.transpose())*inverted_collapsed_full_covariance*(delta) + pull;
@@ -195,9 +242,21 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
                     Eigen::MatrixXf diag = result.Spec().array().matrix().asDiagonal();
                     Eigen::MatrixXf full_covariance = diag*(syst->fractional_covariance)*diag;
                     Eigen::MatrixXf collapsed_full_covariance = CollapseMatrix(config, full_covariance);
-                    Eigen::MatrixXf inverted_collapsed_full_covariance = (collapsed_stat_covariance + collapsed_full_covariance).inverse();
+                    
+                    // Reduce matrices using non_empty_indices
+                    Eigen::MatrixXf grad_reduced_collapsed_full_covariance(reduced_size, reduced_size);
+                    for (size_t ii = 0; ii < reduced_size; ++ii) {
+                        for (size_t jj = 0; jj < reduced_size; ++jj) {
+                            grad_reduced_collapsed_full_covariance(ii, jj) = collapsed_full_covariance(non_empty_indices[ii], non_empty_indices[jj]);
+                        }
+                    }
+                    Eigen::MatrixXf inverted_collapsed_full_covariance = (reduced_collapsed_stat_covariance + grad_reduced_collapsed_full_covariance).inverse();
 
-                    Eigen::VectorXf delta = CollapseMatrix(config,result.Spec()) - normdata;
+                    Eigen::VectorXf collapsed_mc = CollapseMatrix(config,result.Spec());
+                    Eigen::VectorXf delta(reduced_size);
+                    for (size_t ii = 0; ii < reduced_size; ++ii) {
+                        delta(ii) = collapsed_mc(non_empty_indices[ii]) - normdata(non_empty_indices[ii]);
+                    }
                     Eigen::VectorXf subvector2 = param_plus.segment(model.nparams, syst->GetNSplines());
                     float pull = Pull(subvector2);
                     chi2_plus = (delta.transpose())*inverted_collapsed_full_covariance*(delta) + pull;
@@ -213,9 +272,21 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
                     Eigen::MatrixXf diag = result.Spec().array().matrix().asDiagonal();
                     Eigen::MatrixXf full_covariance = diag*(syst->fractional_covariance)*diag;
                     Eigen::MatrixXf collapsed_full_covariance = CollapseMatrix(config, full_covariance);
-                    Eigen::MatrixXf inverted_collapsed_full_covariance = (collapsed_stat_covariance + collapsed_full_covariance).inverse();
+                    
+                    // Reduce matrices using non_empty_indices
+                    Eigen::MatrixXf grad_reduced_collapsed_full_covariance(reduced_size, reduced_size);
+                    for (size_t ii = 0; ii < reduced_size; ++ii) {
+                        for (size_t jj = 0; jj < reduced_size; ++jj) {
+                            grad_reduced_collapsed_full_covariance(ii, jj) = collapsed_full_covariance(non_empty_indices[ii], non_empty_indices[jj]);
+                        }
+                    }
+                    Eigen::MatrixXf inverted_collapsed_full_covariance = (reduced_collapsed_stat_covariance + grad_reduced_collapsed_full_covariance).inverse();
 
-                    Eigen::VectorXf delta = CollapseMatrix(config,result.Spec()) - normdata;
+                    Eigen::VectorXf collapsed_mc = CollapseMatrix(config,result.Spec());
+                    Eigen::VectorXf delta(reduced_size);
+                    for (size_t ii = 0; ii < reduced_size; ++ii) {
+                        delta(ii) = collapsed_mc(non_empty_indices[ii]) - normdata(non_empty_indices[ii]);
+                    }
                     Eigen::VectorXf subvector2 = param_minus.segment(model.nparams, syst->GetNSplines());
                     float pull = Pull(subvector2);
                     chi2_minus = (delta.transpose())*inverted_collapsed_full_covariance*(delta) + pull;
