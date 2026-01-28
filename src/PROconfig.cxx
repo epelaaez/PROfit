@@ -692,10 +692,10 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 }
 
                 if(bincsyst== NULL || strcmp(bincsyst, "true") == 0){
-                    log<LOG_DEBUG>(L"%1% ||Apply systemtics to this file (default) ' @ line %2% in %3% ") % __func__ % __LINE__  % __FILE__;
+                    log<LOG_DEBUG>(L"%1% ||Apply systematics to this file (default) ' @ line %2% in %3% ") % __func__ % __LINE__  % __FILE__;
                     TEMP_eventweight_branch_syst.push_back(1);
                 }else{
-                    log<LOG_DEBUG>(L"%1% || DO NOT apply systemtics to this file (e.g for cosmics) ' @ line %2% in %3% ") % __func__ % __LINE__  % __FILE__;
+                    log<LOG_DEBUG>(L"%1% || DO NOT apply systematics to this file (e.g for cosmics) ' @ line %2% in %3% ") % __func__ % __LINE__  % __FILE__;
                     TEMP_eventweight_branch_syst.push_back(0);
                 }
 
