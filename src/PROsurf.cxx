@@ -200,9 +200,9 @@ std::vector<profOut> PROfile::PROfilePointHelper(const PROsyst *systs, const PRO
         lb = Eigen::VectorXf::Constant(nparams, -3.0);
         ub = Eigen::VectorXf::Constant(nparams, 3.0);
         size_t nphys = local_metric->GetModel().nparams;
-        // Fix physics parameters at seed values
+        // Fix physics parameters at model default values
         for(size_t j=0; j<nphys; j++){
-            float fixed_val = (seed_points.size() > 0) ? seed_points.front()(j) : 0.0f;
+            float fixed_val = local_metric->GetModel().default_val(j);
             ub(j) = fixed_val;
             lb(j) = fixed_val;
         }
@@ -867,8 +867,10 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
         // Capture w by value for the lambda
         size_t idx = w;
         plotFunctions.push_back([&, idx]() {
-            std::string xval = idx < model.nparams ? "Log_{10}(" + model.pretty_param_names[idx]+")" : "#sigma Shift";
-            std::string tit = (idx < model.nparams ? names[idx] : config.m_mcgen_variation_plotname_map.at(names[idx])) + ";" + xval + "; #Delta#Chi^{2}";
+            // Check if this is a physics param (only possible when with_osc=true)
+            bool is_physics = with_osc && idx < model.nparams;
+            std::string xval = is_physics ? "Log_{10}(" + model.pretty_param_names[idx]+")" : "#sigma Shift";
+            std::string tit = (is_physics ? names[idx] : config.m_mcgen_variation_plotname_map.at(names[idx])) + ";" + xval + "; #Delta#Chi^{2}";
             graphs[idx]->SetTitle(tit.c_str());
             graphs[idx]->Draw("AL");
             graphs[idx]->SetLineWidth(1);
@@ -884,7 +886,7 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
             line->SetLineColor(kBlack);
             line->Draw();
 
-            if(idx < model.nparams) graphs[idx]->SetLineColor(kBlue-7);
+            if(is_physics) graphs[idx]->SetLineColor(kBlue-7);
 
             if(graphs[idx]->GetN() == 1) {
                 float x_val = graphs[idx]->GetPointX(0);
@@ -894,7 +896,7 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
                 linet->SetLineColor(kGreen+2);
                 linet->Draw();
             }
-            else if(idx >= model.nparams) {
+            else if(!is_physics) {
                 gprior->Draw("L same");
                 gprior->SetLineStyle(2);
                 gprior->SetLineWidth(1);
@@ -903,8 +905,8 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
             }
         });
 
-        // Add zoomed plots for physics parameters after the last physics parameter
-        if(w == model.nparams - 1) {
+        // Add zoomed plots for physics parameters after the last physics parameter (only when physics params are included)
+        if(with_osc && w == model.nparams - 1) {
             for(int zs = model.nparams - 1; zs >= 0; zs--) {
                 size_t zoomIdx = w - zs;
                 plotFunctions.push_back([&, zoomIdx]() {
@@ -1015,11 +1017,18 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
 
     float y_min = todraw.GetMinimum();
     for (size_t i = 0; i < barvalues.size(); ++i) {
-        std::string label = i < model.nparams ? "Log_{10}(" + model.pretty_param_names[i]+")" : config.m_mcgen_variation_plotname_map.at(names[i]);
+        // In syst-only mode (with_osc=false), all entries are splines
+        // In with_osc mode, first model.nparams entries are physics, rest are splines
+        std::string label;
+        if (with_osc && i < model.nparams) {
+            label = "Log_{10}(" + model.pretty_param_names[i] + ")";
+        } else {
+            label = config.m_mcgen_variation_plotname_map.at(names[i]);
+        }
         TLatex* text = new TLatex(barvalues[i], y_min - 0.05, label.c_str());  // Position text below axis
-        text->SetTextAlign(13);  
-        text->SetTextSize(0.03); 
-        text->SetTextAngle(-45); 
+        text->SetTextAlign(13);
+        text->SetTextSize(0.03);
+        text->SetTextAngle(-45);
         text->Draw();
     }
     TText *t = new TText();
@@ -1056,27 +1065,72 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
 
 
 
+    // Get y-axis range for out-of-bounds handling
+    float y_axis_min = minVal * 1.1;
+    float y_axis_max = maxVal * 1.1;
+    float y_range = y_axis_max - y_axis_min;
+    log<LOG_INFO>(L"%1% || _1sigma plot y-axis range: min=%2%, max=%3%") % __func__ % y_axis_min % y_axis_max;
+    float arrow_margin = y_range * 0.08;  // margin from edge for out-of-range markers
+    float arrow_length = y_range * 0.06;  // length of the arrow
+
+    // Horizontal offsets to prevent marker overlap
+    float offset_blue = -0.12;   // init_seed (blue) - left
+    float offset_red = 0.0;      // true_params (red) - center
+    float offset_black = 0.12;   // best fit (black) - right
+
+    // Helper lambda to draw a marker with out-of-range arrow handling
+    auto drawMarkerWithArrow = [&](float x, float y, int color, float marker_size) {
+        bool below_range = y < y_axis_min;
+        bool above_range = y > y_axis_max;
+
+        float draw_y = y;
+        if (below_range) {
+            draw_y = y_axis_min + arrow_margin;
+        } else if (above_range) {
+            draw_y = y_axis_max - arrow_margin;
+        }
+
+        TMarker* marker = new TMarker(x, draw_y, 29);
+        marker->SetMarkerSize(marker_size);
+        marker->SetMarkerColor(color);
+        marker->Draw();
+
+        // Draw arrow if out of range
+        if (below_range) {
+            TArrow* arr = new TArrow(x, draw_y - arrow_length * 0.3, x, y_axis_min + arrow_length * 0.2, 0.008, "|>");
+            arr->SetLineColor(color);
+            arr->SetFillColor(color);
+            arr->SetLineWidth(1);
+            arr->Draw();
+        } else if (above_range) {
+            TArrow* arr = new TArrow(x, draw_y + arrow_length * 0.3, x, y_axis_max - arrow_length * 0.2, 0.008, "|>");
+            arr->SetLineColor(color);
+            arr->SetFillColor(color);
+            arr->SetLineWidth(1);
+            arr->Draw();
+        }
+    };
+
     for (int i = 0; i < nBins; ++i) {
         if(mask_osc && i < model.nparams) continue;
         // In syst-only mode, init_seed/true_params are full-size but plot indices are spline-only
         int vec_idx = with_osc ? i : (i + model.nparams);
-        TMarker* initstar = new TMarker(i+0.5, init_seed[vec_idx], 29);
-        initstar->SetMarkerSize(0.6); 
-        initstar->SetMarkerColor(kBlue); 
-        initstar->Draw();
+        float x_center = i + 0.5;
 
+        // Blue star: init_seed (best fit seed)
+        drawMarkerWithArrow(x_center + offset_blue, init_seed[vec_idx], kBlue, 0.6);
+
+        // Red star: true_params (injected truth)
         if (vec_idx < true_params.size()) {
-
-            TMarker* truestar = new TMarker(i+0.5, true_params[vec_idx], 29);
-            truestar->SetMarkerSize(0.5); 
-            truestar->SetMarkerColor(kRed); 
-            truestar->Draw();
+            if (i < 3) {  // Log first few for debugging
+                log<LOG_INFO>(L"%1% || _1sigma marker i=%2%: true_params[%3%]=%4%, below_range=%5%")
+                    % __func__ % i % vec_idx % true_params[vec_idx] % (true_params[vec_idx] < y_axis_min);
+            }
+            drawMarkerWithArrow(x_center + offset_red, true_params[vec_idx], kRed, 0.5);
         }
 
-        TMarker* star = new TMarker(i+0.5, bfvalues[i], 29);
-        star->SetMarkerSize(0.5); 
-        star->SetMarkerColor(kBlack); 
-        star->Draw();
+        // Black star: best fit value
+        drawMarkerWithArrow(x_center + offset_black, bfvalues[i], kBlack, 0.5);
     }
 
 

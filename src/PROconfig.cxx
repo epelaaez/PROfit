@@ -1270,7 +1270,7 @@ void PROconfig::CalcTotalBins(){
         m_num_variable_bins_total_collapsed[io] = m_num_variable_bins_mode_block_collapsed[io] * m_num_modes;
     }
 
-    log<LOG_INFO>(L"%1% || Generating Index maps for convienance") % __func__;
+    log<LOG_INFO>(L"%1% || Generating Index maps for convenience") % __func__;
     this->generate_index_map();
 
     //some internal cals
