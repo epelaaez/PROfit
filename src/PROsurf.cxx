@@ -140,6 +140,9 @@ void PROsurf::FillSurfaceStat(const PROconfig &config, const PROfitterConfig &fi
     (void)fitconfig;
 
     PROmetric *local_metric = metric.Clone();
+    PROsyst newsyst = local_metric->GetSysts();
+    newsyst.fractional_covariance = Eigen::MatrixXf::Constant(config.m_num_variable_bins_total[config.i_prime], config.m_num_variable_bins_total[config.i_prime], 0);
+    local_metric->override_systs(newsyst);
     // When doing actual fits here we need to set the bounds of the metric
     // so the bounds of the systs are the cv values
     float min_chi = 1e9;
@@ -150,7 +153,7 @@ void PROsurf::FillSurfaceStat(const PROconfig &config, const PROfitterConfig &fi
         for(size_t j = 0; j < nbinsy; j++) {
             // TODO: Make this work for models with more than 2 parameters
             params(0) = (float)edges_y(j);
-            params(1) = (float)edges_x(j);
+            params(1) = (float)edges_x(i);
             float fx = (*local_metric)(params, dummy_grad, false);
             if(fx < min_chi) min_chi = fx;
             surface(i, j) = fx;
