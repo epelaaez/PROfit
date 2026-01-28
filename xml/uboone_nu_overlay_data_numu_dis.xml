@@ -2,13 +2,15 @@
 
 <mode name="nu" />
 
-<detector name="UBOONE" pot="1" />
+<detector name="UBOONE" pot="4.733e19" />
 
-<channel name="nuoverlay" plotname="Reconstructed Neutrino Energy">
+<channel name="numu" plotname="Reconstructed Neutrino Energy [MeV]">
 	<bins unit="Reconstructed Neutrino Energy [MeV]" min="0" max="2500" nbins="25"/>
 	<bins unit="True Neutrino Energy [MeV]" min="0" max="3000" nbins="20"/>
 	<bins unit="True L/E" min="0" max="3000" nbins="250" plot="false"/>
-	<subchannel name="overlay" plotname="Overlay" color="#FF6961"/>
+	<subchannel name="ext" plotname="Ext" color="#3BB143"/>
+	<subchannel name="dirt" plotname="Dirt" color="#895129"/>
+	<subchannel name="overlay" plotname="Overlay" color="#21B1FF"/>
 </channel>
 
 <model tag="numudis">
@@ -18,24 +20,17 @@
 </model>
 
 <!-- This file is available at /exp/uboone/data/users/lhagaman/PROfit_files/nu_overlay_splines_50.root, 4.1 GB -->
-<MCFile treename="wcpselection/T_KINEvars" filename="/nevis/riverside/data/leehagaman/ngem/data_files/nu_overlay_splines_50.root" scale = "1.0" pot="1">
+<MCFile treename="wcpselection/T_KINEvars" filename="/nevis/riverside/data/leehagaman/ngem/data_files/nu_overlay_splines_50.root" scale = "1.0" pot="4.69e19">
 	<friend treename="wcpselection/T_eval" />
 	<friend treename="wcpselection/T_PFeval" />
+	<friend treename="wcpselection/T_BDTvars" />
 	<friend treename="spline_weights" />
 	<friend treename="nuselection/NeutrinoSelectionFilter" />
 
-	<!--
-	For additional weight:
-		kine_reco_Enu > 0 is the reco selection.
-		Then we have genie_weight if genie_weight is reasonable,
-		or we have 1 if the genie_weight is not reasonable.
-			additional_weight     = "(0 < kine_reco_Enu) * (weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
-		For some reason, using this below makes the systematics look much more asymmetric.
-	-->
 	<branch
-        	associated_subchannel = "nu_UBOONE_nuoverlay_overlay"
+        	associated_subchannel = "nu_UBOONE_numu_overlay"
         	model_rule            = "1"
-			additional_weight     = "(0 < kine_reco_Enu) * (weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
+			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9)) * (weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
 		>
 		<variable>kine_reco_Enu</variable>
 		<variable>truth_nuEnergy</variable>
@@ -43,6 +38,42 @@
 	</branch>
 </MCFile>
 
+<!-- This file is available at /pnfs/uboone/persistent/users/uboonepro/surprise/run4b_full_samples/wc_processed/BNB/MCC9.10_Run4b_v10_04_07_09_Run4b_BNB_beam_off_surprise_reco2_hist.root -->
+<MCFile treename="wcpselection/T_KINEvars" filename="/nevis/riverside/data/leehagaman/ngem/data_files/MCC9.10_Run4b_v10_04_07_09_Run4b_BNB_beam_off_surprise_reco2_hist.root" scale = "1.0" pot="1.476e20">
+	<friend treename="wcpselection/T_eval" />
+	<friend treename="wcpselection/T_PFeval" />
+	<friend treename="wcpselection/T_BDTvars" />
+
+	<branch
+        	associated_subchannel = "nu_UBOONE_numu_ext"
+			incl_systematics      = "false"
+        	model_rule            = "0"
+			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9))"
+		>
+		<variable>kine_reco_Enu</variable>
+		<variable>0</variable>
+		<variable>0</variable>
+	</branch>
+</MCFile>
+
+<!-- TEMPORARY: No systematics for dirt file -->
+<!-- This file is available at /pnfs/uboone/persistent/users/uboonepro/surprise/run4b_full_samples/wc_processed/BNB/MCC9.10_Run4b_v10_04_07_09_BNB_dirt_surpise_reco2_hist.root -->
+<MCFile treename="wcpselection/T_KINEvars" filename="/nevis/riverside/data/leehagaman/ngem/data_files/MCC9.10_Run4b_v10_04_07_09_BNB_dirt_surpise_reco2_hist.root" scale = "1.0" pot="4.692e19">
+	<friend treename="wcpselection/T_eval" />
+	<friend treename="wcpselection/T_PFeval" />
+	<friend treename="wcpselection/T_BDTvars" />
+
+	<branch
+        	associated_subchannel = "nu_UBOONE_numu_dirt"
+			incl_systematics      = "false"
+        	model_rule            = "0"
+			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9))"
+		>
+		<variable>kine_reco_Enu</variable>
+		<variable>0</variable>
+		<variable>0</variable>
+	</branch>
+</MCFile>
 
 <variation_list>
 
