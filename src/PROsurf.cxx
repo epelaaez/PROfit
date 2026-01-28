@@ -4,9 +4,10 @@
 
 #include <Eigen/Eigen>
 
-#include <cmath> 
+#include <cmath>
 #include <future>
 #include <algorithm>
+#include <functional>
 
 #include "TGraph.h"
 #include "TLatex.h"
@@ -846,108 +847,135 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
     }
     std::unique_ptr<TGraph> gprior = std::make_unique<TGraph>(priorX.size(), priorX.data(), priorY.data());
 
-    //First plot
-    int depth = std::ceil((nparams+model.nparams)/4.0);
-    TCanvas *c =  new TCanvas(filename.c_str(), filename.c_str() , 350*4, 350*depth);
-    c->Divide(4,depth);
+    //First plot - use multi-page PDF with 4 columns x 3 rows per page
+    const int nCols = 4;
+    const int nRows = 3;
+    const int plotsPerPage = nCols * nRows;
 
+    TCanvas *c = new TCanvas(filename.c_str(), filename.c_str(), 350*nCols, 350*nRows);
+    c->Divide(nCols, nRows);
 
-    size_t zoom_shift = 0;
-    for(size_t w = 0; w< graphs.size(); w++ ){
+    // Open multi-page PDF
+    c->Print((filename+".pdf[").c_str());
+
+    // First, collect all plots to draw (main plots + zoomed physics plots)
+    std::vector<std::function<void()>> plotFunctions;
+
+    for(size_t w = 0; w < graphs.size(); w++) {
         if(mask_osc && w < model.nparams) continue;
 
-        c->cd(w+1+zoom_shift);
-        std::string xval = w < model.nparams ? "Log_{10}(" + model.pretty_param_names[w]+")" :"#sigma Shift"  ;
-        std::string tit = (w < model.nparams ? names[w] :config.m_mcgen_variation_plotname_map.at(names[w]))+ ";"+xval+"; #Delta#Chi^{2}";
-        graphs[w]->SetTitle(tit.c_str());
-        graphs[w]->Draw("AL");
-        graphs[w]->SetLineWidth(2);
-        graphs[w]->GetYaxis()->SetTitleSize(0.04);             
-        graphs[w]->GetYaxis()->SetLabelSize(0.04);            
-        graphs[w]->GetXaxis()->SetTitleSize(0.04);             
-        graphs[w]->GetXaxis()->SetLabelSize(0.04);            
-        graphs[w]->GetYaxis()->SetRangeUser(0, graphs[w]->GetHistogram()->GetMaximum());
+        // Capture w by value for the lambda
+        size_t idx = w;
+        plotFunctions.push_back([&, idx]() {
+            std::string xval = idx < model.nparams ? "Log_{10}(" + model.pretty_param_names[idx]+")" : "#sigma Shift";
+            std::string tit = (idx < model.nparams ? names[idx] : config.m_mcgen_variation_plotname_map.at(names[idx])) + ";" + xval + "; #Delta#Chi^{2}";
+            graphs[idx]->SetTitle(tit.c_str());
+            graphs[idx]->Draw("AL");
+            graphs[idx]->SetLineWidth(1);
+            graphs[idx]->GetYaxis()->SetTitleSize(0.05);
+            graphs[idx]->GetYaxis()->SetLabelSize(0.04);
+            graphs[idx]->GetXaxis()->SetTitleSize(0.05);
+            graphs[idx]->GetXaxis()->SetLabelSize(0.04);
+            graphs[idx]->GetYaxis()->SetRangeUser(0, graphs[idx]->GetHistogram()->GetMaximum());
 
-        TLine* line = new TLine(graphs[w]->GetXaxis()->GetXmin(), 1, graphs[w]->GetXaxis()->GetXmax(), 1);
-        line->SetLineStyle(3);  // Dotted line style (1 is solid, 2 is dashed, 3 is dotted)
-        line->SetLineWidth(1);  // Thin line
-        line->SetLineColor(kBlack);  // Set color (black for visibility)
-        line->Draw();
+            TLine* line = new TLine(graphs[idx]->GetXaxis()->GetXmin(), 1, graphs[idx]->GetXaxis()->GetXmax(), 1);
+            line->SetLineStyle(3);
+            line->SetLineWidth(1);
+            line->SetLineColor(kBlack);
+            line->Draw();
 
-        if(w<model.nparams) graphs[w]->SetLineColor(kBlue-7);
+            if(idx < model.nparams) graphs[idx]->SetLineColor(kBlue-7);
 
-        if(graphs[w]->GetN()==1){//1 point, its been fixed. Just draw a line
-            float x_val = graphs[w]->GetPointX(0);
-            TLine* linet = new TLine(x_val, 0, x_val, 1);
-            linet->SetLineStyle(1);  // Dotted line style (1 is solid, 2 is dashed, 3 is dotted)
-            linet->SetLineWidth(2);  // Thin line
-            linet->SetLineColor(kGreen+2);  // Set color (black for visibility)
-            linet->Draw();
-        }
-        else if(w>=model.nparams){
-            gprior->Draw("L same");
-            gprior->SetLineStyle(2);
-            gprior->SetLineWidth(2);
-            gprior->SetLineColor(kRed-7);
-            graphs[w]->GetYaxis()->SetRangeUser(0, std::min(graphs[w]->GetHistogram()->GetMaximum(),10.0));
-        }
-
-
-
-        if(w==model.nparams-1){
-            //on past physics param, lets do a quick zoom, stepping back though the physics param
-            for(int zs = model.nparams-1; zs>=0; zs--){
-                c->cd(w+1+zs+1);
-                TGraph * graphClone = new TGraph(*graphs[w-zs]);
-                graphClone->Draw("AL");
-                std::string newTitle = std::string(graphClone->GetTitle()) + " Zoomed 1#sigma";
-                graphClone->SetTitle(newTitle.c_str());
-                graphClone->SetLineColor(kViolet);
-                float vd = std::min(values1_down[w-zs],values1_up[w-zs]) ;
-                float vu = std::max(values1_down[w-zs],values1_up[w-zs]) ;
-                float pd = (vd>0 ? vd*0.9 : vd*1.1);
-                float pu = (vu >0 ? vu*1.1 : vu*0.9);
-                graphClone->GetXaxis()->SetLimits(pd,pu); 
-                graphClone->GetYaxis()->SetRangeUser(0, std::max(graphClone->Eval(pu),graphClone->Eval(pd))*1.1) ;
-                graphClone->GetYaxis()->SetTitleSize(0.04);             
-                graphClone->GetYaxis()->SetLabelSize(0.04);            
-                graphClone->GetXaxis()->SetTitleSize(0.04);             
-                graphClone->GetXaxis()->SetLabelSize(0.04);            
-
-                if(graphClone->GetN()==1){//1 point, its been fixed. Just draw a line
-                    float x_val = graphClone->GetPointX(0);
-                    TLine* linet = new TLine(x_val, 0, x_val, 1);
-                    linet->SetLineStyle(1);  // Dotted line style (1 is solid, 2 is dashed, 3 is dotted)
-                    linet->SetLineWidth(2);  // Thin line
-                    linet->SetLineColor(kGreen+2);  // Set color (black for visibility)
-                    linet->Draw();
-                }
-
-                log<LOG_INFO>(L"%1% || Zoom boundaries X %2% %3% Y %4% %5%  ") % __func__ % pd % pu % 0.0 % (std::max(graphClone->Eval(pu),graphClone->Eval(pd))*1.1)  ;
-
-                TLine *line1 = new TLine(pd, 1, pu, 1);
-                line1->SetLineStyle(3);  
-                line1->SetLineWidth(1);  
-                line1->SetLineColor(kBlack); 
-                line1->Draw();
-
-                TLine* line2 = new TLine(vd, graphClone->Eval(vd) ,vd, 0);
-                line2->SetLineStyle(3);  
-                line2->SetLineWidth(1);  
-                line2->SetLineColor(kBlack); 
-                line2->Draw();
-
-                TLine *line3 = new TLine(vu, graphClone->Eval(vu) ,vu, 0);
-                line3->SetLineStyle(3);  
-                line3->SetLineWidth(1);  
-                line3->SetLineColor(kBlack); 
-                line3->Draw();
+            if(graphs[idx]->GetN() == 1) {
+                float x_val = graphs[idx]->GetPointX(0);
+                TLine* linet = new TLine(x_val, 0, x_val, 1);
+                linet->SetLineStyle(1);
+                linet->SetLineWidth(1);
+                linet->SetLineColor(kGreen+2);
+                linet->Draw();
             }
-            zoom_shift=model.nparams;
+            else if(idx >= model.nparams) {
+                gprior->Draw("L same");
+                gprior->SetLineStyle(2);
+                gprior->SetLineWidth(1);
+                gprior->SetLineColor(kRed-7);
+                graphs[idx]->GetYaxis()->SetRangeUser(0, std::min(graphs[idx]->GetHistogram()->GetMaximum(), 10.0));
+            }
+        });
+
+        // Add zoomed plots for physics parameters after the last physics parameter
+        if(w == model.nparams - 1) {
+            for(int zs = model.nparams - 1; zs >= 0; zs--) {
+                size_t zoomIdx = w - zs;
+                plotFunctions.push_back([&, zoomIdx]() {
+                    TGraph* graphClone = new TGraph(*graphs[zoomIdx]);
+                    graphClone->Draw("AL");
+                    std::string newTitle = std::string(graphClone->GetTitle()) + " Zoomed 1#sigma";
+                    graphClone->SetTitle(newTitle.c_str());
+                    graphClone->SetLineColor(kViolet);
+                    graphClone->SetLineWidth(1);
+                    float vd = std::min(values1_down[zoomIdx], values1_up[zoomIdx]);
+                    float vu = std::max(values1_down[zoomIdx], values1_up[zoomIdx]);
+                    float pd = (vd > 0 ? vd * 0.9 : vd * 1.1);
+                    float pu = (vu > 0 ? vu * 1.1 : vu * 0.9);
+                    graphClone->GetXaxis()->SetLimits(pd, pu);
+                    graphClone->GetYaxis()->SetRangeUser(0, std::max(graphClone->Eval(pu), graphClone->Eval(pd)) * 1.1);
+                    graphClone->GetYaxis()->SetTitleSize(0.05);
+                    graphClone->GetYaxis()->SetLabelSize(0.04);
+                    graphClone->GetXaxis()->SetTitleSize(0.05);
+                    graphClone->GetXaxis()->SetLabelSize(0.04);
+
+                    if(graphClone->GetN() == 1) {
+                        float x_val = graphClone->GetPointX(0);
+                        TLine* linet = new TLine(x_val, 0, x_val, 1);
+                        linet->SetLineStyle(1);
+                        linet->SetLineWidth(1);
+                        linet->SetLineColor(kGreen+2);
+                        linet->Draw();
+                    }
+
+                    log<LOG_INFO>(L"%1% || Zoom boundaries X %2% %3% Y %4% %5%  ") % __func__ % pd % pu % 0.0 % (std::max(graphClone->Eval(pu), graphClone->Eval(pd)) * 1.1);
+
+                    TLine* line1 = new TLine(pd, 1, pu, 1);
+                    line1->SetLineStyle(3);
+                    line1->SetLineWidth(1);
+                    line1->SetLineColor(kBlack);
+                    line1->Draw();
+
+                    TLine* line2 = new TLine(vd, graphClone->Eval(vd), vd, 0);
+                    line2->SetLineStyle(3);
+                    line2->SetLineWidth(1);
+                    line2->SetLineColor(kBlack);
+                    line2->Draw();
+
+                    TLine* line3 = new TLine(vu, graphClone->Eval(vu), vu, 0);
+                    line3->SetLineStyle(3);
+                    line3->SetLineWidth(1);
+                    line3->SetLineColor(kBlack);
+                    line3->Draw();
+                });
+            }
         }
     }
 
-    c->SaveAs((filename+".pdf").c_str(),"pdf");
+    // Now draw plots page by page
+    for(size_t i = 0; i < plotFunctions.size(); i++) {
+        int padIdx = (i % plotsPerPage) + 1;
+
+        // Start of a new page (except for the first plot)
+        if(i > 0 && padIdx == 1) {
+            c->Print((filename+".pdf").c_str());
+            c->Clear();
+            c->Divide(nCols, nRows);
+        }
+
+        c->cd(padIdx);
+        plotFunctions[i]();
+    }
+
+    // Print the last page and close the PDF
+    c->Print((filename+".pdf").c_str());
+    c->Print((filename+".pdf]").c_str());
 
     delete c;
 
