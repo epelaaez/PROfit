@@ -195,19 +195,34 @@ std::vector<profOut> PROfile::PROfilePointHelper(const PROsyst *systs, const PRO
             ub(j) = systs->spline_hi[j-nphys];
         }
     } else {
-        ub = Eigen::VectorXf::Map(systs->spline_hi.data(), systs->spline_hi.size());
-        lb = Eigen::VectorXf::Map(systs->spline_lo.data(), systs->spline_lo.size());
-        nparams = systs->GetNSplines();
+        // Syst-only mode: create full-size bounds but fix physics params at seed values
+        lb = Eigen::VectorXf::Constant(nparams, -3.0);
+        ub = Eigen::VectorXf::Constant(nparams, 3.0);
+        size_t nphys = local_metric->GetModel().nparams;
+        // Fix physics parameters at seed values
+        for(size_t j=0; j<nphys; j++){
+            float fixed_val = (seed_points.size() > 0) ? seed_points.front()(j) : 0.0f;
+            ub(j) = fixed_val;
+            lb(j) = fixed_val;
+        }
+        // Spline bounds as normal
+        for(int j = nphys; j < nparams; ++j) {
+            lb(j) = systs->spline_lo[j-nphys];
+            ub(j) = systs->spline_hi[j-nphys];
+        }
     }
 
+    // In syst-only mode, start loop at first spline index (nphys), not 0
+    int loop_start = with_osc ? 0 : (int)local_metric->GetModel().nparams;
+
     //loop over this threads todo list
-    for(int i=offset; i<nparams;i+=stride) {
+    for(int i=loop_start+offset; i<nparams;i+=stride) {
         tlb = lb;
         tub = ub;
 
         local_metric->reset();
 
-        size_t which_spline= i;
+        size_t which_spline = i;
         bool isphys = which_spline < local_metric->GetModel().nparams;
         profOut output;
 
@@ -1015,14 +1030,16 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
 
     for (int i = 0; i < nBins; ++i) {
         if(mask_osc && i < model.nparams) continue;
-        TMarker* initstar = new TMarker(i+0.5, init_seed[i], 29);
+        // In syst-only mode, init_seed/true_params are full-size but plot indices are spline-only
+        int vec_idx = with_osc ? i : (i + model.nparams);
+        TMarker* initstar = new TMarker(i+0.5, init_seed[vec_idx], 29);
         initstar->SetMarkerSize(0.6); 
         initstar->SetMarkerColor(kBlue); 
         initstar->Draw();
 
-        if (i < true_params.size()) {
+        if (vec_idx < true_params.size()) {
 
-            TMarker* truestar = new TMarker(i+0.5, true_params[i], 29);
+            TMarker* truestar = new TMarker(i+0.5, true_params[vec_idx], 29);
             truestar->SetMarkerSize(0.5); 
             truestar->SetMarkerColor(kRed); 
             truestar->Draw();
