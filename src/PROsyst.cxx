@@ -26,6 +26,9 @@ namespace PROfit {
                 this->CreateFlatMatrix(config, syst); 
                 covar_names.push_back(syst.systname); 
                 ++n_covar;
+            }else if(syst.mode == "external_covariance"){
+                //this->LoadExternalCovariance(syst);
+                covar_names.push_back(syst.systname);
             }
         }
 

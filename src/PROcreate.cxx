@@ -384,6 +384,16 @@ namespace PROfit {
             }
         }
 
+        //Do we have any external systeatics?
+        if(inconfig.m_num_variation_type_external_covariance>0){
+            for(auto& allow_sys : inconfig.m_mcgen_variation_type_map){
+                if(allow_sys.second=="external_covariance"){
+                    map_systematic_num_universe[allow_sys.first] = -1;
+                }
+            }
+        }
+
+
 
         size_t total_num_systematics = map_systematic_num_universe.size();
         log<LOG_INFO>(L"%1% || Found %2% unique variations") % __func__ % total_num_systematics;
@@ -426,6 +436,12 @@ namespace PROfit {
                 }
                 if(sys_mode == "flat"){
                     log<LOG_INFO>(L"%1% || Systematic variation %2% is a match for a flat covariance systematic. Processing a such. ") % __func__ % sys_name.c_str();
+                }
+                if(sys_mode == "external_covariance"){
+                    log<LOG_INFO>(L"%1% || Systematic variation %2% is a match for an externally loaded covariance systematic. Processing a such. ") % __func__ % sys_name.c_str();
+                    sv.back().external_filename = "test";
+                    sv.back().external_matrixname = "test";
+                    log<LOG_INFO>(L"%1% || External filename:  %2%, External Matrix :%3% ") % __func__ % sv.back().external_filename.c_str() % sv.back().external_matrixname.c_str();
                 }
                 if(sys_mode == "norm") {
                     log<LOG_INFO>(L"%1% || Systematic variation %2% is a match for a spline norm systematic. Processing a such. ") % __func__ % sys_name.c_str();
