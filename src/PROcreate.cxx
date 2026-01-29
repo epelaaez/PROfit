@@ -720,41 +720,76 @@ namespace PROfit {
 
         std::vector<long int> nentries(num_files,0);
         std::vector<float> pot_scale(num_files, 1.0);
-        std::vector<std::unique_ptr<TFile>> files(num_files);
-        std::vector<TTree*> trees(num_files,nullptr);//keep as bare pointers because of ROOT :(
+        std::vector<TChain*> chains(num_files, nullptr);
+        std::vector<std::vector<TChain*>> friendChains(num_files);
 
         for(int fid=0; fid < num_files; ++fid) {
             const auto& fn = inconfig.m_mcgen_file_name.at(fid);
 
-            files[fid] = std::make_unique<TFile>(fn.c_str(),"read");
-            trees[fid] = (TTree*)(files[fid]->Get(inconfig.m_mcgen_tree_name.at(fid).c_str()));
-            nentries[fid]= (long int)trees.at(fid)->GetEntries();
+            std::vector<std::string> filesForChain;
 
-            if(files[fid]->IsOpen()){
-                log<LOG_INFO>(L"%1% || Root file succesfully opened: %2%") % __func__  % fn.c_str();
+            if (fn.find(".root") != std::string::npos) {
+                log<LOG_INFO>(L"%1% || Starting a (single) TChain, loading file %2%") % __func__  % fn.c_str();
+                filesForChain.push_back(fn);
             }else{
-                log<LOG_ERROR>(L"%1% || Fail to open root file: %2%") % __func__  % fn.c_str();
-                exit(EXIT_FAILURE);
-            }
-            log<LOG_INFO>(L"%1% || Total Entries: %2%") % __func__ %  nentries[fid];
+                log<LOG_INFO>(L"%1% || Starting a TChain, loading from filelist %2%") % __func__  % fn.c_str();
+                std::ifstream infile(fn.c_str());
+                if (!infile) {
+                    log<LOG_ERROR>(L"%1% || Failed to open input filelist %2%") % __func__  % fn.c_str();
+                    exit(EXIT_FAILURE);
+                }
 
-            //first, grab friend trees
-            if (inconfig.m_mcgen_numfriends[fid]>0){
-                auto mcgen_file_friend_treename_iter = inconfig.m_mcgen_file_friend_treename_map.find(fn);
-                if (mcgen_file_friend_treename_iter != inconfig.m_mcgen_file_friend_treename_map.end()) {
-                    auto mcgen_file_friend_iter = inconfig.m_mcgen_file_friend_map.find(fn);
-                    if (mcgen_file_friend_iter == inconfig.m_mcgen_file_friend_map.end()) {
-                        log<LOG_ERROR>(L"%1% || Friend TTree provided but no friend file??") % __func__;
-                        log<LOG_ERROR>(L"Terminating.");
-                        exit(EXIT_FAILURE);
-                    }
-                    for(size_t k=0; k < mcgen_file_friend_treename_iter->second.size(); k++){
-                        std::string treefriendname = mcgen_file_friend_treename_iter->second.at(k);
-                        std::string treefriendfile = mcgen_file_friend_iter->second.at(k);
-                        trees[fid]->AddFriend(treefriendname.c_str(),treefriendfile.c_str());
+                std::string line;
+                while (std::getline(infile, line)) {
+                    log<LOG_INFO>(L"%1% || Loading file %2% into TChain") %__func__ % line.c_str();
+                    filesForChain.push_back(line);
+                }
+
+                infile.close();
+            }
+
+            chains[fid] = new TChain(inconfig.m_mcgen_tree_name.at(fid).c_str());
+            if (inconfig.m_mcgen_numfriends[fid] > 0) {
+                friendChains[fid].resize(inconfig.m_mcgen_numfriends[fid], nullptr);
+            }
+
+            for(auto &file: filesForChain){
+                chains[fid]->Add(file.c_str());
+
+                if (inconfig.m_mcgen_numfriends[fid] > 0) {
+                    auto mcgen_file_friend_treename_iter = inconfig.m_mcgen_file_friend_treename_map.find(fn);
+                    if (mcgen_file_friend_treename_iter != inconfig.m_mcgen_file_friend_treename_map.end()) {
+                        auto mcgen_file_friend_iter = inconfig.m_mcgen_file_friend_map.find(fn);
+                        if (mcgen_file_friend_iter == inconfig.m_mcgen_file_friend_map.end()) {
+                            log<LOG_ERROR>(L"%1% || Friend TTree provided but no friend file??") % __func__;
+                            log<LOG_ERROR>(L"Terminating.");
+                            exit(EXIT_FAILURE);
+                        }
+
+                        for (size_t k = 0; k < mcgen_file_friend_treename_iter->second.size(); k++) {
+                            std::string treefriendname = mcgen_file_friend_treename_iter->second.at(k);
+
+                            if (!friendChains[fid][k]) {
+                                friendChains[fid][k] = new TChain(treefriendname.c_str());
+                            }
+
+                            log<LOG_DEBUG>(L"%1% || Adding friend tree %2% from file %3%") % __func__ % treefriendname.c_str() % file.c_str();
+                            friendChains[fid][k]->Add(file.c_str());
+                        }
                     }
                 }
             }
+
+            // Add friend chains to main chain
+            if (inconfig.m_mcgen_numfriends[fid] > 0) {
+                for (size_t k = 0; k < friendChains[fid].size(); k++) {
+                    log<LOG_DEBUG>(L"%1% || Adding friend chain %2% to main chain %3%") % __func__ % k % fid;
+                    chains[fid]->AddFriend(friendChains[fid][k]);
+                }
+            }
+
+            nentries[fid] = (long int)chains[fid]->GetEntries();
+            log<LOG_INFO>(L"%1% || Total Entries: %2%") % __func__ %  nentries[fid];
 
             // grab branches 
             int num_branch = inconfig.m_branch_variables[fid].size();
@@ -804,7 +839,7 @@ namespace PROfit {
                 for(const auto &name: branch_variable->variable_names) {
                     branch_variable->branch_variable_formulas.push_back(std::make_shared<ROOTFormula>(
                         "branch_variabler_form_"+std::to_string(fid) +"_" + std::to_string(ib)+"_"+std::to_string(other_count),
-                        name, trees[fid]));
+                        name, chains[fid]));
                     other_count++;
                 }
 
@@ -812,7 +847,7 @@ namespace PROfit {
                 if(inconfig.m_mcgen_additional_weight_bool[fid][ib]){
                     branch_variable->branch_monte_carlo_weight_formula  =  std::make_shared<ROOTFormula>(
                         "branch_add_weight_"+std::to_string(fid)+"_" + std::to_string(ib),
-                        inconfig.m_mcgen_additional_weight_name[fid][ib], trees[fid]);
+                        inconfig.m_mcgen_additional_weight_name[fid][ib], chains[fid]);
                     log<LOG_INFO>(L"%1% || Setting up additional monte carlo weight for this branch: %2%") % __func__ %  inconfig.m_mcgen_additional_weight_name[fid][ib].c_str();
                 }
 
@@ -843,7 +878,7 @@ namespace PROfit {
             // loop over all entries
             for(long int i=0; i < nevents; ++i) {
                 if(i%1000==0)	log<LOG_INFO>(L"%1% || -- uni : %2% / %3%") % __func__ % i % nevents;
-                trees[fid]->GetEntry(i);
+                chains[fid]->GetEntry(i);
 
                 //branch loop
                 for(int ib = 0; ib != num_branch; ++ib) {
@@ -868,6 +903,18 @@ namespace PROfit {
         } //end of file loop
         time_t time_took = time(nullptr) - start_time;
         log<LOG_INFO>(L"%1% || Generating data spectrum took %2% seconds..") % __func__ % time_took;
+
+        // Cleanup TChain objects
+        for(int fid = 0; fid < num_files; ++fid) {
+            for(auto* friendChain : friendChains[fid]) {
+                delete friendChain;
+            }
+            if(chains[fid]) {
+                delete chains[fid];
+                chains[fid] = nullptr;
+            }
+        }
+
         return data;
     }
 
