@@ -276,6 +276,14 @@ namespace PROfit {
                     log<LOG_INFO>(L"%1% || Setting up additional monte carlo weight for this branch: %2%") % __func__ %  inconfig.m_mcgen_additional_weight_name[fid][ib].c_str();
                 }
 
+                //grab cross-section weight
+                if(inconfig.m_mcgen_xs_weight_bool[fid][ib]){
+                    branch_variable->branch_xs_weight_formula = std::make_shared<ROOTFormula>(
+                        "branch_xs_weight_"+std::to_string(fid)+"_" + std::to_string(ib),
+                        inconfig.m_mcgen_xs_weight_name[fid][ib], chains[fid]);
+                    log<LOG_INFO>(L"%1% || Setting up cross-section weight for this branch: %2%") % __func__ %  inconfig.m_mcgen_xs_weight_name[fid][ib].c_str();
+                }
+
 
                 // check to make sure if its in allowlist, it IS in files
                 std::vector<std::string> allowlist_check;
@@ -637,6 +645,9 @@ namespace PROfit {
                     if(inconfig.m_mcgen_additional_weight_bool[fid][ib]){
                         branches[ib]->branch_monte_carlo_weight_formula->LoadEvent(i);
                     }
+                    if(inconfig.m_mcgen_xs_weight_bool[fid][ib]){
+                        branches[ib]->branch_xs_weight_formula->LoadEvent(i);
+                    }
                     for(auto &b: branches[ib]->branch_variable_formulas) {
                         b->LoadEvent(i);
                     }
@@ -851,6 +862,14 @@ namespace PROfit {
                     log<LOG_INFO>(L"%1% || Setting up additional monte carlo weight for this branch: %2%") % __func__ %  inconfig.m_mcgen_additional_weight_name[fid][ib].c_str();
                 }
 
+                //grab cross-section weight
+                if(inconfig.m_mcgen_xs_weight_bool[fid][ib]){
+                    branch_variable->branch_xs_weight_formula = std::make_shared<ROOTFormula>(
+                        "branch_xs_weight_"+std::to_string(fid)+"_" + std::to_string(ib),
+                        inconfig.m_mcgen_xs_weight_name[fid][ib], chains[fid]);
+                    log<LOG_INFO>(L"%1% || Setting up cross-section weight for this branch: %2%") % __func__ %  inconfig.m_mcgen_xs_weight_name[fid][ib].c_str();
+                }
+
             } //end of branch loop
         } // end fid
 
@@ -883,7 +902,7 @@ namespace PROfit {
                 //branch loop
                 for(int ib = 0; ib != num_branch; ++ib) {
                     std::vector<BranchVariable::Value> vars = branches[ib]->GetVariables();
-                    float additional_weight = branches[ib]->GetMonteCarloWeight();
+                    float additional_weight = branches[ib]->GetMonteCarloWeight() * branches[ib]->GetXSWeight();
                     additional_weight *= pot_scale[fid];
 
                     if(additional_weight == 0) //skip on event failing cuts
@@ -927,14 +946,14 @@ namespace PROfit {
         std::vector<BranchVariable::Value> vars = branch->GetVariables();
 
         int run_syst = branch->GetIncludeSystematics();
-        float mc_weight_no_pot_scaling = branch->GetMonteCarloWeight();
+        float xs_weight_val = branch->GetXSWeight();
 
         //log<LOG_ERROR>(L"%1% || Initial mc_weight from GetMonteCarloWeight: %2%") % __func__ % mc_weight;
 
         int channel_group = subchannel_index / std::accumulate(inconfig.m_num_subchannels.begin(), inconfig.m_num_subchannels.end(), 0);
         int det = channel_group % inconfig.m_num_detectors;
 
-        float mc_weight = mc_weight_no_pot_scaling * inconfig.m_det_pot[det] / mcpot;
+        float mc_weight = branch->GetMonteCarloWeight() * xs_weight_val * inconfig.m_det_pot[det] / mcpot;
 
         //log<LOG_ERROR>(L"%1% || Final mc_weight after det_pot scaling: %2%") % __func__ % mc_weight;
 
@@ -995,7 +1014,7 @@ namespace PROfit {
                     if(std::isnan(w) || std::isinf(w)) w = 1;
                     for(auto so: var_syst_objs){
                         if (so->no_xs_weight_spline)
-                            so->FillUniverse(u, spline_bin, mc_weight * additional_weight * w / mc_weight_no_pot_scaling);
+                            so->FillUniverse(u, spline_bin, mc_weight * additional_weight * w / xs_weight_val);
                         else
                             so->FillUniverse(u, spline_bin, mc_weight * additional_weight * w);
                     }

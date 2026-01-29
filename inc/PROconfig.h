@@ -83,6 +83,7 @@ namespace PROfit{
       };
 
       std::shared_ptr<Formula> branch_monte_carlo_weight_formula = nullptr;
+      std::shared_ptr<Formula> branch_xs_weight_formula = nullptr;
       std::vector<std::shared_ptr<Formula>> branch_variable_formulas;
 
       int model_rule;
@@ -115,13 +116,23 @@ namespace PROfit{
       };
 
 
-      // Function: evaluate additional weight setup in the branch and return in floating precision 
+      // Function: evaluate additional weight setup in the branch and return in floating precision
       // Note: if no additional weight is set, value of 1.0 will be returned.
       inline
       float GetMonteCarloWeight() const{
-	if(branch_monte_carlo_weight_formula){ 
+	if(branch_monte_carlo_weight_formula){
 
 	  return branch_monte_carlo_weight_formula->EvalInstance().first();
+	}
+	return 1.0;
+      }
+
+      // Function: evaluate cross-section weight and return in floating precision
+      // Note: if no xs_weight is set, value of 1.0 will be returned.
+      inline
+      float GetXSWeight() const{
+	if(branch_xs_weight_formula){
+	  return branch_xs_weight_formula->EvalInstance().first();
 	}
 	return 1.0;
       }
@@ -325,6 +336,8 @@ namespace PROfit{
             std::map<std::string,std::vector<std::string>> m_mcgen_file_friend_treename_map;
             std::vector<std::vector<std::string>> m_mcgen_additional_weight_name;
             std::vector<std::vector<bool>> m_mcgen_additional_weight_bool;
+            std::vector<std::vector<std::string>> m_mcgen_xs_weight_name;
+            std::vector<std::vector<bool>> m_mcgen_xs_weight_bool;
             std::vector<std::vector<std::shared_ptr<BranchVariable>>> m_branch_variables;
             std::vector<std::vector<std::string>> m_mcgen_eventweight_branch_names;
             std::vector<std::vector<int>> m_mcgen_eventweight_branch_syst;

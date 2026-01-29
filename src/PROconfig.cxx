@@ -657,6 +657,8 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
             std::vector<bool> TEMP_additional_weight_bool;
             std::vector<std::string> TEMP_additional_weight_name;
+            std::vector<bool> TEMP_xs_weight_bool;
+            std::vector<std::string> TEMP_xs_weight_name;
             std::vector<std::string> TEMP_eventweight_branch_names;
             std::vector<bool> TEMP_hist_weight_bool;
             std::vector<std::string> TEMP_hist_weight_name;
@@ -665,7 +667,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
             std::vector<std::shared_ptr<BranchVariable>> TEMP_branch_variables;
             while(pBranch){
 
-                expected_attrs = {"incl_systematics","associated_subchannel","associated_systematic","central_value","eventweight_branch_name","additional_weight","model_rule"};
+                expected_attrs = {"incl_systematics","associated_subchannel","associated_systematic","central_value","eventweight_branch_name","additional_weight", "xs_weight", "model_rule"};
                 for (const tinyxml2::XMLAttribute* attr = pBranch->FirstAttribute(); attr; attr = attr->Next()) {
                     std::string name = attr->Name();
                     if (std::find(expected_attrs.begin(), expected_attrs.end(), name) == expected_attrs.end()) {
@@ -682,6 +684,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 const char* bcentral = pBranch->Attribute("central_value");
                 const char* bwname = pBranch->Attribute("eventweight_branch_name");
                 const char* badditional_weight = pBranch->Attribute("additional_weight");
+                const char* bxs_weight = pBranch->Attribute("xs_weight");
 
                 if(bwname== NULL){
                     //log<LOG_WARNING>(L"%1% || WARNING: No eventweight branch name passed, defaulting to 'weights' @ line %2% in %3% ") % __func__ % __LINE__  % __FILE__;
@@ -722,7 +725,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 }
 
                 //std::string chk_wei = badditional_weight;
-                if(badditional_weight == NULL || strcmp(badditional_weight, "") == 0){ 
+                if(badditional_weight == NULL || strcmp(badditional_weight, "") == 0){
                     TEMP_additional_weight_bool.push_back(0);
                     TEMP_additional_weight_name.push_back("1");
                     log<LOG_DEBUG>(L"%1% || Setting NO additional weight for branch ") % __func__  ;
@@ -731,6 +734,16 @@ int PROconfig::LoadFromXML(const std::string &filename){
                     TEMP_additional_weight_bool.push_back(1);
                     log<LOG_DEBUG>(L"%1% || Setting an additional weight for branch using the branch %2% as a reweighting.") % __func__ % badditional_weight;
 
+                }
+
+                if(bxs_weight == NULL || strcmp(bxs_weight, "") == 0){
+                    TEMP_xs_weight_bool.push_back(0);
+                    TEMP_xs_weight_name.push_back("1");
+                    log<LOG_DEBUG>(L"%1% || Setting NO xs_weight for branch ") % __func__  ;
+                }else{
+                    TEMP_xs_weight_name.push_back(bxs_weight);
+                    TEMP_xs_weight_bool.push_back(1);
+                    log<LOG_DEBUG>(L"%1% || Setting an xs_weight for branch using the branch %2% as a reweighting.") % __func__ % bxs_weight;
                 }
 
 
@@ -818,6 +831,8 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
             m_mcgen_additional_weight_name.push_back(TEMP_additional_weight_name);
             m_mcgen_additional_weight_bool.push_back(TEMP_additional_weight_bool);
+            m_mcgen_xs_weight_name.push_back(TEMP_xs_weight_name);
+            m_mcgen_xs_weight_bool.push_back(TEMP_xs_weight_bool);
             m_branch_variables.push_back(TEMP_branch_variables);
             m_mcgen_eventweight_branch_names.push_back(TEMP_eventweight_branch_names);
             m_mcgen_eventweight_branch_syst.push_back(TEMP_eventweight_branch_syst);

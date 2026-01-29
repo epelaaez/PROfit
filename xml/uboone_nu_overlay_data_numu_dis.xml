@@ -33,7 +33,8 @@
 	<branch
         	associated_subchannel = "nu_UBOONE_numu_overlay"
         	model_rule            = "1"
-			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9)) * (weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
+			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9))"
+			xs_weight             = "(weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
 		>
 		<variable>kine_reco_Enu</variable>
 		<variable>truth_nuEnergy</variable>
@@ -71,6 +72,7 @@
 			incl_systematics      = "false"
         	model_rule            = "0"
 			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9))"
+			xs_weight             = "(weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
 		>
 		<variable>kine_reco_Enu</variable>
 		<variable>0</variable>

@@ -149,6 +149,9 @@ def compute_branches(fname, fid, ttree_df, c):
         if c.m_mcgen_additional_weight_bool[fid][ib]:
             c.m_branch_variables[fid][ib].branch_monte_carlo_weight_formula = profit.DataFrameFormula("branch_add_weight_%i_%i" % (fid, ib), c.m_mcgen_additional_weight_name[fid][ib], ttree_df)
 
+        if c.m_mcgen_xs_weight_bool[fid][ib]:
+            c.m_branch_variables[fid][ib].branch_xs_weight_formula = profit.DataFrameFormula("branch_xs_weight_%i_%i" % (fid, ib), c.m_mcgen_xs_weight_name[fid][ib], ttree_df)
+
 def loadsysts(fname, ttree_df, c):
     friends = []
     friend_names = []
@@ -176,7 +179,8 @@ def process_branch(c, branch, evws, mcpot, subchannel_index, syst_vector, syst_a
     true_value = baseline / true_param
     pdg_id = branch.GetTruePDG()
     run_syst = branch.GetIncludeSystematics()
-    mc_weight = branch.GetMonteCarloWeight()
+    xs_weight = branch.GetXSWeight()
+    mc_weight = branch.GetMonteCarloWeight() * xs_weight
     mc_weight *= c.m_plot_pot / mcpot
 
     if not isinstance(mc_weight, pd.Series):
@@ -231,10 +235,16 @@ def process_branch(c, branch, evws, mcpot, subchannel_index, syst_vector, syst_a
             if s.force_0_cv:
                 cv_shift = evw.shift(0)
                 for i_univ, shift in enumerate(s.knobval):
-                    s.FillUniverse(i_univ, spline_bin[valid], (mc_weight*additional_weight*evw.shift(shift)/cv_shift)[valid])
+                    if s.no_xs_weight_spline:
+                        s.FillUniverse(i_univ, spline_bin[valid], (mc_weight*additional_weight*evw.shift(shift)/cv_shift/xs_weight)[valid])
+                    else:
+                        s.FillUniverse(i_univ, spline_bin[valid], (mc_weight*additional_weight*evw.shift(shift)/cv_shift)[valid])
             else:
                 for i_univ, shift in enumerate(s.knobval):
-                    s.FillUniverse(i_univ, spline_bin[valid], (mc_weight*additional_weight*evw.shift(shift))[valid])
+                    if s.no_xs_weight_spline:
+                        s.FillUniverse(i_univ, spline_bin[valid], (mc_weight*additional_weight*evw.shift(shift)/xs_weight)[valid])
+                    else:
+                        s.FillUniverse(i_univ, spline_bin[valid], (mc_weight*additional_weight*evw.shift(shift))[valid])
         else:
             s.FillCV(global_bin[valid], mc_weight[valid])
             for i_univ in range(s.GetNUniverse()):

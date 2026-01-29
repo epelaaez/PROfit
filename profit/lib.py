@@ -28,6 +28,7 @@ class BranchVariable(profit._profit.BranchVariable):
         self._branch_true_value_formula = None
         self._branch_true_pdg_formula = None
         self._branch_monte_carlo_weight_formula = None
+        self._branch_xs_weight_formula = None
     
     @property
     def branch_formula(self):
@@ -107,6 +108,16 @@ class BranchVariable(profit._profit.BranchVariable):
 
         return self.branch_true_pdg_formula.EvalInstance()
 
+    @property
+    def branch_xs_weight_formula(self):
+        return self._branch_xs_weight_formula
+
+    @branch_xs_weight_formula.setter
+    def branch_xs_weight_formula(self, v):
+        if not isinstance(v, profit.pylib.DataFrameFormula):
+            raise ValueError("BranchVarible.branch_xs_weight_formula must be set to profit.DataFrameFormula")
+        self._branch_xs_weight_formula = v
+
     # Override BranchVariable::GetMonteCarloWeight to use local DataFrameFormula
     # Default to 1 instead of 0 if empty
     def GetMonteCarloWeight(self):
@@ -114,4 +125,12 @@ class BranchVariable(profit._profit.BranchVariable):
             return 1
 
         return self.branch_monte_carlo_weight_formula.EvalInstance()
+
+    # Override BranchVariable::GetXSWeight to use local DataFrameFormula
+    # Default to 1 instead of 0 if empty
+    def GetXSWeight(self):
+        if self.branch_xs_weight_formula is None:
+            return 1
+
+        return self.branch_xs_weight_formula.EvalInstance()
 

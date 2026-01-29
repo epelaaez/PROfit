@@ -242,8 +242,10 @@ PYBIND11_MODULE(_profit, m) {
         .def_readonly("central_value", &PROfit::BranchVariable::central_value)
         .def_property_readonly("branch_formula", 
             [](const PROfit::BranchVariable &b) {return ttreeformula_getter(b.branch_formula.get());})
-        .def_property_readonly("branch_monte_carlo_weight_formula", 
+        .def_property_readonly("branch_monte_carlo_weight_formula",
             [](const PROfit::BranchVariable &b) {return ttreeformula_getter(b.branch_monte_carlo_weight_formula.get());})
+        .def_property_readonly("branch_xs_weight_formula",
+            [](const PROfit::BranchVariable &b) {return ttreeformula_getter(b.branch_xs_weight_formula.get());})
         .def_property_readonly("branch_true_value_formula", 
             [](const PROfit::BranchVariable &b) {return ttreeformula_getter(b.branch_true_value_formula.get());})
         .def_property_readonly("branch_true_L_formula", 
@@ -315,6 +317,8 @@ PYBIND11_MODULE(_profit, m) {
         .def_readonly("m_mcgen_file_friend_treename_map",  &PROfit::PROconfig::m_mcgen_file_friend_treename_map)
         .def_readonly("m_mcgen_additional_weight_name",  &PROfit::PROconfig::m_mcgen_additional_weight_name)
         .def_readonly("m_mcgen_additional_weight_bool",  &PROfit::PROconfig::m_mcgen_additional_weight_bool)
+        .def_readonly("m_mcgen_xs_weight_name",  &PROfit::PROconfig::m_mcgen_xs_weight_name)
+        .def_readonly("m_mcgen_xs_weight_bool",  &PROfit::PROconfig::m_mcgen_xs_weight_bool)
         .def_readonly("m_branch_variables",  &PROfit::PROconfig::m_branch_variables)
         .def_readonly("m_mcgen_eventweight_branch_names",  &PROfit::PROconfig::m_mcgen_eventweight_branch_names)
         .def_readonly("m_mcgen_eventweight_branch_syst",  &PROfit::PROconfig::m_mcgen_eventweight_branch_syst)
@@ -410,7 +414,8 @@ PYBIND11_MODULE(_profit, m) {
         .def_readwrite("p_cv", &PROfit::SystStruct::p_cv)
         .def_readwrite("p_multi_spec", &PROfit::SystStruct::p_multi_spec)
         .def_readonly("index",  &PROfit::SystStruct::index)
-        .def_readwrite("force_0_cv", &PROfit::SystStruct::force_0_cv);
+        .def_readwrite("force_0_cv", &PROfit::SystStruct::force_0_cv)
+        .def_readwrite("no_xs_weight_spline", &PROfit::SystStruct::no_xs_weight_spline);
 
     // PROsyst
     py::class_<PROfit::PROsyst>(m, "PROsyst")
