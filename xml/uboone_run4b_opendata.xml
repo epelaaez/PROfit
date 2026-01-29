@@ -11,6 +11,9 @@
     <subchannel name="data" plotname="Data" color="#99CCFF"/>
 </channel>
 
+<!-- <MCFile treename="wcpselection/T_KINEvars" filename="/nevis/houston/home/leehagaman/PROfit/uboone_spline_testing/temp_data_file_list_test.txt" scale = "1.0" pot="4.733e19"> -->
+
+
 <!-- This file is available at /pnfs/uboone/persistent/users/uboonepro/surprise/opendata/BNB/checkout_MCC9.10_Run4b_v10_04_07_11_BNB_beam_on_surprise_reco2_hist_opendata_20700.root, 4.6 GB -->
 <MCFile treename="wcpselection/T_KINEvars" filename="/nevis/riverside/data/leehagaman/ngem/data_files/checkout_MCC9.10_Run4b_v10_04_07_11_BNB_beam_on_surprise_reco2_hist_opendata_20700.root" scale = "1.0" pot="4.733e19">
     <friend treename="wcpselection/T_eval" />

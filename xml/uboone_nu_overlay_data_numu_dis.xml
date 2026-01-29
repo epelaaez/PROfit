@@ -22,8 +22,8 @@
 <!-- This file is available at /exp/uboone/data/users/lhagaman/PROfit_files/nu_overlay_splines_50.root, 4.1 GB -->
 <!-- <MCFile treename="wcpselection/T_KINEvars" filename="/nevis/riverside/data/leehagaman/ngem/data_files/nu_overlay_splines_50.root" scale = "1.0" pot="4.69e19"> -->
 <!-- This file is available at /exp/uboone/data/users/lhagaman/PROfit_files/run4b_nuoverlay_retuple_splines.root, 65 GB -->
-<!-- <MCFile treename="wcpselection/T_KINEvars" filename="/nevis/riverside/data/leehagaman/ngem/data_files/nu_overlay_splines_50.root" scale = "1.0" pot="4.69e19"> -->
-<MCFile treename="wcpselection/T_KINEvars" filename="/nevis/riverside/data/leehagaman/ngem/data_files/run4b_nuoverlay_retuple_splines.root" scale = "1.0" pot="7.378e20">
+<!-- <MCFile treename="wcpselection/T_KINEvars" filename="/nevis/riverside/data/leehagaman/ngem/data_files/run4b_nuoverlay_retuple_splines.root" scale = "1.0" pot="7.378e20"> -->
+<MCFile treename="wcpselection/T_KINEvars" filename="/nevis/riverside/data/leehagaman/ngem/data_files/nu_overlay_splines_50.root" scale = "1.0" pot="4.69e19">
 	<friend treename="wcpselection/T_eval" />
 	<friend treename="wcpselection/T_PFeval" />
 	<friend treename="wcpselection/T_BDTvars" />
