@@ -339,8 +339,7 @@ namespace PROfit{
             std::vector<std::string> m_mcgen_variation_allowlist;
             std::vector<std::string> m_mcgen_variation_denylist;
             std::vector<std::string> m_mcgen_variation_type;
-            std::vector<std::string> m_mcgen_variation_external_filename;
-            std::vector<std::string> m_mcgen_variation_external_matrixname;
+            std::map<std::string, std::string> m_mcgen_variation_external_filename_map;
             std::map<std::string, std::string> m_mcgen_variation_type_map;
             std::map<std::string, std::string> m_mcgen_variation_plotname_map;
             std::map<std::string, int> m_mcgen_variation_binning_map;

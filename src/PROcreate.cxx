@@ -438,10 +438,10 @@ namespace PROfit {
                     log<LOG_INFO>(L"%1% || Systematic variation %2% is a match for a flat covariance systematic. Processing a such. ") % __func__ % sys_name.c_str();
                 }
                 if(sys_mode == "external_covariance"){
+                    sv.back().external_filename = inconfig.m_mcgen_variation_external_filename_map.at(sys_name);
+                    sv.back().binning = binningindex;
                     log<LOG_INFO>(L"%1% || Systematic variation %2% is a match for an externally loaded covariance systematic. Processing a such. ") % __func__ % sys_name.c_str();
-                    sv.back().external_filename = "test";
-                    sv.back().external_matrixname = "test";
-                    log<LOG_INFO>(L"%1% || External filename:  %2%, External Matrix :%3% ") % __func__ % sv.back().external_filename.c_str() % sv.back().external_matrixname.c_str();
+                    log<LOG_INFO>(L"%1% || External filename:  %2%, External Matrix :%3% . Use for variable number %4%") % __func__ % sv.back().external_filename.c_str() % sys_name.c_str() % sv.back().binning;
                 }
                 if(sys_mode == "norm") {
                     log<LOG_INFO>(L"%1% || Systematic variation %2% is a match for a spline norm systematic. Processing a such. ") % __func__ % sys_name.c_str();
@@ -520,10 +520,10 @@ namespace PROfit {
         for(size_t i = 0; i < syst_vector.size(); ++i){
             auto &sv = syst_vector[i];
             for(auto &s: sv) {
-                if(s.mode=="flat")
+                if(s.mode=="flat" || s.mode=="external_covariance")
                     continue;
                 //Get these binnings right
-                s.CreateSpecs( s.mode == "covariance" ? inconfig.m_num_variable_bins_total[i] : inconfig.m_num_variable_bins_total[s.binning]);
+                s.CreateSpecs( (s.mode == "covariance" ) ? inconfig.m_num_variable_bins_total[i] : inconfig.m_num_variable_bins_total[s.binning]);
                 // use the binnign from the variable if covariance, otherise use the binning fdefined for the spline
             }
         }
