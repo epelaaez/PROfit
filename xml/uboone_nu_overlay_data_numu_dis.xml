@@ -2,39 +2,47 @@
 
 <mode name="nu" />
 
-<detector name="UBOONE" pot="4.733e19" />
+<detector name="uBooNE" pot="4.733e19" />
 
 <channel name="numuCCNpFC" plotname="Reconstructed Neutrino Energy [MeV]">
 	<bins unit="Reconstructed Neutrino Energy [MeV]" min="0" max="2500" nbins="25"/>
 	<bins unit="True Neutrino Energy [MeV]" min="0" max="3000" nbins="20"/>
 	<bins unit="True L/E" min="0" max="3000" nbins="250" plot="false"/>
-	<subchannel name="ext" plotname="Ext" color="#3BB143"/>
+	<subchannel name="nueCCoverlay" plotname="#nu_{e}CC overlay" color="#12fc50"/>
+	<subchannel name="ext" plotname="Ext" color="#3f8036"/>
+	<subchannel name="NCoverlay" plotname="NC overlay" color="#fc9312"/>
 	<subchannel name="dirt" plotname="Dirt" color="#895129"/>
-	<subchannel name="overlay" plotname="Overlay" color="#21B1FF"/>
+	<subchannel name="numuCCoverlay" plotname="#nu_{#mu}CC overlay" color="#21B1FF"/>
 </channel>
 <channel name="numuCC0pFC" plotname="Reconstructed Neutrino Energy [MeV]">
 	<bins unit="Reconstructed Neutrino Energy [MeV]" min="0" max="2500" nbins="25"/>
 	<bins unit="True Neutrino Energy [MeV]" min="0" max="3000" nbins="20"/>
 	<bins unit="True L/E" min="0" max="3000" nbins="250" plot="false"/>
-	<subchannel name="ext" plotname="Ext" color="#3BB143"/>
+	<subchannel name="nueCCoverlay" plotname="#nu_{e}CC overlay" color="#12fc50"/>
+	<subchannel name="ext" plotname="Ext" color="#3f8036"/>
+	<subchannel name="NCoverlay" plotname="NC overlay" color="#fc9312"/>
 	<subchannel name="dirt" plotname="Dirt" color="#895129"/>
-	<subchannel name="overlay" plotname="Overlay" color="#21B1FF"/>
+	<subchannel name="numuCCoverlay" plotname="#nu_{#mu}CC overlay" color="#21B1FF"/>
 </channel>
 <channel name="numuCCNpPC" plotname="Reconstructed Neutrino Energy [MeV]">
 	<bins unit="Reconstructed Neutrino Energy [MeV]" min="0" max="2500" nbins="25"/>
 	<bins unit="True Neutrino Energy [MeV]" min="0" max="3000" nbins="20"/>
 	<bins unit="True L/E" min="0" max="3000" nbins="250" plot="false"/>
-	<subchannel name="ext" plotname="Ext" color="#3BB143"/>
+	<subchannel name="nueCCoverlay" plotname="#nu_{e}CC overlay" color="#12fc50"/>
+	<subchannel name="ext" plotname="Ext" color="#3f8036"/>
+	<subchannel name="NCoverlay" plotname="NC overlay" color="#fc9312"/>
 	<subchannel name="dirt" plotname="Dirt" color="#895129"/>
-	<subchannel name="overlay" plotname="Overlay" color="#21B1FF"/>
+	<subchannel name="numuCCoverlay" plotname="#nu_{#mu}CC overlay" color="#21B1FF"/>
 </channel>
 <channel name="numuCC0pPC" plotname="Reconstructed Neutrino Energy [MeV]">
 	<bins unit="Reconstructed Neutrino Energy [MeV]" min="0" max="2500" nbins="25"/>
 	<bins unit="True Neutrino Energy [MeV]" min="0" max="3000" nbins="20"/>
 	<bins unit="True L/E" min="0" max="3000" nbins="250" plot="false"/>
-	<subchannel name="ext" plotname="Ext" color="#3BB143"/>
+	<subchannel name="nueCCoverlay" plotname="#nu_{e}CC overlay" color="#12fc50"/>
+	<subchannel name="ext" plotname="Ext" color="#3f8036"/>
+	<subchannel name="NCoverlay" plotname="NC overlay" color="#fc9312"/>
 	<subchannel name="dirt" plotname="Dirt" color="#895129"/>
-	<subchannel name="overlay" plotname="Overlay" color="#21B1FF"/>
+	<subchannel name="numuCCoverlay" plotname="#nu_{#mu}CC overlay" color="#21B1FF"/>
 </channel>
 
 <model tag="numudis">
@@ -47,16 +55,16 @@
 <!-- <MCFile treename="wcpselection/T_KINEvars" filename="/nevis/riverside/data/leehagaman/ngem/data_files/nu_overlay_splines_50.root" scale = "1.0" pot="4.69e19"> -->
 <!-- This file is available at /exp/uboone/data/users/lhagaman/PROfit_files/run4b_nuoverlay_retuple_splines.root, 65 GB -->
 <!-- <MCFile treename="wcpselection/T_KINEvars" filename="/nevis/riverside/data/leehagaman/ngem/data_files/run4b_nuoverlay_retuple_splines.root" scale = "1.0" pot="7.378e20"> -->
-<MCFile treename="wcpselection/T_KINEvars" filename="/nevis/riverside/data/leehagaman/ngem/data_files/nu_overlay_splines_50.root" scale = "1.0" pot="4.69e19">
+<MCFile treename="wcpselection/T_KINEvars" filename="/nevis/riverside/data/leehagaman/ngem/data_files/nu_overlay_splines_50.root" scale = "1.0" pot="4.692e19">
 	<friend treename="wcpselection/T_eval" />
 	<friend treename="wcpselection/T_PFeval" />
 	<friend treename="wcpselection/T_BDTvars" />
 	<friend treename="spline_weights" />
 	<friend treename="nuselection/NeutrinoSelectionFilter" />
 	<branch
-        	associated_subchannel = "nu_UBOONE_numuCCNpFC_overlay"
+        	associated_subchannel = "nu_uBooNE_numuCCNpFC_numuCCoverlay"
         	model_rule            = "1"
-			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) > 0))"
+			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) > 0) && (abs(truth_nuPdg) == 14) && (truth_isCC == 1))"
 			xs_weight             = "(weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
 		>
 		<variable>kine_reco_Enu</variable>
@@ -64,19 +72,9 @@
 		<variable>1000.*(mcflux_dk2gen + mcflux_gen2vtx)/truth_nuEnergy</variable>	
 	</branch>
 	<branch
-        	associated_subchannel = "nu_UBOONE_numuCC0pFC_overlay"
+        	associated_subchannel = "nu_uBooNE_numuCCNpFC_nueCCoverlay"
         	model_rule            = "1"
-			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0))"
-			xs_weight             = "(weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
-		>
-		<variable>kine_reco_Enu</variable>
-		<variable>truth_nuEnergy</variable>
-		<variable>1000.*(mcflux_dk2gen + mcflux_gen2vtx)/truth_nuEnergy</variable>	
-	</branch>
-		<branch
-        	associated_subchannel = "nu_UBOONE_numuCCNpPC_overlay"
-        	model_rule            = "1"
-			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 0) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) > 0))"
+			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) > 0) && (abs(truth_nuPdg) == 12) && (truth_isCC == 1))"
 			xs_weight             = "(weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
 		>
 		<variable>kine_reco_Enu</variable>
@@ -84,9 +82,102 @@
 		<variable>1000.*(mcflux_dk2gen + mcflux_gen2vtx)/truth_nuEnergy</variable>	
 	</branch>
 	<branch
-        	associated_subchannel = "nu_UBOONE_numuCC0pPC_overlay"
+        	associated_subchannel = "nu_uBooNE_numuCCNpFC_NCoverlay"
         	model_rule            = "1"
-			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 0) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0))"
+			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) > 0) && (truth_isCC == 0))"
+			xs_weight             = "(weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
+		>
+		<variable>kine_reco_Enu</variable>
+		<variable>truth_nuEnergy</variable>
+		<variable>1000.*(mcflux_dk2gen + mcflux_gen2vtx)/truth_nuEnergy</variable>	
+	</branch>
+
+	<branch
+        	associated_subchannel = "nu_uBooNE_numuCC0pFC_numuCCoverlay"
+        	model_rule            = "1"
+			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0) && (abs(truth_nuPdg) == 14) && (truth_isCC == 1))"
+			xs_weight             = "(weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
+		>
+		<variable>kine_reco_Enu</variable>
+		<variable>truth_nuEnergy</variable>
+		<variable>1000.*(mcflux_dk2gen + mcflux_gen2vtx)/truth_nuEnergy</variable>	
+	</branch>
+	<branch
+        	associated_subchannel = "nu_uBooNE_numuCC0pFC_nueCCoverlay"
+        	model_rule            = "1"
+			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0) && (abs(truth_nuPdg) == 12) && (truth_isCC == 1))"
+			xs_weight             = "(weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
+		>
+		<variable>kine_reco_Enu</variable>
+		<variable>truth_nuEnergy</variable>
+		<variable>1000.*(mcflux_dk2gen + mcflux_gen2vtx)/truth_nuEnergy</variable>	
+	</branch>
+	<branch
+        	associated_subchannel = "nu_uBooNE_numuCC0pFC_NCoverlay"
+        	model_rule            = "1"
+			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0) && (truth_isCC == 0))"
+			xs_weight             = "(weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
+		>
+		<variable>kine_reco_Enu</variable>
+		<variable>truth_nuEnergy</variable>
+		<variable>1000.*(mcflux_dk2gen + mcflux_gen2vtx)/truth_nuEnergy</variable>	
+	</branch>
+
+	<branch
+        	associated_subchannel = "nu_uBooNE_numuCCNpPC_numuCCoverlay"
+        	model_rule            = "1"
+			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 0) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) > 0) && (abs(truth_nuPdg) == 14) && (truth_isCC == 1))"
+			xs_weight             = "(weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
+		>
+		<variable>kine_reco_Enu</variable>
+		<variable>truth_nuEnergy</variable>
+		<variable>1000.*(mcflux_dk2gen + mcflux_gen2vtx)/truth_nuEnergy</variable>	
+	</branch>
+	<branch
+        	associated_subchannel = "nu_uBooNE_numuCCNpPC_nueCCoverlay"
+        	model_rule            = "1"
+			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 0) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) > 0) && (abs(truth_nuPdg) == 12) && (truth_isCC == 1))"
+			xs_weight             = "(weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
+		>
+		<variable>kine_reco_Enu</variable>
+		<variable>truth_nuEnergy</variable>
+		<variable>1000.*(mcflux_dk2gen + mcflux_gen2vtx)/truth_nuEnergy</variable>	
+	</branch>
+	<branch
+        	associated_subchannel = "nu_uBooNE_numuCCNpPC_NCoverlay"
+        	model_rule            = "1"
+			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 0) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) > 0) && (truth_isCC == 0))"
+			xs_weight             = "(weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
+		>
+		<variable>kine_reco_Enu</variable>
+		<variable>truth_nuEnergy</variable>
+		<variable>1000.*(mcflux_dk2gen + mcflux_gen2vtx)/truth_nuEnergy</variable>	
+	</branch>
+
+	<branch
+        	associated_subchannel = "nu_uBooNE_numuCC0pPC_numuCCoverlay"
+        	model_rule            = "1"
+			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 0) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0) && (abs(truth_nuPdg) == 14) && (truth_isCC == 1))"
+			xs_weight             = "(weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
+		>
+		<variable>kine_reco_Enu</variable>
+		<variable>truth_nuEnergy</variable>
+		<variable>1000.*(mcflux_dk2gen + mcflux_gen2vtx)/truth_nuEnergy</variable>	
+	</branch>
+	<branch
+        	associated_subchannel = "nu_uBooNE_numuCC0pPC_nueCCoverlay"
+        	model_rule            = "1"
+			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 0) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0) && (abs(truth_nuPdg) == 12) && (truth_isCC == 1))"
+			xs_weight             = "(weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
+		>
+		<variable>kine_reco_Enu</variable>
+		<variable>truth_nuEnergy</variable>
+		<variable>1000.*(mcflux_dk2gen + mcflux_gen2vtx)/truth_nuEnergy</variable>	
+	</branch>
+	<branch
+        	associated_subchannel = "nu_uBooNE_numuCC0pPC_NCoverlay"
+        	model_rule            = "1"
+			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 0) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0) && (truth_isCC == 0))"
 			xs_weight             = "(weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
 		>
 		<variable>kine_reco_Enu</variable>
@@ -96,12 +187,12 @@
 </MCFile>
 
 <!-- This file is available at /pnfs/uboone/persistent/users/uboonepro/surprise/run4b_full_samples/wc_processed/BNB/MCC9.10_Run4b_v10_04_07_09_Run4b_BNB_beam_off_surprise_reco2_hist.root -->
-<MCFile treename="wcpselection/T_KINEvars" filename="/nevis/riverside/data/leehagaman/ngem/data_files/MCC9.10_Run4b_v10_04_07_09_Run4b_BNB_beam_off_surprise_reco2_hist.root" scale = "1.0" pot="1.476e20">
+<MCFile treename="wcpselection/T_KINEvars" filename="/nevis/riverside/data/leehagaman/ngem/data_files/MCC9.10_Run4b_v10_04_07_09_Run4b_BNB_beam_off_surprise_reco2_hist.root" scale = "1.0" pot="1.466e20">
 	<friend treename="wcpselection/T_eval" />
 	<friend treename="wcpselection/T_PFeval" />
 	<friend treename="wcpselection/T_BDTvars" />
 	<branch
-        	associated_subchannel = "nu_UBOONE_numuCCNpFC_ext"
+        	associated_subchannel = "nu_uBooNE_numuCCNpFC_ext"
 			incl_systematics      = "false"
         	model_rule            = "0"
 			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) > 0))"
@@ -111,7 +202,7 @@
 		<variable>0</variable>	
 	</branch>
 	<branch
-        	associated_subchannel = "nu_UBOONE_numuCC0pFC_ext"
+        	associated_subchannel = "nu_uBooNE_numuCC0pFC_ext"
 			incl_systematics      = "false"
         	model_rule            = "0"
 			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0))"
@@ -121,7 +212,7 @@
 		<variable>0</variable>	
 	</branch>
 		<branch
-        	associated_subchannel = "nu_UBOONE_numuCCNpPC_ext"
+        	associated_subchannel = "nu_uBooNE_numuCCNpPC_ext"
 			incl_systematics      = "false"
         	model_rule            = "0"
 			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 0) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) > 0))"
@@ -131,7 +222,7 @@
 		<variable>0</variable>	
 	</branch>
 	<branch
-        	associated_subchannel = "nu_UBOONE_numuCC0pPC_ext"
+        	associated_subchannel = "nu_uBooNE_numuCC0pPC_ext"
 			incl_systematics      = "false"
         	model_rule            = "0"
 			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 0) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0))"
@@ -150,7 +241,7 @@
 	<friend treename="wcpselection/T_BDTvars" />
 
 	<branch
-        	associated_subchannel = "nu_UBOONE_numuCCNpFC_dirt"
+        	associated_subchannel = "nu_uBooNE_numuCCNpFC_dirt"
 			incl_systematics      = "false"
         	model_rule            = "1"
 			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) > 0))"
@@ -161,7 +252,7 @@
 		<variable>1000.*(mcflux_dk2gen + mcflux_gen2vtx)/truth_nuEnergy</variable>	
 	</branch>
 	<branch
-        	associated_subchannel = "nu_UBOONE_numuCC0pFC_dirt"
+        	associated_subchannel = "nu_uBooNE_numuCC0pFC_dirt"
 			incl_systematics      = "false"
         	model_rule            = "1"
 			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0))"
@@ -172,7 +263,7 @@
 		<variable>1000.*(mcflux_dk2gen + mcflux_gen2vtx)/truth_nuEnergy</variable>	
 	</branch>
 		<branch
-        	associated_subchannel = "nu_UBOONE_numuCCNpPC_dirt"
+        	associated_subchannel = "nu_uBooNE_numuCCNpPC_dirt"
 			incl_systematics      = "false"
         	model_rule            = "1"
 			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 0) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) > 0))"
@@ -183,7 +274,7 @@
 		<variable>1000.*(mcflux_dk2gen + mcflux_gen2vtx)/truth_nuEnergy</variable>	
 	</branch>
 	<branch
-        	associated_subchannel = "nu_UBOONE_numuCC0pPC_dirt"
+        	associated_subchannel = "nu_uBooNE_numuCC0pPC_dirt"
 			incl_systematics      = "false"
         	model_rule            = "1"
 			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 0) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0))"
@@ -289,6 +380,6 @@
 	<allowlist type="covariance" tag="Reint" scale="0.001">weightsReint</allowlist>
 
 	<!-- Other Systematics -->
-	<allowlist type="norm" binning="reco" plotname="Targets_POT" tag="norm">nu_UBOONE_nuoverlay_overlay:0.02</allowlist>
+	<allowlist type="norm" binning="reco" plotname="Targets_POT" tag="norm">nu_uBooNE_nuoverlay_overlay:0.02</allowlist>
 
 </variation_list>

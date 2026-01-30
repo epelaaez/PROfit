@@ -2,7 +2,7 @@
 
 <mode name="nu" />
 
-<detector name="UBOONE" pot="7.801e19" />
+<detector name="uBooNE" pot="4.733e19" />
 
 <channel name="numuCCNpFC" plotname="Reconstructed Neutrino Energy [MeV]">
 	<bins unit="Reconstructed Neutrino Energy [MeV]" min="0" max="2500" nbins="25"/>
@@ -32,12 +32,13 @@
 
 <!-- This contains two files: /pnfs/uboone/persistent/users/uboonepro/surprise/opendata/BNB/checkout_MCC9.10_Run4b_v10_04_07_11_BNB_beam_on_surprise_reco2_hist_opendata_20700.root,
 /pnfs/uboone/persistent/users/uboonepro/surprise/opendata/BNB/checkout_MCC9.10_Run4a_BNB_beam_on_data_surprise_reco2_hist_opendata_19550.root -->
-<MCFile treename="wcpselection/T_KINEvars" filename="/nevis/riverside/data/leehagaman/ngem/data_files/run_4_open_data_surprise_files.txt" scale = "1.0" pot="7.801e19">
+<!-- <MCFile treename="wcpselection/T_KINEvars" filename="/nevis/riverside/data/leehagaman/ngem/data_files/run_4_open_data_surprise_files.txt" scale = "1.0" pot="7.801e19"> -->
+<MCFile treename="wcpselection/T_KINEvars" filename="/nevis/riverside/data/leehagaman/ngem/data_files/checkout_MCC9.10_Run4b_v10_04_07_11_BNB_beam_on_surprise_reco2_hist_opendata_20700.root" scale = "1.0" pot="4.733e19">
     <friend treename="wcpselection/T_eval" />
 	<friend treename="wcpselection/T_BDTvars" />
-	
+
 	<branch
-        	associated_subchannel = "nu_UBOONE_numuCCNpFC_data"
+        	associated_subchannel = "nu_uBooNE_numuCCNpFC_data"
         	model_rule            = "0"
 			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) > 0))"
 		>
@@ -46,7 +47,7 @@
 		<variable>0</variable>
 	</branch>
 	<branch
-        	associated_subchannel = "nu_UBOONE_numuCC0pFC_data"
+        	associated_subchannel = "nu_uBooNE_numuCC0pFC_data"
         	model_rule            = "0"
 			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0))"
 		>
@@ -55,7 +56,7 @@
 		<variable>0</variable>
 	</branch>
 		<branch
-        	associated_subchannel = "nu_UBOONE_numuCCNpPC_data"
+        	associated_subchannel = "nu_uBooNE_numuCCNpPC_data"
         	model_rule            = "0"
 			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 0) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) > 0))"
 		>
@@ -64,7 +65,7 @@
 		<variable>0</variable>	
 	</branch>
 	<branch
-        	associated_subchannel = "nu_UBOONE_numuCC0pPC_data"
+        	associated_subchannel = "nu_uBooNE_numuCC0pPC_data"
         	model_rule            = "0"
 			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 0) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0))"
 		>
