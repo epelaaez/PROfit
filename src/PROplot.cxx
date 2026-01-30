@@ -990,7 +990,7 @@ namespace PROfit{
                         xtitle = joined_title.substr(0, pos);
                         std::string ytitle2d = joined_title.erase(0, pos + del.length());
                         ratio_titles = ";"+xtitle2d+";"+rat_y_title;
-                        std::string hist_title = config.m_detector_plotnames[det]  + " "+ config.m_channel_plotnames[channel]+" CV;"+xtitle2d+";"+ytitle2d;
+                        std::string hist_title = config.m_detector_plotnames[det]  + " "+ config.m_channel_names[channel]+" CV;"+xtitle2d+";"+ytitle2d;
 
                         std::vector<float> edges_x = config.m_channel_variable_bins[channel][other_index].Edges(0);
                         std::vector<float> edges_y = config.m_channel_variable_bins[channel][other_index].Edges(1);
@@ -1102,7 +1102,7 @@ namespace PROfit{
 
                     std::vector<float> edges = config.m_channel_variable_bins[channel][other_index].Edges();
 
-                    std::string hist_titles = config.m_mode_plotnames[mode]+" "+config.m_detector_plotnames[det]  + " "+ config.m_channel_plotnames[channel]+";"+xtitle+";"+ytitle;
+                    std::string hist_titles = config.m_mode_plotnames[mode]+" "+config.m_detector_plotnames[det]  + " "+ config.m_channel_names[channel]+";"+xtitle+";"+ytitle;
                     TH1D cv_hist(("cv_hist"+std::to_string(global_channel_index)).c_str(), hist_titles.c_str(), channel_nbins_x, edges.data());
                     cv_hist.SetLineWidth(2);
 
