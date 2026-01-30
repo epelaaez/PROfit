@@ -838,7 +838,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 if(text) wt = std::string(text);
 
                 //check for known attributes
-                const std::vector<std::string> expected_attrs = {"type", "plotname", "binning", "knobvals", "tag", "prior", "center"};
+                const std::vector<std::string> expected_attrs = {"type", "plotname", "binning", "knobvals", "tag", "prior", "center","filename"};
                 for (const tinyxml2::XMLAttribute* attr = pAllowList->FirstAttribute(); attr; attr = attr->Next()) {
                     std::string name = attr->Name();
                     if (std::find(expected_attrs.begin(), expected_attrs.end(), name) == expected_attrs.end()) {
@@ -855,14 +855,14 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 const char *tags = pAllowList->Attribute("tag");
                 const char *prior = pAllowList->Attribute("prior");
                 const char *center = pAllowList->Attribute("center");
-
+                const char *filename = pAllowList->Attribute("filename");
 
 
                 m_mcgen_variation_type.push_back(variation_type);
                 m_mcgen_variation_type_map[wt] = variation_type;
                 m_mcgen_variation_allowlist.push_back(wt);
                 if(prior) m_mcgen_variation_prior[wt] = std::strtof(prior, NULL);
-                if(center) m_mcgen_variation_prior_centers[wt] = std::strtof(center, NULL);
+                if(filename) m_mcgen_variation_external_filename_map[wt] = filename;
                 m_mcgen_variation_plotname_map[wt] = plot_name ? plot_name : wt;
                 if(!binning || strcmp(binning, "reco") == 0) {
                     m_mcgen_variation_binning_map[wt] = i_prime;
@@ -1199,11 +1199,14 @@ int PROconfig::LoadFromXML(const std::string &filename){
             m_mcgen_variation_allowlist[i] = "mcstat";
             m_mcgen_variation_type_map["mcstat"] = "mcstat";
             m_use_mcstats = true;
+        }else if(m_mcgen_variation_type[i] == "external_covariance"){
+            m_num_variation_type_external_covariance+=1;
         }
 
     }
 
     log<LOG_INFO>(L"%1% || num_variation_type_covariance: %2% ") % __func__ % m_num_variation_type_covariance;
+    log<LOG_INFO>(L"%1% || num_variation_type_external_ovariance: %2% ") % __func__ % m_num_variation_type_external_covariance;
     log<LOG_INFO>(L"%1% || num_variation_type_flat: %2% ") % __func__ % m_num_variation_type_flat;
     log<LOG_INFO>(L"%1% || num_variation_type_norm: %2% ") % __func__ % m_num_variation_type_norm;
     log<LOG_INFO>(L"%1% || num_variation_type_spline: %2% ") % __func__ % m_num_variation_type_spline; 

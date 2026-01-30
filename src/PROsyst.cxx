@@ -26,6 +26,13 @@ namespace PROfit {
                 this->CreateFlatMatrix(config, syst); 
                 covar_names.push_back(syst.systname); 
                 ++n_covar;
+            }else if(syst.mode == "external_covariance"){
+                if(other_index == syst.binning){
+                    //external covariances are only created for specific binning
+                    this->LoadExternalCovarianceMatrix(config,syst);
+                    covar_names.push_back(syst.systname);
+                    ++n_covar;
+                }
             }
         }
 
@@ -96,7 +103,7 @@ namespace PROfit {
                         tmp_centers(ret.n_splines) = spline_centers(idx);
                         ++ret.n_splines;
                         break;
-                        }
+                    }
                 case SystType::Covariance:
                     ret.syst_map[name] = std::make_pair(ret.covmat.size(), SystType::Covariance);
                     ret.covar_names.push_back(name);
@@ -339,7 +346,72 @@ namespace PROfit {
 
         return;
     }
+    void PROsyst::LoadExternalCovarianceMatrix(const PROconfig &config, const SystStruct& syst){
+        //this is matrix name
+        std::string matrixname = syst.GetSysName();
+        std::string filename = syst.external_filename;
+        log<LOG_INFO>(L"%1% || Loading a TMatrix from %2% named %3%") % __func__ % filename.c_str() % matrixname.c_str();
+        int nbins = config.m_num_variable_bins_total[other_index];
+        Eigen::MatrixXf fracM = Eigen::MatrixXf::Zero(nbins, nbins);
+        Eigen::MatrixXf corrM = Eigen::MatrixXf::Identity(nbins, nbins);
 
+        TFile* file = TFile::Open(filename.c_str(), "READ");
+        if(!file || file->IsZombie()){
+            log<LOG_ERROR>(L"%1% || Failed to open file: %2%") % __func__ % filename.c_str();
+            exit(EXIT_FAILURE);
+        }
+
+        TMatrixD* tmatrix = dynamic_cast<TMatrixD*>(file->Get(matrixname.c_str()));
+        if(!tmatrix){
+            log<LOG_ERROR>(L"%1% || Failed to load TMatrixD named %2% from file %3%") % __func__ % matrixname.c_str() % filename.c_str();
+            file->Close();
+            delete file;
+            exit(EXIT_FAILURE);
+        }
+
+        // Check dimensions match expected size
+        int nrows = tmatrix->GetNrows();
+        int ncols = tmatrix->GetNcols();
+        if(nrows != nbins || ncols != nbins){
+            log<LOG_ERROR>(L"%1% || Dimension mismatch: TMatrixD is %2%x%3% but expected %4%x%4%") 
+                % __func__ % nrows % ncols % nbins;
+            file->Close();
+            delete file;
+            exit(EXIT_FAILURE);
+        }
+
+        // Copy TMatrixD values into Eigen matrix
+        for(int i = 0; i < nbins; ++i){
+            for(int j = 0; j < nbins; ++j){
+                fracM(i, j) = static_cast<float>((*tmatrix)(i, j));
+            }
+        }
+
+        // Clean up ROOT objects
+        file->Close();
+        delete file;
+
+        // Zero out any NaN or infinite values
+        PROsyst::toFiniteMatrix(fracM);
+
+        // Check if matrix is positive semi-definite
+        if(!PROsyst::isPositiveSemiDefinite_WithTolerance(fracM, 2.0*Eigen::NumTraits<float>::dummy_precision())){
+            log<LOG_WARNING>(L"%1% || External covariance matrix %2% is not positive semi-definite!") 
+                % __func__ % matrixname.c_str();
+        }
+
+        // Generate correlation matrix from fractional covariance
+        corrM = PROsyst::GenerateCorrMatrix(fracM);
+
+        syst_map[matrixname] = {covmat.size(), SystType::Covariance};
+        covmat.push_back(fracM);
+        corrmat.push_back(corrM);
+
+        log<LOG_INFO>(L"%1% || Successfully loaded %2%x%3% covariance matrix %4%") 
+            % __func__ % nbins % nbins % matrixname.c_str();
+
+        return;
+    }
 
     std::pair<Eigen::MatrixXf, Eigen::MatrixXf>  PROsyst::GenerateCovarMatrices(const SystStruct& sys_obj){
         //get fractional covar
@@ -491,341 +563,342 @@ namespace PROfit {
 
     }
 
-    
-float PROsyst::GetSplineShift(int spline_num, float shift, int bin) const {
-    const Spline& spline = splines[spline_num];
-    if (bin < 0 || bin >= spline.bins) return -1;
 
-    // Find the right segment with egments are sorted by knob value
-    int offset = bin * spline.segments_per_bin;
-    const SplineSegment* segs = &spline.segments[offset];
+    float PROsyst::GetSplineShift(int spline_num, float shift, int bin) const {
+        const Spline& spline = splines[spline_num];
+        if (bin < 0 || bin >= spline.bins) return -1;
 
-    float lowest_knobval = segs[0].knot;
-    int shiftBin = std::clamp(int(shift - lowest_knobval), 0, spline.segments_per_bin - 1);
+        // Find the right segment with egments are sorted by knob value
+        int offset = bin * spline.segments_per_bin;
+        const SplineSegment* segs = &spline.segments[offset];
 
-    const SplineSegment& seg = segs[shiftBin];
-    float x = shift - seg.knot;
-    const auto& c = seg.coeffs;
-    return c[0] + x*(c[1] + x*(c[2] + x*c[3]));
-}
+        float lowest_knobval = segs[0].knot;
+        int shiftBin = std::clamp(int(shift - lowest_knobval), 0, spline.segments_per_bin - 1);
 
-void PROsyst::FillSpline(const SystStruct& syst) {
-    std::vector<PROspec> ratios;
-    ratios.reserve(syst.p_multi_spec.size());
-    float cv_integral = syst.p_cv->Spec().sum();
+        const SplineSegment& seg = segs[shiftBin];
+        float x = shift - seg.knot;
+        const auto& c = seg.coeffs;
+        return c[0] + x*(c[1] + x*(c[2] + x*c[3]));
+    }
+
+    void PROsyst::FillSpline(const SystStruct& syst) {
+        std::vector<PROspec> ratios;
+        ratios.reserve(syst.p_multi_spec.size());
+        float cv_integral = syst.p_cv->Spec().sum();
 
 
-    bool found0 = false;
-    std::vector<float> knobvals;
-    for (size_t i = 0; i < syst.p_multi_spec.size(); ++i) {
-        if (syst.knobval[i] > 0 && !found0) {
+        bool found0 = false;
+        std::vector<float> knobvals;
+        for (size_t i = 0; i < syst.p_multi_spec.size(); ++i) {
+            if (syst.knobval[i] > 0 && !found0) {
+                ratios.push_back(*syst.p_cv / *syst.p_cv);
+                knobvals.push_back(0);
+                found0 = true;
+            }
+            if (syst.knobval[i] == 0) found0 = true;
+
+            float mod = shape_only ? cv_integral / syst.p_multi_spec[i]->Spec().sum() : 1.0;
+            ratios.push_back(((*syst.p_multi_spec[i]) * mod) / *syst.p_cv);
+            knobvals.push_back(syst.knobval[i]);
+        }
+        if (!found0) {
             ratios.push_back(*syst.p_cv / *syst.p_cv);
             knobvals.push_back(0);
-            found0 = true;
         }
-        if (syst.knobval[i] == 0) found0 = true;
 
-        float mod = shape_only ? cv_integral / syst.p_multi_spec[i]->Spec().sum() : 1.0;
-        ratios.push_back(((*syst.p_multi_spec[i]) * mod) / *syst.p_cv);
-        knobvals.push_back(syst.knobval[i]);
-    }
-    if (!found0) {
-        ratios.push_back(*syst.p_cv / *syst.p_cv);
-        knobvals.push_back(0);
-    }
+        int nbins = syst.p_cv->GetNbins();
+        Spline spline;
+        spline.bins = nbins;
+        spline.segments_per_bin = knobvals.size(); 
 
-    int nbins = syst.p_cv->GetNbins();
-    Spline spline;
-    spline.bins = nbins;
-    spline.segments_per_bin = knobvals.size(); 
+        if(syst.knobval.size() != syst.p_multi_spec.size()){
+            log<LOG_ERROR>(L"%1% || number of knobvals specified (%2%) does not match number of weight universes in file (%3%) for systematic %4%!") % __func__ % syst.knobval.size() % syst.p_multi_spec.size() % syst.systname.c_str();
+            log<LOG_ERROR>(L"Terminating.");
+            exit(EXIT_FAILURE);
+        }
+    
 
-    if(syst.knobval.size() != syst.p_multi_spec.size()){
-        log<LOG_ERROR>(L"%1% || number of knobvals specified (%2%) does not match number of weight universes in file (%3%) for systematic %4%!") % __func__ % syst.knobval.size() % syst.p_multi_spec.size() % syst.systname.c_str();
-        log<LOG_ERROR>(L"Terminating.");
-        exit(EXIT_FAILURE);
-    }
+        std::vector<SplineSegment> all_segments;
+        
+        for (size_t i = 0; i < nbins; ++i) {
+            std::vector<SplineSegment> bin_segments;
 
-    std::vector<SplineSegment> all_segments;
-
-    for (size_t i = 0; i < nbins; ++i) {
-        std::vector<SplineSegment> bin_segments;
-
-    // This comment is copy-pasted from CAFAna:
-    // This is cubic interpolation. For each adjacent set of four points we
-    // determine coefficients for a cubic which will be the curve between the
-    // center two. We constrain the function to match the two center points
-    // and to have the right mean gradient at them. This causes this patch to
-    // match smoothly with the next one along. The resulting function is
-    // continuous and first and second differentiable. At the ends of the
-    // range we fit a quadratic instead with only one constraint on the
-    // slope. The coordinate conventions are that point y1 sits at x=0 and y2
-    // at x=1. The matrices are simply the inverses of writing out the
-    // constraints expressed above.
+            // This comment is copy-pasted from CAFAna:
+            // This is cubic interpolation. For each adjacent set of four points we
+            // determine coefficients for a cubic which will be the curve between the
+            // center two. We constrain the function to match the two center points
+            // and to have the right mean gradient at them. This causes this patch to
+            // match smoothly with the next one along. The resulting function is
+            // continuous and first and second differentiable. At the ends of the
+            // range we fit a quadratic instead with only one constraint on the
+            // slope. The coordinate conventions are that point y1 sits at x=0 and y2
+            // at x=1. The matrices are simply the inverses of writing out the
+            // constraints expressed above.
 
 
-        if (ratios.size() < 3) {
-            const float y1 = ratios[0].GetBinContent(i);
-            const float y2 = ratios[1].GetBinContent(i);
-            const float slope = (y2 - y1) / (knobvals[1] - knobvals[0]);
-            bin_segments.push_back(SplineSegment{(float)(-knobvals[1]), {y2, -slope, 0, 0}});
-            bin_segments.push_back(SplineSegment{(float)knobvals[0], {slope * (float)knobvals[0] + y1, slope, 0, 0}});
-        } else {
-            {
+            if (ratios.size() < 3) {
                 const float y1 = ratios[0].GetBinContent(i);
                 const float y2 = ratios[1].GetBinContent(i);
-                const float y3 = ratios[2].GetBinContent(i);
-                const Eigen::Vector3f v{y1, y2, (y3 - y1) / 2};
-                const Eigen::Matrix3f m{{1, -1, 1},
-                                        {-2, 2, -1},
-                                        {1, 0, 0}};
-                const Eigen::Vector3f res = m * v;
-                bin_segments.push_back(SplineSegment{(float)knobvals[0], {res(2), res(1), res(0), 0}});
-            }
-            for (unsigned int shiftIdx = 1; shiftIdx < ratios.size() - 2; ++shiftIdx) {
-                const float y0 = ratios[shiftIdx - 1].GetBinContent(i);
-                const float y1 = ratios[shiftIdx].GetBinContent(i);
-                const float y2 = ratios[shiftIdx + 1].GetBinContent(i);
-                const float y3 = ratios[shiftIdx + 2].GetBinContent(i);
-                const Eigen::Vector4f v{y1, y2, (y2 - y0) / 2, (y3 - y1) / 2};
-                const Eigen::Matrix4f m{{2, -2, 1, 1},
-                                        {-3, 3, -2, -1},
-                                        {0, 0, 1, 0},
-                                        {1, 0, 0, 0}};
-                const Eigen::Vector4f res = m * v;
-                float knobval = knobvals[shiftIdx];
-                if (!found0 && knobval >= 0)
-                    knobval = knobvals[shiftIdx] == 1 ? 0 : knobvals[shiftIdx - 1];
-                bin_segments.push_back(SplineSegment{knobval, {res(3), res(2), res(1), res(0)}});
-            }
-            {
-                const float y4 = ratios[ratios.size() - 3].GetBinContent(i);
-                const float y5 = ratios[ratios.size() - 2].GetBinContent(i);
-                const float y6 = ratios[ratios.size() - 1].GetBinContent(i);
-                const Eigen::Vector3f vp{y5, y6, (y6 - y4) / 2};
-                const Eigen::Matrix3f mp{{-1, 1, -1},
-                                         {0, 0, 1},
-                                         {1, 0, 0}};
-                const Eigen::Vector3f resp = mp * vp;
-                bin_segments.push_back(SplineSegment{(float)knobvals[knobvals.size() - 2], {resp(2), resp(1), resp(0), 0}});
-            }
-        }
-
-        all_segments.insert(all_segments.end(), bin_segments.begin(), bin_segments.end());
-    }
-
-    // If all bins have the same number of segments, keep as knobvals.size(); else update
-    spline.segments_per_bin = all_segments.size() / nbins;
-    spline.segments = std::move(all_segments);
-
-    syst_map[syst.systname] = {splines.size(), SystType::Spline};
-    splines.push_back(std::move(spline));
-    spline_names.push_back(syst.systname);
-    spline_lo.push_back(knobvals[0]);
-    spline_hi.push_back(knobvals.back());
-    spline_binnings.push_back(syst.binning);
-
-}
-float PROsyst::GetSplineShift(std::string name, float shift, int bin) const {
-    if(syst_map.count(name) == 0) {
-        log<LOG_ERROR>(L"%1% || Unrecognized systematic %2%") % __func__ % name.c_str();
-        return 1;
-    }
-    return GetSplineShift(syst_map.at(name).first, shift, bin);
-}
-
-PROspec PROsyst::GetSplineShiftedSpectrum(const PROconfig& config, const PROpeller& prop, std::string name, float shift) const {
-    int nbins = config.m_num_variable_bins_total[other_index];
-    int binning = spline_binnings[syst_map.at(name).first];
-    PROspec ret(nbins);
-    for(size_t i = 0; i < prop.NEvent(); ++i) {
-        const int spline_bin = prop.VariableBinIndex(binning, i);
-        const int reco_bin = prop.VariableBinIndex(other_index, i);
-        ret.Fill(reco_bin, GetSplineShift(name, shift, spline_bin) * prop.added_weights[i]);
-    }
-    return ret;
-}
-
-PROspec PROsyst::GetSplineShiftedSpectrum(const PROconfig& config, const PROpeller& prop, int syst_num, float shift) const {
-    int nbins = config.m_num_variable_bins_total[other_index];
-    int binning = spline_binnings[syst_num];
-    PROspec ret(nbins);
-    for(size_t i = 0; i < prop.NEvent(); ++i) {
-        const int spline_bin = prop.VariableBinIndex(binning, i);
-        const int reco_bin = prop.VariableBinIndex(other_index, i);
-        ret.Fill(reco_bin, GetSplineShift(syst_num, shift, spline_bin) * prop.added_weights[i]);
-    }
-    return ret;
-}
-
-PROspec PROsyst::GetSplineShiftedSpectrum(const PROconfig& config, const PROpeller& prop, std::vector<std::string> names, std::vector<float> shifts) const {
-    assert(names.size() == shifts.size());
-    int nbins = config.m_num_variable_bins_total[other_index];
-    PROspec ret(nbins);
-    for(size_t i = 0; i < prop.NEvent(); ++i) {
-        const int reco_bin = prop.VariableBinIndex(other_index, i);
-        float weight = 1;
-        for(size_t j = 0; j < names.size(); ++j) {
-            int binning = spline_binnings[syst_map.at(names[j]).first];
-            const int spline_bin = prop.VariableBinIndex(binning, i);
-            weight *= GetSplineShift(names[j], shifts[j], spline_bin);
-        }
-        ret.Fill(reco_bin, weight * prop.added_weights[i]);
-    }
-    return ret;
-}
-
-PROspec PROsyst::GetSplineShiftedSpectrum(const PROconfig& config, const PROpeller& prop, std::vector<int> syst_nums, std::vector<float> shifts) const {
-    assert(syst_nums.size() == shifts.size());
-    int nbins = config.m_num_variable_bins_total[other_index];
-    PROspec ret(nbins);
-    for(size_t i = 0; i < prop.NEvent(); ++i) {
-        const int reco_bin = prop.VariableBinIndex(other_index, i);
-        float weight = 1;
-        for(size_t j = 0; j < syst_nums.size(); ++j) {
-            int binning = spline_binnings[syst_nums[j]];
-            const int spline_bin = prop.VariableBinIndex(binning, i);
-            weight *= GetSplineShift(syst_nums[j], shifts[j], spline_bin);
-        }
-        ret.Fill(reco_bin, weight * prop.added_weights[i]);
-    }
-    return ret;
-}
-
-PROspec PROsyst::GetSplineShiftedSpectrum(const PROconfig& config, const PROpeller& prop, std::vector<float> shifts) const {
-    assert(shifts.size() == splines.size());
-    int nbins = config.m_num_variable_bins_total[other_index];
-    PROspec ret(nbins);
-    for(size_t i = 0; i < prop.NEvent(); ++i) {
-        const int reco_bin = prop.VariableBinIndex(other_index, i);
-        float weight = 1;
-        for(size_t j = 0; j < shifts.size(); ++j) {
-            int binning = spline_binnings[j];
-            const int spline_bin = prop.VariableBinIndex(binning, i);
-            weight *= GetSplineShift(j, shifts[j], spline_bin);
-        }
-        ret.Fill(reco_bin, weight * prop.added_weights[i]);
-    }
-    return ret;
-}
-
-Eigen::MatrixXf PROsyst::GrabMatrix(const std::string& sys) const{
-    if(syst_map.find(sys) != syst_map.end())
-        return covmat.at(syst_map.at(sys).first);	
-    else{
-        log<LOG_ERROR>(L"%1% || Systematic you asked for : %2% doesn't have matrix saved yet..") % __func__ % sys.c_str();
-        log<LOG_ERROR>(L"%1% || Return empty matrix .") % __func__ ;
-        return Eigen::MatrixXf();
-    }
-}
-
-Eigen::MatrixXf PROsyst::GrabCorrMatrix(const std::string& sys) const{
-    if(syst_map.find(sys) != syst_map.end())
-        return corrmat.at(syst_map.at(sys).first);	
-    else{
-        log<LOG_ERROR>(L"%1% || Systematic you asked for : %2% doesn't have matrix saved yet..") % __func__ % sys.c_str();
-        log<LOG_ERROR>(L"%1% || Return empty matrix .") % __func__ ;
-        return Eigen::MatrixXf();
-    }
-}
-
-Spline PROsyst::GrabSpline(const std::string& sys) const{
-    if(syst_map.find(sys) != syst_map.end())
-        return splines.at(syst_map.at(sys).first);	
-    else{
-        log<LOG_ERROR>(L"%1% || Systematic you asked for : %2% doesn't have spline saved yet..") % __func__ % sys.c_str();
-        return {};
-    }
-}
-
-PROsyst::SystType PROsyst::GetSystType(const std::string &syst) const {
-    return syst_map.at(syst).second;
-}
-
-Eigen::MatrixXf PROsyst::DecomposeFractionalCovariance(const PROconfig &config, const Eigen::VectorXf &cv_vec) const {
-    Eigen::MatrixXf diag = cv_vec.asDiagonal();
-    Eigen::MatrixXf full_cov = diag * fractional_covariance * diag;
-    Eigen::MatrixXf coll = other_index < 0 ? CollapseMatrix(config, full_cov) : CollapseMatrix(config, full_cov, other_index);
-    /*Eigen::LDLT<Eigen::MatrixXf> ldlt(coll);
-      Eigen::MatrixXf L = ldlt.matrixL(); 
-      Eigen::VectorXf D_sqrt = ldlt.vectorD().array().sqrt();  
-      Eigen::PermutationMatrix<Eigen::Dynamic, Eigen::Dynamic> P(ldlt.transpositionsP());
-
-      if (ldlt.info() != Eigen::Success) {
-      log<LOG_ERROR>(L"%1% | Eigen LLT has failed!") % __func__ ;
-      Eigen::FullPivLU<Eigen::MatrixXf> lu_decomp(coll);
-      int rank = lu_decomp.rank();
-      int size = coll.rows();
-      if (!coll.isApprox(coll.transpose())) {
-      log<LOG_ERROR>(L"%1% | Matrix is not symmetric! Rank %2% and size %3%") % __func__ % rank % size ;
-      }
-      Eigen::SelfAdjointEigenSolver<Eigen::MatrixXf> eigensolver(coll);
-      if (eigensolver.eigenvalues().minCoeff() <= 0) {
-      log<LOG_ERROR>(L"%1% | Matrix is not positive semi definite, minCoeff is %2%. Rank %3% and size %4% ") % __func__ % eigensolver.eigenvalues().minCoeff() % rank % size;
-      }
-      Eigen::JacobiSVD<Eigen::MatrixXf> svd(coll);
-      log<LOG_ERROR>(L"%1% | Singular values: %2% ") % __func__ % svd.singularValues();
-
-      Eigen::IOFormat fmt(Eigen::StreamPrecision, Eigen::DontAlignCols, " ", "\n", "", "", "", "");
-      std::ostringstream oss;
-      oss << coll.format(fmt);
-      log<LOG_ERROR>(L"%1% | Matrix is %2% ") % __func__ % oss.str().c_str();
-      exit(EXIT_FAILURE);
-      }
-      return P * L * D_sqrt.asDiagonal();*/
-    Eigen::JacobiSVD<Eigen::MatrixXf> svd(coll, Eigen::ComputeThinU | Eigen::ComputeThinV);
-    const auto& U = svd.matrixU();
-    const auto& S = svd.singularValues();
-
-    log<LOG_DEBUG>(L"%1% | Singular values: %2% ") % __func__ % svd.singularValues();
-
-    Eigen::FullPivLU<Eigen::MatrixXf> lu_decomp(coll);
-    int rank = lu_decomp.rank();
-    int size = coll.rows();
-    log<LOG_DEBUG>(L"%1% | Matrix is Rank %2% and size %3%") % __func__ % rank % size ;
-
-    float tol = 1e-8f * S.maxCoeff(); // Some cutoff? is this value impactful on out matricies? need to test
-    std::vector<int> keep;
-    for (int i = 0; i < S.size(); ++i) {
-        if (S(i) > tol) keep.push_back(i);
-    }
-
-    if (keep.empty()) {
-        log<LOG_ERROR>(L"%1% | All singular values are below tolerance, cannot sample. Blarg.") % __func__;
-        exit(EXIT_FAILURE);
-    }
-
-    //going to keep only the singular values that give meaningful variance
-    Eigen::MatrixXf fallback_sampler = Eigen::MatrixXf::Zero(coll.rows(), coll.cols());
-    for (size_t i = 0; i < keep.size(); ++i) {
-        fallback_sampler.col(i) = U.col(keep[i]) * std::sqrt(S(keep[i]));
-    }
-
-    return fallback_sampler;
-
-}
-
-void PROsyst::PrintSplines(){
-    std::cout << "=== NEW FLAT SPLINE STRUCTURE ===\n";
-    for (size_t spline_idx = 0; spline_idx < splines.size(); ++spline_idx) {
-        const auto &spline = splines[spline_idx];
-        std::cout << "Spline #" << spline_idx << ":\n";
-        for (int bin_idx = 0; bin_idx < spline.bins; ++bin_idx) {
-            std::cout << "  Bin " << bin_idx << ":\n";
-            for (int seg_idx = 0; seg_idx < spline.segments_per_bin; ++seg_idx) {
-                const auto &seg = spline.segments[bin_idx * spline.segments_per_bin + seg_idx];
-                std::cout << std::fixed << std::setprecision(4)
-                    << "    Segment " << seg_idx
-                    << ": knot=" << seg.knot
-                    << ", coeffs=[";
-                for (int c = 0; c < 4; ++c) {
-                    std::cout << seg.coeffs[c];
-                    if (c < 3) std::cout << ", ";
+                const float slope = (y2 - y1) / (knobvals[1] - knobvals[0]);
+                bin_segments.push_back(SplineSegment{(float)(-knobvals[1]), {y2, -slope, 0, 0}});
+                bin_segments.push_back(SplineSegment{(float)knobvals[0], {slope * (float)knobvals[0] + y1, slope, 0, 0}});
+            } else {
+                {
+                    const float y1 = ratios[0].GetBinContent(i);
+                    const float y2 = ratios[1].GetBinContent(i);
+                    const float y3 = ratios[2].GetBinContent(i);
+                    const Eigen::Vector3f v{y1, y2, (y3 - y1) / 2};
+                    const Eigen::Matrix3f m{{1, -1, 1},
+                        {-2, 2, -1},
+                        {1, 0, 0}};
+                    const Eigen::Vector3f res = m * v;
+                    bin_segments.push_back(SplineSegment{(float)knobvals[0], {res(2), res(1), res(0), 0}});
                 }
-                std::cout << "]\n";
+                for (unsigned int shiftIdx = 1; shiftIdx < ratios.size() - 2; ++shiftIdx) {
+                    const float y0 = ratios[shiftIdx - 1].GetBinContent(i);
+                    const float y1 = ratios[shiftIdx].GetBinContent(i);
+                    const float y2 = ratios[shiftIdx + 1].GetBinContent(i);
+                    const float y3 = ratios[shiftIdx + 2].GetBinContent(i);
+                    const Eigen::Vector4f v{y1, y2, (y2 - y0) / 2, (y3 - y1) / 2};
+                    const Eigen::Matrix4f m{{2, -2, 1, 1},
+                        {-3, 3, -2, -1},
+                        {0, 0, 1, 0},
+                        {1, 0, 0, 0}};
+                    const Eigen::Vector4f res = m * v;
+                    float knobval = knobvals[shiftIdx];
+                    if (!found0 && knobval >= 0)
+                        knobval = knobvals[shiftIdx] == 1 ? 0 : knobvals[shiftIdx - 1];
+                    bin_segments.push_back(SplineSegment{knobval, {res(3), res(2), res(1), res(0)}});
+                }
+                {
+                    const float y4 = ratios[ratios.size() - 3].GetBinContent(i);
+                    const float y5 = ratios[ratios.size() - 2].GetBinContent(i);
+                    const float y6 = ratios[ratios.size() - 1].GetBinContent(i);
+                    const Eigen::Vector3f vp{y5, y6, (y6 - y4) / 2};
+                    const Eigen::Matrix3f mp{{-1, 1, -1},
+                        {0, 0, 1},
+                        {1, 0, 0}};
+                    const Eigen::Vector3f resp = mp * vp;
+                    bin_segments.push_back(SplineSegment{(float)knobvals[knobvals.size() - 2], {resp(2), resp(1), resp(0), 0}});
+                }
+            }
+
+            all_segments.insert(all_segments.end(), bin_segments.begin(), bin_segments.end());
+        }
+
+        // If all bins have the same number of segments, keep as knobvals.size(); else update
+        spline.segments_per_bin = all_segments.size() / nbins;
+        spline.segments = std::move(all_segments);
+
+        syst_map[syst.systname] = {splines.size(), SystType::Spline};
+        splines.push_back(std::move(spline));
+        spline_names.push_back(syst.systname);
+        spline_lo.push_back(knobvals[0]);
+        spline_hi.push_back(knobvals.back());
+        spline_binnings.push_back(syst.binning);
+
+    }
+    float PROsyst::GetSplineShift(std::string name, float shift, int bin) const {
+        if(syst_map.count(name) == 0) {
+            log<LOG_ERROR>(L"%1% || Unrecognized systematic %2%") % __func__ % name.c_str();
+            return 1;
+        }
+        return GetSplineShift(syst_map.at(name).first, shift, bin);
+    }
+
+    PROspec PROsyst::GetSplineShiftedSpectrum(const PROconfig& config, const PROpeller& prop, std::string name, float shift) const {
+        int nbins = config.m_num_variable_bins_total[other_index];
+        int binning = spline_binnings[syst_map.at(name).first];
+        PROspec ret(nbins);
+        for(size_t i = 0; i < prop.NEvent(); ++i) {
+            const int spline_bin = prop.VariableBinIndex(binning, i);
+            const int reco_bin = prop.VariableBinIndex(other_index, i);
+            ret.Fill(reco_bin, GetSplineShift(name, shift, spline_bin) * prop.added_weights[i]);
+        }
+        return ret;
+    }
+
+    PROspec PROsyst::GetSplineShiftedSpectrum(const PROconfig& config, const PROpeller& prop, int syst_num, float shift) const {
+        int nbins = config.m_num_variable_bins_total[other_index];
+        int binning = spline_binnings[syst_num];
+        PROspec ret(nbins);
+        for(size_t i = 0; i < prop.NEvent(); ++i) {
+            const int spline_bin = prop.VariableBinIndex(binning, i);
+            const int reco_bin = prop.VariableBinIndex(other_index, i);
+            ret.Fill(reco_bin, GetSplineShift(syst_num, shift, spline_bin) * prop.added_weights[i]);
+        }
+        return ret;
+    }
+
+    PROspec PROsyst::GetSplineShiftedSpectrum(const PROconfig& config, const PROpeller& prop, std::vector<std::string> names, std::vector<float> shifts) const {
+        assert(names.size() == shifts.size());
+        int nbins = config.m_num_variable_bins_total[other_index];
+        PROspec ret(nbins);
+        for(size_t i = 0; i < prop.NEvent(); ++i) {
+            const int reco_bin = prop.VariableBinIndex(other_index, i);
+            float weight = 1;
+            for(size_t j = 0; j < names.size(); ++j) {
+                int binning = spline_binnings[syst_map.at(names[j]).first];
+                const int spline_bin = prop.VariableBinIndex(binning, i);
+                weight *= GetSplineShift(names[j], shifts[j], spline_bin);
+            }
+            ret.Fill(reco_bin, weight * prop.added_weights[i]);
+        }
+        return ret;
+    }
+
+    PROspec PROsyst::GetSplineShiftedSpectrum(const PROconfig& config, const PROpeller& prop, std::vector<int> syst_nums, std::vector<float> shifts) const {
+        assert(syst_nums.size() == shifts.size());
+        int nbins = config.m_num_variable_bins_total[other_index];
+        PROspec ret(nbins);
+        for(size_t i = 0; i < prop.NEvent(); ++i) {
+            const int reco_bin = prop.VariableBinIndex(other_index, i);
+            float weight = 1;
+            for(size_t j = 0; j < syst_nums.size(); ++j) {
+                int binning = spline_binnings[syst_nums[j]];
+                const int spline_bin = prop.VariableBinIndex(binning, i);
+                weight *= GetSplineShift(syst_nums[j], shifts[j], spline_bin);
+            }
+            ret.Fill(reco_bin, weight * prop.added_weights[i]);
+        }
+        return ret;
+    }
+
+    PROspec PROsyst::GetSplineShiftedSpectrum(const PROconfig& config, const PROpeller& prop, std::vector<float> shifts) const {
+        assert(shifts.size() == splines.size());
+        int nbins = config.m_num_variable_bins_total[other_index];
+        PROspec ret(nbins);
+        for(size_t i = 0; i < prop.NEvent(); ++i) {
+            const int reco_bin = prop.VariableBinIndex(other_index, i);
+            float weight = 1;
+            for(size_t j = 0; j < shifts.size(); ++j) {
+                int binning = spline_binnings[j];
+                const int spline_bin = prop.VariableBinIndex(binning, i);
+                weight *= GetSplineShift(j, shifts[j], spline_bin);
+            }
+            ret.Fill(reco_bin, weight * prop.added_weights[i]);
+        }
+        return ret;
+    }
+
+    Eigen::MatrixXf PROsyst::GrabMatrix(const std::string& sys) const{
+        if(syst_map.find(sys) != syst_map.end())
+            return covmat.at(syst_map.at(sys).first);	
+        else{
+            log<LOG_ERROR>(L"%1% || Systematic you asked for : %2% doesn't have matrix saved yet..") % __func__ % sys.c_str();
+            log<LOG_ERROR>(L"%1% || Return empty matrix .") % __func__ ;
+            return Eigen::MatrixXf();
+        }
+    }
+
+    Eigen::MatrixXf PROsyst::GrabCorrMatrix(const std::string& sys) const{
+        if(syst_map.find(sys) != syst_map.end())
+            return corrmat.at(syst_map.at(sys).first);	
+        else{
+            log<LOG_ERROR>(L"%1% || Systematic you asked for : %2% doesn't have matrix saved yet..") % __func__ % sys.c_str();
+            log<LOG_ERROR>(L"%1% || Return empty matrix .") % __func__ ;
+            return Eigen::MatrixXf();
+        }
+    }
+
+    Spline PROsyst::GrabSpline(const std::string& sys) const{
+        if(syst_map.find(sys) != syst_map.end())
+            return splines.at(syst_map.at(sys).first);	
+        else{
+            log<LOG_ERROR>(L"%1% || Systematic you asked for : %2% doesn't have spline saved yet..") % __func__ % sys.c_str();
+            return {};
+        }
+    }
+
+    PROsyst::SystType PROsyst::GetSystType(const std::string &syst) const {
+        return syst_map.at(syst).second;
+    }
+
+    Eigen::MatrixXf PROsyst::DecomposeFractionalCovariance(const PROconfig &config, const Eigen::VectorXf &cv_vec) const {
+        Eigen::MatrixXf diag = cv_vec.asDiagonal();
+        Eigen::MatrixXf full_cov = diag * fractional_covariance * diag;
+        Eigen::MatrixXf coll = other_index < 0 ? CollapseMatrix(config, full_cov) : CollapseMatrix(config, full_cov, other_index);
+        /*Eigen::LDLT<Eigen::MatrixXf> ldlt(coll);
+          Eigen::MatrixXf L = ldlt.matrixL(); 
+          Eigen::VectorXf D_sqrt = ldlt.vectorD().array().sqrt();  
+          Eigen::PermutationMatrix<Eigen::Dynamic, Eigen::Dynamic> P(ldlt.transpositionsP());
+
+          if (ldlt.info() != Eigen::Success) {
+          log<LOG_ERROR>(L"%1% | Eigen LLT has failed!") % __func__ ;
+          Eigen::FullPivLU<Eigen::MatrixXf> lu_decomp(coll);
+          int rank = lu_decomp.rank();
+          int size = coll.rows();
+          if (!coll.isApprox(coll.transpose())) {
+          log<LOG_ERROR>(L"%1% | Matrix is not symmetric! Rank %2% and size %3%") % __func__ % rank % size ;
+          }
+          Eigen::SelfAdjointEigenSolver<Eigen::MatrixXf> eigensolver(coll);
+          if (eigensolver.eigenvalues().minCoeff() <= 0) {
+          log<LOG_ERROR>(L"%1% | Matrix is not positive semi definite, minCoeff is %2%. Rank %3% and size %4% ") % __func__ % eigensolver.eigenvalues().minCoeff() % rank % size;
+          }
+          Eigen::JacobiSVD<Eigen::MatrixXf> svd(coll);
+          log<LOG_ERROR>(L"%1% | Singular values: %2% ") % __func__ % svd.singularValues();
+
+          Eigen::IOFormat fmt(Eigen::StreamPrecision, Eigen::DontAlignCols, " ", "\n", "", "", "", "");
+          std::ostringstream oss;
+          oss << coll.format(fmt);
+          log<LOG_ERROR>(L"%1% | Matrix is %2% ") % __func__ % oss.str().c_str();
+          exit(EXIT_FAILURE);
+          }
+          return P * L * D_sqrt.asDiagonal();*/
+        Eigen::JacobiSVD<Eigen::MatrixXf> svd(coll, Eigen::ComputeThinU | Eigen::ComputeThinV);
+        const auto& U = svd.matrixU();
+        const auto& S = svd.singularValues();
+
+        log<LOG_DEBUG>(L"%1% | Singular values: %2% ") % __func__ % svd.singularValues();
+
+        Eigen::FullPivLU<Eigen::MatrixXf> lu_decomp(coll);
+        int rank = lu_decomp.rank();
+        int size = coll.rows();
+        log<LOG_DEBUG>(L"%1% | Matrix is Rank %2% and size %3%") % __func__ % rank % size ;
+
+        float tol = 1e-8f * S.maxCoeff(); // Some cutoff? is this value impactful on out matricies? need to test
+        std::vector<int> keep;
+        for (int i = 0; i < S.size(); ++i) {
+            if (S(i) > tol) keep.push_back(i);
+        }
+
+        if (keep.empty()) {
+            log<LOG_ERROR>(L"%1% | All singular values are below tolerance, cannot sample. Blarg.") % __func__;
+            exit(EXIT_FAILURE);
+        }
+
+        //going to keep only the singular values that give meaningful variance
+        Eigen::MatrixXf fallback_sampler = Eigen::MatrixXf::Zero(coll.rows(), coll.cols());
+        for (size_t i = 0; i < keep.size(); ++i) {
+            fallback_sampler.col(i) = U.col(keep[i]) * std::sqrt(S(keep[i]));
+        }
+
+        return fallback_sampler;
+
+    }
+
+    void PROsyst::PrintSplines(){
+        std::cout << "=== NEW FLAT SPLINE STRUCTURE ===\n";
+        for (size_t spline_idx = 0; spline_idx < splines.size(); ++spline_idx) {
+            const auto &spline = splines[spline_idx];
+            std::cout << "Spline #" << spline_idx << ":\n";
+            for (int bin_idx = 0; bin_idx < spline.bins; ++bin_idx) {
+                std::cout << "  Bin " << bin_idx << ":\n";
+                for (int seg_idx = 0; seg_idx < spline.segments_per_bin; ++seg_idx) {
+                    const auto &seg = spline.segments[bin_idx * spline.segments_per_bin + seg_idx];
+                    std::cout << std::fixed << std::setprecision(4)
+                        << "    Segment " << seg_idx
+                        << ": knot=" << seg.knot
+                        << ", coeffs=[";
+                    for (int c = 0; c < 4; ++c) {
+                        std::cout << seg.coeffs[c];
+                        if (c < 3) std::cout << ", ";
+                    }
+                    std::cout << "]\n";
+                }
             }
         }
     }
-}
 
 };
 

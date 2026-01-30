@@ -309,6 +309,7 @@ namespace PROfit{
             bool m_form_covariance;
             std::string m_write_out_tag;
             int m_num_variation_type_covariance = 0;
+            int m_num_variation_type_external_covariance = 0;
             int m_num_variation_type_spline = 0;
             int m_num_variation_type_flat = 0;
             int m_num_variation_type_norm = 0;
@@ -338,6 +339,7 @@ namespace PROfit{
             std::vector<std::string> m_mcgen_variation_allowlist;
             std::vector<std::string> m_mcgen_variation_denylist;
             std::vector<std::string> m_mcgen_variation_type;
+            std::map<std::string, std::string> m_mcgen_variation_external_filename_map;
             std::map<std::string, std::string> m_mcgen_variation_type_map;
             std::map<std::string, std::string> m_mcgen_variation_plotname_map;
             std::map<std::string, int> m_mcgen_variation_binning_map;

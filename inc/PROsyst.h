@@ -8,6 +8,10 @@
 #include <map>
 #include <cmath>
 
+//annoying root headers for file input
+#include "TMatrixD.h"
+#include "TFile.h"
+
 // Our include
 #include "PROconfig.h"
 #include "PROcreate.h"
@@ -85,6 +89,10 @@ namespace PROfit {
              * Note: this function is lazy. It wouldn't do anything if it found covariance matrix with the same name already in the map.
              */
             void CreateFlatMatrix(const PROconfig& config, const SystStruct& syst);
+
+            /* Function: Given a SystStruct, load an external fractinal covariance matrix, and calculate correlation matrix, and add matrices to covmat_map and corrtmat_map
+             */
+            void LoadExternalCovarianceMatrix(const PROconfig& config, const SystStruct& syst);
 
             /* Function: given a syst struct with cv and variation spectra, build fractional covariance matrix for the systematics, as well as correlation matrix 
              * Return: {fractional covariance matrix, correlation covariance matrix}
