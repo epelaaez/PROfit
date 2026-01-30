@@ -50,7 +50,7 @@ namespace PROfit{
                         if(scale) htmp->Scale(1,"width");
                         hists[subchannel_name] = std::move(htmp);
                         ++global_subchannel_index;
-                        }//end subchan
+                    }//end subchan
                     ++global_channel_index;
                 }//end chan
             }//end det
@@ -129,57 +129,59 @@ namespace PROfit{
         return ret;
     }
 
-std::map<std::string, std::vector<std::pair<std::unique_ptr<TGraph>, std::unique_ptr<TGraph>>>>
-getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
-    std::map<std::string, std::vector<std::pair<std::unique_ptr<TGraph>, std::unique_ptr<TGraph>>>> spline_graphs;
+    std::map<std::string, std::vector<std::pair<std::unique_ptr<TGraph>, std::unique_ptr<TGraph>>>>
+        getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
+            std::map<std::string, std::vector<std::pair<std::unique_ptr<TGraph>, std::unique_ptr<TGraph>>>> spline_graphs;
 
-    for (size_t i = 0; i < systs.GetNSplines(); ++i) {
-        const std::string &name = systs.spline_names[i];
-        const Spline &spline = systs.GrabSpline(name);
-        std::vector<std::pair<std::unique_ptr<TGraph>, std::unique_ptr<TGraph>>> bin_graphs;
-        size_t nbins = config.m_num_variable_bins_total.at(systs.spline_binnings[i]);
-        int nsegs = spline.segments_per_bin;
-        bin_graphs.reserve(nbins);
+            for (size_t i = 0; i < systs.GetNSplines(); ++i) {
+                const std::string &name = systs.spline_names[i];
+                const Spline &spline = systs.GrabSpline(name);
+                std::vector<std::pair<std::unique_ptr<TGraph>, std::unique_ptr<TGraph>>> bin_graphs;
+                size_t nbins = config.m_num_variable_bins_total.at(systs.spline_binnings[i]);
+                int nsegs = spline.segments_per_bin;
+                bin_graphs.reserve(nbins);
 
-        for (size_t j = 0; j < nbins; ++j) {
-            std::unique_ptr<TGraph> curve = std::make_unique<TGraph>();
-            std::unique_ptr<TGraph> fixed_pts = std::make_unique<TGraph>();
+                for (size_t j = 0; j < nbins; ++j) {
+                    std::unique_ptr<TGraph> curve = std::make_unique<TGraph>();
+                    std::unique_ptr<TGraph> fixed_pts = std::make_unique<TGraph>();
 
-            // Access the segment range for this bin
-            size_t seg_offset = j * nsegs;
+                    // Access the segment range for this bin
+                    size_t seg_offset = j * nsegs;
 
-            for (int k = 0; k < nsegs; ++k) {
-                const SplineSegment &seg = spline.segments[seg_offset + k];
-                float lo = seg.knot;
-                std::array<float, 4> coeffs = seg.coeffs;
-                // Determine hi for this segment
-                float hi;
-                if (k < nsegs - 1) {
-                    hi = spline.segments[seg_offset + k + 1].knot;
-                } else {
-                    hi = systs.spline_hi[i];
+                    for (int k = 0; k < nsegs; ++k) {
+                        const SplineSegment &seg = spline.segments[seg_offset + k];
+                        float lo = seg.knot;
+                        std::array<float, 4> coeffs = seg.coeffs;
+                        // Determine hi for this segment
+                        float hi;
+                        if (k < nsegs - 1) {
+                            hi = spline.segments[seg_offset + k + 1].knot;
+                        } else {
+                            hi = systs.spline_hi[i];
+                        }
+                        auto fn = [coeffs](float shift) {
+                            return coeffs[0] + coeffs[1] * shift + coeffs[2] * shift * shift + coeffs[3] * shift * shift * shift;
+                        };
+                        // Only plot knot points within the original knobval range (skip mirrored points for the two-universe case)
+                        if (lo >= systs.spline_lo[i])
+                            fixed_pts->SetPoint(fixed_pts->GetN(), lo, fn(0));
+                        if (k == nsegs - 1)
+                            fixed_pts->SetPoint(fixed_pts->GetN(), hi, fn(hi - lo));
+                        float width = (hi - lo) / 20.0f;
+                        for (int l = 0; l < 20; ++l)
+                            curve->SetPoint(curve->GetN(), lo + l * width, fn(l * width));
+                    }
+                    bin_graphs.push_back(std::make_pair(std::move(fixed_pts), std::move(curve)));
                 }
-                auto fn = [coeffs](float shift) {
-                    return coeffs[0] + coeffs[1] * shift + coeffs[2] * shift * shift + coeffs[3] * shift * shift * shift;
-                };
-                fixed_pts->SetPoint(fixed_pts->GetN(), lo, fn(0));
-                if (k == nsegs - 1)
-                    fixed_pts->SetPoint(fixed_pts->GetN(), hi, fn(hi - lo));
-                float width = (hi - lo) / 20.0f;
-                for (int l = 0; l < 20; ++l)
-                    curve->SetPoint(curve->GetN(), lo + l * width, fn(l * width));
+                spline_graphs[name] = std::move(bin_graphs);
             }
-            bin_graphs.push_back(std::make_pair(std::move(fixed_pts), std::move(curve)));
-        }
-        spline_graphs[name] = std::move(bin_graphs);
-    }
 
-    return spline_graphs;
-}
+            return spline_graphs;
+        }
     PROerrorbar getErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const PROspec &cv_spec, const Eigen::VectorXf &cvparams,bool scale, int other_index) {
 
         Eigen::VectorXf cv = CollapseMatrix(config, cv_spec.Spec(), other_index);
-   
+
         std::vector<float> centers;
         size_t global_channel_index = 0;
         for(size_t mode = 0; mode < config.m_num_modes; ++mode) {
@@ -192,16 +194,16 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                             centers.push_back((tedges[p+1]+tedges[p])/2.0);
                         }
                     }
-                    
+
                 }
             }
         }
 
         size_t nerrorsample = 2500;
-        
+
         std::vector<Eigen::VectorXf> specs;
         std::uniform_int_distribution<uint32_t> dseed(0, std::numeric_limits<uint32_t>::max());
-        
+
         //Fills already collapsed
         for(size_t i = 0; i < nerrorsample; ++i){
             Eigen::VectorXf var = FillSystRandomThrow(config, prop, syst, model,cv_spec, cvparams, dseed(PROseed::global_rng), other_index).Spec();
@@ -256,8 +258,8 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
         // sum error points, combine errors in quadrature
         for(size_t bx = 0; bx < nbinsx; bx++){
             if(dims == 2){
-             double up_err_sq = 0;
-             double down_err_sq = 0;
+                double up_err_sq = 0;
+                double down_err_sq = 0;
                 for(size_t by = 0; by < nbinsy; by++){
                     size_t b = bx*nbinsy + by;
                     errband_1d->error_point(bx) += errband.error_point(b+offset);
@@ -275,193 +277,324 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
         }
         log<LOG_DEBUG>(L"%1% || err_band pt: %2%") % __func__ % errband_1d->error_point;
         log<LOG_DEBUG>(L"%1% || err_band up: %2%") % __func__ % errband_1d->error_up;
-	return errband_1d;
+        return errband_1d;
     }
 
     double ratio_err(double A, double dA, double B, double dB, double corr){
-	            return (A/B)*sqrt(pow(dA/A,2)+pow(dB/B,2)-2*(corr*dA*dB/(A*B)));
-		        }
-
-    void plot_detector_ratio(std::vector<TH1D> data_hists, std::vector<TH1D> cv_hists, std::optional<PROerrorbar> errband, std::vector<TH1D> bf_hists, std::optional<PROerrorbar> posterrband, TH2D pre_corr, TH2D post_corr, std::string filename){
-        log<LOG_DEBUG>(L"%1% || inside") % __func__;
-        TH1D data_ND_hist = data_hists.at(0);
-        TH1D data_FD_hist = data_hists.at(1);
-
-        TH1D cv_ND_hist = cv_hists.at(0);
-        TH1D cv_FD_hist = cv_hists.at(1);
-
-        TH1D bf_ND_hist;
-        TH1D bf_FD_hist;
-
-        bool bf = false;
-        if(bf_hists.size() == 2){
-            bf_ND_hist = bf_hists.at(0);
-            bf_FD_hist = bf_hists.at(1);
-
-            bf = true;
-        }
-        else{
-            log<LOG_DEBUG>(L"%1% || Skipping best-fit in ratio plot. Found %2% hists instead of 2.") % __func__ % bf_hists.size();
-        }
-
-        int channel_nbins = data_ND_hist.GetNbinsX();
-
-        TAxis* xAxis = data_ND_hist.GetXaxis();
-        const Double_t* binEdges = xAxis->GetXbins()->GetArray();
-
-        TH1D* data_ratio = new TH1D("Data", "Data;RecoE;FD/ND Ratio", channel_nbins, binEdges);
-        TH1D* cv_ratio = new TH1D("CV", "CV MC;RecoE;FD/ND Ratio", channel_nbins, binEdges);
-        TH1D* bf_ratio = new TH1D("bf", "Best-Fit MC;RecoE;FD/ND Ratio", channel_nbins, binEdges);
-        TH1D* err_ratio = new TH1D("err", ";RecoE;Post/Pre Err Ratio", channel_nbins, binEdges);
-
-        cv_ratio->SetLineWidth(2);
-        Color_t cvcol =  TColor::GetColor(66, 103, 210);//nice blue :)
-        cv_ratio->SetLineColor(cvcol);
-
-        data_ratio->SetLineColor(kBlack);
-        data_ratio->SetLineWidth(2);
-        data_ratio->SetMarkerStyle(kFullCircle);
-        data_ratio->SetMarkerColor(kBlack);
-        data_ratio->SetMarkerSize(1);
-
-        double data_rat = 0;
-        double cv_rat = 0;
-        double bf_rat = 0;
-        double pre_err = 0;
-        double post_err = 0;
-
-        TLegend* leg = new TLegend(0.15, 0.6, 0.4, 0.89);
-
-        TGraphAsymmErrors *post_channel_errband = NULL;
-        TGraphAsymmErrors *channel_errband = NULL;
-
-        channel_errband = new TGraphAsymmErrors(&cv_ND_hist);
-        if(bf){
-            post_channel_errband = new TGraphAsymmErrors(&bf_ND_hist);
-        }
-
-        for(int i = 0; i < channel_nbins; i++){
-                pre_err = ratio_err(cv_FD_hist.GetBinContent(i+1), errband->error_up(i+channel_nbins), cv_ND_hist.GetBinContent(i+1), errband->error_up(i), 0.0);
-                channel_errband->SetPointEYhigh(i, ratio_err(cv_FD_hist.GetBinContent(i+1), errband->error_up(i+channel_nbins), cv_ND_hist.GetBinContent(i+1), errband->error_up(i), 0.0));
-                channel_errband->SetPointEYlow(i, ratio_err(cv_FD_hist.GetBinContent(i+1), errband->error_down(i+channel_nbins), cv_ND_hist.GetBinContent(i+1), errband->error_down(i), 0.0));
-                channel_errband->SetPointY(i, cv_FD_hist.GetBinContent(i+1)/cv_ND_hist.GetBinContent(i+1));
-                double pre_corr_val = pre_corr.GetBinContent(i, i+channel_nbins);
-                double post_corr_val = post_corr.GetBinContent(i, i+channel_nbins);
-                if(bf){
-                    post_channel_errband->SetPointEYhigh(i, ratio_err(bf_FD_hist.GetBinContent(i+1), posterrband->error_up(i+channel_nbins), bf_ND_hist.GetBinContent(i+1), posterrband->error_up(i), post_corr_val));
-                    post_channel_errband->SetPointY(i, bf_FD_hist.GetBinContent(i+1)/bf_ND_hist.GetBinContent(i+1));
-                    post_err = ratio_err(bf_FD_hist.GetBinContent(i+1), posterrband->error_up(i+channel_nbins), bf_ND_hist.GetBinContent(i+1), posterrband->error_up(i), post_corr_val);
-                    err_ratio->SetBinContent(i+1, post_err/pre_err);
-                    post_channel_errband->SetPointEYlow(i, ratio_err(bf_FD_hist.GetBinContent(i+1), posterrband->error_down(i+channel_nbins), bf_ND_hist.GetBinContent(i+1), posterrband->error_down(i), post_corr_val));
-                }
-
-                data_rat = data_FD_hist.GetBinContent(i+1)/data_ND_hist.GetBinContent(i+1);
-                cv_rat = cv_FD_hist.GetBinContent(i+1)/cv_ND_hist.GetBinContent(i+1);
-
-                data_ratio->SetBinContent(i+1, data_rat);
-                cv_ratio->SetBinContent(i+1, cv_rat);
-
-                cv_ratio->SetBinError(i+1, ratio_err(cv_FD_hist.GetBinContent(i+1), cv_FD_hist.GetBinError(i+1), cv_ND_hist.GetBinContent(i+1), cv_ND_hist.GetBinError(i+1), pre_corr_val));
-                data_ratio->SetBinError(i+1, ratio_err(data_FD_hist.GetBinContent(i+1), sqrt(data_FD_hist.GetBinContent(i+1)), data_ND_hist.GetBinContent(i+1), sqrt(data_ND_hist.GetBinContent(i+1)), 0.0));
-                if(bf){
-                    bf_rat = bf_FD_hist.GetBinContent(i+1)/bf_ND_hist.GetBinContent(i+1);
-                    bf_ratio->SetBinContent(i+1, bf_rat);
-
-                    bf_ratio->SetBinError(i+1, ratio_err(bf_FD_hist.GetBinContent(i+1), bf_FD_hist.GetBinError(i+1), bf_ND_hist.GetBinContent(i+1), bf_ND_hist.GetBinError(i+1), post_corr_val));
-                }
-        }
-
-        leg->AddEntry(data_ratio);
-        leg->AddEntry(cv_ratio);
-
-        auto ratio_c = new TCanvas("C", "A ratio example");
-
-        // Set up TPads for ratios, unused if ratio option not chosen
-        TPad p1("p1", "p1", 0, 0.25, 1, 1);
-
-
-        TPad p2("p2", "p2", 0, 0, 1, 0.25);
-        if(bf){
-            p1.SetBottomMargin(0);
-            p2.SetTopMargin(0);
-            p2.SetBottomMargin(0.3);
-            p1.cd();
-        }
-
-        cv_ratio->GetYaxis()->SetRangeUser(0.0, 2.0*cv_ratio->GetMaximum());
-        cv_ratio->Draw("hist");
-
-        channel_errband->SetFillStyle(3144);
-        channel_errband->SetFillColorAlpha(cvcol, 0.2);
-        channel_errband->SetLineColor(cvcol);
-        channel_errband->SetLineWidth(1);
-        channel_errband->Draw("2 same");
-
-        if(bf){
-            bf_ratio->SetLineColor(kRed);
-            bf_ratio->SetLineWidth(2);
-            bf_ratio->Draw("histsame");
-
-            post_channel_errband->SetFillColor(kRed);
-            post_channel_errband->SetFillStyle(3254);
-            post_channel_errband->SetLineColor(kRed);
-            post_channel_errband->SetLineWidth(1);
-
-            post_channel_errband->Draw("2 same");
-            leg->AddEntry(bf_ratio);
-        }
-
-        data_ratio->SetTitle("PROfit Detector Ratio");
-        data_ratio->Draw("PE1 same");
-
-        leg->Draw("same");
-
-        if(bf){
-            p2.cd();
-
-            err_ratio->GetYaxis()->SetTitleSize(0.1);
-            err_ratio->GetYaxis()->SetTitleOffset(0.5);
-            err_ratio->GetYaxis()->SetLabelSize(0.1);
-            err_ratio->GetXaxis()->SetTitleSize(0.1);
-            err_ratio->GetXaxis()->SetLabelSize(0.1);
-            err_ratio->Draw("hist");
-        }
-
-        if(bf){
-          ratio_c->cd(0);
-          p1.Draw();
-
-          p2.Draw();
-        }
-        ratio_c->Modified();
-        ratio_c->Update();
-        ratio_c->Print(("ratio_"+filename).c_str());
-
-        for(int i = 0; i < channel_nbins; i++){
-           if (i > 13){
-               cv_ratio->SetBinContent(i, 0.0);
-               err_ratio->SetBinContent(i, 0.0);
-           }
-        }
-
-        if(bf) p1.cd();
-        cv_ratio->GetXaxis()->SetRangeUser(0.4, 1.0);
-        cv_ratio->GetYaxis()->SetRangeUser(0.0, 5.0);
-        log<LOG_DEBUG>(L"%1% || cv_ratio max %2%") % __func__ % cv_ratio->GetMaximum();
-        cv_ratio->GetYaxis()->SetRangeUser(cv_ratio->GetMinimum()*1.2, cv_ratio->GetMaximum()*1.2);
-        if(bf) p1.Draw();
-        if(bf){
-            p2.cd();
-            err_ratio->GetXaxis()->SetRangeUser(0.4, 1.0);
-            err_ratio->GetYaxis()->SetRangeUser(err_ratio->GetMinimum()*1.2, err_ratio->GetMaximum()*1.2);
-            p2.Draw();
-        }
-
-        ratio_c->Modified();
-        ratio_c->Update();
-        ratio_c->Print(("ratio_small_"+filename).c_str());
+        return (A/B)*sqrt(pow(dA/A,2)+pow(dB/B,2)-2*(corr*dA*dB/(A*B)));
     }
-                                                                                        
+
+    void plot_detector_ratios(
+            const PROconfig &config,
+            std::vector<TH1D> data_hists, 
+            std::vector<TH1D> cv_hists, 
+            std::optional<PROerrorbar> errband, 
+            std::vector<TH1D> bf_hists, 
+            std::optional<PROerrorbar> posterrband, 
+            TH2D &pre_corr, 
+            TH2D &post_corr, 
+            std::string filename,
+            int var_index)
+    {
+        log<LOG_DEBUG>(L"%1% || Starting plot_detector_ratios") % __func__;
+
+        size_t n_hists = data_hists.size();
+
+        if(n_hists < 2) {
+            log<LOG_WARNING>(L"%1% || Need at least 2 channels to compute ratios. Found %2%.") 
+                % __func__ % n_hists;
+            return;
+        }
+
+        log<LOG_INFO>(L"%1% || Creating ratio plots for %2% channels (%3% unique pairs)") 
+            % __func__ % n_hists % (n_hists * (n_hists - 1) / 2);
+
+        //make opffsets
+        std::vector<int> bin_offsets(n_hists + 1, 0);
+        for(size_t i = 0; i < n_hists; ++i) {
+            bin_offsets[i + 1] = bin_offsets[i] + cv_hists[i].GetNbinsX();
+        }
+
+        // Build channel labels from config (mode_detector_channel naming)
+        std::vector<std::string> channel_labels;
+        std::vector<std::string> channel_short_labels;  // For filenames
+        size_t hist_idx = 0;
+        for(size_t mode = 0; mode < config.m_num_modes && hist_idx < n_hists; ++mode) {
+            for(size_t det = 0; det < config.m_num_detectors && hist_idx < n_hists; ++det) {
+                for(size_t channel = 0; channel < config.m_num_channels && hist_idx < n_hists; ++channel) {
+                    std::string label = config.m_mode_plotnames[mode] + " " + 
+                        config.m_detector_plotnames[det] + " " + 
+                        config.m_channel_plotnames[channel];
+                    channel_labels.push_back(label);
+
+                    std::string short_label = config.m_mode_names[mode] + "_" + 
+                        config.m_detector_names[det] + "_" + 
+                        config.m_channel_names[channel];
+                    channel_short_labels.push_back(short_label);
+                    ++hist_idx;
+                }
+            }
+        }
+
+        // Fallback labels if indexing doesn't match expected structure
+        while(channel_labels.size() < n_hists) {
+            size_t idx = channel_labels.size();
+            channel_labels.push_back("Channel " + std::to_string(idx));
+            channel_short_labels.push_back("ch" + std::to_string(idx));
+        }
+
+        bool has_bf = (bf_hists.size() == n_hists);
+        if(!has_bf) {
+            log<LOG_DEBUG>(L"%1% || Best-fit histograms not available or count mismatch. Skipping BF in ratio plots.") 
+                % __func__;
+        }
+
+        for(size_t idx_den = 0; idx_den < n_hists; ++idx_den) {           // denominator (bottom of ratio)
+            for(size_t idx_num = 0; idx_num < n_hists; ++idx_num) {       // numerator (top of ratio)
+                if(idx_num == idx_den) continue;  // Skip self-ratios
+                size_t local_channel_num = idx_num % config.m_num_channels;
+                size_t local_channel_den = idx_den % config.m_num_channels;
+                if(local_channel_num != local_channel_den) continue;
+
+
+                log<LOG_DEBUG>(L"%1% || Processing ratio: %2% / %3%") 
+                    % __func__ % channel_labels[idx_num].c_str() % channel_labels[idx_den].c_str();
+
+                // Get histograms for this pair
+                TH1D& data_num = data_hists[idx_num];
+                TH1D& data_den = data_hists[idx_den];
+                TH1D& cv_num = cv_hists[idx_num];
+                TH1D& cv_den = cv_hists[idx_den];
+
+                // Verify bin counts match
+                int nbins_num = data_num.GetNbinsX();
+                int nbins_den = data_den.GetNbinsX();
+
+                if(nbins_num != nbins_den) {
+                    log<LOG_WARNING>(L"%1% || Skipping ratio %2%/%3%: bin count mismatch (%4% vs %5%)") 
+                        % __func__ % idx_num % idx_den % nbins_num % nbins_den;
+                    continue;
+                }
+
+                int channel_nbins = nbins_num;
+                int offset_num = bin_offsets[idx_num];
+                int offset_den = bin_offsets[idx_den];
+
+                // Create ratio histograms
+                TAxis* xAxis = data_num.GetXaxis();
+                const Double_t* binEdges = xAxis->GetXbins()->GetArray();
+
+                std::string ratio_label = channel_labels[idx_num] + " / " + channel_labels[idx_den];
+                std::string name_suffix = "_" + std::to_string(idx_num) + "_over_" + std::to_string(idx_den);
+
+                TH1D* data_ratio = new TH1D(("Data" + name_suffix).c_str(), 
+                        ("Data;" + std::string(xAxis->GetTitle()) + ";" + ratio_label).c_str(), 
+                        channel_nbins, binEdges);
+                TH1D* cv_ratio = new TH1D(("CV" + name_suffix).c_str(), 
+                        ("CV MC;" + std::string(xAxis->GetTitle()) + ";" + ratio_label).c_str(), 
+                        channel_nbins, binEdges);
+                TH1D* bf_ratio = nullptr;
+                TH1D* err_ratio = nullptr;
+
+                if(has_bf) {
+                    bf_ratio = new TH1D(("bf" + name_suffix).c_str(), 
+                            ("Best-Fit MC;" + std::string(xAxis->GetTitle()) + ";" + ratio_label).c_str(), 
+                            channel_nbins, binEdges);
+                    err_ratio = new TH1D(("err" + name_suffix).c_str(), 
+                            (";" + std::string(xAxis->GetTitle()) + ";Post/Pre Err Ratio").c_str(), 
+                            channel_nbins, binEdges);
+                }
+
+                Color_t cvcol = TColor::GetColor(66, 103, 210);  // Nice blue
+
+                cv_ratio->SetLineWidth(2);
+                cv_ratio->SetLineColor(cvcol);
+
+                data_ratio->SetLineColor(kBlack);
+                data_ratio->SetLineWidth(2);
+                data_ratio->SetMarkerStyle(kFullCircle);
+                data_ratio->SetMarkerColor(kBlack);
+                data_ratio->SetMarkerSize(1);
+
+                TLegend* leg = new TLegend(0.15, 0.7, 0.89, 0.89);
+
+                // Error band graphs
+                TGraphAsymmErrors* channel_errband = new TGraphAsymmErrors(&cv_num);
+                TGraphAsymmErrors* post_channel_errband = nullptr;
+                if(has_bf) {
+                    post_channel_errband = new TGraphAsymmErrors(&bf_hists[idx_num]);
+                }
+
+                // Fill ratio histograms bin by bin
+                for(int i = 0; i < channel_nbins; i++) {
+                    double cv_num_val = cv_num.GetBinContent(i + 1);
+                    double cv_den_val = cv_den.GetBinContent(i + 1);
+
+                    // Bin indices in full collapsed matrix
+                    int bin_idx_num = offset_num + i;
+                    int bin_idx_den = offset_den + i;
+
+                    double pre_corr_val = pre_corr.GetBinContent(bin_idx_num + 1, bin_idx_den + 1);
+                    double post_corr_val = post_corr.GetBinContent(bin_idx_num + 1, bin_idx_den + 1);
+
+                    double cv_rat = (cv_den_val > 0) ? cv_num_val / cv_den_val : 0;
+                    cv_ratio->SetBinContent(i + 1, cv_rat);
+
+                    if(errband) {
+                        double err_num_up = errband->error_up(bin_idx_num);
+                        double err_num_down = errband->error_down(bin_idx_num);
+                        double err_den_up = errband->error_up(bin_idx_den);
+                        double err_den_down = errband->error_down(bin_idx_den);
+
+                        double pre_err_up = ratio_err(cv_num_val, err_num_up, cv_den_val, err_den_up, pre_corr_val);
+                        double pre_err_down = ratio_err(cv_num_val, err_num_down, cv_den_val, err_den_down, pre_corr_val);
+
+                        channel_errband->SetPointY(i, cv_rat);
+                        channel_errband->SetPointEYhigh(i, pre_err_up);
+                        channel_errband->SetPointEYlow(i, pre_err_down);
+
+                        cv_ratio->SetBinError(i + 1, ratio_err(cv_num_val, cv_num.GetBinError(i + 1), 
+                                    cv_den_val, cv_den.GetBinError(i + 1), pre_corr_val));
+                    }
+
+                    // Data ratio
+                    double data_num_val = data_num.GetBinContent(i + 1);
+                    double data_den_val = data_den.GetBinContent(i + 1);
+                    double data_rat = (data_den_val > 0) ? data_num_val / data_den_val : 0;
+                    data_ratio->SetBinContent(i + 1, data_rat);
+                    data_ratio->SetBinError(i + 1, ratio_err(data_num_val, sqrt(data_num_val), 
+                                data_den_val, sqrt(data_den_val), 0.0));
+
+                    // Best-fit ratio
+                    if(has_bf && bf_ratio) {
+                        double bf_num_val = bf_hists[idx_num].GetBinContent(i + 1);
+                        double bf_den_val = bf_hists[idx_den].GetBinContent(i + 1);
+                        double bf_rat = (bf_den_val > 0) ? bf_num_val / bf_den_val : 0;
+                        bf_ratio->SetBinContent(i + 1, bf_rat);
+
+                        if(posterrband && post_channel_errband) {
+                            double post_err_num_up = posterrband->error_up(bin_idx_num);
+                            double post_err_num_down = posterrband->error_down(bin_idx_num);
+                            double post_err_den_up = posterrband->error_up(bin_idx_den);
+                            double post_err_den_down = posterrband->error_down(bin_idx_den);
+
+                            double post_err_up = ratio_err(bf_num_val, post_err_num_up, 
+                                    bf_den_val, post_err_den_up, post_corr_val);
+                            double post_err_down = ratio_err(bf_num_val, post_err_num_down, 
+                                    bf_den_val, post_err_den_down, post_corr_val);
+
+                            post_channel_errband->SetPointY(i, bf_rat);
+                            post_channel_errband->SetPointEYhigh(i, post_err_up);
+                            post_channel_errband->SetPointEYlow(i, post_err_down);
+
+                            bf_ratio->SetBinError(i + 1, ratio_err(bf_num_val, bf_hists[idx_num].GetBinError(i + 1), 
+                                        bf_den_val, bf_hists[idx_den].GetBinError(i + 1), 
+                                        post_corr_val));
+
+                            // Error improvement ratio
+                            if(errband && err_ratio) {
+                                double pre_err = ratio_err(cv_num_val, errband->error_up(bin_idx_num), 
+                                        cv_den_val, errband->error_up(bin_idx_den), pre_corr_val);
+                                if(pre_err > 0) {
+                                    err_ratio->SetBinContent(i + 1, post_err_up / pre_err);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                leg->AddEntry(data_ratio, "Data", "pe");
+                leg->AddEntry(cv_ratio, "CV Prediction", "l");
+                if(has_bf && bf_ratio) {
+                    leg->AddEntry(bf_ratio, "Best-Fit", "l");
+                }
+
+                std::string canvas_name = "ratio_" + channel_short_labels[idx_num] + "_over_" + channel_short_labels[idx_den];
+                auto ratio_c = new TCanvas(canvas_name.c_str(), ratio_label.c_str());
+
+                TPad p1("p1", "p1", 0, has_bf ? 0.25 : 0.0, 1, 1);
+                TPad p2("p2", "p2", 0, 0, 1, 0.25);
+
+                if(has_bf) {
+                    p1.SetBottomMargin(0);
+                    p2.SetTopMargin(0);
+                    p2.SetBottomMargin(0.3);
+                }
+                p1.cd();
+
+                double max_val = std::max(cv_ratio->GetMaximum(), data_ratio->GetMaximum());
+                if(has_bf && bf_ratio) {
+                    max_val = std::max(max_val, bf_ratio->GetMaximum());
+                }
+                cv_ratio->GetYaxis()->SetRangeUser(0.0, 1.33* max_val);
+                cv_ratio->SetTitle(ratio_label.c_str());
+                cv_ratio->Draw("hist");
+
+                // Draw CV error band
+                if(errband) {
+                    channel_errband->SetFillStyle(3144);
+                    channel_errband->SetFillColorAlpha(cvcol, 0.2);
+                    channel_errband->SetLineColor(cvcol);
+                    channel_errband->SetLineWidth(1);
+                    channel_errband->Draw("2 same");
+                }
+
+                // Draw best-fit
+                if(has_bf && bf_ratio) {
+                    bf_ratio->SetLineColor(kRed);
+                    bf_ratio->SetLineWidth(2);
+                    bf_ratio->Draw("hist same");
+
+                    if(posterrband && post_channel_errband) {
+                        post_channel_errband->SetFillColor(kRed);
+                        post_channel_errband->SetFillStyle(3254);
+                        post_channel_errband->SetLineColor(kRed);
+                        post_channel_errband->SetLineWidth(1);
+                        post_channel_errband->Draw("2 same");
+                    }
+                }
+
+                // Draw data
+                data_ratio->Draw("PE1 same");
+                leg->SetNColumns(3);
+                leg->SetFillStyle(0);
+                leg->SetLineWidth(0);
+                leg->Draw("same");
+
+                // Draw error ratio panel (bottom)
+                if(has_bf && posterrband && err_ratio) {
+                    p2.cd();
+                    err_ratio->GetYaxis()->SetTitleSize(0.1);
+                    err_ratio->GetYaxis()->SetTitleOffset(0.5);
+                    err_ratio->GetYaxis()->SetLabelSize(0.1);
+                    err_ratio->GetXaxis()->SetTitleSize(0.1);
+                    err_ratio->GetXaxis()->SetLabelSize(0.1);
+                    err_ratio->Draw("hist");
+                }
+
+                // Finalize canvas
+                ratio_c->cd(0);
+                p1.Draw();
+                if(has_bf) {
+                    p2.Draw();
+                }
+
+                ratio_c->Modified();
+                ratio_c->Update();
+
+                // Save with unique filename
+                std::string output_filename = "ratio_" + channel_short_labels[idx_num] + "_over_" + 
+                    channel_short_labels[idx_den] + "_" + filename;
+                ratio_c->Print(output_filename.c_str());
+
+                log<LOG_INFO>(L"%1% || Created ratio plot: %2%") % __func__ % output_filename.c_str();
+
+                //delete ratio_c;
+            }
+        }
+
+        log<LOG_DEBUG>(L"%1% || Finished plot_detector_ratios") % __func__;
+    }                                                                              
 
     void plot_hist1ds(TCanvas* c, TH1D* cv_hist, TGraphAsymmErrors* errband, THStack* cvstack, std::vector<std::pair<std::string, const char*>>* subplots, TH1D* bf_hist, TGraphAsymmErrors* posterrband, TH1D* data_hist, std::string* dat_str, PlotOptions opt, std::string hist_titles, std::string ratio_titles, const std::string &filename, PlotBounds &bounds, TText* text){
 
@@ -470,6 +603,8 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
         leg->SetNColumns(2);
         leg->SetFillStyle(0);
         leg->SetLineWidth(0);
+
+
 
         Color_t cvcol =  TColor::GetColor(66, 103, 210);
         if(!bf_hist)cvcol=kBlack;
@@ -491,22 +626,39 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
         p2->SetBottomMargin(0.3);
 
         double top_modifier = 1.35;
+        double y_max = 0.0;
 
+        if(cv_hist) {
+            y_max = std::max(y_max, cv_hist->GetMaximum());
+        }
+        if(bf_hist) {
+            y_max = std::max(y_max, bf_hist->GetMaximum());
+        }
+        if(data_hist) {
+            y_max = std::max(y_max, data_hist->GetMaximum());
+        }
+        if(bool(opt&PlotOptions::CVasStack) && cvstack) {
+            y_max = std::max(y_max, cvstack->GetMaximum());
+        }
+
+        y_max *= top_modifier;
+        if(bounds.hasBound("ymax")) {
+             y_max = bounds.getBound("ymax");
+        }
+        
         if(cv_hist) {
 
             cv_hist->SetLineColor(cvcol);
+            cv_hist->SetLineStyle(kDashed);
 
             if(bool(opt&PlotOptions::CVasStack)) {
                 log<LOG_DEBUG>(L"%1% || Using CVStack %2%") % __func__ % hist_titles.c_str();
-                if(data_hist){
-                    cvstack->SetMaximum(  bounds.hasBound("ymax") ? bounds.getBound("ymax") : std::max(top_modifier*cvstack->GetMaximum(), top_modifier*data_hist->GetMaximum()));
-                }
-                else{
-                    cvstack->SetMaximum(  bounds.hasBound("ymax") ? bounds.getBound("ymax") : top_modifier*cvstack->GetMaximum());
-                }
+
                 cvstack->Draw("hist");
                 cvstack->SetTitle(hist_titles.c_str());
                 cv_hist->Draw("same hist");
+
+                cvstack->SetMaximum(y_max);
 
                 TList* hist_list = cvstack->GetHists();
                 TIter next(hist_list); 
@@ -520,9 +672,11 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                     }
                     sc = sc + 1;
                 }
+
+
             }
             else{
-                cv_hist->SetMaximum( bounds.hasBound("ymax") ? bounds.getBound("ymax") :  top_modifier*cv_hist->GetMaximum());
+                cv_hist->SetMaximum(y_max);
                 cv_hist->SetMinimum(0.01);
                 cv_hist->Draw("hist");
             }
@@ -533,6 +687,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                 leg_hack->SetFillStyle(3144);
                 leg_hack->SetFillColorAlpha(cvcol, 0.2);
                 leg_hack->SetLineColor(cvcol);
+                leg_hack->SetLineStyle(kDashed);
                 leg_hack->SetLineWidth(2);
                 leg->AddEntry(leg_hack,"CV Prediction #pm 1#sigma" ,"fl");
             }else{
@@ -541,7 +696,8 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
         }
 
         if(bf_hist) {
-            bf_hist->SetLineStyle(kDashed);
+            bf_hist->SetLineStyle(kSolid);
+            bf_hist->SetLineWidth(2);
             bf_hist->SetLineColor(bfcol);
 
             if(cv_hist) bf_hist->Draw("hist same");
@@ -580,9 +736,8 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
 
             g->Draw("PE1 same");
             TH1 *leg_hack = (TH1*)data_hist->Clone((std::string(data_hist->GetTitle())).c_str());
-	    leg->AddEntry(leg_hack, dat_str->c_str(), "lp");
+            leg->AddEntry(leg_hack, dat_str->c_str(), "lp");
         }
-
 
         if(errband) {
             errband->SetFillStyle(3144);
@@ -778,7 +933,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                     Eigen::VectorXf bf_spec;
                     Eigen::VectorXf bf_spec_1d = Eigen::VectorXf::Zero(channel_nbins_x);
                     if(best_fit){ 
-			bf_spec = CollapseMatrix(config, best_fit->Spec(), other_index);
+                        bf_spec = CollapseMatrix(config, best_fit->Spec(), other_index);
                         bf_spec_1d = make_1d_spec(bf_spec, channel_nbins_x, channel_nbins_y, tot_offset, config.m_channel_variable_dims[channel][other_index]);
                     }
 
@@ -789,18 +944,18 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
 
                     PROerrorbar *errband_1d = NULL;
                     if(errband){
-			errband_1d = make_1d_err(*errband, channel_nbins_x, channel_nbins_y, tot_offset, config.m_channel_variable_dims[channel][other_index]);
+                        errband_1d = make_1d_err(*errband, channel_nbins_x, channel_nbins_y, tot_offset, config.m_channel_variable_dims[channel][other_index]);
                         log<LOG_DEBUG>(L"%1% || err") % __func__;
                     }
 
                     PROerrorbar *posterrband_1d = NULL;
                     if(posterrband){
-			posterrband_1d = make_1d_err(*posterrband, channel_nbins_x, channel_nbins_y, tot_offset, config.m_channel_variable_dims[channel][other_index]);
+                        posterrband_1d = make_1d_err(*posterrband, channel_nbins_x, channel_nbins_y, tot_offset, config.m_channel_variable_dims[channel][other_index]);
                         log<LOG_DEBUG>(L"%1% || posterr") % __func__;
                     }
 
                     if(config.m_channel_variable_dims[channel][other_index] == 2){
-			gStyle->SetPalette(kViridis);
+                        gStyle->SetPalette(kViridis);
                         std::string joined_title = config.m_channel_variable_units[channel][other_index];
                         string del = ";";
                         auto pos = joined_title.find(del);
@@ -813,8 +968,8 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                         std::vector<float> edges_x = config.m_channel_variable_bins[channel][other_index].Edges(0);
                         std::vector<float> edges_y = config.m_channel_variable_bins[channel][other_index].Edges(1);
 
-			// this needs to be a sum over all subchannels
-			//
+                        // this needs to be a sum over all subchannels
+                        //
                         TH2D* cv_hist = new TH2D(hist_title.c_str(),hist_title.c_str(), channel_nbins_x, edges_x.data(), channel_nbins_y, edges_y.data());
                         for(size_t subchannel = 0; subchannel < config.m_num_subchannels[channel]; ++subchannel){
                             const std::string& subchannel_name  = config.m_fullnames[global_subchannel_index_2d];
@@ -1014,7 +1169,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                             post_channel_errband->SetPointEYlow(bin, scale*(posterrband_1d->error_down(bin)));
                         }
                     }
-                      
+
                     TGraphAsymmErrors *ratio_err;
 
                     TText* text = NULL;
@@ -1025,22 +1180,22 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                             text = (TText*)texts.at(global_channel_index).GetListOfLines()->First();
                         }
                     }
-		    // should probably be switching this to a more clear boolean...
+                    // should probably be switching this to a more clear boolean...
                     plot_hist1ds(&c, &cv_hist, channel_errband, cvstack, &subplots, bf_hist, post_channel_errband, data_hist, &dat_str, opt, hist_titles, ratio_titles, filename, bounds, text);
                     ++global_channel_index;
-	            if(pre_allcovsyst.has_value()){
+                    if(pre_allcovsyst.has_value()){
                         cv_hists.push_back(cv_hist);
                         data_hists.push_back(*data_hist);
                         bf_hists.push_back(*bf_hist);
 
-		    }
+                    }
                     tot_offset += nbins_p_2dchan;
                 }
             }
         }
         c.Print((filename+"]").c_str());
 
-	if(pre_allcovsyst.has_value()){
+        if(pre_allcovsyst.has_value() && data_hists.size() >= 2){
             Eigen::MatrixXf fractional_cov = pre_allcovsyst->fractional_covariance;
             Eigen::MatrixXf diag = cv->Spec().array().matrix().asDiagonal();
 
@@ -1048,12 +1203,11 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                 std::map<std::string, std::unique_ptr<TH2D>> pre_matrices = covarianceTH2D(pre_allcovsyst.value(), config, *cv);
                 std::map<std::string, std::unique_ptr<TH2D>> post_matrices = covarianceTH2D(post_allcovsyst.value(), config, *best_fit);
 
-                if (data_hists.size() == 2 and config.m_num_detectors == 2){
-
-                    plot_detector_ratio(data_hists, cv_hists, errband, bf_hists, posterrband, *pre_matrices["collapsed_total_cor"], *post_matrices["collapsed_total_cor"], filename);
-                }
+                plot_detector_ratios(config, data_hists, cv_hists, errband, bf_hists, posterrband, *pre_matrices["collapsed_total_cor"], *post_matrices["collapsed_total_cor"],  filename, other_index);
             }
-	}
+        }
+
+
         log<LOG_DEBUG>(L"%1% || Finishing plot_channels") % __func__;
     }
 
@@ -1224,7 +1378,7 @@ getSplineGraphs(const PROsyst &systs, const PROconfig &config) {
                         for(auto &h:hvec) h->Draw("HIST SAME");
 
                         leg->Draw();
-                        
+
                         TText *t = new TText();
                         t->SetNDC();                
                         t->SetTextFont(42);                          

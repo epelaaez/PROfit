@@ -533,11 +533,11 @@ void PROsurf::PlotCurve(const PROconfig &config, const PROmodel &model, const PR
     textbox->SetTextAlign(12);  // Left align
     textbox->SetTextSize(0.04);
 
-    textbox->AddText(("Start: " + xlabel + " = " + std::to_string(A[0])).c_str());
-    textbox->AddText(("       " + ylabel + " = " + std::to_string(A[1])).c_str());
+    textbox->AddText(("Start: " + xlabel + " = " + to_string_prec(A[0],3)).c_str());
+    textbox->AddText(("       " + ylabel + " = " + to_string_prec(A[1],3)).c_str());
     textbox->AddText("");  // Blank line
-    textbox->AddText(("End:   " + xlabel + " = " + std::to_string(B[0])).c_str());
-    textbox->AddText(("       " + ylabel + " = " + std::to_string(B[1])).c_str());
+    textbox->AddText(("End:   " + xlabel + " = " + to_string_prec(B[0],3)).c_str());
+    textbox->AddText(("       " + ylabel + " = " + to_string_prec(B[1],3)).c_str());
     textbox->Draw();
 
     p1->RedrawAxis();
@@ -586,7 +586,7 @@ void PROsurf::PlotCurve(const PROconfig &config, const PROmodel &model, const PR
 
     mg->Draw("A");
     double margin = (ymax - ymin) * 0.05;
-    mg->GetYaxis()->SetRangeUser(ymin - margin, ymax + 4*margin);
+    mg->GetYaxis()->SetRangeUser(ymin - margin, ymax + 5*margin);
 
     mg->GetXaxis()->SetTitle("Curve Point Index");
     mg->GetYaxis()->SetTitle("Parameter Value");
