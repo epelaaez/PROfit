@@ -633,11 +633,18 @@ namespace PROfit {
             size_t to_print = nevents > 5 ? nevents / 5 : 1;
             if(to_print>50000)to_print=50000;
             int currentTreeNumber = -1;
+            bool file_name_logged = false;
 
             for(long int i=0; i < nevents; ++i) {
                 if(i%to_print==0){
                     time_t time_passed = time(nullptr) - time_stamp;
-                    log<LOG_INFO>(L"%1% || File %2% -- uni : %3% / %4%  took %5% seconds") % __func__ % fid % i % nevents % time_passed;
+                    if(!file_name_logged){
+                        log<LOG_INFO>(L"%1% || File %2% (%6%) -- uni : %3% / %4%  took %5% seconds") % __func__ % fid % i % nevents % time_passed % fn.c_str();
+                        file_name_logged = true;
+                    }
+                    else {
+                        log<LOG_INFO>(L"%1% || File %2% -- uni : %3% / %4%  took %5% seconds") % __func__ % fid % i % nevents % time_passed;
+                    }
                     time_stamp = time(nullptr);
                 }
                 chains[fid]->GetEntry(i);
