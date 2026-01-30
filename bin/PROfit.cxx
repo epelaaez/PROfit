@@ -244,6 +244,7 @@ int main(int argc, char* argv[])
     //Initilize configuration from the XML;
     PROconfig config(xmlname, rateonly);
 
+    log<LOG_INFO>(L"%1% || TEMP DEBUG: PROconfig constructor completed successfully") % __func__;
 
     //Inititilize PROpeller to keep MC
     PROpeller prop;
@@ -415,10 +416,14 @@ int main(int argc, char* argv[])
     //We will load all other variables too, but many are truth level so data won't be as common.
     std::vector<PROdata> variable_data;
     if(!data_xml.empty()){
+        log<LOG_INFO>(L"%1% || TEMP DEBUG: starting dataconfig constructor") % __func__;
         PROconfig dataconfig(data_xml);
+        log<LOG_INFO>(L"%1% || TEMP DEBUG: dataconfig constructor completed successfully") % __func__;
+        log<LOG_INFO>(L"%1% || dataconfig.m_num_channels: %2%") % __func__ % dataconfig.m_num_channels;
         std::string dataBinName = analysis_tag+"_data.bin";
         for(size_t i = 0; i < dataconfig.m_num_channels; ++i) {
             size_t nsubch = dataconfig.m_num_subchannels[i];
+            log<LOG_INFO>(L"%1% || TEMP DEBUG: nsubch: %2%") % __func__ % nsubch;
             if(nsubch != 1) {
                 log<LOG_ERROR>(L"%1% || Data xml required to have exactly 1 subchannel per channel. Found %2% for channel %3%")
                     % __func__ % nsubch % i;
@@ -426,6 +431,7 @@ int main(int argc, char* argv[])
                 exit(EXIT_FAILURE);
             }
             std::string &subchname = dataconfig.m_subchannel_names[i][0];
+            log<LOG_INFO>(L"%1% || TEMP DEBUG: subchname: %2%") % __func__ % subchname.c_str();
             if(subchname != "data") {
                 log<LOG_ERROR>(L"%1% || Data subchannel required to be called \"data.\" Found name %2% for channel %3%")
                     % __func__ % subchname.c_str() % i;

@@ -2,28 +2,72 @@
 
 <mode name="nu" />
 
-<detector name="UBOONE" pot="4.733e19" />
+<detector name="UBOONE" pot="7.801e19" />
 
-<channel name="numu" unit="Reconstructed Neutrino Energy [MeV]">
-    <bins unit="Reconstructed Neutrino Energy [MeV]" min="0" max="2500" nbins="25"/>
-	<bins unit="True Neutrino Energy [MeV]" min="0" max="3000" nbins="20" plot="false"/>
+<channel name="numuCCNpFC" plotname="Reconstructed Neutrino Energy [MeV]">
+	<bins unit="Reconstructed Neutrino Energy [MeV]" min="0" max="2500" nbins="25"/>
+	<bins unit="True Neutrino Energy [MeV]" min="0" max="3000" nbins="20"/>
+	<bins unit="True L/E" min="0" max="3000" nbins="250" plot="false"/>
+    <subchannel name="data" plotname="Data" color="#99CCFF"/>
+</channel>
+<channel name="numuCC0pFC" plotname="Reconstructed Neutrino Energy [MeV]">
+	<bins unit="Reconstructed Neutrino Energy [MeV]" min="0" max="2500" nbins="25"/>
+	<bins unit="True Neutrino Energy [MeV]" min="0" max="3000" nbins="20"/>
+	<bins unit="True L/E" min="0" max="3000" nbins="250" plot="false"/>
+    <subchannel name="data" plotname="Data" color="#99CCFF"/>
+</channel>
+<channel name="numuCCNpPC" plotname="Reconstructed Neutrino Energy [MeV]">
+	<bins unit="Reconstructed Neutrino Energy [MeV]" min="0" max="2500" nbins="25"/>
+	<bins unit="True Neutrino Energy [MeV]" min="0" max="3000" nbins="20"/>
+	<bins unit="True L/E" min="0" max="3000" nbins="250" plot="false"/>
+    <subchannel name="data" plotname="Data" color="#99CCFF"/>
+</channel>
+<channel name="numuCC0pPC" plotname="Reconstructed Neutrino Energy [MeV]">
+	<bins unit="Reconstructed Neutrino Energy [MeV]" min="0" max="2500" nbins="25"/>
+	<bins unit="True Neutrino Energy [MeV]" min="0" max="3000" nbins="20"/>
 	<bins unit="True L/E" min="0" max="3000" nbins="250" plot="false"/>
     <subchannel name="data" plotname="Data" color="#99CCFF"/>
 </channel>
 
-<!-- <MCFile treename="wcpselection/T_KINEvars" filename="/nevis/houston/home/leehagaman/PROfit/uboone_spline_testing/temp_data_file_list_test.txt" scale = "1.0" pot="4.733e19"> -->
 
-
-<!-- This file is available at /pnfs/uboone/persistent/users/uboonepro/surprise/opendata/BNB/checkout_MCC9.10_Run4b_v10_04_07_11_BNB_beam_on_surprise_reco2_hist_opendata_20700.root, 4.6 GB -->
-<MCFile treename="wcpselection/T_KINEvars" filename="/nevis/riverside/data/leehagaman/ngem/data_files/checkout_MCC9.10_Run4b_v10_04_07_11_BNB_beam_on_surprise_reco2_hist_opendata_20700.root" scale = "1.0" pot="4.733e19">
+<!-- This contains two files: /pnfs/uboone/persistent/users/uboonepro/surprise/opendata/BNB/checkout_MCC9.10_Run4b_v10_04_07_11_BNB_beam_on_surprise_reco2_hist_opendata_20700.root,
+/pnfs/uboone/persistent/users/uboonepro/surprise/opendata/BNB/checkout_MCC9.10_Run4a_BNB_beam_on_data_surprise_reco2_hist_opendata_19550.root -->
+<MCFile treename="wcpselection/T_KINEvars" filename="/nevis/riverside/data/leehagaman/ngem/data_files/run_4_open_data_surprise_files.txt" scale = "1.0" pot="7.801e19">
     <friend treename="wcpselection/T_eval" />
 	<friend treename="wcpselection/T_BDTvars" />
+	
 	<branch
-        associated_subchannel = "nu_UBOONE_numu_data"
-        incl_systematics      = "false"
-        model_rule            = "0"
-		additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9))"
-        >
+        	associated_subchannel = "nu_UBOONE_numuCCNpFC_data"
+        	model_rule            = "0"
+			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) > 0))"
+		>
+		<variable>kine_reco_Enu</variable>
+		<variable>0</variable>
+		<variable>0</variable>
+	</branch>
+	<branch
+        	associated_subchannel = "nu_UBOONE_numuCC0pFC_data"
+        	model_rule            = "0"
+			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0))"
+		>
+		<variable>kine_reco_Enu</variable>
+		<variable>0</variable>
+		<variable>0</variable>
+	</branch>
+		<branch
+        	associated_subchannel = "nu_UBOONE_numuCCNpPC_data"
+        	model_rule            = "0"
+			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 0) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) > 0))"
+		>
+		<variable>kine_reco_Enu</variable>
+		<variable>0</variable>
+		<variable>0</variable>	
+	</branch>
+	<branch
+        	associated_subchannel = "nu_UBOONE_numuCC0pPC_data"
+        	model_rule            = "0"
+			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 0) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0))"
+		>
 		<variable>kine_reco_Enu</variable>
 		<variable>0</variable>
 		<variable>0</variable>

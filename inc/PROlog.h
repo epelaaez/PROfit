@@ -7,7 +7,8 @@
 #include <iomanip>
 #include <exception>
 #include <vector>
-#include <fstream> 
+#include <fstream>
+#include <unordered_map>
 
 #include <Eigen/Eigen>
 
@@ -71,16 +72,30 @@ namespace log_impl {
         public:
             formatted_log_t( log_level_t level, const wchar_t* msg ) : level(level), fmt(msg) {}
             ~formatted_log_t() {
+                static const int SUPPRESS_AFTER = 10;
+                static std::unordered_map<std::wstring, int> msg_counts;
+                std::wstring formatted_msg = boost::str(fmt);
+                int& count = msg_counts[formatted_msg];
+                count++;
+
                 // Check against console verbosity
                 if ( level <= GLOBAL_LEVEL ) {
-                    // Output to primary stream (usually wcout)
-                    *OSTREAM << level << L" " << fmt << endl;
+                    if (count <= SUPPRESS_AFTER) {
+                        *OSTREAM << level << L" " << fmt << endl;
+                    } else if (count == SUPPRESS_AFTER + 1) {
+                        *OSTREAM << level << L" " << fmt << L" (suppressing further cases)" << endl;
+                    }
                 }
 
                 // Check against file verbosity (can be different from console)
                 if(LOGGING_TO_FILE && LOG_FILE_STREAM.is_open() && level <= FILE_LEVEL) {
-                    LOG_FILE_STREAM << level << L" " << fmt << endl;
-                    LOG_FILE_STREAM.flush(); 
+                    if (count <= SUPPRESS_AFTER) {
+                        LOG_FILE_STREAM << level << L" " << fmt << endl;
+                        LOG_FILE_STREAM.flush();
+                    } else if (count == SUPPRESS_AFTER + 1) {
+                        LOG_FILE_STREAM << level << L" " << fmt << L" (suppressing further cases)" << endl;
+                        LOG_FILE_STREAM.flush();
+                    }
                 }
             }        
             

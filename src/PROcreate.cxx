@@ -261,6 +261,7 @@ namespace PROfit {
                 //}
                 int other_count = 0;
                 for(const auto &name: branch_variable->variable_names) {
+                    log<LOG_INFO>(L"%1% || Setting up variable formula for file %2%, branch %3% (%4%): %5%") % __func__ % fid % ib % branch_variable->associated_hist.c_str() % name.c_str();
                     branch_variable->branch_variable_formulas.push_back(std::make_shared<ROOTFormula>(
                         "branch_variable_form_"+std::to_string(fid) +"_" + std::to_string(ib)+"_"+std::to_string(other_count),
                         name, chains[fid]));
@@ -270,18 +271,20 @@ namespace PROfit {
 
                 //grab monte carlo weight
                 if(inconfig.m_mcgen_additional_weight_bool[fid][ib]){
+                    log<LOG_INFO>(L"%1% || Setting up additional monte carlo weight for file %2%, branch %3% (%4%): %5%") % __func__ % fid % ib % branch_variable->associated_hist.c_str() % inconfig.m_mcgen_additional_weight_name[fid][ib].c_str();
                     branch_variable->branch_monte_carlo_weight_formula = std::make_shared<ROOTFormula>(
                         "branch_add_weight_"+std::to_string(fid)+"_" + std::to_string(ib),
                         inconfig.m_mcgen_additional_weight_name[fid][ib], chains[fid]);
-                    log<LOG_INFO>(L"%1% || Setting up additional monte carlo weight for this branch: %2%") % __func__ %  inconfig.m_mcgen_additional_weight_name[fid][ib].c_str();
+                    log<LOG_INFO>(L"%1% || Successfully set up additional monte carlo weight for this branch: %2%") % __func__ %  inconfig.m_mcgen_additional_weight_name[fid][ib].c_str();
                 }
 
                 //grab cross-section weight
                 if(inconfig.m_mcgen_xs_weight_bool[fid][ib]){
+                    log<LOG_INFO>(L"%1% || Setting up cross-section weight for file %2%, branch %3% (%4%): %5%") % __func__ % fid % ib % branch_variable->associated_hist.c_str() % inconfig.m_mcgen_xs_weight_name[fid][ib].c_str();
                     branch_variable->branch_xs_weight_formula = std::make_shared<ROOTFormula>(
                         "branch_xs_weight_"+std::to_string(fid)+"_" + std::to_string(ib),
                         inconfig.m_mcgen_xs_weight_name[fid][ib], chains[fid]);
-                    log<LOG_INFO>(L"%1% || Setting up cross-section weight for this branch: %2%") % __func__ %  inconfig.m_mcgen_xs_weight_name[fid][ib].c_str();
+                    log<LOG_INFO>(L"%1% || Successfully set up cross-section weight for this branch: %2%") % __func__ %  inconfig.m_mcgen_xs_weight_name[fid][ib].c_str();
                 }
 
 
@@ -898,6 +901,19 @@ namespace PROfit {
             for(long int i=0; i < nevents; ++i) {
                 if(i%1000==0)	log<LOG_INFO>(L"%1% || -- uni : %2% / %3%") % __func__ % i % nevents;
                 chains[fid]->GetEntry(i);
+
+                // update the formulas to the current event (handles TChain file transitions)
+                for(int ib = 0; ib != num_branch; ++ib) {
+                    if(inconfig.m_mcgen_additional_weight_bool[fid][ib]){
+                        branches[ib]->branch_monte_carlo_weight_formula->LoadEvent(i);
+                    }
+                    if(inconfig.m_mcgen_xs_weight_bool[fid][ib]){
+                        branches[ib]->branch_xs_weight_formula->LoadEvent(i);
+                    }
+                    for(auto &b: branches[ib]->branch_variable_formulas) {
+                        b->LoadEvent(i);
+                    }
+                }
 
                 //branch loop
                 for(int ib = 0; ib != num_branch; ++ib) {

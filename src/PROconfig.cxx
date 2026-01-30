@@ -6,6 +6,7 @@
 #include <numeric>
 #include "TTree.h"
 #include "TTreeFormula.h"
+#include "TFriendElement.h"
 using namespace PROfit;
 
 
@@ -72,22 +73,22 @@ bool PROconfig::SameChannels(const PROconfig &one, const PROconfig &two) {
                 % __func__ % one.m_channel_names[i].c_str() % two.m_channel_names[i].c_str();
             return false;
         }
-        if(one.m_channel_variable_bins[one.i_prime][i].NBins() != two.m_channel_variable_bins[two.i_prime][i].NBins()) {
+        if(one.m_channel_variable_bins[i][one.i_prime].NBins() != two.m_channel_variable_bins[i][two.i_prime].NBins()) {
             log<LOG_WARNING>(L"%1% || Found different number of channel bins %2% vs %3%")
-                % __func__ % one.m_channel_variable_bins[one.i_prime][i].NBins() % two.m_channel_variable_bins[two.i_prime][i].NBins();
+                % __func__ % one.m_channel_variable_bins[i][one.i_prime].NBins() % two.m_channel_variable_bins[i][two.i_prime].NBins();
             return false;
         }
-        if (one.m_channel_variable_bins[one.i_prime][i].NDim() != two.m_channel_variable_bins[two.i_prime][i].NDim()) {
+        if (one.m_channel_variable_bins[i][one.i_prime].NDim() != two.m_channel_variable_bins[i][two.i_prime].NDim()) {
             log<LOG_WARNING>(L"%1% || Found different number of channel variable dimensions %2% vs %3%")
-                % __func__ % one.m_channel_variable_bins[one.i_prime][i].NDim() % two.m_channel_variable_bins[two.i_prime][i].NDim();
+                % __func__ % one.m_channel_variable_bins[i][one.i_prime].NDim() % two.m_channel_variable_bins[i][two.i_prime].NDim();
             return false;
         }
 
-        for (size_t jdim = 0; jdim < one.m_channel_variable_bins[one.i_prime][i].NDim(); jdim++) {
-            for (size_t k = 0; k < one.m_channel_variable_bins[one.i_prime][i].NBinEdgesAlong(jdim); k++) {
-                if(one.m_channel_variable_bins[one.i_prime][i].Edges(jdim)[k] != two.m_channel_variable_bins[two.i_prime][i].Edges(jdim)[k]) {
+        for (size_t jdim = 0; jdim < one.m_channel_variable_bins[i][one.i_prime].NDim(); jdim++) {
+            for (size_t k = 0; k < one.m_channel_variable_bins[i][one.i_prime].NBinEdgesAlong(jdim); k++) {
+                if(one.m_channel_variable_bins[i][one.i_prime].Edges(jdim)[k] != two.m_channel_variable_bins[i][two.i_prime].Edges(jdim)[k]) {
                     log<LOG_WARNING>(L"%1% || Found different bin edge for bin %2% in channel %3% dimension %4%. %5% vs %6%")
-                        % __func__ % k % i % jdim % one.m_channel_variable_bins[one.i_prime][i].Edges(jdim)[k] % two.m_channel_variable_bins[two.i_prime][i].Edges(jdim)[k];
+                        % __func__ % k % i % jdim % one.m_channel_variable_bins[i][one.i_prime].Edges(jdim)[k] % two.m_channel_variable_bins[i][two.i_prime].Edges(jdim)[k];
                     return false;
                 }
             }
@@ -1741,11 +1742,17 @@ void PROconfig::construct_variable_collapsing_matrices(){
         //construct the matrix by detector block
         Eigen::MatrixXf block_collapser = Eigen::MatrixXf::Zero(m_num_variable_bins_detector_block[io], m_num_variable_bins_detector_block_collapsed[io]);
 
+        log<LOG_INFO>(L"%1% || TEMP DEBUG: created block_collapser matrix with size %2% x %3%") % __func__ % m_num_variable_bins_detector_block[io] % m_num_variable_bins_detector_block_collapsed[io];
+
         size_t channel_row_start = 0, channel_col_start = 0;
         for(size_t ic =0; ic != m_num_channels; ++ic){
 
+            log<LOG_INFO>(L"%1% || TEMP DEBUG: creating channel_collapser matrix for channel %2% with size %3% x %4%") % __func__ % ic % m_num_subchannels[ic] % m_channel_variable_bins[ic][io].NBins();
+
             //first, build matrix for each channel block
             size_t total_num_bins_channel = m_num_subchannels[ic] * m_channel_variable_bins[ic][io].NBins();
+
+            log<LOG_INFO>(L"%1% || TEMP DEBUG: total_num_bins_channel: %2%") % __func__ % total_num_bins_channel;
 
             Eigen::MatrixXf channel_collapser = Eigen::MatrixXf::Zero(total_num_bins_channel, m_channel_variable_bins[ic][io].NBins());
             for(size_t col = 0; col != m_channel_variable_bins[ic][io].NBins(); ++col){
@@ -1755,11 +1762,17 @@ void PROconfig::construct_variable_collapsing_matrices(){
                 }
             }
 
+            log<LOG_INFO>(L"%1% || TEMP DEBUG: created channel_collapser matrix with size %2% x %3%") % __func__ % total_num_bins_channel % m_channel_variable_bins[ic][io].NBins();
+
             // now, copy this matrix to detector block
             block_collapser(Eigen::seqN(channel_row_start, total_num_bins_channel), Eigen::seqN(channel_col_start, m_channel_variable_bins[ic][io].NBins())) = channel_collapser;
             channel_row_start += total_num_bins_channel;
             channel_col_start += m_channel_variable_bins[ic][io].NBins();
+
+            log<LOG_INFO>(L"%1% || TEMP DEBUG: copied channel_collapser matrix to block_collapser matrix with size %2% x %3%") % __func__ % total_num_bins_channel % m_channel_variable_bins[ic][io].NBins();
         }
+
+        log<LOG_INFO>(L"%1% || TEMP DEBUG: copied all channel_collapser matrices to block_collapser matrix with size %2% x %3%") % __func__ % m_num_variable_bins_detector_block[io] % m_num_variable_bins_detector_block_collapsed[io];
 
         //okay! now stuff every detector block size_to the final collapse matrix
         for(size_t im = 0; im != m_num_modes; ++im){
@@ -1769,6 +1782,8 @@ void PROconfig::construct_variable_collapsing_matrices(){
                 variable_collapsing_matrices.back()(Eigen::seqN(row_block_start, m_num_variable_bins_detector_block[io]), Eigen::seqN(col_block_start, m_num_variable_bins_detector_block_collapsed[io])) = block_collapser;
             }
         }
+
+        log<LOG_INFO>(L"%1% || TEMP DEBUG: copied all block_collapser matrices to variable_collapsing_matrices with size %2% x %3%") % __func__ % m_num_variable_bins_total[io] % m_num_variable_bins_total_collapsed[io];
 
     }
     return;
@@ -1844,14 +1859,40 @@ ROOTFormula::ROOTFormula(const std::string &name, const std::string &formula, TT
     // split the formula at a ";" into multiple values. used to be "," but that breaks arguments
     std::string this_formula;
     while(std::getline(formula_reader, this_formula, ';')) {
+        log<LOG_DEBUG>(L"%1% || Compiling TTreeFormula '%2%' with name '%3%' on tree '%4%'") % __func__ % this_formula.c_str() % name.c_str() % t->GetName();
         auto f = std::make_unique<TTreeFormula>(name.c_str(), this_formula.c_str(), t);
+        log<LOG_DEBUG>(L"%1% || TTreeFormula compiled: GetNdim()=%2%, GetNcodes()=%3%, GetNdata()=%4%") % __func__ % f->GetNdim() % f->GetNcodes() % f->GetNdata();
         // Check if formula compiled successfully
         if (f->GetNdim() == 0 && f->GetNcodes() == 0) {
             log<LOG_ERROR>(L"%1% || ERROR: TTreeFormula not compiled correctly for formula: %2%") % __func__ % this_formula.c_str();
+            log<LOG_ERROR>(L"%1% || -- Tree name: %2%, Tree entries: %3%") % __func__ % t->GetName() % t->GetEntries();
+            // List available branches for debugging
+            log<LOG_ERROR>(L"%1% || -- Available branches in tree:") % __func__;
+            if(t->GetListOfBranches()){
+                for(int ib = 0; ib < std::min(t->GetListOfBranches()->GetEntries(), (int)50); ++ib){
+                    log<LOG_ERROR>(L"%1% ||    branch: %2%") % __func__ % t->GetListOfBranches()->At(ib)->GetName();
+                }
+                if(t->GetListOfBranches()->GetEntries() > 50){
+                    log<LOG_ERROR>(L"%1% ||    ... and %2% more branches") % __func__ % (t->GetListOfBranches()->GetEntries() - 50);
+                }
+            }
+            // List friend tree branches too
+            if(t->GetListOfFriends()){
+                for(const TObject* fr : *t->GetListOfFriends()){
+                    TTree* ftree = ((TFriendElement*)fr)->GetTree();
+                    if(ftree && ftree->GetListOfBranches()){
+                        log<LOG_ERROR>(L"%1% || -- Friend tree '%2%' branches:") % __func__ % ftree->GetName();
+                        for(int ib = 0; ib < std::min(ftree->GetListOfBranches()->GetEntries(), (int)20); ++ib){
+                            log<LOG_ERROR>(L"%1% ||    branch: %2%") % __func__ % ftree->GetListOfBranches()->At(ib)->GetName();
+                        }
+                    }
+                }
+            }
             exit(EXIT_FAILURE);
         }
         fs.push_back(std::move(f));
     }
+    log<LOG_DEBUG>(L"%1% || Successfully compiled %2% formula(s) for '%3%'") % __func__ % fs.size() % name.c_str();
     treeNumber = -1;
 }
 
@@ -1969,8 +2010,14 @@ int PROconfig::Binning::Bin(const std::vector<float> &v) const {
         size_t local_bin = pos_iter - thisbin.begin() - 1;
 
         if(pos_iter == thisbin.end() || pos_iter == thisbin.begin()){
-            log<LOG_DEBUG>(L"%1% || Value: %2% in Dim: %3% is in underflow or overflow bins, return bin of -1") % __func__ % v[i_vec] % i_vec;
-            log<LOG_DEBUG>(L"%1% || Binning has bin lower edge: %2% and bin upper edge: %3%") % __func__ % thisbin.front() % thisbin.back();
+            static int underflow_overflow_count = 0;
+            underflow_overflow_count++;
+            if(underflow_overflow_count <= 10) {
+                log<LOG_DEBUG>(L"%1% || Value: %2% in Dim: %3% is in underflow or overflow bins, return bin of -1") % __func__ % v[i_vec] % i_vec;
+                log<LOG_DEBUG>(L"%1% || Binning has bin lower edge: %2% and bin upper edge: %3%") % __func__ % thisbin.front() % thisbin.back();
+                if(underflow_overflow_count == 10)
+                    log<LOG_DEBUG>(L"%1% || (suppressing further underflow/overflow messages)") % __func__;
+            }
             return -1;
         }
 
