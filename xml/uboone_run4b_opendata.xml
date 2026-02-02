@@ -2,7 +2,7 @@
 
 <mode name="nu" />
 
-<detector name="uBooNE" pot="4.733e19" />
+<detector name="uBooNE" pot="4.031e19" />
 
 <channel name="numuCCNpFC" plotname="Reconstructed Neutrino Energy [MeV]">
 	<bins unit="Reconstructed Neutrino Energy [MeV]" min="0" max="2500" nbins="25"/>
@@ -21,7 +21,7 @@
 <!-- This contains two files: /pnfs/uboone/persistent/users/uboonepro/surprise/opendata/BNB/checkout_MCC9.10_Run4b_v10_04_07_11_BNB_beam_on_surprise_reco2_hist_opendata_20700.root,
 /pnfs/uboone/persistent/users/uboonepro/surprise/opendata/BNB/checkout_MCC9.10_Run4a_BNB_beam_on_data_surprise_reco2_hist_opendata_19550.root -->
 <!-- <MCFile treename="wcpselection/T_KINEvars" filename="/nevis/riverside/data/leehagaman/ngem/data_files/run_4_open_data_surprise_files.txt" scale = "1.0" pot="7.801e19"> -->
-<MCFile treename="wcpselection/T_KINEvars" filename="/nevis/riverside/data/leehagaman/ngem/data_files/checkout_MCC9.10_Run4b_v10_04_07_11_BNB_beam_on_surprise_reco2_hist_opendata_20700.root" scale = "1.0" pot="4.733e19">
+<MCFile treename="wcpselection/T_KINEvars" filename="/nevis/riverside/data/leehagaman/ngem/data_files/checkout_MCC9.10_Run4b_v10_04_07_11_BNB_beam_on_surprise_reco2_hist_opendata_20700.root" scale = "1.0" pot="4.031e19">
     <friend treename="wcpselection/T_eval" />
 	<friend treename="wcpselection/T_BDTvars" />
 
