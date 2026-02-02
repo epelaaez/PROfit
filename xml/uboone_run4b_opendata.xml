@@ -16,18 +16,6 @@
 	<bins unit="True L/E" min="0" max="3000" nbins="250" plot="false"/>
     <subchannel name="data" plotname="Data" color="#99CCFF"/>
 </channel>
-<channel name="numuCCNpPC" plotname="Reconstructed Neutrino Energy [MeV]">
-	<bins unit="Reconstructed Neutrino Energy [MeV]" min="0" max="2500" nbins="25"/>
-	<bins unit="True Neutrino Energy [MeV]" min="0" max="3000" nbins="20"/>
-	<bins unit="True L/E" min="0" max="3000" nbins="250" plot="false"/>
-    <subchannel name="data" plotname="Data" color="#99CCFF"/>
-</channel>
-<channel name="numuCC0pPC" plotname="Reconstructed Neutrino Energy [MeV]">
-	<bins unit="Reconstructed Neutrino Energy [MeV]" min="0" max="2500" nbins="25"/>
-	<bins unit="True Neutrino Energy [MeV]" min="0" max="3000" nbins="20"/>
-	<bins unit="True L/E" min="0" max="3000" nbins="250" plot="false"/>
-    <subchannel name="data" plotname="Data" color="#99CCFF"/>
-</channel>
 
 
 <!-- This contains two files: /pnfs/uboone/persistent/users/uboonepro/surprise/opendata/BNB/checkout_MCC9.10_Run4b_v10_04_07_11_BNB_beam_on_surprise_reco2_hist_opendata_20700.root,
@@ -50,24 +38,6 @@
         	associated_subchannel = "nu_uBooNE_numuCC0pFC_data"
         	model_rule            = "0"
 			weight_1     = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0))"
-		>
-		<variable>kine_reco_Enu</variable>
-		<variable>0</variable>
-		<variable>0</variable>
-	</branch>
-		<branch
-        	associated_subchannel = "nu_uBooNE_numuCCNpPC_data"
-        	model_rule            = "0"
-			weight_1     = "((0 < kine_reco_Enu) && (match_isFC == 0) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) > 0))"
-		>
-		<variable>kine_reco_Enu</variable>
-		<variable>0</variable>
-		<variable>0</variable>	
-	</branch>
-	<branch
-        	associated_subchannel = "nu_uBooNE_numuCC0pPC_data"
-        	model_rule            = "0"
-			weight_1     = "((0 < kine_reco_Enu) && (match_isFC == 0) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0))"
 		>
 		<variable>kine_reco_Enu</variable>
 		<variable>0</variable>

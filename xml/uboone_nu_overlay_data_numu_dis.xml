@@ -24,26 +24,6 @@
 	<subchannel name="dirt" plotname="Dirt" color="#895129"/>
 	<subchannel name="numuCCoverlay" plotname="#nu_{#mu}CC overlay" color="#21B1FF"/>
 </channel>
-<channel name="numuCCNpPC" plotname="Reconstructed Neutrino Energy [MeV]">
-	<bins unit="Reconstructed Neutrino Energy [MeV]" min="0" max="2500" nbins="25"/>
-	<bins unit="True Neutrino Energy [MeV]" min="0" max="3000" nbins="20"/>
-	<bins unit="True L/E" min="0" max="3000" nbins="250" plot="false"/>
-	<subchannel name="nueCCoverlay" plotname="#nu_{e}CC overlay" color="#12fc50"/>
-	<subchannel name="ext" plotname="Ext" color="#3f8036"/>
-	<subchannel name="NCoverlay" plotname="NC overlay" color="#fc9312"/>
-	<subchannel name="dirt" plotname="Dirt" color="#895129"/>
-	<subchannel name="numuCCoverlay" plotname="#nu_{#mu}CC overlay" color="#21B1FF"/>
-</channel>
-<channel name="numuCC0pPC" plotname="Reconstructed Neutrino Energy [MeV]">
-	<bins unit="Reconstructed Neutrino Energy [MeV]" min="0" max="2500" nbins="25"/>
-	<bins unit="True Neutrino Energy [MeV]" min="0" max="3000" nbins="20"/>
-	<bins unit="True L/E" min="0" max="3000" nbins="250" plot="false"/>
-	<subchannel name="nueCCoverlay" plotname="#nu_{e}CC overlay" color="#12fc50"/>
-	<subchannel name="ext" plotname="Ext" color="#3f8036"/>
-	<subchannel name="NCoverlay" plotname="NC overlay" color="#fc9312"/>
-	<subchannel name="dirt" plotname="Dirt" color="#895129"/>
-	<subchannel name="numuCCoverlay" plotname="#nu_{#mu}CC overlay" color="#21B1FF"/>
-</channel>
 
 <model tag="numudis">
     <rule index="0" name="No Osc"/>
@@ -123,67 +103,6 @@
 		<variable>1000.*(mcflux_dk2gen + mcflux_gen2vtx)/truth_nuEnergy</variable>	
 	</branch>
 
-	<branch
-        	associated_subchannel = "nu_uBooNE_numuCCNpPC_numuCCoverlay"
-        	model_rule            = "1"
-			weight_1              = "((0 < kine_reco_Enu) && (match_isFC == 0) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) > 0) && (abs(truth_nuPdg) == 14) && (truth_isCC == 1))"
-			weight_2              = "(weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
-		>
-		<variable>kine_reco_Enu</variable>
-		<variable>truth_nuEnergy</variable>
-		<variable>1000.*(mcflux_dk2gen + mcflux_gen2vtx)/truth_nuEnergy</variable>	
-	</branch>
-	<branch
-        	associated_subchannel = "nu_uBooNE_numuCCNpPC_nueCCoverlay"
-        	model_rule            = "1"
-			weight_1              = "((0 < kine_reco_Enu) && (match_isFC == 0) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) > 0) && (abs(truth_nuPdg) == 12) && (truth_isCC == 1))"
-			weight_2              = "(weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
-		>
-		<variable>kine_reco_Enu</variable>
-		<variable>truth_nuEnergy</variable>
-		<variable>1000.*(mcflux_dk2gen + mcflux_gen2vtx)/truth_nuEnergy</variable>	
-	</branch>
-	<branch
-        	associated_subchannel = "nu_uBooNE_numuCCNpPC_NCoverlay"
-        	model_rule            = "1"
-			weight_1              = "((0 < kine_reco_Enu) && (match_isFC == 0) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) > 0) && (truth_isCC == 0))"
-			weight_2              = "(weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
-		>
-		<variable>kine_reco_Enu</variable>
-		<variable>truth_nuEnergy</variable>
-		<variable>1000.*(mcflux_dk2gen + mcflux_gen2vtx)/truth_nuEnergy</variable>	
-	</branch>
-
-	<branch
-        	associated_subchannel = "nu_uBooNE_numuCC0pPC_numuCCoverlay"
-        	model_rule            = "1"
-			weight_1              = "((0 < kine_reco_Enu) && (match_isFC == 0) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0) && (abs(truth_nuPdg) == 14) && (truth_isCC == 1))"
-			weight_2              = "(weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
-		>
-		<variable>kine_reco_Enu</variable>
-		<variable>truth_nuEnergy</variable>
-		<variable>1000.*(mcflux_dk2gen + mcflux_gen2vtx)/truth_nuEnergy</variable>	
-	</branch>
-	<branch
-        	associated_subchannel = "nu_uBooNE_numuCC0pPC_nueCCoverlay"
-        	model_rule            = "1"
-			weight_1              = "((0 < kine_reco_Enu) && (match_isFC == 0) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0) && (abs(truth_nuPdg) == 12) && (truth_isCC == 1))"
-			weight_2              = "(weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
-		>
-		<variable>kine_reco_Enu</variable>
-		<variable>truth_nuEnergy</variable>
-		<variable>1000.*(mcflux_dk2gen + mcflux_gen2vtx)/truth_nuEnergy</variable>	
-	</branch>
-	<branch
-        	associated_subchannel = "nu_uBooNE_numuCC0pPC_NCoverlay"
-        	model_rule            = "1"
-			weight_1              = "((0 < kine_reco_Enu) && (match_isFC == 0) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0) && (truth_isCC == 0))"
-			weight_2              = "(weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
-		>
-		<variable>kine_reco_Enu</variable>
-		<variable>truth_nuEnergy</variable>
-		<variable>1000.*(mcflux_dk2gen + mcflux_gen2vtx)/truth_nuEnergy</variable>	
-	</branch>
 </MCFile>
 
 <!-- This file is available at /pnfs/uboone/persistent/users/uboonepro/surprise/run4b_full_samples/wc_processed/BNB/MCC9.10_Run4b_v10_04_07_09_Run4b_BNB_beam_off_surprise_reco2_hist.root -->
@@ -206,26 +125,6 @@
 			incl_systematics      = "false"
         	model_rule            = "0"
 			weight_1              = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0))"
-		>
-		<variable>kine_reco_Enu</variable>
-		<variable>0</variable>
-		<variable>0</variable>	
-	</branch>
-		<branch
-        	associated_subchannel = "nu_uBooNE_numuCCNpPC_ext"
-			incl_systematics      = "false"
-        	model_rule            = "0"
-			weight_1              = "((0 < kine_reco_Enu) && (match_isFC == 0) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) > 0))"
-		>
-		<variable>kine_reco_Enu</variable>
-		<variable>0</variable>
-		<variable>0</variable>	
-	</branch>
-	<branch
-        	associated_subchannel = "nu_uBooNE_numuCC0pPC_ext"
-			incl_systematics      = "false"
-        	model_rule            = "0"
-			weight_1              = "((0 < kine_reco_Enu) && (match_isFC == 0) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0))"
 		>
 		<variable>kine_reco_Enu</variable>
 		<variable>0</variable>
@@ -255,26 +154,6 @@
 			incl_systematics      = "false"
         	model_rule            = "1"
 			weight_1              = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0))"
-		>
-		<variable>kine_reco_Enu</variable>
-		<variable>truth_nuEnergy</variable>
-		<variable>1000.*(mcflux_dk2gen + mcflux_gen2vtx)/truth_nuEnergy</variable>	
-	</branch>
-		<branch
-        	associated_subchannel = "nu_uBooNE_numuCCNpPC_dirt"
-			incl_systematics      = "false"
-        	model_rule            = "1"
-			weight_1              = "((0 < kine_reco_Enu) && (match_isFC == 0) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) > 0))"
-		>
-		<variable>kine_reco_Enu</variable>
-		<variable>truth_nuEnergy</variable>
-		<variable>1000.*(mcflux_dk2gen + mcflux_gen2vtx)/truth_nuEnergy</variable>	
-	</branch>
-	<branch
-        	associated_subchannel = "nu_uBooNE_numuCC0pPC_dirt"
-			incl_systematics      = "false"
-        	model_rule            = "1"
-			weight_1              = "((0 < kine_reco_Enu) && (match_isFC == 0) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0))"
 		>
 		<variable>kine_reco_Enu</variable>
 		<variable>truth_nuEnergy</variable>

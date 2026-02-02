@@ -959,9 +959,8 @@ namespace PROfit {
         int channel_group = subchannel_index / std::accumulate(inconfig.m_num_subchannels.begin(), inconfig.m_num_subchannels.end(), 0);
         int det = channel_group % inconfig.m_num_detectors;
 
-        float mc_weight = branch->GetTotalWeight() * inconfig.m_det_pot[det] / mcpot;
-
-        //log<LOG_ERROR>(L"%1% || Final mc_weight after det_pot scaling: %2%") % __func__ % mc_weight;
+        float pot_scale = inconfig.m_det_pot[det] / mcpot;
+        float mc_weight = branch->GetTotalWeight() * pot_scale;
 
         int model_rule = branch->GetModelRule();
 
@@ -1020,14 +1019,15 @@ namespace PROfit {
                     if(std::isnan(w) || std::isinf(w)) w = 1;
                     for(auto so: var_syst_objs){
                         if (!so->include_only_weights.empty()) {
-                            // Compute correction: divide out weights NOT in include_only_weights
-                            float correction = 1.0;
-                            for(int wi = 0; wi < num_weights; ++wi) {
-                                if(std::find(so->include_only_weights.begin(), so->include_only_weights.end(), wi+1) == so->include_only_weights.end()) {
-                                    correction /= weight_vals[wi];
+                            // Compute weight using only the included weights (avoids divide-by-zero)
+                            float included_weight = 1.0;
+                            for(int idx : so->include_only_weights) {
+                                int wi = idx - 1; // convert 1-based to 0-based
+                                if(wi >= 0 && wi < num_weights) {
+                                    included_weight *= weight_vals[wi];
                                 }
                             }
-                            so->FillUniverse(u, spline_bin, mc_weight * correction * additional_weight * w);
+                            so->FillUniverse(u, spline_bin, included_weight * pot_scale * additional_weight * w);
                         } else {
                             so->FillUniverse(u, spline_bin, mc_weight * additional_weight * w);
                         }

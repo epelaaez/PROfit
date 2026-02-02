@@ -183,8 +183,9 @@ def process_branch(c, branch, evws, mcpot, subchannel_index, syst_vector, syst_a
     # Compute individual weight values for include_only_weights support
     num_weights = branch.NumWeights()
     weight_vals = [branch.GetWeight(wi) for wi in range(num_weights)]
+    pot_scale = c.m_plot_pot / mcpot
     mc_weight = branch.GetTotalWeight()
-    mc_weight *= c.m_plot_pot / mcpot
+    mc_weight *= pot_scale
 
     if not isinstance(mc_weight, pd.Series):
         mc_weight = pd.Series(mc_weight, true_param.index)
@@ -233,22 +234,27 @@ def process_branch(c, branch, evws, mcpot, subchannel_index, syst_vector, syst_a
 
             s.FillCV(spline_bin[valid], mc_weight[valid])
             
-            # Compute correction factor for include_only_weights
-            correction = 1
+            # Compute base weight for spline universes
             if len(s.include_only_weights) > 0:
-                for wi in range(num_weights):
-                    if (wi + 1) not in s.include_only_weights:
-                        correction = correction / weight_vals[wi]
+                # Multiply only the included weights (avoids divide-by-zero)
+                included_weight = pot_scale
+                for idx in s.include_only_weights:
+                    wi = idx - 1  # convert 1-based to 0-based
+                    if 0 <= wi < num_weights:
+                        included_weight = included_weight * weight_vals[wi]
+                spline_base = included_weight
+            else:
+                spline_base = mc_weight
 
             # If force_0_cv is set, normalize shifts by the shift at knob=0
             # Note: This is also implemented in PROsyst::FillSpline for the C++ code path
             if s.force_0_cv:
                 cv_shift = evw.shift(0)
                 for i_univ, shift in enumerate(s.knobval):
-                    s.FillUniverse(i_univ, spline_bin[valid], (mc_weight*correction*additional_weight*evw.shift(shift)/cv_shift)[valid])
+                    s.FillUniverse(i_univ, spline_bin[valid], (spline_base*additional_weight*evw.shift(shift)/cv_shift)[valid])
             else:
                 for i_univ, shift in enumerate(s.knobval):
-                    s.FillUniverse(i_univ, spline_bin[valid], (mc_weight*correction*additional_weight*evw.shift(shift))[valid])
+                    s.FillUniverse(i_univ, spline_bin[valid], (spline_base*additional_weight*evw.shift(shift))[valid])
         else:
             s.FillCV(global_bin[valid], mc_weight[valid])
             for i_univ in range(s.GetNUniverse()):
