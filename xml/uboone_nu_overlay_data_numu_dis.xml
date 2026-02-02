@@ -64,8 +64,8 @@
 	<branch
         	associated_subchannel = "nu_uBooNE_numuCCNpFC_numuCCoverlay"
         	model_rule            = "1"
-			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) > 0) && (abs(truth_nuPdg) == 14) && (truth_isCC == 1))"
-			xs_weight             = "(weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
+			weight_1              = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) > 0) && (abs(truth_nuPdg) == 14) && (truth_isCC == 1))"
+			weight_2              = "(weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
 		>
 		<variable>kine_reco_Enu</variable>
 		<variable>truth_nuEnergy</variable>
@@ -74,8 +74,8 @@
 	<branch
         	associated_subchannel = "nu_uBooNE_numuCCNpFC_nueCCoverlay"
         	model_rule            = "1"
-			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) > 0) && (abs(truth_nuPdg) == 12) && (truth_isCC == 1))"
-			xs_weight             = "(weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
+			weight_1              = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) > 0) && (abs(truth_nuPdg) == 12) && (truth_isCC == 1))"
+			weight_2              = "(weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
 		>
 		<variable>kine_reco_Enu</variable>
 		<variable>truth_nuEnergy</variable>
@@ -84,8 +84,8 @@
 	<branch
         	associated_subchannel = "nu_uBooNE_numuCCNpFC_NCoverlay"
         	model_rule            = "1"
-			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) > 0) && (truth_isCC == 0))"
-			xs_weight             = "(weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
+			weight_1              = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) > 0) && (truth_isCC == 0))"
+			weight_2              = "(weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
 		>
 		<variable>kine_reco_Enu</variable>
 		<variable>truth_nuEnergy</variable>
@@ -95,8 +95,8 @@
 	<branch
         	associated_subchannel = "nu_uBooNE_numuCC0pFC_numuCCoverlay"
         	model_rule            = "1"
-			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0) && (abs(truth_nuPdg) == 14) && (truth_isCC == 1))"
-			xs_weight             = "(weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
+			weight_1              = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0) && (abs(truth_nuPdg) == 14) && (truth_isCC == 1))"
+			weight_2              = "(weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
 		>
 		<variable>kine_reco_Enu</variable>
 		<variable>truth_nuEnergy</variable>
@@ -105,8 +105,8 @@
 	<branch
         	associated_subchannel = "nu_uBooNE_numuCC0pFC_nueCCoverlay"
         	model_rule            = "1"
-			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0) && (abs(truth_nuPdg) == 12) && (truth_isCC == 1))"
-			xs_weight             = "(weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
+			weight_1              = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0) && (abs(truth_nuPdg) == 12) && (truth_isCC == 1))"
+			weight_2              = "(weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
 		>
 		<variable>kine_reco_Enu</variable>
 		<variable>truth_nuEnergy</variable>
@@ -115,8 +115,8 @@
 	<branch
         	associated_subchannel = "nu_uBooNE_numuCC0pFC_NCoverlay"
         	model_rule            = "1"
-			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0) && (truth_isCC == 0))"
-			xs_weight             = "(weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
+			weight_1              = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0) && (truth_isCC == 0))"
+			weight_2              = "(weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
 		>
 		<variable>kine_reco_Enu</variable>
 		<variable>truth_nuEnergy</variable>
@@ -126,8 +126,8 @@
 	<branch
         	associated_subchannel = "nu_uBooNE_numuCCNpPC_numuCCoverlay"
         	model_rule            = "1"
-			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 0) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) > 0) && (abs(truth_nuPdg) == 14) && (truth_isCC == 1))"
-			xs_weight             = "(weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
+			weight_1              = "((0 < kine_reco_Enu) && (match_isFC == 0) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) > 0) && (abs(truth_nuPdg) == 14) && (truth_isCC == 1))"
+			weight_2              = "(weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
 		>
 		<variable>kine_reco_Enu</variable>
 		<variable>truth_nuEnergy</variable>
@@ -136,8 +136,8 @@
 	<branch
         	associated_subchannel = "nu_uBooNE_numuCCNpPC_nueCCoverlay"
         	model_rule            = "1"
-			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 0) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) > 0) && (abs(truth_nuPdg) == 12) && (truth_isCC == 1))"
-			xs_weight             = "(weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
+			weight_1              = "((0 < kine_reco_Enu) && (match_isFC == 0) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) > 0) && (abs(truth_nuPdg) == 12) && (truth_isCC == 1))"
+			weight_2              = "(weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
 		>
 		<variable>kine_reco_Enu</variable>
 		<variable>truth_nuEnergy</variable>
@@ -146,8 +146,8 @@
 	<branch
         	associated_subchannel = "nu_uBooNE_numuCCNpPC_NCoverlay"
         	model_rule            = "1"
-			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 0) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) > 0) && (truth_isCC == 0))"
-			xs_weight             = "(weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
+			weight_1              = "((0 < kine_reco_Enu) && (match_isFC == 0) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) > 0) && (truth_isCC == 0))"
+			weight_2              = "(weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
 		>
 		<variable>kine_reco_Enu</variable>
 		<variable>truth_nuEnergy</variable>
@@ -157,8 +157,8 @@
 	<branch
         	associated_subchannel = "nu_uBooNE_numuCC0pPC_numuCCoverlay"
         	model_rule            = "1"
-			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 0) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0) && (abs(truth_nuPdg) == 14) && (truth_isCC == 1))"
-			xs_weight             = "(weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
+			weight_1              = "((0 < kine_reco_Enu) && (match_isFC == 0) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0) && (abs(truth_nuPdg) == 14) && (truth_isCC == 1))"
+			weight_2              = "(weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
 		>
 		<variable>kine_reco_Enu</variable>
 		<variable>truth_nuEnergy</variable>
@@ -167,8 +167,8 @@
 	<branch
         	associated_subchannel = "nu_uBooNE_numuCC0pPC_nueCCoverlay"
         	model_rule            = "1"
-			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 0) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0) && (abs(truth_nuPdg) == 12) && (truth_isCC == 1))"
-			xs_weight             = "(weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
+			weight_1              = "((0 < kine_reco_Enu) && (match_isFC == 0) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0) && (abs(truth_nuPdg) == 12) && (truth_isCC == 1))"
+			weight_2              = "(weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
 		>
 		<variable>kine_reco_Enu</variable>
 		<variable>truth_nuEnergy</variable>
@@ -177,8 +177,8 @@
 	<branch
         	associated_subchannel = "nu_uBooNE_numuCC0pPC_NCoverlay"
         	model_rule            = "1"
-			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 0) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0) && (truth_isCC == 0))"
-			xs_weight             = "(weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
+			weight_1              = "((0 < kine_reco_Enu) && (match_isFC == 0) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0) && (truth_isCC == 0))"
+			weight_2              = "(weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
 		>
 		<variable>kine_reco_Enu</variable>
 		<variable>truth_nuEnergy</variable>
@@ -195,7 +195,7 @@
         	associated_subchannel = "nu_uBooNE_numuCCNpFC_ext"
 			incl_systematics      = "false"
         	model_rule            = "0"
-			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) > 0))"
+			weight_1              = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) > 0))"
 		>
 		<variable>kine_reco_Enu</variable>
 		<variable>0</variable>
@@ -205,7 +205,7 @@
         	associated_subchannel = "nu_uBooNE_numuCC0pFC_ext"
 			incl_systematics      = "false"
         	model_rule            = "0"
-			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0))"
+			weight_1              = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0))"
 		>
 		<variable>kine_reco_Enu</variable>
 		<variable>0</variable>
@@ -215,7 +215,7 @@
         	associated_subchannel = "nu_uBooNE_numuCCNpPC_ext"
 			incl_systematics      = "false"
         	model_rule            = "0"
-			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 0) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) > 0))"
+			weight_1              = "((0 < kine_reco_Enu) && (match_isFC == 0) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) > 0))"
 		>
 		<variable>kine_reco_Enu</variable>
 		<variable>0</variable>
@@ -225,7 +225,7 @@
         	associated_subchannel = "nu_uBooNE_numuCC0pPC_ext"
 			incl_systematics      = "false"
         	model_rule            = "0"
-			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 0) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0))"
+			weight_1              = "((0 < kine_reco_Enu) && (match_isFC == 0) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0))"
 		>
 		<variable>kine_reco_Enu</variable>
 		<variable>0</variable>
@@ -244,8 +244,7 @@
         	associated_subchannel = "nu_uBooNE_numuCCNpFC_dirt"
 			incl_systematics      = "false"
         	model_rule            = "1"
-			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) > 0))"
-			xs_weight             = "(weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
+			weight_1              = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) > 0))"
 		>
 		<variable>kine_reco_Enu</variable>
 		<variable>truth_nuEnergy</variable>
@@ -255,8 +254,7 @@
         	associated_subchannel = "nu_uBooNE_numuCC0pFC_dirt"
 			incl_systematics      = "false"
         	model_rule            = "1"
-			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0))"
-			xs_weight             = "(weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
+			weight_1              = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0))"
 		>
 		<variable>kine_reco_Enu</variable>
 		<variable>truth_nuEnergy</variable>
@@ -266,8 +264,7 @@
         	associated_subchannel = "nu_uBooNE_numuCCNpPC_dirt"
 			incl_systematics      = "false"
         	model_rule            = "1"
-			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 0) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) > 0))"
-			xs_weight             = "(weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
+			weight_1              = "((0 < kine_reco_Enu) && (match_isFC == 0) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) > 0))"
 		>
 		<variable>kine_reco_Enu</variable>
 		<variable>truth_nuEnergy</variable>
@@ -277,8 +274,7 @@
         	associated_subchannel = "nu_uBooNE_numuCC0pPC_dirt"
 			incl_systematics      = "false"
         	model_rule            = "1"
-			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 0) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0))"
-			xs_weight             = "(weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
+			weight_1              = "((0 < kine_reco_Enu) && (match_isFC == 0) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0))"
 		>
 		<variable>kine_reco_Enu</variable>
 		<variable>truth_nuEnergy</variable>
@@ -292,86 +288,86 @@
 	<allowlist type="mcstat" plotname="MC Stats" tag="other">MCStat</allowlist>
 
 
-    <!-- Cross Section Systematics -->
+    <!-- Cross Section Systematics, 55 splines -->
 	
-	<allowlist type="spline" binning="var0" plotname="MACCQE" tag="QE" force_0_cv="true" no_xs_weight_spline="true">MaCCQE_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="AxFFCCQEshape" knobvals="0, 1" tag="QE" force_0_cv="true" no_xs_weight_spline="true">AxFFCCQEshape_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="VecFFCCQEshape" knobvals="0, 1" tag="QE" force_0_cv="true" no_xs_weight_spline="true">VecFFCCQEshape_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="RPA_CCQE" tag="QE" force_0_cv="true" no_xs_weight_spline="true">RPA_CCQE_UBGenie</allowlist> 
-	<allowlist type="spline" binning="var0" plotname="CoulombCCQE" tag="QE" force_0_cv="true" no_xs_weight_spline="true">CoulombCCQE_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="MACCQE" tag="QE" force_0_cv="true" include_only_weights="1">MaCCQE_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="AxFFCCQEshape" knobvals="0, 1" tag="QE" force_0_cv="true" include_only_weights="1">AxFFCCQEshape_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="VecFFCCQEshape" knobvals="0, 1" tag="QE" force_0_cv="true" include_only_weights="1">VecFFCCQEshape_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="RPA_CCQE" tag="QE" force_0_cv="true" include_only_weights="1">RPA_CCQE_UBGenie</allowlist> 
+	<allowlist type="spline" binning="var0" plotname="CoulombCCQE" tag="QE" force_0_cv="true" include_only_weights="1">CoulombCCQE_UBGenie</allowlist>
 
-	<allowlist type="spline" binning="var0" plotname="NormCCMEC" knobvals="-2, -1, 0, 1, 2, 3" tag="MEC" force_0_cv="true" no_xs_weight_spline="true">NormCCMEC_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="NormNCMEC" knobvals="-1, 0, 1, 2, 3" tag="MEC" force_0_cv="true" no_xs_weight_spline="true">NormNCMEC_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="XSecShape_CCMEC" knobvals="0, 1" tag="MEC" force_0_cv="true" no_xs_weight_spline="true">XSecShape_CCMEC_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="DecayAngMEC" knobvals="0, 1" tag="MEC" force_0_cv="true" no_xs_weight_spline="true">DecayAngMEC_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="FracPN_CCMEC" tag="MEC" force_0_cv="true" no_xs_weight_spline="true">FracPN_CCMEC_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="FracDelta_CCMEC" tag="MEC" force_0_cv="true" no_xs_weight_spline="true">FracDelta_CCMEC_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="NormCCMEC" knobvals="-2, -1, 0, 1, 2, 3" tag="MEC" force_0_cv="true" include_only_weights="1">NormCCMEC_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="NormNCMEC" knobvals="-1, 0, 1, 2, 3" tag="MEC" force_0_cv="true" include_only_weights="1">NormNCMEC_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="XSecShape_CCMEC" knobvals="0, 1" tag="MEC" force_0_cv="true" include_only_weights="1">XSecShape_CCMEC_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="DecayAngMEC" knobvals="0, 1" tag="MEC" force_0_cv="true" include_only_weights="1">DecayAngMEC_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="FracPN_CCMEC" tag="MEC" force_0_cv="true" include_only_weights="1">FracPN_CCMEC_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="FracDelta_CCMEC" tag="MEC" force_0_cv="true" include_only_weights="1">FracDelta_CCMEC_UBGenie</allowlist>
 	
-	<allowlist type="spline" binning="var0" plotname="MaCCRES" tag="RES" force_0_cv="true" no_xs_weight_spline="true">MaCCRES_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="MvCCRES" tag="RES" force_0_cv="true" no_xs_weight_spline="true">MvCCRES_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="MaNCRES" tag="RES" force_0_cv="true" no_xs_weight_spline="true">MaNCRES_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="MvNCRES" tag="RES" force_0_cv="true" no_xs_weight_spline="true">MvNCRES_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="RDecBR1eta" tag="RES" force_0_cv="true" no_xs_weight_spline="true">RDecBR1eta_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="Theta_Delta2Npi" knobvals="0, 1" tag="RES" force_0_cv="true" no_xs_weight_spline="true">Theta_Delta2Npi_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="RDecBR1gamma" tag="RES" force_0_cv="true" no_xs_weight_spline="true">RDecBR1gamma_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="ThetaDelta2NRad" knobvals="0, 1" tag="RES" force_0_cv="true" no_xs_weight_spline="true">ThetaDelta2NRad_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="MaCCRES" tag="RES" force_0_cv="true" include_only_weights="1">MaCCRES_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="MvCCRES" tag="RES" force_0_cv="true" include_only_weights="1">MvCCRES_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="MaNCRES" tag="RES" force_0_cv="true" include_only_weights="1">MaNCRES_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="MvNCRES" tag="RES" force_0_cv="true" include_only_weights="1">MvNCRES_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="RDecBR1eta" tag="RES" force_0_cv="true" include_only_weights="1">RDecBR1eta_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="Theta_Delta2Npi" knobvals="0, 1" tag="RES" force_0_cv="true" include_only_weights="1">Theta_Delta2Npi_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="RDecBR1gamma" tag="RES" force_0_cv="true" include_only_weights="1">RDecBR1gamma_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="ThetaDelta2NRad" knobvals="0, 1" tag="RES" force_0_cv="true" include_only_weights="1">ThetaDelta2NRad_UBGenie</allowlist>
 
-	<allowlist type="spline" binning="var0" plotname="NormCCCOH" knobvals="-1, 0, 1, 2, 3" tag="COH" force_0_cv="true" no_xs_weight_spline="true">NormCCCOH_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="NormNCCOH" knobvals="-1, 0, 1, 2, 3" tag="COH" force_0_cv="true" no_xs_weight_spline="true">NormNCCOH_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="NormCCCOH" knobvals="-1, 0, 1, 2, 3" tag="COH" force_0_cv="true" include_only_weights="1">NormCCCOH_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="NormNCCOH" knobvals="-1, 0, 1, 2, 3" tag="COH" force_0_cv="true" include_only_weights="1">NormNCCOH_UBGenie</allowlist>
 	
-	<allowlist type="spline" binning="var0" plotname="MaNCEL" tag="NC" force_0_cv="true" no_xs_weight_spline="true">MaNCEL_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="EtaNCEL" tag="NC" force_0_cv="true" no_xs_weight_spline="true">EtaNCEL_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="MaNCEL" tag="NC" force_0_cv="true" include_only_weights="1">MaNCEL_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="EtaNCEL" tag="NC" force_0_cv="true" include_only_weights="1">EtaNCEL_UBGenie</allowlist>
 
-	<allowlist type="spline" binning="var0" plotname="AGKYxF1pi" tag="Hadr." force_0_cv="true" no_xs_weight_spline="true">AGKYxF1pi_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="AGKYpT1pi" tag="Hadr." force_0_cv="true" no_xs_weight_spline="true">AGKYpT1pi_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="AGKYxF1pi" tag="Hadr." force_0_cv="true" include_only_weights="1">AGKYxF1pi_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="AGKYpT1pi" tag="Hadr." force_0_cv="true" include_only_weights="1">AGKYpT1pi_UBGenie</allowlist>
 
-	<allowlist type="spline" binning="var0" plotname="NonRESBGvbarnNC1pi" tag="Non-RES" force_0_cv="true" no_xs_weight_spline="true">NonRESBGvbarnNC1pi_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="NonRESBGvbarnNC2pi" tag="Non-RES" force_0_cv="true" no_xs_weight_spline="true">NonRESBGvbarnNC2pi_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="NonRESBGvbarpNC1pi" tag="Non-RES" force_0_cv="true" no_xs_weight_spline="true">NonRESBGvbarpNC1pi_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="NonRESBGvbarpNC2pi" tag="Non-RES" force_0_cv="true" no_xs_weight_spline="true">NonRESBGvbarpNC2pi_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="NonRESBGvnNC1pi" tag="Non-RES" force_0_cv="true" no_xs_weight_spline="true">NonRESBGvnNC1pi_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="NonRESBGvnNC2pi" tag="Non-RES" force_0_cv="true" no_xs_weight_spline="true">NonRESBGvnNC2pi_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="NonRESBGvpNC1pi" tag="Non-RES" force_0_cv="true" no_xs_weight_spline="true">NonRESBGvpNC1pi_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="NonRESBGvpNC2pi" tag="Non-RES" force_0_cv="true" no_xs_weight_spline="true">NonRESBGvpNC2pi_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="NonRESBGvbarnCC1pi" tag="Non-RES" force_0_cv="true" no_xs_weight_spline="true">NonRESBGvbarnCC1pi_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="NonRESBGvbarnCC2pi" tag="Non-RES" force_0_cv="true" no_xs_weight_spline="true">NonRESBGvbarnCC2pi_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="NonRESBGvbarpCC1pi" tag="Non-RES" force_0_cv="true" no_xs_weight_spline="true">NonRESBGvbarpCC1pi_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="NonRESBGvbarpCC2pi" tag="Non-RES" force_0_cv="true" no_xs_weight_spline="true">NonRESBGvbarpCC2pi_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="NonRESBGvnCC1pi" tag="Non-RES" force_0_cv="true" no_xs_weight_spline="true">NonRESBGvnCC1pi_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="NonRESBGvnCC2pi" tag="Non-RES" force_0_cv="true" no_xs_weight_spline="true">NonRESBGvnCC2pi_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="NonRESBGvpCC1pi" tag="Non-RES" force_0_cv="true" no_xs_weight_spline="true">NonRESBGvpCC1pi_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="NonRESBGvpCC2pi" tag="Non-RES" force_0_cv="true" no_xs_weight_spline="true">NonRESBGvpCC2pi_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="NonRESBGvbarnNC1pi" tag="Non-RES" force_0_cv="true" include_only_weights="1">NonRESBGvbarnNC1pi_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="NonRESBGvbarnNC2pi" tag="Non-RES" force_0_cv="true" include_only_weights="1">NonRESBGvbarnNC2pi_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="NonRESBGvbarpNC1pi" tag="Non-RES" force_0_cv="true" include_only_weights="1">NonRESBGvbarpNC1pi_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="NonRESBGvbarpNC2pi" tag="Non-RES" force_0_cv="true" include_only_weights="1">NonRESBGvbarpNC2pi_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="NonRESBGvnNC1pi" tag="Non-RES" force_0_cv="true" include_only_weights="1">NonRESBGvnNC1pi_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="NonRESBGvnNC2pi" tag="Non-RES" force_0_cv="true" include_only_weights="1">NonRESBGvnNC2pi_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="NonRESBGvpNC1pi" tag="Non-RES" force_0_cv="true" include_only_weights="1">NonRESBGvpNC1pi_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="NonRESBGvpNC2pi" tag="Non-RES" force_0_cv="true" include_only_weights="1">NonRESBGvpNC2pi_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="NonRESBGvbarnCC1pi" tag="Non-RES" force_0_cv="true" include_only_weights="1">NonRESBGvbarnCC1pi_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="NonRESBGvbarnCC2pi" tag="Non-RES" force_0_cv="true" include_only_weights="1">NonRESBGvbarnCC2pi_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="NonRESBGvbarpCC1pi" tag="Non-RES" force_0_cv="true" include_only_weights="1">NonRESBGvbarpCC1pi_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="NonRESBGvbarpCC2pi" tag="Non-RES" force_0_cv="true" include_only_weights="1">NonRESBGvbarpCC2pi_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="NonRESBGvnCC1pi" tag="Non-RES" force_0_cv="true" include_only_weights="1">NonRESBGvnCC1pi_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="NonRESBGvnCC2pi" tag="Non-RES" force_0_cv="true" include_only_weights="1">NonRESBGvnCC2pi_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="NonRESBGvpCC1pi" tag="Non-RES" force_0_cv="true" include_only_weights="1">NonRESBGvpCC1pi_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="NonRESBGvpCC2pi" tag="Non-RES" force_0_cv="true" include_only_weights="1">NonRESBGvpCC2pi_UBGenie</allowlist>
 
-	<allowlist type="spline" binning="var0" plotname="AhtBY" tag="Struct." force_0_cv="true" no_xs_weight_spline="true">AhtBY_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="BhtBY" tag="Struct." force_0_cv="true" no_xs_weight_spline="true">BhtBY_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="CV1uBY" tag="Struct." force_0_cv="true" no_xs_weight_spline="true">CV1uBY_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="CV2uBY" tag="Struct." force_0_cv="true" no_xs_weight_spline="true">CV2uBY_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="AhtBY" tag="Struct." force_0_cv="true" include_only_weights="1">AhtBY_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="BhtBY" tag="Struct." force_0_cv="true" include_only_weights="1">BhtBY_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="CV1uBY" tag="Struct." force_0_cv="true" include_only_weights="1">CV1uBY_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="CV2uBY" tag="Struct." force_0_cv="true" include_only_weights="1">CV2uBY_UBGenie</allowlist>
 
-	<allowlist type="spline" binning="var0" plotname="MFP_pi" tag="FSI" force_0_cv="true" no_xs_weight_spline="true">MFP_pi_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="MFP_N" tag="FSI" force_0_cv="true" no_xs_weight_spline="true">MFP_N_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="FrCEx_pi" tag="FSI" force_0_cv="true" no_xs_weight_spline="true">FrCEx_pi_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="FrInel_pi" tag="FSI" force_0_cv="true" no_xs_weight_spline="true">FrInel_pi_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="FrAbs_pi" tag="FSI" force_0_cv="true" no_xs_weight_spline="true">FrAbs_pi_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="FrCEx_N" tag="FSI" force_0_cv="true" no_xs_weight_spline="true">FrCEx_N_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="FrInel_N" tag="FSI" force_0_cv="true" no_xs_weight_spline="true">FrInel_N_UBGenie</allowlist>
-	<allowlist type="spline" binning="var0" plotname="FrAbs_N" tag="FSI" force_0_cv="true" no_xs_weight_spline="true">FrAbs_N_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="MFP_pi" tag="FSI" force_0_cv="true" include_only_weights="1">MFP_pi_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="MFP_N" tag="FSI" force_0_cv="true" include_only_weights="1">MFP_N_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="FrCEx_pi" tag="FSI" force_0_cv="true" include_only_weights="1">FrCEx_pi_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="FrInel_pi" tag="FSI" force_0_cv="true" include_only_weights="1">FrInel_pi_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="FrAbs_pi" tag="FSI" force_0_cv="true" include_only_weights="1">FrAbs_pi_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="FrCEx_N" tag="FSI" force_0_cv="true" include_only_weights="1">FrCEx_N_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="FrInel_N" tag="FSI" force_0_cv="true" include_only_weights="1">FrInel_N_UBGenie</allowlist>
+	<allowlist type="spline" binning="var0" plotname="FrAbs_N" tag="FSI" force_0_cv="true" include_only_weights="1">FrAbs_N_UBGenie</allowlist>
 
-	<allowlist type="spline" binning="var0" plotname="xsr_scc_Fa3_SCC" tag="SCC" force_0_cv="true" no_xs_weight_spline="true">xsr_scc_Fa3_SCC</allowlist>
-	<allowlist type="spline" binning="var0" plotname="xsr_scc_Fv3_SCC" tag="SCC" force_0_cv="true" no_xs_weight_spline="true">xsr_scc_Fv3_SCC</allowlist>
+	<allowlist type="spline" binning="var0" plotname="xsr_scc_Fa3_SCC" tag="SCC" force_0_cv="true" include_only_weights="1">xsr_scc_Fa3_SCC</allowlist>
+	<allowlist type="spline" binning="var0" plotname="xsr_scc_Fv3_SCC" tag="SCC" force_0_cv="true" include_only_weights="1">xsr_scc_Fv3_SCC</allowlist>
 
 	
-	<!-- Flux Systematics -->
-	<allowlist type="spline" binning="var0" plotname="horncurrent" knobvals="-1, 0, 1" tag="Flux" force_0_cv="true" no_xs_weight_spline="true">horncurrent_FluxUnisim</allowlist>
-	<allowlist type="spline" binning="var0" plotname="expskin" knobvals="-1, 0, 1" tag="Flux" force_0_cv="true" no_xs_weight_spline="true">expskin_FluxUnisim</allowlist>
-	<allowlist type="spline" binning="var0" plotname="kminus" tag="Flux" force_0_cv="true" no_xs_weight_spline="true">kminus_PrimaryHadronNormalization</allowlist>
-	<allowlist type="spline" binning="var0" plotname="kplus" tag="Flux" force_0_cv="true" no_xs_weight_spline="true">kplus_PrimaryHadronFeynmanScaling</allowlist>
-	<allowlist type="spline" binning="var0" plotname="kzero" tag="Flux" force_0_cv="true" no_xs_weight_spline="true">kzero_PrimaryHadronSanfordWang</allowlist>
-	<allowlist type="spline" binning="var0" plotname="nucleoninexsec" knobvals="-1, 0, 1" tag="Flux" force_0_cv="true" no_xs_weight_spline="true">nucleoninexsec_FluxUnisim</allowlist>
-	<allowlist type="spline" binning="var0" plotname="nucleonqexsec" knobvals="-1, 0, 1" tag="Flux" force_0_cv="true" no_xs_weight_spline="true">nucleonqexsec_FluxUnisim</allowlist>
-	<allowlist type="spline" binning="var0" plotname="nucleontotxsec" knobvals="-1, 0, 1" tag="Flux" force_0_cv="true" no_xs_weight_spline="true">nucleontotxsec_FluxUnisim</allowlist>
-	<allowlist type="spline" binning="var0" plotname="pioninexsec" knobvals="-1, 0, 1" tag="Flux" force_0_cv="true" no_xs_weight_spline="true">pioninexsec_FluxUnisim</allowlist>
-	<allowlist type="spline" binning="var0" plotname="pionqexsec" knobvals="-1, 0, 1" tag="Flux" force_0_cv="true" no_xs_weight_spline="true">pionqexsec_FluxUnisim</allowlist>
-	<allowlist type="spline" binning="var0" plotname="piontotxsec" knobvals="-1, 0, 1" tag="Flux" force_0_cv="true" no_xs_weight_spline="true">piontotxsec_FluxUnisim</allowlist>
+	<!-- Flux Systematics, 11 splines -->
+	<allowlist type="spline" binning="var0" plotname="horncurrent" knobvals="-1, 0, 1" tag="Flux" force_0_cv="true" include_only_weights="1">horncurrent_FluxUnisim</allowlist>
+	<allowlist type="spline" binning="var0" plotname="expskin" knobvals="-1, 0, 1" tag="Flux" force_0_cv="true" include_only_weights="1">expskin_FluxUnisim</allowlist>
+	<allowlist type="spline" binning="var0" plotname="kminus" tag="Flux" force_0_cv="true" include_only_weights="1">kminus_PrimaryHadronNormalization</allowlist>
+	<allowlist type="spline" binning="var0" plotname="kplus" tag="Flux" force_0_cv="true" include_only_weights="1">kplus_PrimaryHadronFeynmanScaling</allowlist>
+	<allowlist type="spline" binning="var0" plotname="kzero" tag="Flux" force_0_cv="true" include_only_weights="1">kzero_PrimaryHadronSanfordWang</allowlist>
+	<allowlist type="spline" binning="var0" plotname="nucleoninexsec" knobvals="-1, 0, 1" tag="Flux" force_0_cv="true" include_only_weights="1">nucleoninexsec_FluxUnisim</allowlist>
+	<allowlist type="spline" binning="var0" plotname="nucleonqexsec" knobvals="-1, 0, 1" tag="Flux" force_0_cv="true" include_only_weights="1">nucleonqexsec_FluxUnisim</allowlist>
+	<allowlist type="spline" binning="var0" plotname="nucleontotxsec" knobvals="-1, 0, 1" tag="Flux" force_0_cv="true" include_only_weights="1">nucleontotxsec_FluxUnisim</allowlist>
+	<allowlist type="spline" binning="var0" plotname="pioninexsec" knobvals="-1, 0, 1" tag="Flux" force_0_cv="true" include_only_weights="1">pioninexsec_FluxUnisim</allowlist>
+	<allowlist type="spline" binning="var0" plotname="pionqexsec" knobvals="-1, 0, 1" tag="Flux" force_0_cv="true" include_only_weights="1">pionqexsec_FluxUnisim</allowlist>
+	<allowlist type="spline" binning="var0" plotname="piontotxsec" knobvals="-1, 0, 1" tag="Flux" force_0_cv="true" include_only_weights="1">piontotxsec_FluxUnisim</allowlist>
 	<allowlist type="covariance" plotname="piplus_prod" tag="piprod">piplus_PrimaryHadronSWCentralSplineVariation</allowlist>
 	<allowlist type="covariance" plotname="piminus_prod" tag="piprod">piminus_PrimaryHadronSWCentralSplineVariation</allowlist>
 

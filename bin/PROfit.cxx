@@ -244,8 +244,6 @@ int main(int argc, char* argv[])
     //Initilize configuration from the XML;
     PROconfig config(xmlname, rateonly);
 
-    log<LOG_INFO>(L"%1% || TEMP DEBUG: PROconfig constructor completed successfully") % __func__;
-
     //Inititilize PROpeller to keep MC
     PROpeller prop;
 
@@ -416,14 +414,10 @@ int main(int argc, char* argv[])
     //We will load all other variables too, but many are truth level so data won't be as common.
     std::vector<PROdata> variable_data;
     if(!data_xml.empty()){
-        log<LOG_INFO>(L"%1% || TEMP DEBUG: starting dataconfig constructor") % __func__;
         PROconfig dataconfig(data_xml);
-        log<LOG_INFO>(L"%1% || TEMP DEBUG: dataconfig constructor completed successfully") % __func__;
-        log<LOG_INFO>(L"%1% || dataconfig.m_num_channels: %2%") % __func__ % dataconfig.m_num_channels;
         std::string dataBinName = analysis_tag+"_data.bin";
         for(size_t i = 0; i < dataconfig.m_num_channels; ++i) {
             size_t nsubch = dataconfig.m_num_subchannels[i];
-            log<LOG_INFO>(L"%1% || TEMP DEBUG: nsubch: %2%") % __func__ % nsubch;
             if(nsubch != 1) {
                 log<LOG_ERROR>(L"%1% || Data xml required to have exactly 1 subchannel per channel. Found %2% for channel %3%")
                     % __func__ % nsubch % i;
@@ -431,7 +425,6 @@ int main(int argc, char* argv[])
                 exit(EXIT_FAILURE);
             }
             std::string &subchname = dataconfig.m_subchannel_names[i][0];
-            log<LOG_INFO>(L"%1% || TEMP DEBUG: subchname: %2%") % __func__ % subchname.c_str();
             if(subchname != "data") {
                 log<LOG_ERROR>(L"%1% || Data subchannel required to be called \"data.\" Found name %2% for channel %3%")
                     % __func__ % subchname.c_str() % i;
@@ -1449,6 +1442,7 @@ int main(int argc, char* argv[])
 
 
         if(with_splines) {
+
             c.Print((final_output_tag+"_PROplot_Spline.pdf" + "[").c_str(), "pdf");
 
             std::map<std::string, std::vector<std::pair<std::unique_ptr<TGraph>,std::unique_ptr<TGraph>>>> spline_graphs = getSplineGraphs(variable_systs[config.i_prime], config);
@@ -1461,12 +1455,15 @@ int main(int argc, char* argv[])
                 chan++;
                 int col = chan%2==0 ? kRed: kBlue;
                 int lastsbindex = 0;
+
                 for(const auto &[fixed_pts, curve]: syst_bins) {
+
                     unprinted = true;
                     c.cd(bin%16+1);
                     size_t sbi = config.GetSubchannelIndexFromVariableGlobalBin(bin,config.i_prime);
                     std::string nsubchannel = config.GetSubchannelName(sbi);
-                    std::string chan_units =   config.m_channel_variable_units[config.i_prime][config.GetLocalChannelIndexFromGlobalSubchannelIndex(sbi)];
+                    size_t local_channel_index = config.GetLocalChannelIndexFromGlobalSubchannelIndex(sbi);
+                    std::string chan_units = config.m_channel_variable_units[local_channel_index][config.i_prime];
                     int edges_vec_sz = (int)config.m_variable_bin_to_edges[config.i_prime].size();
                     size_t safe_bin = (edges_vec_sz>0) ? std::min((size_t)bin, (size_t)edges_vec_sz-1) : 0;
                     std::pair<float,float> edg = config.m_variable_bin_to_edges[config.i_prime][safe_bin];
@@ -1497,6 +1494,8 @@ int main(int argc, char* argv[])
             }
 
             c.Print((final_output_tag+"_PROplot_Spline.pdf" + "]").c_str(), "pdf");
+            c.Clear();
+
         }
 
         //now onto root files

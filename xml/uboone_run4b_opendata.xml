@@ -40,7 +40,7 @@
 	<branch
         	associated_subchannel = "nu_uBooNE_numuCCNpFC_data"
         	model_rule            = "0"
-			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) > 0))"
+			weight_1     = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) > 0))"
 		>
 		<variable>kine_reco_Enu</variable>
 		<variable>0</variable>
@@ -49,7 +49,7 @@
 	<branch
         	associated_subchannel = "nu_uBooNE_numuCC0pFC_data"
         	model_rule            = "0"
-			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0))"
+			weight_1     = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0))"
 		>
 		<variable>kine_reco_Enu</variable>
 		<variable>0</variable>
@@ -58,7 +58,7 @@
 		<branch
         	associated_subchannel = "nu_uBooNE_numuCCNpPC_data"
         	model_rule            = "0"
-			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 0) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) > 0))"
+			weight_1     = "((0 < kine_reco_Enu) && (match_isFC == 0) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) > 0))"
 		>
 		<variable>kine_reco_Enu</variable>
 		<variable>0</variable>
@@ -67,7 +67,7 @@
 	<branch
         	associated_subchannel = "nu_uBooNE_numuCC0pPC_data"
         	model_rule            = "0"
-			additional_weight     = "((0 < kine_reco_Enu) && (match_isFC == 0) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0))"
+			weight_1     = "((0 < kine_reco_Enu) && (match_isFC == 0) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0))"
 		>
 		<variable>kine_reco_Enu</variable>
 		<variable>0</variable>

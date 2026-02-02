@@ -146,11 +146,11 @@ def compute_branches(fname, fid, ttree_df, c):
         c.m_branch_variables[fid][ib].branch_true_value_formula = profit.DataFrameFormula("branch_true_form_%i_%i" % (fid, ib), branch.true_param_name, ttree_df)
         c.m_branch_variables[fid][ib].branch_true_pdg_formula = profit.DataFrameFormula("branch_pdg_form_%i_%i" % (fid, ib), branch.pdg_name, ttree_df)
 
-        if c.m_mcgen_additional_weight_bool[fid][ib]:
-            c.m_branch_variables[fid][ib].branch_monte_carlo_weight_formula = profit.DataFrameFormula("branch_add_weight_%i_%i" % (fid, ib), c.m_mcgen_additional_weight_name[fid][ib], ttree_df)
-
-        if c.m_mcgen_xs_weight_bool[fid][ib]:
-            c.m_branch_variables[fid][ib].branch_xs_weight_formula = profit.DataFrameFormula("branch_xs_weight_%i_%i" % (fid, ib), c.m_mcgen_xs_weight_name[fid][ib], ttree_df)
+        weight_formulas = []
+        for wi in range(c.m_mcgen_num_weights[fid][ib]):
+            wname = c.m_mcgen_weight_names[fid][ib][wi]
+            weight_formulas.append(profit.DataFrameFormula("branch_weight_%i_%i_%i" % (wi+1, fid, ib), wname, ttree_df))
+        c.m_branch_variables[fid][ib].branch_weight_formulas = weight_formulas
 
 def loadsysts(fname, ttree_df, c):
     friends = []
@@ -179,8 +179,11 @@ def process_branch(c, branch, evws, mcpot, subchannel_index, syst_vector, syst_a
     true_value = baseline / true_param
     pdg_id = branch.GetTruePDG()
     run_syst = branch.GetIncludeSystematics()
-    xs_weight = branch.GetXSWeight()
-    mc_weight = branch.GetMonteCarloWeight() * xs_weight
+
+    # Compute individual weight values for include_only_weights support
+    num_weights = branch.NumWeights()
+    weight_vals = [branch.GetWeight(wi) for wi in range(num_weights)]
+    mc_weight = branch.GetTotalWeight()
     mc_weight *= c.m_plot_pot / mcpot
 
     if not isinstance(mc_weight, pd.Series):
@@ -230,21 +233,22 @@ def process_branch(c, branch, evws, mcpot, subchannel_index, syst_vector, syst_a
 
             s.FillCV(spline_bin[valid], mc_weight[valid])
             
+            # Compute correction factor for include_only_weights
+            correction = 1
+            if len(s.include_only_weights) > 0:
+                for wi in range(num_weights):
+                    if (wi + 1) not in s.include_only_weights:
+                        correction = correction / weight_vals[wi]
+
             # If force_0_cv is set, normalize shifts by the shift at knob=0
             # Note: This is also implemented in PROsyst::FillSpline for the C++ code path
             if s.force_0_cv:
                 cv_shift = evw.shift(0)
                 for i_univ, shift in enumerate(s.knobval):
-                    if s.no_xs_weight_spline:
-                        s.FillUniverse(i_univ, spline_bin[valid], (mc_weight*additional_weight*evw.shift(shift)/cv_shift/xs_weight)[valid])
-                    else:
-                        s.FillUniverse(i_univ, spline_bin[valid], (mc_weight*additional_weight*evw.shift(shift)/cv_shift)[valid])
+                    s.FillUniverse(i_univ, spline_bin[valid], (mc_weight*correction*additional_weight*evw.shift(shift)/cv_shift)[valid])
             else:
                 for i_univ, shift in enumerate(s.knobval):
-                    if s.no_xs_weight_spline:
-                        s.FillUniverse(i_univ, spline_bin[valid], (mc_weight*additional_weight*evw.shift(shift)/xs_weight)[valid])
-                    else:
-                        s.FillUniverse(i_univ, spline_bin[valid], (mc_weight*additional_weight*evw.shift(shift))[valid])
+                    s.FillUniverse(i_univ, spline_bin[valid], (mc_weight*correction*additional_weight*evw.shift(shift))[valid])
         else:
             s.FillCV(global_bin[valid], mc_weight[valid])
             for i_univ in range(s.GetNUniverse()):
