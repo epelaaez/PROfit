@@ -32,9 +32,10 @@
 </model>
 
 <!-- This file is available at /exp/uboone/data/users/lhagaman/PROfit_files/nu_overlay_splines_50.root, 4.1 GB -->
-<!-- <MCFile treename="wcpselection/T_KINEvars" filename="/nevis/riverside/data/leehagaman/ngem/data_files/nu_overlay_splines_50.root" scale = "1.0" pot="4.69e19"> -->
+<!-- <MCFile treename="wcpselection/T_KINEvars" filename="/nevis/riverside/data/leehagaman/ngem/data_files/nu_overlay_splines_50.root" scale = "1.0" pot="4.692e19"> -->
 <!-- This file is available at /exp/uboone/data/users/lhagaman/PROfit_files/run4b_nuoverlay_retuple_splines.root, 65 GB -->
 <!-- <MCFile treename="wcpselection/T_KINEvars" filename="/nevis/riverside/data/leehagaman/ngem/data_files/run4b_nuoverlay_retuple_splines.root" scale = "1.0" pot="7.378e20"> -->
+
 <MCFile treename="wcpselection/T_KINEvars" filename="/nevis/riverside/data/leehagaman/ngem/data_files/nu_overlay_splines_50.root" scale = "1.0" pot="4.692e19">
 	<friend treename="wcpselection/T_eval" />
 	<friend treename="wcpselection/T_PFeval" />
@@ -105,6 +106,35 @@
 
 </MCFile>
 
+<!-- This file is available at /exp/uboone/data/users/lhagaman/PROfit_files/run4b_dirt_surprise_200_splines.root -->
+<MCFile treename="wcpselection/T_KINEvars" filename="/nevis/riverside/data/leehagaman/ngem/data_files/run4b_dirt_surprise_200_splines.root" scale = "1.0" pot="1.664e19">
+	<friend treename="wcpselection/T_eval" />
+	<friend treename="wcpselection/T_PFeval" />
+	<friend treename="wcpselection/T_BDTvars" />
+	<friend treename="spline_weights" />
+	<friend treename="nuselection/NeutrinoSelectionFilter" />
+	<branch
+        	associated_subchannel = "nu_uBooNE_numuCCNpFC_dirt"
+        	model_rule            = "1"
+			weight_1              = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) > 0))"
+			weight_2              = "(weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
+		>
+		<variable>kine_reco_Enu</variable>
+		<variable>truth_nuEnergy</variable>
+		<variable>1000.*(mcflux_dk2gen + mcflux_gen2vtx)/truth_nuEnergy</variable>	
+	</branch>
+	<branch
+        	associated_subchannel = "nu_uBooNE_numuCC0pFC_dirt"
+        	model_rule            = "1"
+			weight_1              = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0))"
+			weight_2              = "(weight_cv * weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))"
+		>
+		<variable>kine_reco_Enu</variable>
+		<variable>truth_nuEnergy</variable>
+		<variable>1000.*(mcflux_dk2gen + mcflux_gen2vtx)/truth_nuEnergy</variable>	
+	</branch>
+</MCFile>
+
 <!-- This file is available at /pnfs/uboone/persistent/users/uboonepro/surprise/run4b_full_samples/wc_processed/BNB/MCC9.10_Run4b_v10_04_07_09_Run4b_BNB_beam_off_surprise_reco2_hist.root -->
 <MCFile treename="wcpselection/T_KINEvars" filename="/nevis/riverside/data/leehagaman/ngem/data_files/MCC9.10_Run4b_v10_04_07_09_Run4b_BNB_beam_off_surprise_reco2_hist.root" scale = "1.0" pot="3.874e20">
 	<friend treename="wcpselection/T_eval" />
@@ -133,39 +163,10 @@
 </MCFile>
 
 
-<!-- This file is available at /exp/uboone/data/users/lhagaman/PROfit_files/run4b_dirt_surprise_200_splines.root -->
-<MCFile treename="wcpselection/T_KINEvars" filename="/nevis/riverside/data/leehagaman/ngem/data_files/run4b_dirt_surprise_200_splines.root" scale = "1.0" pot="1.664e19">
-	<friend treename="wcpselection/T_eval" />
-	<friend treename="wcpselection/T_PFeval" />
-	<friend treename="wcpselection/T_BDTvars" />
-
-	<branch
-        	associated_subchannel = "nu_uBooNE_numuCCNpFC_dirt"
-			incl_systematics      = "false"
-        	model_rule            = "1"
-			weight_1              = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) > 0))"
-		>
-		<variable>kine_reco_Enu</variable>
-		<variable>truth_nuEnergy</variable>
-		<variable>1000.*(mcflux_dk2gen + mcflux_gen2vtx)/truth_nuEnergy</variable>	
-	</branch>
-	<branch
-        	associated_subchannel = "nu_uBooNE_numuCC0pFC_dirt"
-			incl_systematics      = "false"
-        	model_rule            = "1"
-			weight_1              = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0))"
-		>
-		<variable>kine_reco_Enu</variable>
-		<variable>truth_nuEnergy</variable>
-		<variable>1000.*(mcflux_dk2gen + mcflux_gen2vtx)/truth_nuEnergy</variable>	
-	</branch>
-</MCFile>
-
 <variation_list>
 
     <!-- MC Statistics -->
 	<allowlist type="mcstat" plotname="MC Stats" tag="other">MCStat</allowlist>
-
 
     <!-- Cross Section Systematics, 55 splines -->
 	
