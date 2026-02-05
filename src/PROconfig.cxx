@@ -6,6 +6,7 @@
 #include <numeric>
 #include "TTree.h"
 #include "TTreeFormula.h"
+#include "TFriendElement.h"
 using namespace PROfit;
 
 
@@ -72,22 +73,22 @@ bool PROconfig::SameChannels(const PROconfig &one, const PROconfig &two) {
                 % __func__ % one.m_channel_names[i].c_str() % two.m_channel_names[i].c_str();
             return false;
         }
-        if(one.m_channel_variable_bins[one.i_prime][i].NBins() != two.m_channel_variable_bins[two.i_prime][i].NBins()) {
+        if(one.m_channel_variable_bins[i][one.i_prime].NBins() != two.m_channel_variable_bins[i][two.i_prime].NBins()) {
             log<LOG_WARNING>(L"%1% || Found different number of channel bins %2% vs %3%")
-                % __func__ % one.m_channel_variable_bins[one.i_prime][i].NBins() % two.m_channel_variable_bins[two.i_prime][i].NBins();
+                % __func__ % one.m_channel_variable_bins[i][one.i_prime].NBins() % two.m_channel_variable_bins[i][two.i_prime].NBins();
             return false;
         }
-        if (one.m_channel_variable_bins[one.i_prime][i].NDim() != two.m_channel_variable_bins[two.i_prime][i].NDim()) {
+        if (one.m_channel_variable_bins[i][one.i_prime].NDim() != two.m_channel_variable_bins[i][two.i_prime].NDim()) {
             log<LOG_WARNING>(L"%1% || Found different number of channel variable dimensions %2% vs %3%")
-                % __func__ % one.m_channel_variable_bins[one.i_prime][i].NDim() % two.m_channel_variable_bins[two.i_prime][i].NDim();
+                % __func__ % one.m_channel_variable_bins[i][one.i_prime].NDim() % two.m_channel_variable_bins[i][two.i_prime].NDim();
             return false;
         }
 
-        for (size_t jdim = 0; jdim < one.m_channel_variable_bins[one.i_prime][i].NDim(); jdim++) {
-            for (size_t k = 0; k < one.m_channel_variable_bins[one.i_prime][i].NBinEdgesAlong(jdim); k++) {
-                if(one.m_channel_variable_bins[one.i_prime][i].Edges(jdim)[k] != two.m_channel_variable_bins[two.i_prime][i].Edges(jdim)[k]) {
+        for (size_t jdim = 0; jdim < one.m_channel_variable_bins[i][one.i_prime].NDim(); jdim++) {
+            for (size_t k = 0; k < one.m_channel_variable_bins[i][one.i_prime].NBinEdgesAlong(jdim); k++) {
+                if(one.m_channel_variable_bins[i][one.i_prime].Edges(jdim)[k] != two.m_channel_variable_bins[i][two.i_prime].Edges(jdim)[k]) {
                     log<LOG_WARNING>(L"%1% || Found different bin edge for bin %2% in channel %3% dimension %4%. %5% vs %6%")
-                        % __func__ % k % i % jdim % one.m_channel_variable_bins[one.i_prime][i].Edges(jdim)[k] % two.m_channel_variable_bins[two.i_prime][i].Edges(jdim)[k];
+                        % __func__ % k % i % jdim % one.m_channel_variable_bins[i][one.i_prime].Edges(jdim)[k] % two.m_channel_variable_bins[i][two.i_prime].Edges(jdim)[k];
                     return false;
                 }
             }
@@ -662,8 +663,8 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
 
 
-            std::vector<bool> TEMP_additional_weight_bool;
-            std::vector<std::string> TEMP_additional_weight_name;
+            std::vector<std::vector<std::string>> TEMP_weight_names; // per-branch list of weight formulas
+            std::vector<int> TEMP_num_weights; // per-branch count of weights
             std::vector<std::string> TEMP_eventweight_branch_names;
             std::vector<bool> TEMP_hist_weight_bool;
             std::vector<std::string> TEMP_hist_weight_name;
@@ -672,12 +673,21 @@ int PROconfig::LoadFromXML(const std::string &filename){
             std::vector<std::shared_ptr<BranchVariable>> TEMP_branch_variables;
             while(pBranch){
 
-                expected_attrs = {"incl_systematics","associated_subchannel","associated_systematic","central_value","eventweight_branch_name","additional_weight","model_rule"};
+                expected_attrs = {"incl_systematics","associated_subchannel","associated_systematic","central_value","eventweight_branch_name","additional_weight", "model_rule"};
                 for (const tinyxml2::XMLAttribute* attr = pBranch->FirstAttribute(); attr; attr = attr->Next()) {
                     std::string name = attr->Name();
-                    if (std::find(expected_attrs.begin(), expected_attrs.end(), name) == expected_attrs.end()) {
+                    // Allow weight_1, weight_2, ... weight_N dynamically
+                    bool is_weight_attr = (name.substr(0, 7) == "weight_" && name.size() > 7);
+                    if(is_weight_attr) {
+                        bool all_digits = true;
+                        for(size_t ci = 7; ci < name.size(); ++ci) {
+                            if(!isdigit(name[ci])) { all_digits = false; break; }
+                        }
+                        is_weight_attr = all_digits;
+                    }
+                    if (!is_weight_attr && std::find(expected_attrs.begin(), expected_attrs.end(), name) == expected_attrs.end()) {
                         log<LOG_ERROR>(L"%1% || ERROR! Attribute [%2%] in the <MCFile/branch> element is not expected.") % __func__ % name.c_str()  ;
-                        log<LOG_ERROR>(L"%1% || -- Check spelling: allowed attributes are %2%") % __func__ % expected_attrs ;
+                        log<LOG_ERROR>(L"%1% || -- Check spelling: allowed attributes are %2% and weight_1, weight_2, ...") % __func__ % expected_attrs ;
                         throw std::invalid_argument(std::string("<MCfile/branch> attribute not allowed : ") + name);
                     }
                 }
@@ -699,10 +709,10 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 }
 
                 if(bincsyst== NULL || strcmp(bincsyst, "true") == 0){
-                    log<LOG_DEBUG>(L"%1% ||Apply systemtics to this file (default) ' @ line %2% in %3% ") % __func__ % __LINE__  % __FILE__;
+                    log<LOG_DEBUG>(L"%1% ||Apply systematics to this file (default) ' @ line %2% in %3% ") % __func__ % __LINE__  % __FILE__;
                     TEMP_eventweight_branch_syst.push_back(1);
                 }else{
-                    log<LOG_DEBUG>(L"%1% || DO NOT apply systemtics to this file (e.g for cosmics) ' @ line %2% in %3% ") % __func__ % __LINE__  % __FILE__;
+                    log<LOG_DEBUG>(L"%1% || DO NOT apply systematics to this file (e.g for cosmics) ' @ line %2% in %3% ") % __func__ % __LINE__  % __FILE__;
                     TEMP_eventweight_branch_syst.push_back(0);
                 }
 
@@ -728,16 +738,36 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
                 }
 
-                //std::string chk_wei = badditional_weight;
-                if(badditional_weight == NULL || strcmp(badditional_weight, "") == 0){ 
-                    TEMP_additional_weight_bool.push_back(0);
-                    TEMP_additional_weight_name.push_back("1");
-                    log<LOG_DEBUG>(L"%1% || Setting NO additional weight for branch ") % __func__  ;
-                }else{
-                    TEMP_additional_weight_name.push_back(badditional_weight);
-                    TEMP_additional_weight_bool.push_back(1);
-                    log<LOG_DEBUG>(L"%1% || Setting an additional weight for branch using the branch %2% as a reweighting.") % __func__ % badditional_weight;
-
+                // Parse generic weight attributes: weight_1, weight_2, ..., weight_N
+                // Also accept additional_weight as backwards-compatible alias for weight_1
+                std::vector<std::string> branch_weights;
+                const char* bweight_1 = pBranch->Attribute("weight_1");
+                if(bweight_1 != NULL && strcmp(bweight_1, "") != 0) {
+                    branch_weights.push_back(bweight_1);
+                } else if(badditional_weight != NULL && strcmp(badditional_weight, "") != 0) {
+                    // additional_weight is backwards-compatible alias for weight_1
+                    branch_weights.push_back(badditional_weight);
+                    log<LOG_DEBUG>(L"%1% || Using additional_weight as alias for weight_1") % __func__;
+                }
+                // Parse weight_2, weight_3, ... (weight_1 already handled above)
+                for(int wi = 2; ; ++wi) {
+                    std::string attr_name = "weight_" + std::to_string(wi);
+                    const char* wval = pBranch->Attribute(attr_name.c_str());
+                    if(wval == NULL || strcmp(wval, "") == 0) break;
+                    // If weight_1 was not set but weight_2+ exists, pad with "1" for weight_1
+                    while((int)branch_weights.size() < wi - 1) {
+                        branch_weights.push_back("1");
+                    }
+                    branch_weights.push_back(wval);
+                }
+                TEMP_weight_names.push_back(branch_weights);
+                TEMP_num_weights.push_back((int)branch_weights.size());
+                if(branch_weights.empty()) {
+                    log<LOG_DEBUG>(L"%1% || Setting NO weights for branch ") % __func__;
+                } else {
+                    for(size_t wi = 0; wi < branch_weights.size(); ++wi) {
+                        log<LOG_DEBUG>(L"%1% || Setting weight_%2% for branch: %3%") % __func__ % (wi+1) % branch_weights[wi].c_str();
+                    }
                 }
 
 
@@ -823,8 +853,8 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 pBranch = pBranch->NextSiblingElement("branch");
             }
 
-            m_mcgen_additional_weight_name.push_back(TEMP_additional_weight_name);
-            m_mcgen_additional_weight_bool.push_back(TEMP_additional_weight_bool);
+            m_mcgen_weight_names.push_back(TEMP_weight_names);
+            m_mcgen_num_weights.push_back(TEMP_num_weights);
             m_branch_variables.push_back(TEMP_branch_variables);
             m_mcgen_eventweight_branch_names.push_back(TEMP_eventweight_branch_names);
             m_mcgen_eventweight_branch_syst.push_back(TEMP_eventweight_branch_syst);
@@ -847,7 +877,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 if(text) wt = std::string(text);
 
                 //check for known attributes
-                const std::vector<std::string> expected_attrs = {"type", "plotname", "binning", "knobvals", "tag", "prior", "center","filename"};
+                const std::vector<std::string> expected_attrs = {"type", "plotname", "binning", "knobvals", "tag", "prior", "center", "force_0_cv", "include_only_weights", "scale","filename"};
                 for (const tinyxml2::XMLAttribute* attr = pAllowList->FirstAttribute(); attr; attr = attr->Next()) {
                     std::string name = attr->Name();
                     if (std::find(expected_attrs.begin(), expected_attrs.end(), name) == expected_attrs.end()) {
@@ -864,6 +894,9 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 const char *tags = pAllowList->Attribute("tag");
                 const char *prior = pAllowList->Attribute("prior");
                 const char *center = pAllowList->Attribute("center");
+                const char *force_0_cv = pAllowList->Attribute("force_0_cv");
+                const char *include_only_weights_str = pAllowList->Attribute("include_only_weights");
+                const char *scale = pAllowList->Attribute("scale");
                 const char *filename = pAllowList->Attribute("filename");
 
 
@@ -923,6 +956,28 @@ int PROconfig::LoadFromXML(const std::string &filename){
                     }
                     if(begin) tags_vec.push_back(std::string(begin, c));
                     m_mcgen_variation_tags[wt] = tags_vec;
+                }
+                if(force_0_cv && strcmp(force_0_cv, "true") == 0) {
+                    m_mcgen_variation_force_0_cv[wt] = true;
+                    log<LOG_INFO>(L"%1% || Parsed force_0_cv=true for systematic %2%") % __func__ % wt.c_str();
+                }
+                if(include_only_weights_str) {
+                    std::vector<int> iow_vec;
+                    const char *c = include_only_weights_str, *begin = NULL;
+                    while(*c) {
+                        if(begin && (isspace(*c) || *c == ',')) {
+                            iow_vec.push_back(atoi(begin));
+                            begin = NULL;
+                        } else if(!begin && !isspace(*c) && *c != ',') begin = c;
+                        ++c;
+                    }
+                    if(begin) iow_vec.push_back(atoi(begin));
+                    m_mcgen_variation_include_only_weights[wt] = iow_vec;
+                    log<LOG_INFO>(L"%1% || Parsed include_only_weights for systematic %2%: %3% entries") % __func__ % wt.c_str() % iow_vec.size();
+                }
+                if(scale) {
+                    m_mcgen_variation_scale[wt] = std::strtof(scale, NULL);
+                    log<LOG_INFO>(L"%1% || Parsed scale=%2% for systematic %3%") % __func__ % m_mcgen_variation_scale[wt] % wt.c_str();
                 }
                 log<LOG_DEBUG>(L"%1% || Allowlisting variations: %2%") % __func__ % wt.c_str() ;
                 tinyxml2::XMLElement *pNext = pAllowList->NextSiblingElement("allowlist");
@@ -1271,7 +1326,7 @@ void PROconfig::CalcTotalBins(){
         m_num_variable_bins_total_collapsed[io] = m_num_variable_bins_mode_block_collapsed[io] * m_num_modes;
     }
 
-    log<LOG_INFO>(L"%1% || Generating Index maps for convienance") % __func__;
+    log<LOG_INFO>(L"%1% || Generating Index maps for convenience") % __func__;
     this->generate_index_map();
 
     //some internal cals
@@ -1525,8 +1580,8 @@ void PROconfig::remove_unused_files(){
         std::vector<bool> temp_fake;
         std::map<std::string,std::vector<std::string>> temp_file_friend_map;
         std::map<std::string,std::vector<std::string>> temp_file_friend_treename_map;
-        std::vector<std::vector<std::string>> temp_additional_weight_name;
-        std::vector<std::vector<bool>> temp_additional_weight_bool;
+        std::vector<std::vector<std::vector<std::string>>> temp_weight_names;
+        std::vector<std::vector<int>> temp_num_weights;
         std::vector<std::vector<std::shared_ptr<BranchVariable>>> temp_branch_variables;
         std::vector<std::vector<std::string>> temp_eventweight_branch_names;
         std::vector<std::vector<int>> temp_eventweight_branch_syst;
@@ -1535,8 +1590,8 @@ void PROconfig::remove_unused_files(){
             log<LOG_DEBUG>(L"%1% || Check on @%2% th file: %3%...") % __func__ % i % m_mcgen_file_name[i].c_str();
             bool this_file_needed = false;
 
-            std::vector<std::string> this_file_additional_weight_name;
-            std::vector<bool> this_file_additional_weight_bool;
+            std::vector<std::vector<std::string>> this_file_weight_names;
+            std::vector<int> this_file_num_weights;
             std::vector<std::shared_ptr<BranchVariable>> this_file_branch_variables;
             std::vector<std::string> this_file_eventweight_branch_names;
             std::vector<int> this_file_eventweight_branch_syst;
@@ -1548,8 +1603,8 @@ void PROconfig::remove_unused_files(){
                     set_all_names.erase(m_branch_variables[i][j]->associated_hist);
                     this_file_needed = true;
 
-                    this_file_additional_weight_name.push_back(m_mcgen_additional_weight_name[i][j]);
-                    this_file_additional_weight_bool.push_back(m_mcgen_additional_weight_bool[i][j]);
+                    this_file_weight_names.push_back(m_mcgen_weight_names[i][j]);
+                    this_file_num_weights.push_back(m_mcgen_num_weights[i][j]);
                     this_file_branch_variables.push_back(m_branch_variables[i][j]);
                     this_file_eventweight_branch_names.push_back(m_mcgen_eventweight_branch_names[i][j]);
                     this_file_eventweight_branch_syst.push_back(m_mcgen_eventweight_branch_syst[i][j]);
@@ -1568,8 +1623,8 @@ void PROconfig::remove_unused_files(){
                 temp_file_friend_map[m_mcgen_file_name[i]] = m_mcgen_file_friend_map[m_mcgen_file_name[i]];		
                 temp_file_friend_treename_map[m_mcgen_file_name[i]] = m_mcgen_file_friend_treename_map[m_mcgen_file_name[i]];
 
-                temp_additional_weight_name.push_back(this_file_additional_weight_name);
-                temp_additional_weight_bool.push_back(this_file_additional_weight_bool);
+                temp_weight_names.push_back(this_file_weight_names);
+                temp_num_weights.push_back(this_file_num_weights);
                 temp_branch_variables.push_back(this_file_branch_variables);
                 temp_eventweight_branch_names.push_back(this_file_eventweight_branch_names);
             }
@@ -1584,8 +1639,8 @@ void PROconfig::remove_unused_files(){
         m_mcgen_fake = temp_fake;
         m_mcgen_file_friend_map =temp_file_friend_map;
         m_mcgen_file_friend_treename_map = temp_file_friend_treename_map;
-        m_mcgen_additional_weight_name = temp_additional_weight_name;
-        m_mcgen_additional_weight_bool = temp_additional_weight_bool;
+        m_mcgen_weight_names = temp_weight_names;
+        m_mcgen_num_weights = temp_num_weights;
         m_branch_variables = temp_branch_variables;
         m_mcgen_eventweight_branch_names = temp_eventweight_branch_names;
         m_mcgen_eventweight_branch_syst = temp_eventweight_branch_syst;
@@ -1799,8 +1854,9 @@ uint32_t PROconfig::CalcHash() const{
             }
         }
     }
-    for (const auto& vec : m_mcgen_additional_weight_name) 
-        unique_string << vecToString(vec);
+    for (const auto& vec : m_mcgen_weight_names)
+        for (const auto& vec2 : vec)
+            unique_string << vecToString(vec2);
 
     for (const auto& vec : m_mcgen_eventweight_branch_names) 
         unique_string << vecToString(vec);
@@ -1830,8 +1886,40 @@ ROOTFormula::ROOTFormula(const std::string &name, const std::string &formula, TT
     // split the formula at a ";" into multiple values. used to be "," but that breaks arguments
     std::string this_formula;
     while(std::getline(formula_reader, this_formula, ';')) {
-        fs.push_back(std::make_unique<TTreeFormula>(name.c_str(), this_formula.c_str(), t));
+        log<LOG_DEBUG>(L"%1% || Compiling TTreeFormula '%2%' with name '%3%' on tree '%4%'") % __func__ % this_formula.c_str() % name.c_str() % t->GetName();
+        auto f = std::make_unique<TTreeFormula>(name.c_str(), this_formula.c_str(), t);
+        log<LOG_DEBUG>(L"%1% || TTreeFormula compiled: GetNdim()=%2%, GetNcodes()=%3%, GetNdata()=%4%") % __func__ % f->GetNdim() % f->GetNcodes() % f->GetNdata();
+        // Check if formula compiled successfully
+        if (f->GetNdim() == 0 && f->GetNcodes() == 0) {
+            log<LOG_ERROR>(L"%1% || ERROR: TTreeFormula not compiled correctly for formula: %2%") % __func__ % this_formula.c_str();
+            log<LOG_ERROR>(L"%1% || -- Tree name: %2%, Tree entries: %3%") % __func__ % t->GetName() % t->GetEntries();
+            // List available branches for debugging
+            log<LOG_ERROR>(L"%1% || -- Available branches in tree:") % __func__;
+            if(t->GetListOfBranches()){
+                for(int ib = 0; ib < std::min(t->GetListOfBranches()->GetEntries(), (int)50); ++ib){
+                    log<LOG_ERROR>(L"%1% ||    branch: %2%") % __func__ % t->GetListOfBranches()->At(ib)->GetName();
+                }
+                if(t->GetListOfBranches()->GetEntries() > 50){
+                    log<LOG_ERROR>(L"%1% ||    ... and %2% more branches") % __func__ % (t->GetListOfBranches()->GetEntries() - 50);
+                }
+            }
+            // List friend tree branches too
+            if(t->GetListOfFriends()){
+                for(const TObject* fr : *t->GetListOfFriends()){
+                    TTree* ftree = ((TFriendElement*)fr)->GetTree();
+                    if(ftree && ftree->GetListOfBranches()){
+                        log<LOG_ERROR>(L"%1% || -- Friend tree '%2%' branches:") % __func__ % ftree->GetName();
+                        for(int ib = 0; ib < std::min(ftree->GetListOfBranches()->GetEntries(), (int)20); ++ib){
+                            log<LOG_ERROR>(L"%1% ||    branch: %2%") % __func__ % ftree->GetListOfBranches()->At(ib)->GetName();
+                        }
+                    }
+                }
+            }
+            exit(EXIT_FAILURE);
+        }
+        fs.push_back(std::move(f));
     }
+    log<LOG_DEBUG>(L"%1% || Successfully compiled %2% formula(s) for '%3%'") % __func__ % fs.size() % name.c_str();
     treeNumber = -1;
 }
 
@@ -1949,8 +2037,14 @@ int PROconfig::Binning::Bin(const std::vector<float> &v) const {
         size_t local_bin = pos_iter - thisbin.begin() - 1;
 
         if(pos_iter == thisbin.end() || pos_iter == thisbin.begin()){
-            log<LOG_DEBUG>(L"%1% || Value: %2% in Dim: %3% is in underflow or overflow bins, return bin of -1") % __func__ % v[i_vec] % i_vec;
-            log<LOG_DEBUG>(L"%1% || Binning has bin lower edge: %2% and bin upper edge: %3%") % __func__ % thisbin.front() % thisbin.back();
+            static int underflow_overflow_count = 0;
+            underflow_overflow_count++;
+            if(underflow_overflow_count <= 10) {
+                log<LOG_DEBUG>(L"%1% || Value: %2% in Dim: %3% is in underflow or overflow bins, return bin of -1") % __func__ % v[i_vec] % i_vec;
+                log<LOG_DEBUG>(L"%1% || Binning has bin lower edge: %2% and bin upper edge: %3%") % __func__ % thisbin.front() % thisbin.back();
+                if(underflow_overflow_count == 10)
+                    log<LOG_DEBUG>(L"%1% || (suppressing further underflow/overflow messages)") % __func__;
+            }
             return -1;
         }
 

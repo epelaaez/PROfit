@@ -82,7 +82,7 @@ namespace PROfit{
           virtual ~Formula() {}
       };
 
-      std::shared_ptr<Formula> branch_monte_carlo_weight_formula = nullptr;
+      std::vector<std::shared_ptr<Formula>> branch_weight_formulas;
       std::vector<std::shared_ptr<Formula>> branch_variable_formulas;
 
       int model_rule;
@@ -115,15 +115,42 @@ namespace PROfit{
       };
 
 
-      // Function: evaluate additional weight setup in the branch and return in floating precision 
-      // Note: if no additional weight is set, value of 1.0 will be returned.
+      // Function: get individual weight by 0-based index. Returns 1.0 if index out of range.
       inline
-      float GetMonteCarloWeight() const{
-	if(branch_monte_carlo_weight_formula){ 
+      float GetWeight(int i) const{
+        if(i >= 0 && i < (int)branch_weight_formulas.size() && branch_weight_formulas[i]){
+          return branch_weight_formulas[i]->EvalInstance().first();
+        }
+        return 1.0;
+      }
 
-	  return branch_monte_carlo_weight_formula->EvalInstance().first();
-	}
-	return 1.0;
+      // Function: get total weight (product of all defined weights). Returns 1.0 if no weights defined.
+      inline
+      float GetTotalWeight() const{
+        float product = 1.0;
+        for(const auto& f : branch_weight_formulas){
+          if(f) product *= f->EvalInstance().first();
+        }
+        return product;
+      }
+
+      // Function: get product of weights at specified 1-based indices. Returns 1.0 if indices empty.
+      inline
+      float GetWeightProduct(const std::vector<int>& indices) const{
+        float product = 1.0;
+        for(int idx : indices){
+          int i = idx - 1; // convert 1-based to 0-based
+          if(i >= 0 && i < (int)branch_weight_formulas.size() && branch_weight_formulas[i]){
+            product *= branch_weight_formulas[i]->EvalInstance().first();
+          }
+        }
+        return product;
+      }
+
+      // Function: get number of defined weights
+      inline
+      int NumWeights() const{
+        return (int)branch_weight_formulas.size();
       }
 
       std::vector<BranchVariable::Value> GetVariables() const {
@@ -324,8 +351,8 @@ namespace PROfit{
             std::vector<bool> m_mcgen_fake;
             std::map<std::string,std::vector<std::string>> m_mcgen_file_friend_map;
             std::map<std::string,std::vector<std::string>> m_mcgen_file_friend_treename_map;
-            std::vector<std::vector<std::string>> m_mcgen_additional_weight_name;
-            std::vector<std::vector<bool>> m_mcgen_additional_weight_bool;
+            std::vector<std::vector<std::vector<std::string>>> m_mcgen_weight_names; // file × branch × weight_index
+            std::vector<std::vector<int>> m_mcgen_num_weights; // file × branch → count of weights
             std::vector<std::vector<std::shared_ptr<BranchVariable>>> m_branch_variables;
             std::vector<std::vector<std::string>> m_mcgen_eventweight_branch_names;
             std::vector<std::vector<int>> m_mcgen_eventweight_branch_syst;
@@ -349,6 +376,9 @@ namespace PROfit{
             std::vector<std::tuple<std::string, std::string, float>> m_mcgen_correlations;
             std::map<std::string, float> m_mcgen_variation_prior;
             std::map<std::string, float> m_mcgen_variation_prior_centers;
+            std::map<std::string, bool> m_mcgen_variation_force_0_cv; //map of systematics with force_0_cv=true (normalize shifts by shift at knob=0)
+            std::map<std::string, std::vector<int>> m_mcgen_variation_include_only_weights; //map of systematics with include_only_weights (1-based indices of which weights to include in spline universes)
+            std::map<std::string, float> m_mcgen_variation_scale; //map of systematics with scale factor to apply to weights (e.g., 0.001 for weights stored as x1000)
       
             //FIX skepic
             std::vector<std::string> systematic_name;

@@ -66,6 +66,9 @@ namespace PROfit{
 
         std::vector<int> norm_bins;
         float norm_value;
+        bool force_0_cv = false; // if true, normalize spline shifts by shift at knob=0
+        std::vector<int> include_only_weights; // 1-based indices of which weights to include in spline universes; empty = all
+        float scale = 1.0f; // scale factor to apply to weights (e.g., 0.001 for weights stored as x1000)
 
         //boost serialization
         template<class Archive>
@@ -85,6 +88,9 @@ namespace PROfit{
             ar & hash;
             ar & norm_bins;
             ar & norm_value;
+            ar & force_0_cv;
+            ar & include_only_weights;
+            ar & scale;
         }
 
 

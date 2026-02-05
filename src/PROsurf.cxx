@@ -4,9 +4,10 @@
 
 #include <Eigen/Eigen>
 
-#include <cmath> 
+#include <cmath>
 #include <future>
 #include <algorithm>
+#include <functional>
 
 #include "TGraph.h"
 #include "TLatex.h"
@@ -195,19 +196,34 @@ std::vector<profOut> PROfile::PROfilePointHelper(const PROsyst *systs, const PRO
             ub(j) = systs->spline_hi[j-nphys];
         }
     } else {
-        ub = Eigen::VectorXf::Map(systs->spline_hi.data(), systs->spline_hi.size());
-        lb = Eigen::VectorXf::Map(systs->spline_lo.data(), systs->spline_lo.size());
-        nparams = systs->GetNSplines();
+        // Syst-only mode: create full-size bounds but fix physics params at seed values
+        lb = Eigen::VectorXf::Constant(nparams, -3.0);
+        ub = Eigen::VectorXf::Constant(nparams, 3.0);
+        size_t nphys = local_metric->GetModel().nparams;
+        // Fix physics parameters at model default values
+        for(size_t j=0; j<nphys; j++){
+            float fixed_val = local_metric->GetModel().default_val(j);
+            ub(j) = fixed_val;
+            lb(j) = fixed_val;
+        }
+        // Spline bounds as normal
+        for(int j = nphys; j < nparams; ++j) {
+            lb(j) = systs->spline_lo[j-nphys];
+            ub(j) = systs->spline_hi[j-nphys];
+        }
     }
 
+    // In syst-only mode, start loop at first spline index (nphys), not 0
+    int loop_start = with_osc ? 0 : (int)local_metric->GetModel().nparams;
+
     //loop over this threads todo list
-    for(int i=offset; i<nparams;i+=stride) {
+    for(int i=loop_start+offset; i<nparams;i+=stride) {
         tlb = lb;
         tub = ub;
 
         local_metric->reset();
 
-        size_t which_spline= i;
+        size_t which_spline = i;
         bool isphys = which_spline < local_metric->GetModel().nparams;
         profOut output;
 
@@ -831,108 +847,137 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
     }
     std::unique_ptr<TGraph> gprior = std::make_unique<TGraph>(priorX.size(), priorX.data(), priorY.data());
 
-    //First plot
-    int depth = std::ceil((nparams+model.nparams)/4.0);
-    TCanvas *c =  new TCanvas(filename.c_str(), filename.c_str() , 350*4, 350*depth);
-    c->Divide(4,depth);
+    //First plot - use multi-page PDF with 4 columns x 3 rows per page
+    const int nCols = 4;
+    const int nRows = 3;
+    const int plotsPerPage = nCols * nRows;
 
+    TCanvas *c = new TCanvas(filename.c_str(), filename.c_str(), 350*nCols, 350*nRows);
+    c->Divide(nCols, nRows);
 
-    size_t zoom_shift = 0;
-    for(size_t w = 0; w< graphs.size(); w++ ){
+    // Open multi-page PDF
+    c->Print((filename+".pdf[").c_str());
+
+    // First, collect all plots to draw (main plots + zoomed physics plots)
+    std::vector<std::function<void()>> plotFunctions;
+
+    for(size_t w = 0; w < graphs.size(); w++) {
         if(mask_osc && w < model.nparams) continue;
 
-        c->cd(w+1+zoom_shift);
-        std::string xval = w < model.nparams ? "Log_{10}(" + model.pretty_param_names[w]+")" :"#sigma Shift"  ;
-        std::string tit = (w < model.nparams ? names[w] :config.m_mcgen_variation_plotname_map.at(names[w]))+ ";"+xval+"; #Delta#Chi^{2}";
-        graphs[w]->SetTitle(tit.c_str());
-        graphs[w]->Draw("AL");
-        graphs[w]->SetLineWidth(2);
-        graphs[w]->GetYaxis()->SetTitleSize(0.04);             
-        graphs[w]->GetYaxis()->SetLabelSize(0.04);            
-        graphs[w]->GetXaxis()->SetTitleSize(0.04);             
-        graphs[w]->GetXaxis()->SetLabelSize(0.04);            
-        graphs[w]->GetYaxis()->SetRangeUser(0, graphs[w]->GetHistogram()->GetMaximum());
+        // Capture w by value for the lambda
+        size_t idx = w;
+        plotFunctions.push_back([&, idx]() {
+            // Check if this is a physics param (only possible when with_osc=true)
+            bool is_physics = with_osc && idx < model.nparams;
+            std::string xval = is_physics ? "Log_{10}(" + model.pretty_param_names[idx]+")" : "#sigma Shift";
+            std::string tit = (is_physics ? names[idx] : config.m_mcgen_variation_plotname_map.at(names[idx])) + ";" + xval + "; #Delta#Chi^{2}";
+            graphs[idx]->SetTitle(tit.c_str());
+            graphs[idx]->Draw("AL");
+            graphs[idx]->SetLineWidth(1);
+            graphs[idx]->GetYaxis()->SetTitleSize(0.05);
+            graphs[idx]->GetYaxis()->SetLabelSize(0.04);
+            graphs[idx]->GetXaxis()->SetTitleSize(0.05);
+            graphs[idx]->GetXaxis()->SetLabelSize(0.04);
+            graphs[idx]->GetYaxis()->SetRangeUser(0, graphs[idx]->GetHistogram()->GetMaximum());
 
-        TLine* line = new TLine(graphs[w]->GetXaxis()->GetXmin(), 1, graphs[w]->GetXaxis()->GetXmax(), 1);
-        line->SetLineStyle(3);  // Dotted line style (1 is solid, 2 is dashed, 3 is dotted)
-        line->SetLineWidth(1);  // Thin line
-        line->SetLineColor(kBlack);  // Set color (black for visibility)
-        line->Draw();
+            TLine* line = new TLine(graphs[idx]->GetXaxis()->GetXmin(), 1, graphs[idx]->GetXaxis()->GetXmax(), 1);
+            line->SetLineStyle(3);
+            line->SetLineWidth(1);
+            line->SetLineColor(kBlack);
+            line->Draw();
 
-        if(w<model.nparams) graphs[w]->SetLineColor(kBlue-7);
+            if(is_physics) graphs[idx]->SetLineColor(kBlue-7);
 
-        if(graphs[w]->GetN()==1){//1 point, its been fixed. Just draw a line
-            float x_val = graphs[w]->GetPointX(0);
-            TLine* linet = new TLine(x_val, 0, x_val, 1);
-            linet->SetLineStyle(1);  // Dotted line style (1 is solid, 2 is dashed, 3 is dotted)
-            linet->SetLineWidth(2);  // Thin line
-            linet->SetLineColor(kGreen+2);  // Set color (black for visibility)
-            linet->Draw();
-        }
-        else if(w>=model.nparams){
-            gprior->Draw("L same");
-            gprior->SetLineStyle(2);
-            gprior->SetLineWidth(2);
-            gprior->SetLineColor(kRed-7);
-            graphs[w]->GetYaxis()->SetRangeUser(0, std::min(graphs[w]->GetHistogram()->GetMaximum(),10.0));
-        }
-
-
-
-        if(w==model.nparams-1){
-            //on past physics param, lets do a quick zoom, stepping back though the physics param
-            for(int zs = model.nparams-1; zs>=0; zs--){
-                c->cd(w+1+zs+1);
-                TGraph * graphClone = new TGraph(*graphs[w-zs]);
-                graphClone->Draw("AL");
-                std::string newTitle = std::string(graphClone->GetTitle()) + " Zoomed 1#sigma";
-                graphClone->SetTitle(newTitle.c_str());
-                graphClone->SetLineColor(kViolet);
-                float vd = std::min(values1_down[w-zs],values1_up[w-zs]) ;
-                float vu = std::max(values1_down[w-zs],values1_up[w-zs]) ;
-                float pd = (vd>0 ? vd*0.9 : vd*1.1);
-                float pu = (vu >0 ? vu*1.1 : vu*0.9);
-                graphClone->GetXaxis()->SetLimits(pd,pu); 
-                graphClone->GetYaxis()->SetRangeUser(0, std::max(graphClone->Eval(pu),graphClone->Eval(pd))*1.1) ;
-                graphClone->GetYaxis()->SetTitleSize(0.04);             
-                graphClone->GetYaxis()->SetLabelSize(0.04);            
-                graphClone->GetXaxis()->SetTitleSize(0.04);             
-                graphClone->GetXaxis()->SetLabelSize(0.04);            
-
-                if(graphClone->GetN()==1){//1 point, its been fixed. Just draw a line
-                    float x_val = graphClone->GetPointX(0);
-                    TLine* linet = new TLine(x_val, 0, x_val, 1);
-                    linet->SetLineStyle(1);  // Dotted line style (1 is solid, 2 is dashed, 3 is dotted)
-                    linet->SetLineWidth(2);  // Thin line
-                    linet->SetLineColor(kGreen+2);  // Set color (black for visibility)
-                    linet->Draw();
-                }
-
-                log<LOG_INFO>(L"%1% || Zoom boundaries X %2% %3% Y %4% %5%  ") % __func__ % pd % pu % 0.0 % (std::max(graphClone->Eval(pu),graphClone->Eval(pd))*1.1)  ;
-
-                TLine *line1 = new TLine(pd, 1, pu, 1);
-                line1->SetLineStyle(3);  
-                line1->SetLineWidth(1);  
-                line1->SetLineColor(kBlack); 
-                line1->Draw();
-
-                TLine* line2 = new TLine(vd, graphClone->Eval(vd) ,vd, 0);
-                line2->SetLineStyle(3);  
-                line2->SetLineWidth(1);  
-                line2->SetLineColor(kBlack); 
-                line2->Draw();
-
-                TLine *line3 = new TLine(vu, graphClone->Eval(vu) ,vu, 0);
-                line3->SetLineStyle(3);  
-                line3->SetLineWidth(1);  
-                line3->SetLineColor(kBlack); 
-                line3->Draw();
+            if(graphs[idx]->GetN() == 1) {
+                float x_val = graphs[idx]->GetPointX(0);
+                TLine* linet = new TLine(x_val, 0, x_val, 1);
+                linet->SetLineStyle(1);
+                linet->SetLineWidth(1);
+                linet->SetLineColor(kGreen+2);
+                linet->Draw();
             }
-            zoom_shift=model.nparams;
+            else if(!is_physics) {
+                gprior->Draw("L same");
+                gprior->SetLineStyle(2);
+                gprior->SetLineWidth(1);
+                gprior->SetLineColor(kRed-7);
+                graphs[idx]->GetYaxis()->SetRangeUser(0, std::min(graphs[idx]->GetHistogram()->GetMaximum(), 10.0));
+            }
+        });
+
+        // Add zoomed plots for physics parameters after the last physics parameter (only when physics params are included)
+        if(with_osc && w == model.nparams - 1) {
+            for(int zs = model.nparams - 1; zs >= 0; zs--) {
+                size_t zoomIdx = w - zs;
+                plotFunctions.push_back([&, zoomIdx]() {
+                    TGraph* graphClone = new TGraph(*graphs[zoomIdx]);
+                    graphClone->Draw("AL");
+                    std::string newTitle = std::string(graphClone->GetTitle()) + " Zoomed 1#sigma";
+                    graphClone->SetTitle(newTitle.c_str());
+                    graphClone->SetLineColor(kViolet);
+                    graphClone->SetLineWidth(1);
+                    float vd = std::min(values1_down[zoomIdx], values1_up[zoomIdx]);
+                    float vu = std::max(values1_down[zoomIdx], values1_up[zoomIdx]);
+                    float pd = (vd > 0 ? vd * 0.9 : vd * 1.1);
+                    float pu = (vu > 0 ? vu * 1.1 : vu * 0.9);
+                    graphClone->GetXaxis()->SetLimits(pd, pu);
+                    graphClone->GetYaxis()->SetRangeUser(0, std::max(graphClone->Eval(pu), graphClone->Eval(pd)) * 1.1);
+                    graphClone->GetYaxis()->SetTitleSize(0.05);
+                    graphClone->GetYaxis()->SetLabelSize(0.04);
+                    graphClone->GetXaxis()->SetTitleSize(0.05);
+                    graphClone->GetXaxis()->SetLabelSize(0.04);
+
+                    if(graphClone->GetN() == 1) {
+                        float x_val = graphClone->GetPointX(0);
+                        TLine* linet = new TLine(x_val, 0, x_val, 1);
+                        linet->SetLineStyle(1);
+                        linet->SetLineWidth(1);
+                        linet->SetLineColor(kGreen+2);
+                        linet->Draw();
+                    }
+
+                    log<LOG_INFO>(L"%1% || Zoom boundaries X %2% %3% Y %4% %5%  ") % __func__ % pd % pu % 0.0 % (std::max(graphClone->Eval(pu), graphClone->Eval(pd)) * 1.1);
+
+                    TLine* line1 = new TLine(pd, 1, pu, 1);
+                    line1->SetLineStyle(3);
+                    line1->SetLineWidth(1);
+                    line1->SetLineColor(kBlack);
+                    line1->Draw();
+
+                    TLine* line2 = new TLine(vd, graphClone->Eval(vd), vd, 0);
+                    line2->SetLineStyle(3);
+                    line2->SetLineWidth(1);
+                    line2->SetLineColor(kBlack);
+                    line2->Draw();
+
+                    TLine* line3 = new TLine(vu, graphClone->Eval(vu), vu, 0);
+                    line3->SetLineStyle(3);
+                    line3->SetLineWidth(1);
+                    line3->SetLineColor(kBlack);
+                    line3->Draw();
+                });
+            }
         }
     }
 
-    c->SaveAs((filename+".pdf").c_str(),"pdf");
+    // Now draw plots page by page
+    for(size_t i = 0; i < plotFunctions.size(); i++) {
+        int padIdx = (i % plotsPerPage) + 1;
+
+        // Start of a new page (except for the first plot)
+        if(i > 0 && padIdx == 1) {
+            c->Print((filename+".pdf").c_str());
+            c->Clear();
+            c->Divide(nCols, nRows);
+        }
+
+        c->cd(padIdx);
+        plotFunctions[i]();
+    }
+
+    // Print the last page and close the PDF
+    c->Print((filename+".pdf").c_str());
+    c->Print((filename+".pdf]").c_str());
 
     delete c;
 
@@ -972,11 +1017,18 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
 
     float y_min = todraw.GetMinimum();
     for (size_t i = 0; i < barvalues.size(); ++i) {
-        std::string label = i < model.nparams ? "Log_{10}(" + model.pretty_param_names[i]+")" : config.m_mcgen_variation_plotname_map.at(names[i]);
+        // In syst-only mode (with_osc=false), all entries are splines
+        // In with_osc mode, first model.nparams entries are physics, rest are splines
+        std::string label;
+        if (with_osc && i < model.nparams) {
+            label = "Log_{10}(" + model.pretty_param_names[i] + ")";
+        } else {
+            label = config.m_mcgen_variation_plotname_map.at(names[i]);
+        }
         TLatex* text = new TLatex(barvalues[i], y_min - 0.05, label.c_str());  // Position text below axis
-        text->SetTextAlign(13);  
-        text->SetTextSize(0.03); 
-        text->SetTextAngle(-45); 
+        text->SetTextAlign(13);
+        text->SetTextSize(0.03);
+        text->SetTextAngle(-45);
         text->Draw();
     }
     TText *t = new TText();
@@ -1013,25 +1065,72 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
 
 
 
-    for (int i = 0; i < nBins; ++i) {
-        if(mask_osc && i < model.nparams) continue;
-        TMarker* initstar = new TMarker(i+0.5, init_seed[i], 29);
-        initstar->SetMarkerSize(0.6); 
-        initstar->SetMarkerColor(kBlue); 
-        initstar->Draw();
+    // Get y-axis range for out-of-bounds handling
+    float y_axis_min = minVal * 1.1;
+    float y_axis_max = maxVal * 1.1;
+    float y_range = y_axis_max - y_axis_min;
+    log<LOG_INFO>(L"%1% || _1sigma plot y-axis range: min=%2%, max=%3%") % __func__ % y_axis_min % y_axis_max;
+    float arrow_margin = y_range * 0.08;  // margin from edge for out-of-range markers
+    float arrow_length = y_range * 0.06;  // length of the arrow
 
-        if (i < true_params.size()) {
+    // Horizontal offsets to prevent marker overlap
+    float offset_blue = -0.12;   // init_seed (blue) - left
+    float offset_red = 0.0;      // true_params (red) - center
+    float offset_black = 0.12;   // best fit (black) - right
 
-            TMarker* truestar = new TMarker(i+0.5, true_params[i], 29);
-            truestar->SetMarkerSize(0.5); 
-            truestar->SetMarkerColor(kRed); 
-            truestar->Draw();
+    // Helper lambda to draw a marker with out-of-range arrow handling
+    auto drawMarkerWithArrow = [&](float x, float y, int color, float marker_size) {
+        bool below_range = y < y_axis_min;
+        bool above_range = y > y_axis_max;
+
+        float draw_y = y;
+        if (below_range) {
+            draw_y = y_axis_min + arrow_margin;
+        } else if (above_range) {
+            draw_y = y_axis_max - arrow_margin;
         }
 
-        TMarker* star = new TMarker(i+0.5, bfvalues[i], 29);
-        star->SetMarkerSize(0.5); 
-        star->SetMarkerColor(kBlack); 
-        star->Draw();
+        TMarker* marker = new TMarker(x, draw_y, 29);
+        marker->SetMarkerSize(marker_size);
+        marker->SetMarkerColor(color);
+        marker->Draw();
+
+        // Draw arrow if out of range
+        if (below_range) {
+            TArrow* arr = new TArrow(x, draw_y - arrow_length * 0.3, x, y_axis_min + arrow_length * 0.2, 0.008, "|>");
+            arr->SetLineColor(color);
+            arr->SetFillColor(color);
+            arr->SetLineWidth(1);
+            arr->Draw();
+        } else if (above_range) {
+            TArrow* arr = new TArrow(x, draw_y + arrow_length * 0.3, x, y_axis_max - arrow_length * 0.2, 0.008, "|>");
+            arr->SetLineColor(color);
+            arr->SetFillColor(color);
+            arr->SetLineWidth(1);
+            arr->Draw();
+        }
+    };
+
+    for (int i = 0; i < nBins; ++i) {
+        if(mask_osc && i < model.nparams) continue;
+        // In syst-only mode, init_seed/true_params are full-size but plot indices are spline-only
+        int vec_idx = with_osc ? i : (i + model.nparams);
+        float x_center = i + 0.5;
+
+        // Blue star: init_seed (best fit seed)
+        drawMarkerWithArrow(x_center + offset_blue, init_seed[vec_idx], kBlue, 0.6);
+
+        // Red star: true_params (injected truth)
+        if (vec_idx < true_params.size()) {
+            if (i < 3) {  // Log first few for debugging
+                log<LOG_INFO>(L"%1% || _1sigma marker i=%2%: true_params[%3%]=%4%, below_range=%5%")
+                    % __func__ % i % vec_idx % true_params[vec_idx] % (true_params[vec_idx] < y_axis_min);
+            }
+            drawMarkerWithArrow(x_center + offset_red, true_params[vec_idx], kRed, 0.5);
+        }
+
+        // Black star: best fit value
+        drawMarkerWithArrow(x_center + offset_black, bfvalues[i], kBlack, 0.5);
     }
 
 

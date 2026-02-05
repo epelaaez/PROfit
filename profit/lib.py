@@ -27,7 +27,7 @@ class BranchVariable(profit._profit.BranchVariable):
         self._branch_true_L_formula = None
         self._branch_true_value_formula = None
         self._branch_true_pdg_formula = None
-        self._branch_monte_carlo_weight_formula = None
+        self._branch_weight_formulas = []
     
     @property
     def branch_formula(self):
@@ -70,14 +70,19 @@ class BranchVariable(profit._profit.BranchVariable):
         self._branch_true_pdg_formula = v
 
     @property
-    def branch_monte_carlo_weight_formula(self):
-        return self._branch_monte_carlo_weight_formula
-        
-    @branch_monte_carlo_weight_formula.setter
-    def branch_monte_carlo_weight_formula(self, v):
-        if not isinstance(v, profit.pylib.DataFrameFormula): 
-            raise ValueError("BranchVarible.branch_monte_carlo_weight_formula must be set to profit.DataFrameFormula")
-        self._branch_monte_carlo_weight_formula = v
+    def branch_weight_formulas(self):
+        return self._branch_weight_formulas
+
+    @branch_weight_formulas.setter
+    def branch_weight_formulas(self, v):
+        if not isinstance(v, list):
+            raise ValueError("BranchVariable.branch_weight_formulas must be set to a list of profit.DataFrameFormula")
+        self._branch_weight_formulas = v
+
+    def add_weight_formula(self, v):
+        if not isinstance(v, profit.pylib.DataFrameFormula):
+            raise ValueError("Weight formula must be a profit.DataFrameFormula")
+        self._branch_weight_formulas.append(v)
 
     # Override BranchVariable::GetValue to use local DataFrameFormula
     def GetValue(self):
@@ -107,11 +112,23 @@ class BranchVariable(profit._profit.BranchVariable):
 
         return self.branch_true_pdg_formula.EvalInstance()
 
-    # Override BranchVariable::GetMonteCarloWeight to use local DataFrameFormula
-    # Default to 1 instead of 0 if empty
-    def GetMonteCarloWeight(self):
-        if self.branch_monte_carlo_weight_formula is None:
-            return 1
+    # Override BranchVariable::GetWeight to use local DataFrameFormula
+    # Returns the weight at 0-based index i. Default to 1 if out of range.
+    def GetWeight(self, i):
+        if i >= 0 and i < len(self._branch_weight_formulas) and self._branch_weight_formulas[i] is not None:
+            return self._branch_weight_formulas[i].EvalInstance()
+        return 1
 
-        return self.branch_monte_carlo_weight_formula.EvalInstance()
+    # Override BranchVariable::GetTotalWeight to use local DataFrameFormula
+    # Returns the product of all defined weights. Default to 1 if no weights.
+    def GetTotalWeight(self):
+        product = 1
+        for f in self._branch_weight_formulas:
+            if f is not None:
+                product = product * f.EvalInstance()
+        return product
+
+    # Get number of defined weights
+    def NumWeights(self):
+        return len(self._branch_weight_formulas)
 

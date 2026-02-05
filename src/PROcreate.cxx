@@ -75,6 +75,15 @@ namespace PROfit {
     }
 
     void SystStruct::FillUniverse(int universe, int global_bin, float event_weight){
+        
+        /*
+        if (event_weight < 0) {
+            log<LOG_ERROR>(L"%1% || Event weight is negative with value %2% for systematic %3%") % __func__ % event_weight % systname.c_str();
+            log<LOG_ERROR>(L"Terminating.");
+            exit(EXIT_FAILURE);
+        }
+        */
+        
         p_multi_spec.at(universe)->QuickFill(global_bin, event_weight);
         return;
     }
@@ -135,7 +144,7 @@ namespace PROfit {
             std::vector<std::string> filesForChain;
 
             if (fn.find(".root") != std::string::npos) {
-                log<LOG_INFO>(L"%1% || Starting a (single) TCHain, loading file %2%") % __func__  % fn.c_str();
+                log<LOG_INFO>(L"%1% || Starting a (single) TChain, loading file %2%") % __func__  % fn.c_str();
                 filesForChain.push_back(useXrootD ? convertToXRootD(fn) : fn);
             }else{
 
@@ -252,6 +261,7 @@ namespace PROfit {
                 //}
                 int other_count = 0;
                 for(const auto &name: branch_variable->variable_names) {
+                    log<LOG_INFO>(L"%1% || Setting up variable formula for file %2%, branch %3% (%4%): %5%") % __func__ % fid % ib % branch_variable->associated_hist.c_str() % name.c_str();
                     branch_variable->branch_variable_formulas.push_back(std::make_shared<ROOTFormula>(
                         "branch_variable_form_"+std::to_string(fid) +"_" + std::to_string(ib)+"_"+std::to_string(other_count),
                         name, chains[fid]));
@@ -259,12 +269,14 @@ namespace PROfit {
                 }
 
 
-                //grab monte carlo weight
-                if(inconfig.m_mcgen_additional_weight_bool[fid][ib]){
-                    branch_variable->branch_monte_carlo_weight_formula = std::make_shared<ROOTFormula>(
-                        "branch_add_weight_"+std::to_string(fid)+"_" + std::to_string(ib),
-                        inconfig.m_mcgen_additional_weight_name[fid][ib], chains[fid]);
-                    log<LOG_INFO>(L"%1% || Setting up additional monte carlo weight for this branch: %2%") % __func__ %  inconfig.m_mcgen_additional_weight_name[fid][ib].c_str();
+                //grab weight formulas (weight_1, weight_2, ...)
+                for(int wi = 0; wi < inconfig.m_mcgen_num_weights[fid][ib]; ++wi){
+                    const std::string& wname = inconfig.m_mcgen_weight_names[fid][ib][wi];
+                    log<LOG_INFO>(L"%1% || Setting up weight_%2% for file %3%, branch %4% (%5%): %6%") % __func__ % (wi+1) % fid % ib % branch_variable->associated_hist.c_str() % wname.c_str();
+                    branch_variable->branch_weight_formulas.push_back(std::make_shared<ROOTFormula>(
+                        "branch_weight_"+std::to_string(wi+1)+"_"+std::to_string(fid)+"_" + std::to_string(ib),
+                        wname, chains[fid]));
+                    log<LOG_INFO>(L"%1% || Successfully set up weight_%2% for this branch: %3%") % __func__ % (wi+1) % wname.c_str();
                 }
 
 
@@ -423,6 +435,11 @@ namespace PROfit {
                     sv.back().SetWeightFormula(sys_weight_formula);
                     sv.back().SetMode(sys_mode);
                 }
+                // Check if scale is set for this systematic
+                if(inconfig.m_mcgen_variation_scale.find(sys_name) != inconfig.m_mcgen_variation_scale.end()) {
+                    sv.back().scale = inconfig.m_mcgen_variation_scale.at(sys_name);
+                    log<LOG_INFO>(L"%1% || Setting scale=%2% for systematic %3%") % __func__ % sv.back().scale % sys_name.c_str();
+                }
                 if(sys_mode == "spline") {
                     bool override_knobs = inconfig.m_mcgen_variation_knobval_override.find(sys_name) != inconfig.m_mcgen_variation_knobval_override.end();
                     if(!override_knobs && map_systematic_knob_vals.find(sys_name) == map_systematic_knob_vals.end()) {
@@ -433,6 +450,16 @@ namespace PROfit {
                     sv.back().knobval = sv.back().knob_index;
                     std::sort(sv.back().knobval.begin(), sv.back().knobval.end());
                     sv.back().binning = binningindex;
+                    // Check if force_0_cv is set for this systematic
+                    if(inconfig.m_mcgen_variation_force_0_cv.find(sys_name) != inconfig.m_mcgen_variation_force_0_cv.end()) {
+                        sv.back().force_0_cv = inconfig.m_mcgen_variation_force_0_cv.at(sys_name);
+                        log<LOG_INFO>(L"%1% || Setting force_0_cv=true for systematic %2%") % __func__ % sys_name.c_str();
+                    }
+                    // Check if include_only_weights is set for this systematic
+                    if(inconfig.m_mcgen_variation_include_only_weights.find(sys_name) != inconfig.m_mcgen_variation_include_only_weights.end()) {
+                        sv.back().include_only_weights = inconfig.m_mcgen_variation_include_only_weights.at(sys_name);
+                        log<LOG_INFO>(L"%1% || Setting include_only_weights for systematic %2% (%3% entries)") % __func__ % sys_name.c_str() % sv.back().include_only_weights.size();
+                    }
                 }
                 if(sys_mode == "flat"){
                     log<LOG_INFO>(L"%1% || Systematic variation %2% is a match for a flat covariance systematic. Processing a such. ") % __func__ % sys_name.c_str();
@@ -614,26 +641,32 @@ namespace PROfit {
             size_t to_print = nevents > 5 ? nevents / 5 : 1;
             if(to_print>50000)to_print=50000;
             int currentTreeNumber = -1;
+            bool file_name_logged = false;
 
             for(long int i=0; i < nevents; ++i) {
                 if(i%to_print==0){
                     time_t time_passed = time(nullptr) - time_stamp;
-                    log<LOG_INFO>(L"%1% || File %2% -- uni : %3% / %4%  took %5% seconds") % __func__ % fid % i % nevents % time_passed;
+                    if(!file_name_logged){
+                        log<LOG_INFO>(L"%1% || File %2% (%6%) -- uni : %3% / %4%  took %5% seconds") % __func__ % fid % i % nevents % time_passed % fn.c_str();
+                        file_name_logged = true;
+                    }
+                    else {
+                        log<LOG_INFO>(L"%1% || File %2% -- uni : %3% / %4%  took %5% seconds") % __func__ % fid % i % nevents % time_passed;
+                    }
                     time_stamp = time(nullptr);
                 }
                 chains[fid]->GetEntry(i);
 
                 // update the branches to the current event
                 for(int ib = 0; ib != num_branch; ++ib) {
-
-                    if(inconfig.m_mcgen_additional_weight_bool[fid][ib]){
-                        branches[ib]->branch_monte_carlo_weight_formula->LoadEvent(i);
+                    for(auto &wf: branches[ib]->branch_weight_formulas) {
+                        wf->LoadEvent(i);
                     }
                     for(auto &b: branches[ib]->branch_variable_formulas) {
                         b->LoadEvent(i);
                     }
                 }
-                
+
                 // Refresh the systematics loaders
                 if (chains[fid]->GetTreeNumber() != currentTreeNumber) {
                     currentTreeNumber = chains[fid]->GetTreeNumber();
@@ -681,6 +714,25 @@ namespace PROfit {
         log<LOG_INFO>(L"%1% || Finish reading files, it took %2% seconds..") % __func__ % time_took;
         log<LOG_INFO>(L"%1% || DONE") %__func__ ;
 
+        // Cleanup TChain objects to avoid ROOT/Cling JIT crash during global cleanup
+        log<LOG_DEBUG>(L"%1% || Cleaning up TChain objects...") % __func__;
+        for(int fid = 0; fid < num_files; ++fid) {
+            // Delete friend chains first (they were added to main chain)
+            for(auto* friendChain : friendChains[fid]) {
+                if(friendChain) {
+                    delete friendChain;
+                }
+            }
+            friendChains[fid].clear();
+            
+            // Delete main chain
+            if(chains[fid]) {
+                delete chains[fid];
+                chains[fid] = nullptr;
+            }
+        }
+        log<LOG_DEBUG>(L"%1% || TChain cleanup complete.") % __func__;
+
         return 0;
     }
 
@@ -693,41 +745,76 @@ namespace PROfit {
 
         std::vector<long int> nentries(num_files,0);
         std::vector<float> pot_scale(num_files, 1.0);
-        std::vector<std::unique_ptr<TFile>> files(num_files);
-        std::vector<TTree*> trees(num_files,nullptr);//keep as bare pointers because of ROOT :(
+        std::vector<TChain*> chains(num_files, nullptr);
+        std::vector<std::vector<TChain*>> friendChains(num_files);
 
         for(int fid=0; fid < num_files; ++fid) {
             const auto& fn = inconfig.m_mcgen_file_name.at(fid);
 
-            files[fid] = std::make_unique<TFile>(fn.c_str(),"read");
-            trees[fid] = (TTree*)(files[fid]->Get(inconfig.m_mcgen_tree_name.at(fid).c_str()));
-            nentries[fid]= (long int)trees.at(fid)->GetEntries();
+            std::vector<std::string> filesForChain;
 
-            if(files[fid]->IsOpen()){
-                log<LOG_INFO>(L"%1% || Root file succesfully opened: %2%") % __func__  % fn.c_str();
+            if (fn.find(".root") != std::string::npos) {
+                log<LOG_INFO>(L"%1% || Starting a (single) TChain, loading file %2%") % __func__  % fn.c_str();
+                filesForChain.push_back(fn);
             }else{
-                log<LOG_ERROR>(L"%1% || Fail to open root file: %2%") % __func__  % fn.c_str();
-                exit(EXIT_FAILURE);
-            }
-            log<LOG_INFO>(L"%1% || Total Entries: %2%") % __func__ %  nentries[fid];
+                log<LOG_INFO>(L"%1% || Starting a TChain, loading from filelist %2%") % __func__  % fn.c_str();
+                std::ifstream infile(fn.c_str());
+                if (!infile) {
+                    log<LOG_ERROR>(L"%1% || Failed to open input filelist %2%") % __func__  % fn.c_str();
+                    exit(EXIT_FAILURE);
+                }
 
-            //first, grab friend trees
-            if (inconfig.m_mcgen_numfriends[fid]>0){
-                auto mcgen_file_friend_treename_iter = inconfig.m_mcgen_file_friend_treename_map.find(fn);
-                if (mcgen_file_friend_treename_iter != inconfig.m_mcgen_file_friend_treename_map.end()) {
-                    auto mcgen_file_friend_iter = inconfig.m_mcgen_file_friend_map.find(fn);
-                    if (mcgen_file_friend_iter == inconfig.m_mcgen_file_friend_map.end()) {
-                        log<LOG_ERROR>(L"%1% || Friend TTree provided but no friend file??") % __func__;
-                        log<LOG_ERROR>(L"Terminating.");
-                        exit(EXIT_FAILURE);
-                    }
-                    for(size_t k=0; k < mcgen_file_friend_treename_iter->second.size(); k++){
-                        std::string treefriendname = mcgen_file_friend_treename_iter->second.at(k);
-                        std::string treefriendfile = mcgen_file_friend_iter->second.at(k);
-                        trees[fid]->AddFriend(treefriendname.c_str(),treefriendfile.c_str());
+                std::string line;
+                while (std::getline(infile, line)) {
+                    log<LOG_INFO>(L"%1% || Loading file %2% into TChain") %__func__ % line.c_str();
+                    filesForChain.push_back(line);
+                }
+
+                infile.close();
+            }
+
+            chains[fid] = new TChain(inconfig.m_mcgen_tree_name.at(fid).c_str());
+            if (inconfig.m_mcgen_numfriends[fid] > 0) {
+                friendChains[fid].resize(inconfig.m_mcgen_numfriends[fid], nullptr);
+            }
+
+            for(auto &file: filesForChain){
+                chains[fid]->Add(file.c_str());
+
+                if (inconfig.m_mcgen_numfriends[fid] > 0) {
+                    auto mcgen_file_friend_treename_iter = inconfig.m_mcgen_file_friend_treename_map.find(fn);
+                    if (mcgen_file_friend_treename_iter != inconfig.m_mcgen_file_friend_treename_map.end()) {
+                        auto mcgen_file_friend_iter = inconfig.m_mcgen_file_friend_map.find(fn);
+                        if (mcgen_file_friend_iter == inconfig.m_mcgen_file_friend_map.end()) {
+                            log<LOG_ERROR>(L"%1% || Friend TTree provided but no friend file??") % __func__;
+                            log<LOG_ERROR>(L"Terminating.");
+                            exit(EXIT_FAILURE);
+                        }
+
+                        for (size_t k = 0; k < mcgen_file_friend_treename_iter->second.size(); k++) {
+                            std::string treefriendname = mcgen_file_friend_treename_iter->second.at(k);
+
+                            if (!friendChains[fid][k]) {
+                                friendChains[fid][k] = new TChain(treefriendname.c_str());
+                            }
+
+                            log<LOG_DEBUG>(L"%1% || Adding friend tree %2% from file %3%") % __func__ % treefriendname.c_str() % file.c_str();
+                            friendChains[fid][k]->Add(file.c_str());
+                        }
                     }
                 }
             }
+
+            // Add friend chains to main chain
+            if (inconfig.m_mcgen_numfriends[fid] > 0) {
+                for (size_t k = 0; k < friendChains[fid].size(); k++) {
+                    log<LOG_DEBUG>(L"%1% || Adding friend chain %2% to main chain %3%") % __func__ % k % fid;
+                    chains[fid]->AddFriend(friendChains[fid][k]);
+                }
+            }
+
+            nentries[fid] = (long int)chains[fid]->GetEntries();
+            log<LOG_INFO>(L"%1% || Total Entries: %2%") % __func__ %  nentries[fid];
 
             // grab branches 
             int num_branch = inconfig.m_branch_variables[fid].size();
@@ -777,16 +864,17 @@ namespace PROfit {
                 for(const auto &name: branch_variable->variable_names) {
                     branch_variable->branch_variable_formulas.push_back(std::make_shared<ROOTFormula>(
                         "branch_variabler_form_"+std::to_string(fid) +"_" + std::to_string(ib)+"_"+std::to_string(other_count),
-                        name, trees[fid]));
+                        name, chains[fid]));
                     other_count++;
                 }
 
-                //grab monte carlo weight
-                if(inconfig.m_mcgen_additional_weight_bool[fid][ib]){
-                    branch_variable->branch_monte_carlo_weight_formula  =  std::make_shared<ROOTFormula>(
-                        "branch_add_weight_"+std::to_string(fid)+"_" + std::to_string(ib),
-                        inconfig.m_mcgen_additional_weight_name[fid][ib], trees[fid]);
-                    log<LOG_INFO>(L"%1% || Setting up additional monte carlo weight for this branch: %2%") % __func__ %  inconfig.m_mcgen_additional_weight_name[fid][ib].c_str();
+                //grab weight formulas (weight_1, weight_2, ...)
+                for(int wi = 0; wi < inconfig.m_mcgen_num_weights[fid][ib]; ++wi){
+                    const std::string& wname = inconfig.m_mcgen_weight_names[fid][ib][wi];
+                    log<LOG_INFO>(L"%1% || Setting up weight_%2% for this branch: %3%") % __func__ % (wi+1) % wname.c_str();
+                    branch_variable->branch_weight_formulas.push_back(std::make_shared<ROOTFormula>(
+                        "branch_weight_"+std::to_string(wi+1)+"_"+std::to_string(fid)+"_" + std::to_string(ib),
+                        wname, chains[fid]));
                 }
 
             } //end of branch loop
@@ -816,12 +904,22 @@ namespace PROfit {
             // loop over all entries
             for(long int i=0; i < nevents; ++i) {
                 if(i%1000==0)	log<LOG_INFO>(L"%1% || -- uni : %2% / %3%") % __func__ % i % nevents;
-                trees[fid]->GetEntry(i);
+                chains[fid]->GetEntry(i);
+
+                // update the formulas to the current event (handles TChain file transitions)
+                for(int ib = 0; ib != num_branch; ++ib) {
+                    for(auto &wf: branches[ib]->branch_weight_formulas) {
+                        wf->LoadEvent(i);
+                    }
+                    for(auto &b: branches[ib]->branch_variable_formulas) {
+                        b->LoadEvent(i);
+                    }
+                }
 
                 //branch loop
                 for(int ib = 0; ib != num_branch; ++ib) {
                     std::vector<BranchVariable::Value> vars = branches[ib]->GetVariables();
-                    float additional_weight = branches[ib]->GetMonteCarloWeight();
+                    float additional_weight = branches[ib]->GetTotalWeight();
                     additional_weight *= pot_scale[fid];
 
                     if(additional_weight == 0) //skip on event failing cuts
@@ -833,14 +931,27 @@ namespace PROfit {
                     }
 
 
-                        for(size_t io = 0; io < inconfig.m_num_variables; ++io)
-                            if(var_bin_indices[io] >= 0)
-                                data[io].Fill(var_bin_indices[io], additional_weight);//from io+1
+                    for(size_t io = 0; io < inconfig.m_num_variables; ++io)
+                        if(var_bin_indices[io] >= 0)
+                            data[io].Fill(var_bin_indices[io], additional_weight);//from io+1
+                    
                 }  //end of branch loop
             } //end of entry loop
         } //end of file loop
         time_t time_took = time(nullptr) - start_time;
         log<LOG_INFO>(L"%1% || Generating data spectrum took %2% seconds..") % __func__ % time_took;
+
+        // Cleanup TChain objects
+        for(int fid = 0; fid < num_files; ++fid) {
+            for(auto* friendChain : friendChains[fid]) {
+                delete friendChain;
+            }
+            if(chains[fid]) {
+                delete chains[fid];
+                chains[fid] = nullptr;
+            }
+        }
+
         return data;
     }
 
@@ -853,12 +964,19 @@ namespace PROfit {
         std::vector<BranchVariable::Value> vars = branch->GetVariables();
 
         int run_syst = branch->GetIncludeSystematics();
-        float mc_weight = branch->GetMonteCarloWeight();
+
+        // Compute individual weight values for potential use with include_only_weights
+        int num_weights = branch->NumWeights();
+        std::vector<float> weight_vals(num_weights);
+        for(int wi = 0; wi < num_weights; ++wi) {
+            weight_vals[wi] = branch->GetWeight(wi);
+        }
 
         int channel_group = subchannel_index / std::accumulate(inconfig.m_num_subchannels.begin(), inconfig.m_num_subchannels.end(), 0);
         int det = channel_group % inconfig.m_num_detectors;
 
-        mc_weight *= inconfig.m_det_pot[det] / mcpot;
+        float pot_scale = inconfig.m_det_pot[det] / mcpot;
+        float mc_weight = branch->GetTotalWeight() * pot_scale;
 
         int model_rule = branch->GetModelRule();
 
@@ -899,7 +1017,7 @@ namespace PROfit {
             for(size_t io = 0; io < inconfig.m_num_variables; ++io)
                 var_syst_objs.push_back(&syst_vector[io][i]);
 
-            float additional_weight = syst_additional_weight.at(i);
+            float additional_weight = syst_additional_weight.at(i); // extra per-systematic weights, unrelated to the per-event additional_weight set in the xml file
             auto map_iter = eventweight_map.find(var_syst_objs.front()->GetSysName());
             int spline_bin = (var_syst_objs.front()->mode == "covariance") ? -1: var_bin_indices[var_syst_objs.front()->binning];
 
@@ -915,8 +1033,21 @@ namespace PROfit {
                     
                     float w = static_cast<float>(map_iter->second->at(is));
                     if(std::isnan(w) || std::isinf(w)) w = 1;
-                    for(auto so: var_syst_objs)
-                        so->FillUniverse(u, spline_bin, mc_weight * additional_weight * w);
+                    for(auto so: var_syst_objs){
+                        if (!so->include_only_weights.empty()) {
+                            // Compute weight using only the included weights (avoids divide-by-zero)
+                            float included_weight = 1.0;
+                            for(int idx : so->include_only_weights) {
+                                int wi = idx - 1; // convert 1-based to 0-based
+                                if(wi >= 0 && wi < num_weights) {
+                                    included_weight *= weight_vals[wi];
+                                }
+                            }
+                            so->FillUniverse(u, spline_bin, included_weight * pot_scale * additional_weight * w);
+                        } else {
+                            so->FillUniverse(u, spline_bin, mc_weight * additional_weight * w);
+                        }
+                    }
                 }
 
                 continue;
@@ -930,7 +1061,9 @@ namespace PROfit {
                     }
                 }
                 for(int iuni = 0; iuni < var_syst_objs.front()->GetNUniverse(); ++iuni){
-                    float sys_wei = run_syst ? additional_weight * static_cast<float>(map_iter->second->at(iuni) ) :  1.0;
+                    float raw_weight = static_cast<float>(map_iter->second->at(iuni));
+                    float scaled_weight = raw_weight * var_syst_objs.front()->scale; // apply scale factor (default 1.0)
+                    float sys_wei = run_syst ? additional_weight * scaled_weight :  1.0;
                     for(size_t io = 0; io < inconfig.m_num_variables; ++io) {
                         if(var_bin_indices[io] >= 0){
                             var_syst_objs[io]->FillUniverse(iuni, var_bin_indices[io], mc_weight * sys_wei);

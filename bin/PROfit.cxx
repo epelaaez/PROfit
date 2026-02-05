@@ -249,7 +249,6 @@ int main(int argc, char* argv[])
     //Initilize configuration from the XML;
     PROconfig config(xmlname, rateonly);
 
-
     //Inititilize PROpeller to keep MC
     PROpeller prop;
 
@@ -299,6 +298,13 @@ int main(int argc, char* argv[])
         }
 
     }
+
+    // For process-only command, exit early after MC processing is complete
+    // This avoids unnecessary setup and potential cleanup issues with ROOT
+    //if(*process_command && !*profile_command && !*surface_command && !*protest_command && !*proglobal_command && !*proplot_command && !*profc_command) {
+    //    log<LOG_WARNING>(L"%1% || Process command complete. Binary files saved successfully.") % __func__;
+    //    return 0;
+    //}
 
     //Scale events by some percentage of total detector POT
     if(scale_arg.size()) {
@@ -380,6 +386,9 @@ int main(int argc, char* argv[])
     //Spline fake data injection studies
     Eigen::VectorXf fakedataparams = Eigen::VectorXf::Constant(model->nparams + variable_systs[config.i_prime].GetNSplines(), 0);
     for(size_t i = 0; i < model->nparams; ++i) fakedataparams(i) = fake_data_osc_param_vector(i);
+    log<LOG_INFO>(L"%1% || model->default_val: %2%") % __func__ % model->default_val;
+    log<LOG_INFO>(L"%1% || fake_data_osc_param_vector: %2%") % __func__ % fake_data_osc_param_vector;
+    log<LOG_INFO>(L"%1% || fakedataparams (physics portion): %2% %3%") % __func__ % fakedataparams(0) % fakedataparams(1);
     for(const auto& [name, shift]: injected_systs) {
         log<LOG_INFO>(L"%1% || Injected syst: %2% shifted by %3%") % __func__ % name.c_str() % shift;
 
@@ -443,6 +452,7 @@ int main(int argc, char* argv[])
             PROdata::saveVector(dataconfig, alldata, dataBinName);
             data = alldata[config.i_prime];
             //data.save(dataconfig,dataBinName);
+            
             for(size_t io = 0; io < dataconfig.m_num_variables; ++io)
                 variable_data.push_back(alldata[io]);
 
@@ -454,6 +464,7 @@ int main(int argc, char* argv[])
             PROdata::loadVector(alldata, dataBinName);
             data = alldata[config.i_prime];
             //data.save(dataconfig,dataBinName);
+
             for(size_t io = 0; io < dataconfig.m_num_variables; ++io)
                 variable_data.push_back(alldata[io]);
 
@@ -469,10 +480,10 @@ int main(int argc, char* argv[])
             }
         }
 
-        if(*profile_command || *surface_command || *protest_command){
+        /*if(*profile_command || *surface_command || *protest_command){
             log<LOG_ERROR>(L"%1% || ERROR --data can only be used with plot subcommand! ") % __func__  ;
             return 1;
-        }
+        }*/
 
 
     }//if no data, use injected or fake data;
@@ -928,6 +939,7 @@ int main(int argc, char* argv[])
         PROfile profile(config, metric->GetSysts(), metric->GetModel(), *metric, myseed, scanFitConfig, 
                 final_output_tag+"_PROfile", best_chi2, !systs_only, nthread, seeds,
                 fakedataparams);
+        log<LOG_INFO>(L"%1% || fakedataparams for Plot (true_params/red stars): %2%") % __func__ % fakedataparams;
         profile.Plot(config, metric->GetSysts(), metric->GetModel(), *metric, myseed,
                 final_output_tag+"_PROfile", !systs_only, best_fit,
                 fakedataparams);
@@ -1441,6 +1453,7 @@ int main(int argc, char* argv[])
 
 
         if(with_splines) {
+
             c.Print((final_output_tag+"_PROplot_Spline.pdf" + "[").c_str(), "pdf");
 
             std::map<std::string, std::vector<std::pair<std::unique_ptr<TGraph>,std::unique_ptr<TGraph>>>> spline_graphs = getSplineGraphs(variable_systs[config.i_prime], config);
@@ -1453,12 +1466,15 @@ int main(int argc, char* argv[])
                 chan++;
                 int col = chan%2==0 ? kRed: kBlue;
                 int lastsbindex = 0;
+
                 for(const auto &[fixed_pts, curve]: syst_bins) {
+
                     unprinted = true;
                     c.cd(bin%16+1);
                     size_t sbi = config.GetSubchannelIndexFromVariableGlobalBin(bin,config.i_prime);
                     std::string nsubchannel = config.GetSubchannelName(sbi);
-                    std::string chan_units =   config.m_channel_variable_units[config.i_prime][config.GetLocalChannelIndexFromGlobalSubchannelIndex(sbi)];
+                    size_t local_channel_index = config.GetLocalChannelIndexFromGlobalSubchannelIndex(sbi);
+                    std::string chan_units = config.m_channel_variable_units[local_channel_index][config.i_prime];
                     int edges_vec_sz = (int)config.m_variable_bin_to_edges[config.i_prime].size();
                     size_t safe_bin = (edges_vec_sz>0) ? std::min((size_t)bin, (size_t)edges_vec_sz-1) : 0;
                     std::pair<float,float> edg = config.m_variable_bin_to_edges[config.i_prime][safe_bin];
@@ -1489,6 +1505,8 @@ int main(int argc, char* argv[])
             }
 
             c.Print((final_output_tag+"_PROplot_Spline.pdf" + "]").c_str(), "pdf");
+            c.Clear();
+
         }
 
         //now onto root files
