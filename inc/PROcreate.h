@@ -49,7 +49,6 @@ namespace PROfit{
         std::string mode;  //covar, spline, external...
         std::string weight_formula;
         std::string external_filename;
-        std::string external_matrixname;
 
         std::vector<eweight_type> knobval;
         std::vector<eweight_type> knob_index;
@@ -76,7 +75,6 @@ namespace PROfit{
             ar & mode;
             ar & weight_formula;
             ar & external_filename;
-            ar & external_matrixname;
             ar & knobval;
             ar & knob_index;
             ar & index;
@@ -104,8 +102,6 @@ namespace PROfit{
         inline
             void SetWeightFormula(const std::string& in_formula){weight_formula = in_formula; return;}
 
-        inline 
-            void SetExternalData(const std::string &infile, const std::string &inmat){ external_filename=infile, external_matrixname=inmat; return;}
 
         std::vector<std::vector<eweight_type>> GetCovVec();
         std::vector<eweight_type> GetKnobs(int index, std::string variation);
