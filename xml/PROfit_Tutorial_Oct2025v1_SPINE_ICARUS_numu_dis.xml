@@ -78,81 +78,81 @@
     </branch>
 </MCFile>
 
-<variation_list>
+<systematics>
     <!-- MC Statistics -->
-    <allowlist type="mcstat" plotname="MC Stats" tag="other">MCStat</allowlist>
-    
+    <systematic type="mcstat" plotname="MC Stats" tag="other">MCStat</systematic>
+
     <!-- Interaction Model Systematics -->
-    <allowlist type="spline" binning="var1" plotname="ZExp_b1" tag="QE-MEC">ZExpPCAWeighter_SBNNuSyst_ZExpPCA_multisigma_b1</allowlist>
-    <allowlist type="spline" binning="var1" plotname="ZExp_b2" tag="QE-MEC">ZExpPCAWeighter_SBNNuSyst_ZExpPCA_multisigma_b2</allowlist>
-    <allowlist type="spline" binning="var1" plotname="ZExp_b3" tag="QE-MEC">ZExpPCAWeighter_SBNNuSyst_ZExpPCA_multisigma_b3</allowlist>
-    <allowlist type="spline" binning="var1" plotname="ZExp_b4" tag="QE-MEC">ZExpPCAWeighter_SBNNuSyst_ZExpPCA_multisigma_b4</allowlist>
-    <allowlist type="covariance" plotname="NCELVariationResponse" tag="OtherXSec">GENIEReWeight_SBN_v1_multisim_NCELVariationResponse</allowlist>
-    <allowlist type="spline" binning="var1" plotname="MaCCRES" tag="OtherXSec">GENIEReWeight_SBN_v1_multisigma_MaCCRES</allowlist>
-    <allowlist type="spline"  binning="var1" plotname="MvCCRES" tag="OtherXSec">GENIEReWeight_SBN_v1_multisigma_MvCCRES</allowlist>
-    <allowlist type="covariance" plotname="NCRESVariationResponse" tag="OtherXSec">GENIEReWeight_SBN_v1_multisim_NCRESVariationResponse</allowlist>
-    <allowlist type="covariance" plotname="COHVariationResponse" tag="OtherXSec">GENIEReWeight_SBN_v1_multisim_COHVariationResponse</allowlist>
-    <allowlist type="covariance" plotname="DISBYVariationResponse" tag="OtherXSec">GENIEReWeight_SBN_v1_multisim_DISBYVariationResponse</allowlist>
-    <allowlist type="covariance" plotname="FSI_pi" tag="FSI">GENIEReWeight_SBN_v1_multisim_FSI_pi_VariationResponse</allowlist>
-    <allowlist type="covariance" plotname="FSI_N" tag="FSI">GENIEReWeight_SBN_v1_multisim_FSI_N_VariationResponse</allowlist>
-    <allowlist type="spline"  binning="var1" plotname="RPA_CCQE" tag="QE-MEC">GENIEReWeight_SBN_v1_multisigma_RPA_CCQE</allowlist>
-    <allowlist type="spline"  binning="var1" plotname="CoulombCCQE" tag="QE-MEC">GENIEReWeight_SBN_v1_multisigma_CoulombCCQE</allowlist>
-    <allowlist type="spline"  binning="var1" plotname="NormCCMEC" tag="QE-MEC">GENIEReWeight_SBN_v1_multisigma_NormCCMEC</allowlist>
-    <allowlist type="covariance" plotname="NormNCMEC" tag="QE-MEC">GENIEReWeight_SBN_v1_multisim_NormNCMEC</allowlist>
-    <allowlist type="covariance" plotname="NonRESBGvpCC1pi" tag="NonRESBG">GENIEReWeight_SBN_v1_multisim_NonRESBGvpCC1pi</allowlist>
-    <allowlist type="covariance" plotname="NonRESBGvpCC2pi" tag="NonRESBG">GENIEReWeight_SBN_v1_multisim_NonRESBGvpCC2pi</allowlist>
-    <allowlist type="covariance" plotname="NonRESBGvpNC1pi" tag="NonRESBG">GENIEReWeight_SBN_v1_multisim_NonRESBGvpNC1pi</allowlist>
-    <allowlist type="covariance" plotname="NonRESBGvpNC2pi" tag="NonRESBG">GENIEReWeight_SBN_v1_multisim_NonRESBGvpNC2pi</allowlist>
-    <allowlist type="covariance" plotname="NonRESBGvnCC1pi" tag="NonRESBG">GENIEReWeight_SBN_v1_multisim_NonRESBGvnCC1pi</allowlist>
-    <allowlist type="covariance" plotname="NonRESBGvnCC2pi" tag="NonRESBG">GENIEReWeight_SBN_v1_multisim_NonRESBGvnCC2pi</allowlist>
-    <allowlist type="covariance" plotname="NonRESBGvnNC1pi" tag="NonRESBG">GENIEReWeight_SBN_v1_multisim_NonRESBGvnNC1pi</allowlist>
-    <allowlist type="covariance" plotname="NonRESBGvnNC2pi" tag="NonRESBG">GENIEReWeight_SBN_v1_multisim_NonRESBGvnNC2pi</allowlist>
-    <allowlist type="covariance" plotname="NonRESBGvbarpCC1pi" tag="NonRESBG">GENIEReWeight_SBN_v1_multisim_NonRESBGvbarpCC1pi</allowlist>
-    <allowlist type="covariance" plotname="NonRESBGvbarpCC2pi" tag="NonRESBG">GENIEReWeight_SBN_v1_multisim_NonRESBGvbarpCC2pi</allowlist>
-    <allowlist type="covariance" plotname="NonRESBGvbarpNC1pi" tag="NonRESBG">GENIEReWeight_SBN_v1_multisim_NonRESBGvbarpNC1pi</allowlist>
-    <allowlist type="covariance" plotname="NonRESBGvbarpNC2pi" tag="NonRESBG">GENIEReWeight_SBN_v1_multisim_NonRESBGvbarpNC2pi</allowlist>
-    <allowlist type="covariance" plotname="NonRESBGvbarnCC1pi" tag="NonRESBG">GENIEReWeight_SBN_v1_multisim_NonRESBGvbarnCC1pi</allowlist>
-    <allowlist type="covariance" plotname="NonRESBGvbarnCC2pi" tag="NonRESBG">GENIEReWeight_SBN_v1_multisim_NonRESBGvbarnCC2pi</allowlist>
-    <allowlist type="covariance" plotname="NonRESBGvbarnNC1pi" tag="NonRESBG">GENIEReWeight_SBN_v1_multisim_NonRESBGvbarnNC1pi</allowlist>
-    <allowlist type="covariance" plotname="NonRESBGvbarnNC2pi" tag="NonRESBG">GENIEReWeight_SBN_v1_multisim_NonRESBGvbarnNC2pi</allowlist>
-    <allowlist type="spline"  binning="var1" plotname="FrCEx_N" tag="FSI">GENIEReWeight_SBN_v1_multisigma_FrCEx_N</allowlist>
-    <allowlist type="spline"  binning="var1" plotname="FrCEx_pi" tag="FSI">GENIEReWeight_SBN_v1_multisigma_FrCEx_pi</allowlist>
-    <allowlist type="spline"  binning="var1" plotname="DecayAngMEC" tag="QE-MEC">GENIEReWeight_SBN_v1_multisigma_DecayAngMEC</allowlist>
-    <allowlist type="spline"  binning="var1" plotname="XSecShape_CCMEC" tag="QE-MEC">GENIEReWeight_SBNNuSyst_GENIE_multisigma_XSecShape_CCMEC</allowlist>
-    <allowlist type="spline"  binning="var1" plotname="FracPN_CCMEC" tag="QE-MEC">GENIEReWeight_SBNNuSyst_GENIE_multisigma_FracPN_CCMEC</allowlist>
+    <systematic type="spline" binning="var1" plotname="ZExp_b1" tag="QE-MEC">ZExpPCAWeighter_SBNNuSyst_ZExpPCA_multisigma_b1</systematic>
+    <systematic type="spline" binning="var1" plotname="ZExp_b2" tag="QE-MEC">ZExpPCAWeighter_SBNNuSyst_ZExpPCA_multisigma_b2</systematic>
+    <systematic type="spline" binning="var1" plotname="ZExp_b3" tag="QE-MEC">ZExpPCAWeighter_SBNNuSyst_ZExpPCA_multisigma_b3</systematic>
+    <systematic type="spline" binning="var1" plotname="ZExp_b4" tag="QE-MEC">ZExpPCAWeighter_SBNNuSyst_ZExpPCA_multisigma_b4</systematic>
+    <systematic type="covariance" plotname="NCELVariationResponse" tag="OtherXSec">GENIEReWeight_SBN_v1_multisim_NCELVariationResponse</systematic>
+    <systematic type="spline" binning="var1" plotname="MaCCRES" tag="OtherXSec">GENIEReWeight_SBN_v1_multisigma_MaCCRES</systematic>
+    <systematic type="spline"  binning="var1" plotname="MvCCRES" tag="OtherXSec">GENIEReWeight_SBN_v1_multisigma_MvCCRES</systematic>
+    <systematic type="covariance" plotname="NCRESVariationResponse" tag="OtherXSec">GENIEReWeight_SBN_v1_multisim_NCRESVariationResponse</systematic>
+    <systematic type="covariance" plotname="COHVariationResponse" tag="OtherXSec">GENIEReWeight_SBN_v1_multisim_COHVariationResponse</systematic>
+    <systematic type="covariance" plotname="DISBYVariationResponse" tag="OtherXSec">GENIEReWeight_SBN_v1_multisim_DISBYVariationResponse</systematic>
+    <systematic type="covariance" plotname="FSI_pi" tag="FSI">GENIEReWeight_SBN_v1_multisim_FSI_pi_VariationResponse</systematic>
+    <systematic type="covariance" plotname="FSI_N" tag="FSI">GENIEReWeight_SBN_v1_multisim_FSI_N_VariationResponse</systematic>
+    <systematic type="spline"  binning="var1" plotname="RPA_CCQE" tag="QE-MEC">GENIEReWeight_SBN_v1_multisigma_RPA_CCQE</systematic>
+    <systematic type="spline"  binning="var1" plotname="CoulombCCQE" tag="QE-MEC">GENIEReWeight_SBN_v1_multisigma_CoulombCCQE</systematic>
+    <systematic type="spline"  binning="var1" plotname="NormCCMEC" tag="QE-MEC">GENIEReWeight_SBN_v1_multisigma_NormCCMEC</systematic>
+    <systematic type="covariance" plotname="NormNCMEC" tag="QE-MEC">GENIEReWeight_SBN_v1_multisim_NormNCMEC</systematic>
+    <systematic type="covariance" plotname="NonRESBGvpCC1pi" tag="NonRESBG">GENIEReWeight_SBN_v1_multisim_NonRESBGvpCC1pi</systematic>
+    <systematic type="covariance" plotname="NonRESBGvpCC2pi" tag="NonRESBG">GENIEReWeight_SBN_v1_multisim_NonRESBGvpCC2pi</systematic>
+    <systematic type="covariance" plotname="NonRESBGvpNC1pi" tag="NonRESBG">GENIEReWeight_SBN_v1_multisim_NonRESBGvpNC1pi</systematic>
+    <systematic type="covariance" plotname="NonRESBGvpNC2pi" tag="NonRESBG">GENIEReWeight_SBN_v1_multisim_NonRESBGvpNC2pi</systematic>
+    <systematic type="covariance" plotname="NonRESBGvnCC1pi" tag="NonRESBG">GENIEReWeight_SBN_v1_multisim_NonRESBGvnCC1pi</systematic>
+    <systematic type="covariance" plotname="NonRESBGvnCC2pi" tag="NonRESBG">GENIEReWeight_SBN_v1_multisim_NonRESBGvnCC2pi</systematic>
+    <systematic type="covariance" plotname="NonRESBGvnNC1pi" tag="NonRESBG">GENIEReWeight_SBN_v1_multisim_NonRESBGvnNC1pi</systematic>
+    <systematic type="covariance" plotname="NonRESBGvnNC2pi" tag="NonRESBG">GENIEReWeight_SBN_v1_multisim_NonRESBGvnNC2pi</systematic>
+    <systematic type="covariance" plotname="NonRESBGvbarpCC1pi" tag="NonRESBG">GENIEReWeight_SBN_v1_multisim_NonRESBGvbarpCC1pi</systematic>
+    <systematic type="covariance" plotname="NonRESBGvbarpCC2pi" tag="NonRESBG">GENIEReWeight_SBN_v1_multisim_NonRESBGvbarpCC2pi</systematic>
+    <systematic type="covariance" plotname="NonRESBGvbarpNC1pi" tag="NonRESBG">GENIEReWeight_SBN_v1_multisim_NonRESBGvbarpNC1pi</systematic>
+    <systematic type="covariance" plotname="NonRESBGvbarpNC2pi" tag="NonRESBG">GENIEReWeight_SBN_v1_multisim_NonRESBGvbarpNC2pi</systematic>
+    <systematic type="covariance" plotname="NonRESBGvbarnCC1pi" tag="NonRESBG">GENIEReWeight_SBN_v1_multisim_NonRESBGvbarnCC1pi</systematic>
+    <systematic type="covariance" plotname="NonRESBGvbarnCC2pi" tag="NonRESBG">GENIEReWeight_SBN_v1_multisim_NonRESBGvbarnCC2pi</systematic>
+    <systematic type="covariance" plotname="NonRESBGvbarnNC1pi" tag="NonRESBG">GENIEReWeight_SBN_v1_multisim_NonRESBGvbarnNC1pi</systematic>
+    <systematic type="covariance" plotname="NonRESBGvbarnNC2pi" tag="NonRESBG">GENIEReWeight_SBN_v1_multisim_NonRESBGvbarnNC2pi</systematic>
+    <systematic type="spline"  binning="var1" plotname="FrCEx_N" tag="FSI">GENIEReWeight_SBN_v1_multisigma_FrCEx_N</systematic>
+    <systematic type="spline"  binning="var1" plotname="FrCEx_pi" tag="FSI">GENIEReWeight_SBN_v1_multisigma_FrCEx_pi</systematic>
+    <systematic type="spline"  binning="var1" plotname="DecayAngMEC" tag="QE-MEC">GENIEReWeight_SBN_v1_multisigma_DecayAngMEC</systematic>
+    <systematic type="spline"  binning="var1" plotname="XSecShape_CCMEC" tag="QE-MEC">GENIEReWeight_SBNNuSyst_GENIE_multisigma_XSecShape_CCMEC</systematic>
+    <systematic type="spline"  binning="var1" plotname="FracPN_CCMEC" tag="QE-MEC">GENIEReWeight_SBNNuSyst_GENIE_multisigma_FracPN_CCMEC</systematic>
 
     <!--- Flux covariance syststematics -->
-    <allowlist type="covariance" tag="fluxsyst">expskin_Flux</allowlist>  
-    <allowlist type="covariance" tag="fluxsyst">horncurrent_Flux</allowlist>  
-    <allowlist type="covariance" tag="fluxsyst">nucleoninexsec_Flux</allowlist>  
-    <allowlist type="covariance" tag="fluxsyst">nucleonqexsec_Flux</allowlist>  
-    <allowlist type="covariance" tag="fluxsyst">nucleontotxsec_Flux</allowlist>  
-    <allowlist type="covariance" tag="fluxsyst">pioninexsec_Flux</allowlist>  
-    <allowlist type="covariance" tag="fluxsyst">pionqexsec_Flux</allowlist>  
-    <allowlist type="covariance" tag="fluxsyst">piontotxsec_Flux</allowlist>  
-    <allowlist type="covariance" tag="fluxsyst">piplus_Flux</allowlist>  
-    <allowlist type="covariance" tag="fluxsyst">piminus_Flux</allowlist>  
-    <allowlist type="covariance" tag="fluxsyst">kplus_Flux</allowlist>  
-    <allowlist type="covariance" tag="fluxsyst">kminus_Flux</allowlist>  
-    <allowlist type="covariance" tag="fluxsyst">kzero_Flux</allowlist> 
+    <systematic type="covariance" tag="fluxsyst">expskin_Flux</systematic>
+    <systematic type="covariance" tag="fluxsyst">horncurrent_Flux</systematic>
+    <systematic type="covariance" tag="fluxsyst">nucleoninexsec_Flux</systematic>
+    <systematic type="covariance" tag="fluxsyst">nucleonqexsec_Flux</systematic>
+    <systematic type="covariance" tag="fluxsyst">nucleontotxsec_Flux</systematic>
+    <systematic type="covariance" tag="fluxsyst">pioninexsec_Flux</systematic>
+    <systematic type="covariance" tag="fluxsyst">pionqexsec_Flux</systematic>
+    <systematic type="covariance" tag="fluxsyst">piontotxsec_Flux</systematic>
+    <systematic type="covariance" tag="fluxsyst">piplus_Flux</systematic>
+    <systematic type="covariance" tag="fluxsyst">piminus_Flux</systematic>
+    <systematic type="covariance" tag="fluxsyst">kplus_Flux</systematic>
+    <systematic type="covariance" tag="fluxsyst">kminus_Flux</systematic>
+    <systematic type="covariance" tag="fluxsyst">kzero_Flux</systematic>
 
     <!--- Detector and Reconstruction Systematics -->
-    <allowlist type="spline" binning="var0" plotname="8msLifetime" tag="detsyst">var01</allowlist>
-    <allowlist type="spline" binning="var0" plotname="Ind1WireGap" tag="detsyst">var04</allowlist>
-    <allowlist type="spline" binning="var0" plotname="Ind2ShapingTime" tag="detsyst">var11</allowlist>
-    <allowlist type="spline" binning="var0" plotname="Recomb" tag="detsyst">var05</allowlist>
-    <allowlist type="spline" binning="var0" plotname="PMTQE" tag="detsyst">var06</allowlist>
-    <allowlist type="spline" binning="var0" plotname="CohNoise" tag="detsyst">var10</allowlist>
-    <allowlist type="spline" binning="var0" plotname="IntNoise" tag="detsyst">var13</allowlist>
-    <allowlist type="spline" binning="var0" plotname="TPCYZNonUni" tag="detsyst">var07</allowlist>
-    <allowlist type="spline" binning="var0" plotname="SignalShape" tag="detsyst">var12</allowlist>
+    <systematic type="spline" binning="var0" plotname="8msLifetime" tag="detsyst">var01</systematic>
+    <systematic type="spline" binning="var0" plotname="Ind1WireGap" tag="detsyst">var04</systematic>
+    <systematic type="spline" binning="var0" plotname="Ind2ShapingTime" tag="detsyst">var11</systematic>
+    <systematic type="spline" binning="var0" plotname="Recomb" tag="detsyst">var05</systematic>
+    <systematic type="spline" binning="var0" plotname="PMTQE" tag="detsyst">var06</systematic>
+    <systematic type="spline" binning="var0" plotname="CohNoise" tag="detsyst">var10</systematic>
+    <systematic type="spline" binning="var0" plotname="IntNoise" tag="detsyst">var13</systematic>
+    <systematic type="spline" binning="var0" plotname="TPCYZNonUni" tag="detsyst">var07</systematic>
+    <systematic type="spline" binning="var0" plotname="SignalShape" tag="detsyst">var12</systematic>
 
     <!-- Unused Detector and Reconstruction Systematics -->
-    <!--<allowlist type="spline" binning="reco" plotname="OldIntrinsicNoise" tag="det">var09</allowlist>-->
-    <!--<allowlist type="spline" binning="reco" plotname="FrontInductionGain" tag="det">var03</allowlist>-->
+    <!--<systematic type="spline" binning="reco" plotname="OldIntrinsicNoise" tag="det">var09</systematic>-->
+    <!--<systematic type="spline" binning="reco" plotname="FrontInductionGain" tag="det">var03</systematic>-->
 
     <!--- Normalization Systematics -->
-    <allowlist type="norm" binning="reco" plotname="FluxNorm" tag="other">nu_ICARUS_numu_n:0.02</allowlist>
-    <allowlist type="norm" plotname="FiducialVol" tag="other">nu_ICARUS:0.01</allowlist>
-</variation_list>
+    <systematic type="norm" binning="reco" plotname="FluxNorm" tag="other">nu_ICARUS_numu_n:0.02</systematic>
+    <systematic type="norm" plotname="FiducialVol" tag="other">nu_ICARUS:0.01</systematic>
+</systematics>
 
