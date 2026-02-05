@@ -46,8 +46,9 @@ namespace PROfit{
         //members
         std::string systname;
         int n_univ;
-        std::string mode;  //'multisim', 'minmax', and 'multisig'
+        std::string mode;  //covar, spline, external...
         std::string weight_formula;
+        std::string external_filename;
 
         std::vector<eweight_type> knobval;
         std::vector<eweight_type> knob_index;
@@ -76,6 +77,7 @@ namespace PROfit{
             ar & n_univ;
             ar & mode;
             ar & weight_formula;
+            ar & external_filename;
             ar & knobval;
             ar & knob_index;
             ar & index;

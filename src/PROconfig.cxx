@@ -104,17 +104,23 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
     //Setup TiXml documents
     tinyxml2::XMLDocument doc;
-    doc.LoadFile(filename.c_str());
-    bool loadOkay = !doc.ErrorID();
+    tinyxml2::XMLError loadResult = doc.LoadFile(filename.c_str());
 
     bool use_universe = 1; //FIX
-    try{
-        if(loadOkay) log<LOG_INFO>(L"%1% || Correctly loaded and parsed XML, continuing") % __func__;
-        else throw 404;    
-    }
-    catch (int ernum) {
-        log<LOG_ERROR>(L"%1% || ERROR: Failed to load XML configuration file names %4%. @ line %2% in %3% ") % __func__ % __LINE__  % __FILE__ % filename.c_str();
-        log<LOG_ERROR>(L"This generally means broken brackets or attribute syntax in xml itself.");
+    if(loadResult == tinyxml2::XML_SUCCESS) {
+        log<LOG_INFO>(L"%1% || Correctly loaded and parsed XML, continuing") % __func__;
+    } else {
+        log<LOG_ERROR>(L"%1% || ERROR: Failed to load XML configuration file: %2%") % __func__ % filename.c_str();
+        if(loadResult == tinyxml2::XML_ERROR_FILE_NOT_FOUND) {
+            log<LOG_ERROR>(L"The XML file was not found. Check the file path and name.");
+        } else if(loadResult == tinyxml2::XML_ERROR_FILE_COULD_NOT_BE_OPENED) {
+            log<LOG_ERROR>(L"The XML file could not be opened. Check file permissions.");
+        } else if(loadResult == tinyxml2::XML_ERROR_FILE_READ_ERROR) {
+            log<LOG_ERROR>(L"Error reading the XML file.");
+        } else {
+            log<LOG_ERROR>(L"XML parsing error: %1%") % doc.ErrorStr();
+            log<LOG_ERROR>(L"This generally means broken brackets or attribute syntax in the XML itself.");
+        }
         log<LOG_ERROR>(L"Terminating.");
         exit(EXIT_FAILURE);
     }
@@ -125,7 +131,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
     //Temp usage
     i_prime=0;
-    std::vector<std::string> allowed_elements = {"mode", "detector", "channel", "MCFile","WeightMaps","model","variation_list","correlation","varied_spectrum", "ShapeOnlyUncertainty"   };
+    std::vector<std::string> allowed_elements = {"mode", "detector", "channel", "MCFile","WeightMaps","model","variation_list","systematics","correlation","varied_spectrum", "ShapeOnlyUncertainty"   };
     for (tinyxml2::XMLElement* elem = doc.FirstChildElement(); elem; elem = elem->NextSiblingElement()) {
         std::string name = elem->Name();
         if (std::find(allowed_elements.begin(), allowed_elements.end(), name) == allowed_elements.end()) {
@@ -545,6 +551,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
     pMC   = doc.FirstChildElement("MCFile");
     pWeiMaps = doc.FirstChildElement("WeightMaps");
     pList = doc.FirstChildElement("variation_list");
+    if(!pList) pList = doc.FirstChildElement("systematics"); // alternative name for variation_list
     pCorrelations = doc.FirstChildElement("correlation");
     pSpec = doc.FirstChildElement("varied_spectrum");
     pShapeOnlyMap = doc.FirstChildElement("ShapeOnlyUncertainty");
@@ -861,20 +868,22 @@ int PROconfig::LoadFromXML(const std::string &filename){
     }else{
         while(pList){
 
+            // Support both old naming (allowlist) and new naming (systematic)
             tinyxml2::XMLElement *pAllowList = pList->FirstChildElement("allowlist");
+            if(!pAllowList) pAllowList = pList->FirstChildElement("systematic");
             while(pAllowList){
                 const char *text = pAllowList->GetText();
                 std::string wt = "null";
                 if(text) wt = std::string(text);
 
                 //check for known attributes
-                const std::vector<std::string> expected_attrs = {"type", "plotname", "binning", "knobvals", "tag", "prior", "center", "force_0_cv", "include_only_weights", "scale"};
+                const std::vector<std::string> expected_attrs = {"type", "plotname", "binning", "knobvals", "tag", "prior", "center", "force_0_cv", "include_only_weights", "scale","filename"};
                 for (const tinyxml2::XMLAttribute* attr = pAllowList->FirstAttribute(); attr; attr = attr->Next()) {
                     std::string name = attr->Name();
                     if (std::find(expected_attrs.begin(), expected_attrs.end(), name) == expected_attrs.end()) {
-                        log<LOG_ERROR>(L"%1% || ERROR! Attribute [%2%] in the <allowlist> element is not expected.") % __func__ % name.c_str()  ;
+                        log<LOG_ERROR>(L"%1% || ERROR! Attribute [%2%] in the <allowlist>/<systematic> element is not expected.") % __func__ % name.c_str()  ;
                         log<LOG_ERROR>(L"%1% || -- Check spelling: allowed attributes are %2%") % __func__ % expected_attrs ;
-                        throw std::invalid_argument(std::string("<allowlist> attribute not allowed : ") + name);
+                        throw std::invalid_argument(std::string("<allowlist>/<systematic> attribute not allowed : ") + name);
                     }
                 }
 
@@ -888,14 +897,14 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 const char *force_0_cv = pAllowList->Attribute("force_0_cv");
                 const char *include_only_weights_str = pAllowList->Attribute("include_only_weights");
                 const char *scale = pAllowList->Attribute("scale");
-
+                const char *filename = pAllowList->Attribute("filename");
 
 
                 m_mcgen_variation_type.push_back(variation_type);
                 m_mcgen_variation_type_map[wt] = variation_type;
                 m_mcgen_variation_allowlist.push_back(wt);
                 if(prior) m_mcgen_variation_prior[wt] = std::strtof(prior, NULL);
-                if(center) m_mcgen_variation_prior_centers[wt] = std::strtof(center, NULL);
+                if(filename) m_mcgen_variation_external_filename_map[wt] = filename;
                 m_mcgen_variation_plotname_map[wt] = plot_name ? plot_name : wt;
                 if(!binning || strcmp(binning, "reco") == 0) {
                     m_mcgen_variation_binning_map[wt] = i_prime;
@@ -971,7 +980,9 @@ int PROconfig::LoadFromXML(const std::string &filename){
                     log<LOG_INFO>(L"%1% || Parsed scale=%2% for systematic %3%") % __func__ % m_mcgen_variation_scale[wt] % wt.c_str();
                 }
                 log<LOG_DEBUG>(L"%1% || Allowlisting variations: %2%") % __func__ % wt.c_str() ;
-                pAllowList = pAllowList->NextSiblingElement("allowlist");
+                tinyxml2::XMLElement *pNext = pAllowList->NextSiblingElement("allowlist");
+                if(!pNext) pNext = pAllowList->NextSiblingElement("systematic");
+                pAllowList = pNext;
             }
 
             tinyxml2::XMLElement *pDenyList = pList->FirstChildElement("denylist");
@@ -981,7 +992,9 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 log<LOG_DEBUG>(L"%1% || Denylisting variations: %2%") % __func__ % bt.c_str() ;
                 pDenyList = pDenyList->NextSiblingElement("denylist");
             }
-            pList = pList->NextSiblingElement("variation_list");
+            tinyxml2::XMLElement *pNextList = pList->NextSiblingElement("variation_list");
+            if(!pNextList) pNextList = pList->NextSiblingElement("systematics");
+            pList = pNextList;
         }
     }
 
@@ -1254,11 +1267,14 @@ int PROconfig::LoadFromXML(const std::string &filename){
             m_mcgen_variation_allowlist[i] = "mcstat";
             m_mcgen_variation_type_map["mcstat"] = "mcstat";
             m_use_mcstats = true;
+        }else if(m_mcgen_variation_type[i] == "external_covariance"){
+            m_num_variation_type_external_covariance+=1;
         }
 
     }
 
     log<LOG_INFO>(L"%1% || num_variation_type_covariance: %2% ") % __func__ % m_num_variation_type_covariance;
+    log<LOG_INFO>(L"%1% || num_variation_type_external_ovariance: %2% ") % __func__ % m_num_variation_type_external_covariance;
     log<LOG_INFO>(L"%1% || num_variation_type_flat: %2% ") % __func__ % m_num_variation_type_flat;
     log<LOG_INFO>(L"%1% || num_variation_type_norm: %2% ") % __func__ % m_num_variation_type_norm;
     log<LOG_INFO>(L"%1% || num_variation_type_spline: %2% ") % __func__ % m_num_variation_type_spline; 

@@ -115,63 +115,63 @@
 
 </MCFile>
 
-<variation_list>
+<systematics>
     <!-- Inlcude MC stats, uncomment out to remove -->
-    <allowlist type="mcstat" plotname="MC Stats" tag="Other">MCStat</allowlist>
+    <systematic type="mcstat" plotname="MC Stats" tag="Other">MCStat</systematic>
 
-    <allowlist type="norm" plotname="SBNDDet" tag="Other">nu_SBND:0.02</allowlist>
-    <allowlist type="norm" plotname="ICARUSDet" tag="Other">nu_ICARUS:0.02</allowlist>
+    <systematic type="norm" plotname="SBNDDet" tag="Other">nu_SBND:0.02</systematic>
+    <systematic type="norm" plotname="ICARUSDet" tag="Other">nu_ICARUS:0.02</systematic>
 
-    <allowlist type="spline"  binning="var1" plotname="ZExpA1CCQE" tag="Zexpansion">GENIEReWeight_SBN_v1_multisigma_ZExpA1CCQE</allowlist>
-    <allowlist type="spline"  binning="var1" plotname="ZExpA2CCQE" tag="Zexpansion">GENIEReWeight_SBN_v1_multisigma_ZExpA2CCQE</allowlist>
-    <allowlist type="spline"  binning="var1" plotname="ZExpA3CCQE" tag="Zexpansion">GENIEReWeight_SBN_v1_multisigma_ZExpA3CCQE</allowlist>
-    <allowlist type="spline"  binning="var1" plotname="ZExpA4CCQE" tag="Zexpansion">GENIEReWeight_SBN_v1_multisigma_ZExpA4CCQE</allowlist>
+    <systematic type="spline"  binning="var1" plotname="ZExpA1CCQE" tag="Zexpansion">GENIEReWeight_SBN_v1_multisigma_ZExpA1CCQE</systematic>
+    <systematic type="spline"  binning="var1" plotname="ZExpA2CCQE" tag="Zexpansion">GENIEReWeight_SBN_v1_multisigma_ZExpA2CCQE</systematic>
+    <systematic type="spline"  binning="var1" plotname="ZExpA3CCQE" tag="Zexpansion">GENIEReWeight_SBN_v1_multisigma_ZExpA3CCQE</systematic>
+    <systematic type="spline"  binning="var1" plotname="ZExpA4CCQE" tag="Zexpansion">GENIEReWeight_SBN_v1_multisigma_ZExpA4CCQE</systematic>
 
-    <allowlist type="spline"  binning="var1"  plotname="MaCCRES" tag="Cross-Section-I">GENIEReWeight_SBN_v1_multisigma_MaCCRES</allowlist>
-    <allowlist type="spline"  binning="var1"  plotname="MvCCRES" tag="Cross-Section-I">GENIEReWeight_SBN_v1_multisigma_MvCCRES</allowlist>
-    <allowlist type="spline"  binning="var1"  plotname="RPA_CCQE" tag="Cross-Section-I">GENIEReWeight_SBN_v1_multisigma_RPA_CCQE</allowlist>
-    <allowlist type="spline"  binning="var1"  plotname="CoulombCCQE" tag="Cross-Section-I">GENIEReWeight_SBN_v1_multisigma_CoulombCCQE</allowlist>
-    <allowlist type="spline"  binning="var1" plotname="NormCCMEC" tag="Cross-Section-I">GENIEReWeight_SBN_v1_multisigma_NormCCMEC</allowlist>
-    <allowlist type="spline"  binning="var1" plotname="FrCEx_N" tag="Cross-Section-II-FSI">GENIEReWeight_SBN_v1_multisigma_FrCEx_N</allowlist>
-    <allowlist type="spline"  binning="var1" plotname="FrCEx_pi" tag="Cross-Section-II-FSI">GENIEReWeight_SBN_v1_multisigma_FrCEx_pi</allowlist>
+    <systematic type="spline"  binning="var1"  plotname="MaCCRES" tag="Cross-Section-I">GENIEReWeight_SBN_v1_multisigma_MaCCRES</systematic>
+    <systematic type="spline"  binning="var1"  plotname="MvCCRES" tag="Cross-Section-I">GENIEReWeight_SBN_v1_multisigma_MvCCRES</systematic>
+    <systematic type="spline"  binning="var1"  plotname="RPA_CCQE" tag="Cross-Section-I">GENIEReWeight_SBN_v1_multisigma_RPA_CCQE</systematic>
+    <systematic type="spline"  binning="var1"  plotname="CoulombCCQE" tag="Cross-Section-I">GENIEReWeight_SBN_v1_multisigma_CoulombCCQE</systematic>
+    <systematic type="spline"  binning="var1" plotname="NormCCMEC" tag="Cross-Section-I">GENIEReWeight_SBN_v1_multisigma_NormCCMEC</systematic>
+    <systematic type="spline"  binning="var1" plotname="FrCEx_N" tag="Cross-Section-II-FSI">GENIEReWeight_SBN_v1_multisigma_FrCEx_N</systematic>
+    <systematic type="spline"  binning="var1" plotname="FrCEx_pi" tag="Cross-Section-II-FSI">GENIEReWeight_SBN_v1_multisigma_FrCEx_pi</systematic>
 
-    <allowlist type="covariance" plotname="NCELVariationResponse" tag="Cross-Section-I">GENIEReWeight_SBN_v1_multisim_NCELVariationResponse</allowlist>
-    <allowlist type="covariance" plotname="NCRESVariationResponse" tag="Cross-Section-I">GENIEReWeight_SBN_v1_multisim_NCRESVariationResponse</allowlist>
-    <allowlist type="covariance" plotname="COHVariationResponse" tag="Cross-Section-I">GENIEReWeight_SBN_v1_multisim_COHVariationResponse</allowlist>
-    <allowlist type="covariance" plotname="DISBYVariationResponse" tag="Cross-Section-I">GENIEReWeight_SBN_v1_multisim_DISBYVariationResponse</allowlist>
-    <allowlist type="covariance" plotname="FSI_pi" tag="Cross-Section-II-FSI">GENIEReWeight_SBN_v1_multisim_FSI_pi_VariationResponse</allowlist>
-    <allowlist type="covariance" plotname="FSI_N" tag="Cross-Section-II-FSI">GENIEReWeight_SBN_v1_multisim_FSI_N_VariationResponse</allowlist>
-    <allowlist type="covariance" plotname="NormNCMEC" tag="Cross-Section-I">GENIEReWeight_SBN_v1_multisim_NormNCMEC</allowlist>
-    <allowlist type="covariance" plotname="NonRESBGvpCC1pi" tag="Cross-Section-III-NonRes">GENIEReWeight_SBN_v1_multisim_NonRESBGvpCC1pi</allowlist>
-    <allowlist type="covariance" plotname="NonRESBGvpCC2pi" tag="Cross-Section-III-NonRes">GENIEReWeight_SBN_v1_multisim_NonRESBGvpCC2pi</allowlist>
-    <allowlist type="covariance" plotname="NonRESBGvpNC1pi" tag="Cross-Section-III-NonRes">GENIEReWeight_SBN_v1_multisim_NonRESBGvpNC1pi</allowlist>
-    <allowlist type="covariance" plotname="NonRESBGvpNC2pi" tag="Cross-Section-III-NonRes">GENIEReWeight_SBN_v1_multisim_NonRESBGvpNC2pi</allowlist>
-    <allowlist type="covariance" plotname="NonRESBGvnCC1pi" tag="Cross-Section-III-NonRes">GENIEReWeight_SBN_v1_multisim_NonRESBGvnCC1pi</allowlist>
-    <allowlist type="covariance" plotname="NonRESBGvnCC2pi" tag="Cross-Section-III-NonRes">GENIEReWeight_SBN_v1_multisim_NonRESBGvnCC2pi</allowlist>
-    <allowlist type="covariance" plotname="NonRESBGvnNC1pi" tag="Cross-Section-III-NonRes">GENIEReWeight_SBN_v1_multisim_NonRESBGvnNC1pi</allowlist>
-    <allowlist type="covariance" plotname="NonRESBGvnNC2pi" tag="Cross-Section-III-NonRes">GENIEReWeight_SBN_v1_multisim_NonRESBGvnNC2pi</allowlist>
-    <allowlist type="covariance" plotname="NonRESBGvbarpCC1pi" tag="Cross-Section-III-NonRes">GENIEReWeight_SBN_v1_multisim_NonRESBGvbarpCC1pi</allowlist>
-    <allowlist type="covariance" plotname="NonRESBGvbarpCC2pi" tag="Cross-Section-III-NonRes">GENIEReWeight_SBN_v1_multisim_NonRESBGvbarpCC2pi</allowlist>
-    <allowlist type="covariance" plotname="NonRESBGvbarpNC1pi" tag="Cross-Section-III-NonRes">GENIEReWeight_SBN_v1_multisim_NonRESBGvbarpNC1pi</allowlist>
-    <allowlist type="covariance" plotname="NonRESBGvbarpNC2pi" tag="Cross-Section-III-NonRes">GENIEReWeight_SBN_v1_multisim_NonRESBGvbarpNC2pi</allowlist>
-    <allowlist type="covariance" plotname="NonRESBGvbarnCC1pi" tag="Cross-Section-III-NonRes">GENIEReWeight_SBN_v1_multisim_NonRESBGvbarnCC1pi</allowlist>
-    <allowlist type="covariance" plotname="NonRESBGvbarnCC2pi" tag="Cross-Section-III-NonRes">GENIEReWeight_SBN_v1_multisim_NonRESBGvbarnCC2pi</allowlist>
-    <allowlist type="covariance" plotname="NonRESBGvbarnNC1pi" tag="Cross-Section-III-NonRes">GENIEReWeight_SBN_v1_multisim_NonRESBGvbarnNC1pi</allowlist>
-    <allowlist type="covariance" plotname="NonRESBGvbarnNC2pi" tag="Cross-Section-III-NonRes">GENIEReWeight_SBN_v1_multisim_NonRESBGvbarnNC2pi</allowlist>
+    <systematic type="covariance" plotname="NCELVariationResponse" tag="Cross-Section-I">GENIEReWeight_SBN_v1_multisim_NCELVariationResponse</systematic>
+    <systematic type="covariance" plotname="NCRESVariationResponse" tag="Cross-Section-I">GENIEReWeight_SBN_v1_multisim_NCRESVariationResponse</systematic>
+    <systematic type="covariance" plotname="COHVariationResponse" tag="Cross-Section-I">GENIEReWeight_SBN_v1_multisim_COHVariationResponse</systematic>
+    <systematic type="covariance" plotname="DISBYVariationResponse" tag="Cross-Section-I">GENIEReWeight_SBN_v1_multisim_DISBYVariationResponse</systematic>
+    <systematic type="covariance" plotname="FSI_pi" tag="Cross-Section-II-FSI">GENIEReWeight_SBN_v1_multisim_FSI_pi_VariationResponse</systematic>
+    <systematic type="covariance" plotname="FSI_N" tag="Cross-Section-II-FSI">GENIEReWeight_SBN_v1_multisim_FSI_N_VariationResponse</systematic>
+    <systematic type="covariance" plotname="NormNCMEC" tag="Cross-Section-I">GENIEReWeight_SBN_v1_multisim_NormNCMEC</systematic>
+    <systematic type="covariance" plotname="NonRESBGvpCC1pi" tag="Cross-Section-III-NonRes">GENIEReWeight_SBN_v1_multisim_NonRESBGvpCC1pi</systematic>
+    <systematic type="covariance" plotname="NonRESBGvpCC2pi" tag="Cross-Section-III-NonRes">GENIEReWeight_SBN_v1_multisim_NonRESBGvpCC2pi</systematic>
+    <systematic type="covariance" plotname="NonRESBGvpNC1pi" tag="Cross-Section-III-NonRes">GENIEReWeight_SBN_v1_multisim_NonRESBGvpNC1pi</systematic>
+    <systematic type="covariance" plotname="NonRESBGvpNC2pi" tag="Cross-Section-III-NonRes">GENIEReWeight_SBN_v1_multisim_NonRESBGvpNC2pi</systematic>
+    <systematic type="covariance" plotname="NonRESBGvnCC1pi" tag="Cross-Section-III-NonRes">GENIEReWeight_SBN_v1_multisim_NonRESBGvnCC1pi</systematic>
+    <systematic type="covariance" plotname="NonRESBGvnCC2pi" tag="Cross-Section-III-NonRes">GENIEReWeight_SBN_v1_multisim_NonRESBGvnCC2pi</systematic>
+    <systematic type="covariance" plotname="NonRESBGvnNC1pi" tag="Cross-Section-III-NonRes">GENIEReWeight_SBN_v1_multisim_NonRESBGvnNC1pi</systematic>
+    <systematic type="covariance" plotname="NonRESBGvnNC2pi" tag="Cross-Section-III-NonRes">GENIEReWeight_SBN_v1_multisim_NonRESBGvnNC2pi</systematic>
+    <systematic type="covariance" plotname="NonRESBGvbarpCC1pi" tag="Cross-Section-III-NonRes">GENIEReWeight_SBN_v1_multisim_NonRESBGvbarpCC1pi</systematic>
+    <systematic type="covariance" plotname="NonRESBGvbarpCC2pi" tag="Cross-Section-III-NonRes">GENIEReWeight_SBN_v1_multisim_NonRESBGvbarpCC2pi</systematic>
+    <systematic type="covariance" plotname="NonRESBGvbarpNC1pi" tag="Cross-Section-III-NonRes">GENIEReWeight_SBN_v1_multisim_NonRESBGvbarpNC1pi</systematic>
+    <systematic type="covariance" plotname="NonRESBGvbarpNC2pi" tag="Cross-Section-III-NonRes">GENIEReWeight_SBN_v1_multisim_NonRESBGvbarpNC2pi</systematic>
+    <systematic type="covariance" plotname="NonRESBGvbarnCC1pi" tag="Cross-Section-III-NonRes">GENIEReWeight_SBN_v1_multisim_NonRESBGvbarnCC1pi</systematic>
+    <systematic type="covariance" plotname="NonRESBGvbarnCC2pi" tag="Cross-Section-III-NonRes">GENIEReWeight_SBN_v1_multisim_NonRESBGvbarnCC2pi</systematic>
+    <systematic type="covariance" plotname="NonRESBGvbarnNC1pi" tag="Cross-Section-III-NonRes">GENIEReWeight_SBN_v1_multisim_NonRESBGvbarnNC1pi</systematic>
+    <systematic type="covariance" plotname="NonRESBGvbarnNC2pi" tag="Cross-Section-III-NonRes">GENIEReWeight_SBN_v1_multisim_NonRESBGvbarnNC2pi</systematic>
     <!-- use all flux covariance systs from multisimTree-->
-    <allowlist type="covariance" tag="Flux">expskin_Flux</allowlist>  
-    <allowlist type="covariance" tag="Flux">horncurrent_Flux</allowlist>  
-    <allowlist type="covariance" tag="Flux">nucleoninexsec_Flux</allowlist>  
-    <allowlist type="covariance" tag="Flux">nucleonqexsec_Flux</allowlist>  
-    <allowlist type="covariance" tag="Flux">nucleontotxsec_Flux</allowlist>  
-    <allowlist type="covariance" tag="Flux">pioninexsec_Flux</allowlist>  
-    <allowlist type="covariance" tag="Flux">pionqexsec_Flux</allowlist>  
-    <allowlist type="covariance" tag="Flux">piontotxsec_Flux</allowlist>  
-    <allowlist type="covariance" tag="Flux">piplus_Flux</allowlist>  
-    <allowlist type="covariance" tag="Flux">piminus_Flux</allowlist>  
-    <allowlist type="covariance" tag="Flux">kplus_Flux</allowlist>  
-    <allowlist type="covariance" tag="Flux">kminus_Flux</allowlist>  
-    <allowlist type="covariance" tag="Flux">kzero_Flux</allowlist> 
-</variation_list>
+    <systematic type="covariance" tag="Flux">expskin_Flux</systematic>
+    <systematic type="covariance" tag="Flux">horncurrent_Flux</systematic>
+    <systematic type="covariance" tag="Flux">nucleoninexsec_Flux</systematic>
+    <systematic type="covariance" tag="Flux">nucleonqexsec_Flux</systematic>
+    <systematic type="covariance" tag="Flux">nucleontotxsec_Flux</systematic>
+    <systematic type="covariance" tag="Flux">pioninexsec_Flux</systematic>
+    <systematic type="covariance" tag="Flux">pionqexsec_Flux</systematic>
+    <systematic type="covariance" tag="Flux">piontotxsec_Flux</systematic>
+    <systematic type="covariance" tag="Flux">piplus_Flux</systematic>
+    <systematic type="covariance" tag="Flux">piminus_Flux</systematic>
+    <systematic type="covariance" tag="Flux">kplus_Flux</systematic>
+    <systematic type="covariance" tag="Flux">kminus_Flux</systematic>
+    <systematic type="covariance" tag="Flux">kzero_Flux</systematic>
+</systematics>
 
 

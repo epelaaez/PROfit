@@ -56,7 +56,8 @@ namespace PROfit {
                     }
                     proposal.tune_mode = false; 
                     for(size_t i = 0; i < steps; i++) {
-                        if(step() && action) (*action)(current);
+                        step();
+                        if(action) (*action)(current);
                     }
                 }
 

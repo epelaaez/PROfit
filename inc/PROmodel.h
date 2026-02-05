@@ -772,7 +772,7 @@ public:
         pretty_param_names = {"#Deltam^{2}", "sin^{2}2#theta_{ee}", "sin^{2}#theta_{24}"}; 
         pretty_param_units = {"eV^{2}", "",""};
         is_log10 = {true, true, true};
-
+        build_param_index();
         lb = Eigen::VectorXf(3);
         ub = Eigen::VectorXf(3);
         default_val = Eigen::VectorXf(3);
