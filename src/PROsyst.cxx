@@ -586,97 +586,80 @@ namespace PROfit {
         ratios.reserve(syst.p_multi_spec.size());
         float cv_integral = syst.p_cv->Spec().sum();
 
-
         bool found0 = false;
+        int knob0_index = -1;  // Index of knobval=0 in ratios vector
+
         std::vector<float> knobvals;
         for (size_t i = 0; i < syst.p_multi_spec.size(); ++i) {
             if (syst.knobval[i] > 0 && !found0) {
                 ratios.push_back(*syst.p_cv / *syst.p_cv);
                 knobvals.push_back(0);
+                knob0_index = ratios.size() - 1;
                 found0 = true;
             }
-            if (syst.knobval[i] == 0) found0 = true;
+            if (syst.knobval[i] == 0) {
+                found0 = true;
+                knob0_index = ratios.size();  // Will be set after push_back below
+            }
 
-    bool found0 = false;
-    int knob0_index = -1;  // Index of knobval=0 in ratios vector
-    std::vector<float> knobvals;
-    for (size_t i = 0; i < syst.p_multi_spec.size(); ++i) {
-        if (syst.knobval[i] > 0 && !found0) {
+            float mod = shape_only ? cv_integral / syst.p_multi_spec[i]->Spec().sum() : 1.0;
+            /*
+               if (mod < 0) {
+               log<LOG_ERROR>(L"%1% || Spline shift weight is negative with value %2% for systematic %3%") % __func__ % mod % syst.systname.c_str();
+               log<LOG_ERROR>(L"Terminating.");
+               exit(EXIT_FAILURE);
+               }
+               */
+            ratios.push_back(((*syst.p_multi_spec[i]) * mod) / *syst.p_cv);
+            knobvals.push_back(syst.knobval[i]);
+        }
+        if (!found0) {
             ratios.push_back(*syst.p_cv / *syst.p_cv);
             knobvals.push_back(0);
             knob0_index = ratios.size() - 1;
-            found0 = true;
-        }
-        if (syst.knobval[i] == 0) {
-            found0 = true;
-            knob0_index = ratios.size();  // Will be set after push_back below
         }
 
-        float mod = shape_only ? cv_integral / syst.p_multi_spec[i]->Spec().sum() : 1.0;
-        /*
-        if (mod < 0) {
-            log<LOG_ERROR>(L"%1% || Spline shift weight is negative with value %2% for systematic %3%") % __func__ % mod % syst.systname.c_str();
+        // If force_0_cv is set, normalize all ratios by the ratio at knob=0
+        // This ensures that at shift=0, the spline returns exactly 1.0 (no change to CV)
+        if (syst.force_0_cv && knob0_index >= 0) {
+            log<LOG_INFO>(L"%1% || Applying force_0_cv normalization for systematic %2%") % __func__ % syst.systname.c_str();
+            // IMPORTANT: Make a copy, not a reference! Otherwise we modify the divisor during the loop.
+            PROspec ratio_at_0 = ratios[knob0_index];
+            for (size_t i = 0; i < ratios.size(); ++i) {
+                ratios[i] = ratios[i] / ratio_at_0;
+            }
+        }
+
+        int nbins = syst.p_cv->GetNbins();
+        Spline spline;
+        spline.bins = nbins;
+        spline.segments_per_bin = knobvals.size(); 
+
+        if(syst.knobval.size() != syst.p_multi_spec.size()){
+            log<LOG_ERROR>(L"%1% || number of knobvals specified (%2%) does not match number of weight universes in file (%3%) for systematic %4%!") % __func__ % syst.knobval.size() % syst.p_multi_spec.size() % syst.systname.c_str();
             log<LOG_ERROR>(L"Terminating.");
             exit(EXIT_FAILURE);
         }
-        */
-        ratios.push_back(((*syst.p_multi_spec[i]) * mod) / *syst.p_cv);
-        knobvals.push_back(syst.knobval[i]);
-    }
-    if (!found0) {
-        ratios.push_back(*syst.p_cv / *syst.p_cv);
-        knobvals.push_back(0);
-        knob0_index = ratios.size() - 1;
-    }
 
-    // If force_0_cv is set, normalize all ratios by the ratio at knob=0
-    // This ensures that at shift=0, the spline returns exactly 1.0 (no change to CV)
-    if (syst.force_0_cv && knob0_index >= 0) {
-        log<LOG_INFO>(L"%1% || Applying force_0_cv normalization for systematic %2%") % __func__ % syst.systname.c_str();
-        // IMPORTANT: Make a copy, not a reference! Otherwise we modify the divisor during the loop.
-        PROspec ratio_at_0 = ratios[knob0_index];
-        for (size_t i = 0; i < ratios.size(); ++i) {
-            ratios[i] = ratios[i] / ratio_at_0;
-        }
-    }
+        std::vector<SplineSegment> all_segments;
 
-    int nbins = syst.p_cv->GetNbins();
-    Spline spline;
-    spline.bins = nbins;
-    spline.segments_per_bin = knobvals.size(); 
+        for (size_t i = 0; i < nbins; ++i) {
+            std::vector<SplineSegment> bin_segments;
 
-    if(syst.knobval.size() != syst.p_multi_spec.size()){
-        log<LOG_ERROR>(L"%1% || number of knobvals specified (%2%) does not match number of weight universes in file (%3%) for systematic %4%!") % __func__ % syst.knobval.size() % syst.p_multi_spec.size() % syst.systname.c_str();
-        log<LOG_ERROR>(L"Terminating.");
-        exit(EXIT_FAILURE);
-    }
-
-    std::vector<SplineSegment> all_segments;
-
-    for (size_t i = 0; i < nbins; ++i) {
-        std::vector<SplineSegment> bin_segments;
-
-    // This comment is copy-pasted from CAFAna:
-    // This is cubic interpolation. For each adjacent set of four points we
-    // determine coefficients for a cubic which will be the curve between the
-    // center two. We constrain the function to match the two center points
-    // and to have the right mean gradient at them. This causes this patch to
-    // match smoothly with the next one along. The resulting function is
-    // continuous and first and second differentiable. At the ends of the
-    // range we fit a quadratic instead with only one constraint on the
-    // slope. The coordinate conventions are that point y1 sits at x=0 and y2
-    // at x=1. The matrices are simply the inverses of writing out the
-    // constraints expressed above.
+            // This comment is copy-pasted from CAFAna:
+            // This is cubic interpolation. For each adjacent set of four points we
+            // determine coefficients for a cubic which will be the curve between the
+            // center two. We constrain the function to match the two center points
+            // and to have the right mean gradient at them. This causes this patch to
+            // match smoothly with the next one along. The resulting function is
+            // continuous and first and second differentiable. At the ends of the
+            // range we fit a quadratic instead with only one constraint on the
+            // slope. The coordinate conventions are that point y1 sits at x=0 and y2
+            // at x=1. The matrices are simply the inverses of writing out the
+            // constraints expressed above.
 
 
-        if (ratios.size() < 3) {
-            const float y1 = ratios[0].GetBinContent(i);
-            const float y2 = ratios[1].GetBinContent(i);
-            const float slope = (y2 - y1) / (knobvals[1] - knobvals[0]);
-            bin_segments.push_back(SplineSegment{(float)(-knobvals[1]), {y2, -slope, 0, 0}});
-            bin_segments.push_back(SplineSegment{(float)knobvals[0], {slope * (float)knobvals[0] + y1, slope, 0, 0}});
-        } else {
-            {
+            if (ratios.size() < 3) {
                 const float y1 = ratios[0].GetBinContent(i);
                 const float y2 = ratios[1].GetBinContent(i);
                 const float slope = (y2 - y1) / (knobvals[1] - knobvals[0]);
