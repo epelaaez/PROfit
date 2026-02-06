@@ -1035,7 +1035,7 @@ int main(int argc, char* argv[])
 
         if(!only_brazil) {
             if(statonly)
-                surface.FillSurfaceStat(config, scanFitConfig, final_output_tag+"_statonly_surface.txt", CVParams);
+                surface.FillSurfaceStat(config, scanFitConfig, final_output_tag+"_statonly_surface.txt", CVParams, dseed(myseed.global_rng));
             else
                 surface.FillSurface(scanFitConfig, final_output_tag+"_surface.txt",myseed,nthread);
         }
@@ -1137,7 +1137,7 @@ int main(int argc, char* argv[])
                         nbinsy, logy ? PROsurf::LogAxis : PROsurf::LinAxis, ylo, yhi);
 
                 if(statonly)
-                    brazil_band_surfaces.back().FillSurfaceStat(config, scanFitConfig, "", CVParams);
+                    brazil_band_surfaces.back().FillSurfaceStat(config, scanFitConfig, "", CVParams, dseed(myseed.global_rng));
                 else
                     brazil_band_surfaces.back().FillSurface(scanFitConfig, "", myseed, nthread);
 

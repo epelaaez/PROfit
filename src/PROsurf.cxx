@@ -120,7 +120,7 @@ PROsurf::PROsurf(PROmetric &metric,  size_t x_idx, size_t y_idx, size_t nbinsx, 
 
 }
 
-void PROsurf::FillSurfaceStat(const PROconfig &config, const PROfitterConfig &fitconfig, std::string filename, const Eigen::VectorXf &cv_params) {
+void PROsurf::FillSurfaceStat(const PROconfig &config, const PROfitterConfig &fitconfig, std::string filename, const Eigen::VectorXf &cv_params, uint32_t seed) {
     std::ofstream chi_file;
     if(!filename.empty()){
         chi_file.open(filename);
@@ -136,9 +136,6 @@ void PROsurf::FillSurfaceStat(const PROconfig &config, const PROfitterConfig &fi
         chi_file << "\n";
     }
 
-    // I think this will be needed for stat fits with more than 2 physics parameters
-    (void)fitconfig;
-
     PROmetric *local_metric = metric.Clone();
     PROsyst newsyst = local_metric->GetSysts();
     newsyst.fractional_covariance = Eigen::MatrixXf::Constant(config.m_num_variable_bins_total[config.i_prime], config.m_num_variable_bins_total[config.i_prime], 0);
@@ -148,15 +145,42 @@ void PROsurf::FillSurfaceStat(const PROconfig &config, const PROfitterConfig &fi
     float min_chi = 1e9;
     Eigen::VectorXf dummy_grad = cv_params;
     Eigen::VectorXf params = cv_params;
+    Eigen::VectorXf last;
 
-    for(size_t i = 0; i < nbinsx; i++) {
-        for(size_t j = 0; j < nbinsy; j++) {
-            // TODO: Make this work for models with more than 2 parameters
-            params(0) = (float)edges_y(j);
-            params(1) = (float)edges_x(i);
-            float fx = (*local_metric)(params, dummy_grad, false);
-            if(fx < min_chi) min_chi = fx;
-            surface(i, j) = fx;
+    if(local_metric->GetModel().nparams - 2 == 0) {
+        for(size_t i = 0; i < nbinsx; i++) {
+            for(size_t j = 0; j < nbinsy; j++) {
+                params(0) = (float)edges_y(j);
+                params(1) = (float)edges_x(i);
+                float fx = (*local_metric)(params, dummy_grad, false);
+                if(fx < min_chi) min_chi = fx;
+                surface(i, j) = fx;
+            }
+        }
+    } else {
+        Eigen::VectorXf lb(params.size());
+        lb << local_metric->GetModel().lb, Eigen::VectorXf::Map(local_metric->GetSysts().spline_lo.data(), local_metric->GetSysts().spline_lo.size());
+        Eigen::VectorXf ub(params.size());
+        ub << local_metric->GetModel().ub, Eigen::VectorXf::Map(local_metric->GetSysts().spline_hi.data(), local_metric->GetSysts().spline_hi.size());
+
+        for(size_t i = 0; i < nbinsx; i++) {
+            for(size_t j = 0; j < nbinsy; j++) {
+                lb(0) = (float)edges_y(j);
+                ub(0) = (float)edges_y(j);
+                lb(1) = (float)edges_x(i);
+                ub(1) = (float)edges_x(i);
+                local_metric->setBounds(lb,ub);
+                PROfitter fitter(ub, lb, fitconfig, seed+i+nbinsx*j);
+                float fx;
+                if(i != 0 || j != 0){
+                    fx = fitter.Fit(*local_metric, last);
+                }else{
+                    fx = fitter.Fit(*local_metric);
+                }
+                last = fitter.best_fit;
+                if(fx < min_chi) min_chi = fx;
+                surface(i, j) = fx;
+            }
         }
     }
     for(size_t i = 0; i < nbinsx; ++i) {
