@@ -451,7 +451,20 @@ namespace PROfit{
 
             /* Calculate hash of unique properties of XML config for PROpeller */
             uint32_t CalcHash() const;
-                    
+
+            //---- Embedded data support ----
+            // Whether a <data> section was found in the XML
+            bool m_has_data_section = false;
+            // Self-contained XML string for building a data-only PROconfig
+            std::string m_data_xml_string;
+            // Serialized <bins> XML for each channel (used to reconstruct data XML)
+            std::vector<std::string> m_channel_bins_xml_strings;
+
+            /* Build a data-only PROconfig from the embedded <data> section.
+             * Returns a PROconfig with one "data" subchannel per channel
+             * and MCFiles from the <data> block. */
+            PROconfig BuildDataConfig() const;
+
 
     };
 }
