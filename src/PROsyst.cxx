@@ -286,68 +286,6 @@ namespace PROfit {
         return frac_covar_matrix;
     }
 
-    #if 0
-    Eigen::MatrixXf PROsyst::spline2covDirect(int spline_idx, const PROconfig &config, const PROpeller &prop, int other_index, float prior, float center) const {
-        // Convert a spline to fractional covariance by generating random Gaussian throws
-        // and evaluating the spline shift for each bin. If the spline binning differs
-        // from other_index, map the effect via variable_hist_storage, matching FillSpectra.
-        //
-        // Key insight: frac_cov(i,j) = mean[(1 - shift_i) * (1 - shift_j)]
-        // where shift_i is the effective spline shift in the target binning.
-
-        const int nthrows = 500;
-        std::mt19937 rng{42};  // Fixed seed for reproducibility
-        std::normal_distribution<float> dist(center, prior);
-
-        const int target_bins = static_cast<int>(config.m_num_variable_bins_total[other_index]);
-        const int spline_binning = spline_binnings[spline_idx];
-        const int spline_bins = static_cast<int>(config.m_num_variable_bins_total[spline_binning]);
-
-        Eigen::MatrixXf mat = Eigen::MatrixXf::Zero(target_bins, target_bins);
-        Eigen::VectorXf mean_delta = Eigen::VectorXf::Zero(target_bins);
-
-        for(int t = 0; t < nthrows; ++t){
-            float theta = dist(rng);
-            Eigen::VectorXf delta = Eigen::VectorXf::Zero(target_bins);
-
-            if(spline_binning == other_index) {
-                for(int b = 0; b < target_bins; ++b){
-                    float shift = GetSplineShift(spline_idx, theta, b);
-                    delta(b) = 1.0f - shift;  // fractional deviation from CV
-                }
-            } else {
-                Eigen::VectorXf spline_shifts(spline_bins);
-                for(int b = 0; b < spline_bins; ++b){
-                    spline_shifts(b) = GetSplineShift(spline_idx, theta, b);
-                }
-
-                const auto& hist = prop.variable_hist_storage(spline_binning, other_index);
-                Eigen::VectorXf weighted_sum = hist.transpose() * spline_shifts;
-                Eigen::VectorXf unweighted_sum = hist.colwise().sum().transpose();
-
-                Eigen::VectorXf ratio = Eigen::VectorXf::Ones(target_bins);
-                for(int k = 0; k < target_bins; ++k) {
-                    if(unweighted_sum(k) > 0) {
-                        ratio(k) = weighted_sum(k) / unweighted_sum(k);
-                    }
-                }
-                delta = Eigen::VectorXf::Ones(target_bins) - ratio;
-            }
-
-            mean_delta += delta;
-            mat += delta * delta.transpose();
-        }
-        mat /= nthrows;
-        mean_delta /= static_cast<float>(nthrows);
-
-        // Diagnostics: if mean_delta is non-zero, covariance includes a mean-bias term
-        log<LOG_INFO>(L"%1% || spline2covDirect mean_delta diagnostics: mean=%2%, max_abs=%3%")
-            % __func__ % mean_delta.mean() % mean_delta.cwiseAbs().maxCoeff();
-
-        PROsyst::toFiniteMatrix(mat);
-        return mat;
-    }
-    #endif
 
     Eigen::MatrixXf PROsyst::SumMatrices() const{
 
