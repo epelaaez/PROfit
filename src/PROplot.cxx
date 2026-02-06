@@ -164,9 +164,7 @@ namespace PROfit{
                         auto fn = [coeffs](float shift) {
                             return coeffs[0] + coeffs[1] * shift + coeffs[2] * shift * shift + coeffs[3] * shift * shift * shift;
                         };
-                        // Only plot knot points within the original knobval range (skip mirrored points for the two-universe case)
-                        if (lo >= systs.spline_lo[i])
-                            fixed_pts->SetPoint(fixed_pts->GetN(), lo, fn(0));
+                        fixed_pts->SetPoint(fixed_pts->GetN(), lo, fn(0));
                         if (k == nsegs - 1)
                             fixed_pts->SetPoint(fixed_pts->GetN(), hi, fn(hi - lo));
                         float width = (hi - lo) / 20.0f;
@@ -1408,15 +1406,16 @@ namespace PROfit{
                         }
 
                         TLegend* leg = new TLegend(0.11, 0.6, 0.89, 0.89);
-                        //TLegend* leg = new TLegend(0.11, 0.79, 0.89, 0.88);
                         leg->SetNColumns(3);
-                        //leg->SetHeader(tag.c_str(), "C");  // Center-aligned header
 
 
                         TH1F* hsum = new TH1F( ("Sum_"+tag+"_"+std::to_string(global_channel_index)).c_str(), tag.c_str(), bin_edges.size()-1, bin_edges.data());
                         hsum->Reset();
                         std::vector<TH1F*> hvec;
-                        int i =0;
+                        int i = 0;
+			size_t channel_nbins_y = 1;// start with assumption of 1d
+                        size_t channel_nbins_x = config.m_channel_variable_bins[channel][other_index].NBinsAlong(0);
+
                         for(const auto & systname:vec){
 
                             Eigen::MatrixXf frac_covariance = allsplinesyst.GrabMatrix(systname);
@@ -1424,9 +1423,7 @@ namespace PROfit{
                             Eigen::MatrixXf collapsed_full_covariance = CollapseMatrix(config, full_covariance);
                             Eigen::MatrixXf collapsed_frac_covariance = collapsed_diag_inv*collapsed_full_covariance*collapsed_diag_inv;
 
-
-                            //submatix ffractional
-                            Eigen::MatrixXf channel_cov = collapsed_frac_covariance(channel_bins, channel_bins);
+                            Eigen::MatrixXf channel_cov = collapsed_full_covariance(channel_bins, channel_bins);
 
                             // Diagnostic: Check channel_cov diagonal for bad values
                             bool cov_has_nan = channel_cov.diagonal().array().isNaN().any();
@@ -1452,12 +1449,28 @@ namespace PROfit{
                             int color_idx = i % colors.size();
                             int style_idx = (i / 4) % line_styles.size();  
                             i++;
-
                             TH1F* h = new TH1F((tag+"_Channel_"+std::to_string(global_channel_index)+"_"+std::to_string(i)).c_str(), tag.c_str(), bin_edges.size()-1, bin_edges.data());
 
-                            for (size_t i = 0; i < nbins; ++i) {
-                                h->SetBinContent(i+1, sqrt(channel_cov(i,i)));
-                                hsum->SetBinContent(i+1, hsum->GetBinContent(i+1)+channel_cov(i,i));
+                            if(config.m_channel_variable_dims[channel][other_index] == 2)  channel_nbins_y = config.m_channel_variable_bins[channel][other_index].NBinsAlong(1);
+
+			    Eigen::VectorXf VarVec = Eigen::VectorXf::Zero(channel_nbins_x);
+			    Eigen::VectorXf diag1d = Eigen::VectorXf::Zero(channel_nbins_x);
+			    Eigen::MatrixXf channel_diag = collapsed_diag(channel_bins, channel_bins);
+
+                            for(int i = 0; i < channel_nbins_x; i++){
+			        for(int j = channel_nbins_y*i; j < channel_nbins_y*(i+1); j++){
+				    diag1d(i) += channel_diag(j, j);
+			            for(int k = channel_nbins_y*i; k < channel_nbins_y*(i+1); k++){
+			                VarVec(i) += channel_cov(j, k);
+			            }
+			        }
+			    }
+
+			    float inv_diag1d;
+                            for (size_t i = 0; i < channel_nbins_x; ++i) {
+				inv_diag1d = 1/diag1d(i);
+                                h->SetBinContent(i+1, sqrt(inv_diag1d*VarVec(i)*inv_diag1d));
+                                hsum->SetBinContent(i+1, hsum->GetBinContent(i+1)+inv_diag1d*VarVec(i)*inv_diag1d);
                             }
 
                             const std::string &plotname = config.m_mcgen_variation_plotname_map.at(systname);
@@ -1467,7 +1480,7 @@ namespace PROfit{
                             hvec.push_back(h);
 
                         }//end syst
-                        for (size_t i = 0; i < nbins; ++i) {
+                        for (size_t i = 0; i < channel_nbins_x; ++i) {
                             hsum->SetBinContent(i+1, sqrt(hsum->GetBinContent(i+1)));
                         }
                         leg->AddEntry(hsum,"Sum","l");
