@@ -161,10 +161,12 @@ void PROsurf::FillSurfaceStat(const PROconfig &config, const PROfitterConfig &fi
             }
         }
     } else {
-        Eigen::VectorXf lb(params.size());
-        lb << local_metric->GetModel().lb, Eigen::VectorXf::Map(local_metric->GetSysts().spline_lo.data(), local_metric->GetSysts().spline_lo.size());
-        Eigen::VectorXf ub(params.size());
-        ub << local_metric->GetModel().ub, Eigen::VectorXf::Map(local_metric->GetSysts().spline_hi.data(), local_metric->GetSysts().spline_hi.size());
+        Eigen::VectorXf lb = params;
+        for(size_t i = 0; i < local_metric->GetModel().nparams; ++i)
+            lb(i) = local_metric->GetModel().lb(i);
+        Eigen::VectorXf ub = params;
+        for(size_t i = 0; i < local_metric->GetModel().nparams; ++i)
+            ub(i) = local_metric->GetModel().ub(i);
 
         for(size_t i = 0; i < nbinsx; i++) {
             for(size_t j = 0; j < nbinsy; j++) {
