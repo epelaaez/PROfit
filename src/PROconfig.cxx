@@ -4,6 +4,9 @@
 #include <cstdlib>
 #include <ctype.h>
 #include <numeric>
+#include <sstream>
+#include <fstream>
+#include <filesystem>
 #include "TTree.h"
 #include "TTreeFormula.h"
 #include "TFriendElement.h"
@@ -131,7 +134,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
     //Temp usage
     i_prime=0;
-    std::vector<std::string> allowed_elements = {"mode", "detector", "channel", "MCFile","WeightMaps","model","variation_list","systematics","correlation","varied_spectrum", "ShapeOnlyUncertainty"   };
+    std::vector<std::string> allowed_elements = {"mode", "detector", "channel", "MCFile","WeightMaps","model","variation_list","systematics","correlation","varied_spectrum", "ShapeOnlyUncertainty", "data", "plotpot"   };
     for (tinyxml2::XMLElement* elem = doc.FirstChildElement(); elem; elem = elem->NextSiblingElement()) {
         std::string name = elem->Name();
         if (std::find(allowed_elements.begin(), allowed_elements.end(), name) == allowed_elements.end()) {
@@ -531,6 +534,30 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 }
 
                 pSubChan = pSubChan->NextSiblingElement("subchannel");
+            }
+
+            // Serialize bins XML for this channel (used to build data config if <data> section exists)
+            {
+                std::string channelBinsXml;
+                tinyxml2::XMLElement* pBinSer = pChan->FirstChildElement("bins");
+                while(pBinSer) {
+                    tinyxml2::XMLPrinter printer;
+                    pBinSer->Accept(&printer);
+                    channelBinsXml += "\t";
+                    channelBinsXml += printer.CStr();
+                    channelBinsXml += "\n";
+                    pBinSer = pBinSer->NextSiblingElement("bins");
+                }
+                pBinSer = pChan->FirstChildElement("bins2D");
+                while(pBinSer) {
+                    tinyxml2::XMLPrinter printer;
+                    pBinSer->Accept(&printer);
+                    channelBinsXml += "\t";
+                    channelBinsXml += printer.CStr();
+                    channelBinsXml += "\n";
+                    pBinSer = pBinSer->NextSiblingElement("bins2D");
+                }
+                m_channel_bins_xml_strings.push_back(channelBinsXml);
             }
 
             nchan++;
@@ -1303,6 +1330,55 @@ int PROconfig::LoadFromXML(const std::string &filename){
         log<LOG_INFO>(L"%1% || variable %2% num_bins_total_collapsed: %3%") % __func__ % io % m_num_variable_bins_total_collapsed[io];
     }
 
+    // Parse embedded <data> section if present
+    tinyxml2::XMLElement* pData = doc.FirstChildElement("data");
+    if(pData) {
+        m_has_data_section = true;
+        log<LOG_INFO>(L"%1% || Found embedded <data> section in XML, building data config string...") % __func__;
+
+        // Build a self-contained data XML string
+        std::ostringstream dataXml;
+        dataXml << "<?xml version=\"1.0\" ?>\n\n";
+
+        // Mode(s)
+        for(size_t im = 0; im < m_num_modes; im++) {
+            dataXml << "<mode name=\"" << m_mode_names[im] << "\" />\n";
+        }
+        dataXml << "\n";
+
+        // Detector(s) — format pot in scientific notation to preserve precision
+        for(size_t id = 0; id < m_num_detectors; id++) {
+            dataXml << "<detector name=\"" << m_detector_names[id] << "\" pot=\"";
+            dataXml << std::scientific << m_det_pot[id] << "\" />\n";
+        }
+        dataXml << "\n";
+
+        // Channels with a single "data" subchannel, reusing the original bins XML
+        for(size_t ic = 0; ic < m_num_channels; ic++) {
+            dataXml << "<channel name=\"" << m_channel_names[ic] << "\"";
+            if(!m_channel_plotnames[ic].empty()) {
+                dataXml << " plotname=\"" << m_channel_plotnames[ic] << "\"";
+            }
+            dataXml << ">\n";
+            dataXml << m_channel_bins_xml_strings[ic];
+            dataXml << "\t<subchannel name=\"data\" plotname=\"Data\" color=\"#99CCFF\"/>\n";
+            dataXml << "</channel>\n";
+        }
+        dataXml << "\n";
+
+        // Serialize MCFile elements from inside the <data> section
+        tinyxml2::XMLElement* pDataMC = pData->FirstChildElement("MCFile");
+        while(pDataMC) {
+            tinyxml2::XMLPrinter printer;
+            pDataMC->Accept(&printer);
+            dataXml << printer.CStr() << "\n";
+            pDataMC = pDataMC->NextSiblingElement("MCFile");
+        }
+
+        m_data_xml_string = dataXml.str();
+        log<LOG_INFO>(L"%1% || Data config XML string built successfully (%2% bytes)") % __func__ % m_data_xml_string.size();
+    }
+
     log<LOG_INFO>(L"%1% || Done reading the xmls") % __func__;
     return 0;
 }
@@ -1882,6 +1958,28 @@ uint32_t PROconfig::CalcHash() const{
     log<LOG_INFO>(L"%1% || MurmurHash output hash %2% ") % __func__ % hash;
 
     return hash;
+}
+
+PROconfig PROconfig::BuildDataConfig() const {
+    if(!m_has_data_section) {
+        log<LOG_ERROR>(L"%1% || BuildDataConfig called but no <data> section was found in XML!") % __func__;
+        throw std::runtime_error("No <data> section in XML");
+    }
+
+    // Write the data XML string to a temporary file and load it as a PROconfig
+    std::string tmpdir = std::filesystem::temp_directory_path().string();
+    std::string tmpfile = tmpdir + "/profit_data_config_tmp_" + std::to_string(getpid()) + ".xml";
+
+    {
+        std::ofstream ofs(tmpfile);
+        ofs << m_data_xml_string;
+    }
+
+    log<LOG_INFO>(L"%1% || Loading data config from temporary XML: %2%") % __func__ % tmpfile.c_str();
+    PROconfig dataconfig(tmpfile);
+    std::filesystem::remove(tmpfile);
+
+    return dataconfig;
 }
 
 ROOTFormula::ROOTFormula(const std::string &name, const std::string &formula, TTree *t) {

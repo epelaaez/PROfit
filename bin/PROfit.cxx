@@ -416,8 +416,18 @@ int main(int argc, char* argv[])
 
     //We will load all other variables too, but many are truth level so data won't be as common.
     std::vector<PROdata> variable_data;
-    if(!data_xml.empty()){
-        PROconfig dataconfig(data_xml);
+    // Support data from either --data flag or embedded <data> section in the XML
+    bool have_data = !data_xml.empty() || config.m_has_data_section;
+    if(have_data){
+        PROconfig dataconfig;
+        if(!data_xml.empty()){
+            // Explicit --data flag takes precedence
+            dataconfig = PROconfig(data_xml);
+        } else {
+            // Use embedded <data> section from the unified XML
+            log<LOG_INFO>(L"%1% || Using embedded <data> section from XML for data config") % __func__;
+            dataconfig = config.BuildDataConfig();
+        }
         std::string dataBinName = analysis_tag+"_data.bin";
         for(size_t i = 0; i < dataconfig.m_num_channels; ++i) {
             size_t nsubch = dataconfig.m_num_subchannels[i];
