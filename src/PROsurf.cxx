@@ -147,11 +147,14 @@ void PROsurf::FillSurfaceStat(const PROconfig &config, const PROfitterConfig &fi
     Eigen::VectorXf params = cv_params;
     Eigen::VectorXf last;
 
+    // TODO: If x_idx or y_idx refers to a systematic I think this may or may not be what we want
+    // TODO: If one of the model parameters is fixed (using --fix) this will not fix that parameter (Will the regular surface fit fix that parameter? Or fix a systematic we wanted to fix?)
+
     if(local_metric->GetModel().nparams - 2 == 0) {
         for(size_t i = 0; i < nbinsx; i++) {
             for(size_t j = 0; j < nbinsy; j++) {
-                params(0) = (float)edges_y(j);
-                params(1) = (float)edges_x(i);
+                params(y_idx) = (float)edges_y(j);
+                params(x_idx) = (float)edges_x(i);
                 float fx = (*local_metric)(params, dummy_grad, false);
                 if(fx < min_chi) min_chi = fx;
                 surface(i, j) = fx;
@@ -165,10 +168,10 @@ void PROsurf::FillSurfaceStat(const PROconfig &config, const PROfitterConfig &fi
 
         for(size_t i = 0; i < nbinsx; i++) {
             for(size_t j = 0; j < nbinsy; j++) {
-                lb(0) = (float)edges_y(j);
-                ub(0) = (float)edges_y(j);
-                lb(1) = (float)edges_x(i);
-                ub(1) = (float)edges_x(i);
+                lb(y_idx) = (float)edges_y(j);
+                ub(y_idx) = (float)edges_y(j);
+                lb(x_idx) = (float)edges_x(i);
+                ub(x_idx) = (float)edges_x(i);
                 local_metric->setBounds(lb,ub);
                 PROfitter fitter(ub, lb, fitconfig, seed+i+nbinsx*j);
                 float fx;
