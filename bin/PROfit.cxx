@@ -1870,18 +1870,31 @@ int main(int argc, char* argv[])
         // TODO: How do we input binnings for these plots in a nice way?
         // TODO: Is it better to write out the chain to a cvs/root file and plot externally?
         twod.push_back(TH2D("two", ";sin^{2}2#theta_{#mu#mu};#Deltam^{2}_{41} [eV^{2}];MCMC Points",
-                             60, -2, 0, 60, -1, 2));
-        oned.push_back(TH1D("one1", ";sin^{2}2#theta_{#mu#mu};Posterior PDF", 60, -2, 0));
-        oned.push_back(TH1D("one2", ";#Deltam^{2}_{41} [eV^{2}];Posterior PDF", 60, -1, 2));
+                             200, -3, 0, 200, -2, 2));
+        oned.push_back(TH1D("one1", ";sin^{2}2#theta_{#mu#mu};Posterior PDF", 200, -3, 0));
+        oned.push_back(TH1D("one2", ";#Deltam^{2}_{41} [eV^{2}];Posterior PDF", 200, -2, 2));
         //for(auto &fut : chains) {
         //    std::vector<Eigen::VectorXf> chain = fut.get();
+        TFile fout("mcmc_chains.root", "RECREATE");
+        size_t chain_counter = 0;
         for(const auto &tchains : chains) {
             for(const auto &chain : tchains) {
+                chain_counter++;
+                std::string name = "chain"+std::to_string(chain_counter);
+                TTree tree(name.c_str(), name.c_str());
+                Eigen::VectorXf v = Eigen::VectorXf::Zero(nparams);
+                for(size_t i = 0; i < metric->GetModel().nparams; ++i)
+                    tree.Branch(metric->GetModel().param_names[i].c_str(), &v(i));
+                for(size_t i = metric->GetModel().nparams; i < nparams; ++i)
+                    tree.Branch(metric->GetSysts().spline_names[i - metric->GetModel().nparams].c_str(), &v(i));
                 for(const auto &p : chain) {
                     twod[0].Fill(p(1), p(0));
                     oned[0].Fill(p(1));
                     oned[1].Fill(p(0));
+                    v = p;
+                    tree.Fill();
                 }
+                tree.Write();
             }
         }
         TCanvas c;
@@ -2041,11 +2054,11 @@ int main(int argc, char* argv[])
 //std::vector<Eigen::VectorXf> mcmc_worker(Eigen::VectorXf initial, PROmetric *metric, uint32_t seed) {
 void mcmc_worker(std::vector<std::vector<Eigen::VectorXf>> &chains, Eigen::VectorXf initial, PROmetric *metric, uint32_t seed, size_t nchains) {
     //std::vector<Eigen::VectorXf> chain;
+    std::uniform_int_distribution<uint32_t> dseed(0, std::numeric_limits<uint32_t>::max());
+    std::mt19937 rng(seed);
     for(size_t i = 0; i < nchains; ++i) {
         chains.emplace_back();
         std::vector<Eigen::VectorXf> &chain = chains.back();
-        std::uniform_int_distribution<uint32_t> dseed(0, std::numeric_limits<uint32_t>::max());
-        std::mt19937 rng(seed);
         auto action = [&chain](const Eigen::VectorXf &pt) { chain.push_back(pt); };
         simple_target target{*metric};
         adaptive_proposal proposal(*metric, dseed(rng));

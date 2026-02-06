@@ -61,7 +61,8 @@ namespace PROfit {
                     }
                     proposal.tune_mode = false; 
                     for(size_t i = 0; i < steps; i++) {
-                        if(step() && action) (*action)(current);
+                        step();
+                        if(action) (*action)(current);
                     }
                 }
 
@@ -303,7 +304,7 @@ namespace PROfit {
 
 
         void tune(bool accepted) {
-            if (accepted) {
+            //if (accepted) {
                 ++tune_calls;
                 Eigen::VectorXf delta = last_proposed - mean;
                 mean += delta / tune_calls;
@@ -315,7 +316,7 @@ namespace PROfit {
                     cov.col(idx).setZero();
                 }
 
-            }
+            //}
             accept_history.push_back(accepted);
             if (accept_history.size() == adapt_window) {
                 float acc_rate = std::count(accept_history.begin(), accept_history.end(), true) / float(adapt_window);
