@@ -324,22 +324,6 @@ int main(int argc, char* argv[])
            config.m_mcgen_variation_prior_centers[sys]= cv_injected_systs.count(sys) ? cv_injected_systs.at(sys) : def ;
     }
 
-    //Build a PROsyst to sort and analyze all systematics
-    //PROsyst systs(prop, config, systsstructs.front(), shapeonly);
-    std::vector<PROsyst> variable_systs;
-    for(size_t i = 0; i < config.m_num_variables; ++i){
-
-        if(config.m_channel_variable_plot_bool.at(i)){ 
-            variable_systs.emplace_back(prop, config, systsstructs.at(i), shapeonly, i);
-        }else{
-            variable_systs.emplace_back();
-        }
-        //variable_systs.back().PrintSplines();
-        //return 0;
-    }
-
-
-
     //Seed time
     PROseed myseed(nthread, global_seed);
     std::uniform_int_distribution<uint32_t> dseed(0, std::numeric_limits<uint32_t>::max());
@@ -348,6 +332,20 @@ int main(int argc, char* argv[])
 
     std::unique_ptr<PROmodel> model = get_model_from_string(config, prop);
     std::unique_ptr<PROmodel> null_model = std::make_unique<NullModel>(prop);
+
+    //Build a PROsyst to sort and analyze all systematics
+    //PROsyst systs(prop, config, systsstructs.front(), shapeonly);
+    std::vector<PROsyst> variable_systs;
+    for(size_t i = 0; i < config.m_num_variables; ++i){
+
+        if(config.m_channel_variable_plot_bool.at(i)){ 
+            variable_systs.emplace_back(prop, config, systsstructs.at(i), shapeonly, i, model.get(), nullptr);
+        }else{
+            variable_systs.emplace_back();
+        }
+        //variable_systs.back().PrintSplines();
+        //return 0;
+    }
 
     Eigen::VectorXf fake_data_osc_param_vector = model->default_val;
     Eigen::VectorXf cv_osc_param_vector = model->default_val;
@@ -2093,6 +2091,5 @@ int main(int argc, char* argv[])
 
     return 0;
 }
-
 
 

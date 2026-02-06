@@ -64,7 +64,7 @@ def init_syst_structs(c, ew):
         syst_structs[-1].SetWeightFormula("1")
         syst_structs[-1].SetMode(mode)
 
-        if mode == "spline":
+        if mode == "spline" or mode == "spline_to_covariance":
             syst_structs[-1].knobval = np.array([-3.0, -2.0, -1.0, 0.0, 1.0, 2.0, 3.0], dtype=np.float32)
             syst_structs[-1].knob_index = np.array([-3.0, -2.0, -1.0, 0.0, 1.0, 2.0, 3.0], dtype=np.float32)
             syst_structs[-1].binning = c.m_mcgen_variation_binning_map[syst]
@@ -224,7 +224,7 @@ def process_branch(c, branch, evws, mcpot, subchannel_index, syst_vector, syst_a
         additional_weight = syst_additional_weight[i]
         evw = evws.systematic(s.GetSysName())
 
-        if s.mode == "spline":
+        if s.mode == "spline" or s.mode == "spline_to_covariance":
             if s.binning == -2:
                 spline_bin = global_true_bin
             elif s.binning == -1: 

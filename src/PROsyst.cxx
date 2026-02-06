@@ -6,18 +6,74 @@
 #include "PROlog.h"
 #include "PROtocall.h"
 #include <Eigen/Eigen>
+#include <random>
 
 namespace PROfit {
 
     bool PROsyst::shape_only = false;
 
-    PROsyst::PROsyst( const PROpeller &prop, const PROconfig &config, const std::vector<SystStruct>& systs, bool shapeonly, int other_index) : other_index(other_index) {
+    PROsyst::PROsyst( const PROpeller &prop, const PROconfig &config, const std::vector<SystStruct>& systs, bool shapeonly, int other_index, const PROmodel* model, const Eigen::VectorXf* params) : other_index(other_index) {
         shape_only = shapeonly;
         for(const auto& syst: systs) {
             log<LOG_DEBUG>(L"%1% || syst mode: %2%") % __func__ % syst.mode.c_str();
             if(syst.mode == "spline" || syst.mode == "norm") {
                 FillSpline(syst);
                 ++n_splines;
+            } else if(syst.mode == "spline_to_covariance") {
+                // Build spline first, then convert to covariance matrix
+                FillSpline(syst);
+                int spline_idx = splines.size() - 1;
+                if(model == nullptr){
+                    log<LOG_ERROR>(L"%1% || spline_to_covariance requires a PROmodel to use spline2cov. "
+                        L"Construct PROsyst with a model (and optional params).") % __func__;
+                    log<LOG_ERROR>(L"Terminating.");
+                    exit(EXIT_FAILURE);
+                }
+
+                // Initialize spline priors/centers for the temporary spline list
+                spline_priors = Eigen::VectorXf::Constant(splines.size(), 1);
+                spline_centers = Eigen::VectorXf::Constant(splines.size(), 0);
+                for(const auto &[name, prior]: config.m_mcgen_variation_prior) {
+                    auto it = std::find(spline_names.begin(), spline_names.end(), name);
+                    if(it != std::end(spline_names)) {
+                        size_t idx = std::distance(std::begin(spline_names), it);
+                        spline_priors(idx) = prior;
+                    }
+                }
+                for(const auto &[name, center]: config.m_mcgen_variation_prior_centers) {
+                    auto it = std::find(spline_names.begin(), spline_names.end(), name);
+                    if(it != std::end(spline_names)) {
+                        size_t idx = std::distance(std::begin(spline_names), it);
+                        spline_centers(idx) = center;
+                    }
+                }
+
+                Eigen::VectorXf cvparams;
+                if(params != nullptr){
+                    cvparams = *params;
+                }else{
+                    cvparams = Eigen::VectorXf::Zero(model->nparams + splines.size());
+                    cvparams.segment(0, model->nparams) = model->default_val;
+                }
+
+                log<LOG_INFO>(L"%1% || Converting spline '%2%' to covariance matrix using spline2cov") % __func__ % syst.systname.c_str();
+                Eigen::MatrixXf frac_cov = spline2cov(spline_idx, config, prop, *model, cvparams, 42);
+                Eigen::MatrixXf corr = GenerateCorrMatrix(frac_cov);
+
+                // Remove the spline (it was the last one appended by FillSpline)
+                syst_map.erase(syst.systname);
+                splines.pop_back();
+                spline_names.pop_back();
+                spline_lo.pop_back();
+                spline_hi.pop_back();
+                spline_binnings.pop_back();
+
+                // Store as covariance instead
+                syst_map[syst.systname] = {covmat.size(), SystType::Covariance};
+                covmat.push_back(frac_cov);
+                corrmat.push_back(corr);
+                covar_names.push_back(syst.systname);
+                ++n_covar;
             } else if(syst.mode == "covariance") {
                 this->CreateMatrix(syst);
                 covar_names.push_back(syst.systname);
@@ -229,6 +285,69 @@ namespace PROfit {
 
         return frac_covar_matrix;
     }
+
+    #if 0
+    Eigen::MatrixXf PROsyst::spline2covDirect(int spline_idx, const PROconfig &config, const PROpeller &prop, int other_index, float prior, float center) const {
+        // Convert a spline to fractional covariance by generating random Gaussian throws
+        // and evaluating the spline shift for each bin. If the spline binning differs
+        // from other_index, map the effect via variable_hist_storage, matching FillSpectra.
+        //
+        // Key insight: frac_cov(i,j) = mean[(1 - shift_i) * (1 - shift_j)]
+        // where shift_i is the effective spline shift in the target binning.
+
+        const int nthrows = 500;
+        std::mt19937 rng{42};  // Fixed seed for reproducibility
+        std::normal_distribution<float> dist(center, prior);
+
+        const int target_bins = static_cast<int>(config.m_num_variable_bins_total[other_index]);
+        const int spline_binning = spline_binnings[spline_idx];
+        const int spline_bins = static_cast<int>(config.m_num_variable_bins_total[spline_binning]);
+
+        Eigen::MatrixXf mat = Eigen::MatrixXf::Zero(target_bins, target_bins);
+        Eigen::VectorXf mean_delta = Eigen::VectorXf::Zero(target_bins);
+
+        for(int t = 0; t < nthrows; ++t){
+            float theta = dist(rng);
+            Eigen::VectorXf delta = Eigen::VectorXf::Zero(target_bins);
+
+            if(spline_binning == other_index) {
+                for(int b = 0; b < target_bins; ++b){
+                    float shift = GetSplineShift(spline_idx, theta, b);
+                    delta(b) = 1.0f - shift;  // fractional deviation from CV
+                }
+            } else {
+                Eigen::VectorXf spline_shifts(spline_bins);
+                for(int b = 0; b < spline_bins; ++b){
+                    spline_shifts(b) = GetSplineShift(spline_idx, theta, b);
+                }
+
+                const auto& hist = prop.variable_hist_storage(spline_binning, other_index);
+                Eigen::VectorXf weighted_sum = hist.transpose() * spline_shifts;
+                Eigen::VectorXf unweighted_sum = hist.colwise().sum().transpose();
+
+                Eigen::VectorXf ratio = Eigen::VectorXf::Ones(target_bins);
+                for(int k = 0; k < target_bins; ++k) {
+                    if(unweighted_sum(k) > 0) {
+                        ratio(k) = weighted_sum(k) / unweighted_sum(k);
+                    }
+                }
+                delta = Eigen::VectorXf::Ones(target_bins) - ratio;
+            }
+
+            mean_delta += delta;
+            mat += delta * delta.transpose();
+        }
+        mat /= nthrows;
+        mean_delta /= static_cast<float>(nthrows);
+
+        // Diagnostics: if mean_delta is non-zero, covariance includes a mean-bias term
+        log<LOG_INFO>(L"%1% || spline2covDirect mean_delta diagnostics: mean=%2%, max_abs=%3%")
+            % __func__ % mean_delta.mean() % mean_delta.cwiseAbs().maxCoeff();
+
+        PROsyst::toFiniteMatrix(mat);
+        return mat;
+    }
+    #endif
 
     Eigen::MatrixXf PROsyst::SumMatrices() const{
 
@@ -924,4 +1043,3 @@ namespace PROfit {
     }
 
 };
-

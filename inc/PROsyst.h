@@ -45,13 +45,22 @@ namespace PROfit {
             PROsyst(){}
 
             /*Function: Primary constructor from a vector of SystStructs  */
-            PROsyst(const PROpeller &prop, const PROconfig &config, const std::vector<SystStruct>& systs, bool shapeonly=false, int other_index = -1);
+            PROsyst(const PROpeller &prop, const PROconfig &config, const std::vector<SystStruct>& systs, bool shapeonly=false, int other_index = -1, const PROmodel* model = nullptr, const Eigen::VectorXf* params = nullptr);
 
             PROsyst subset(const std::vector<std::string> &systs) const;
             PROsyst excluding(const std::vector<std::string> &systs) const;
             PROsyst allsplines2cov(const PROconfig &config, const PROpeller &prop,const PROmodel &model, const Eigen::VectorXf &params,  uint32_t seed) const;
 
             Eigen::MatrixXf spline2cov(int spline, const PROconfig &config, const PROpeller &prop, const PROmodel &model, const Eigen::VectorXf &params, uint32_t seed) const ;
+
+            /* Function: Convert a spline to a fractional covariance matrix directly from spline coefficients.
+             * Uses Gaussian random throws and evaluates GetSplineShift per bin.
+             * For splines defined in a different binning than other_index, it maps the effect via
+             * prop.variable_hist_storage, mirroring FillSpectra's behavior.
+             */
+            #if 0
+            Eigen::MatrixXf spline2covDirect(int spline_idx, const PROconfig &config, const PROpeller &prop, int other_index, float prior = 1.0f, float center = 0.0f) const;
+            #endif
 
             /* Function: given the systematic name, return corresponding fractional covariance matrix */
             Eigen::MatrixXf GrabMatrix(const std::string& sys) const;

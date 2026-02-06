@@ -55,7 +55,7 @@ SPLINE_COLUMNS = ["ms3", "ms2", "ms1", "cv", "ps1", "ps2", "ps3"]
 SPLINE_SHIFTS = [-3, -2, -1, 0, 1, 2, 3]
 
 def syst_index_name(index, mode):
-    if mode == "spline": # Multisigma
+    if mode == "spline" or mode == "spline_to_covariance": # Multisigma
         return SPLINE_COLUMNS[index]
     else: # Multisim
         return "univ_%i" % index
@@ -70,7 +70,7 @@ class SystematicsDF(pd.DataFrame):
         # Fill in cv if we need to
         for s in self.systematics():
             syst = self.systematic(s)
-            if syst.mode() == "spline" and "cv" not in syst.columns:
+            if (syst.mode() == "spline" or syst.mode() == "spline_to_covariance") and "cv" not in syst.columns:
                 self[s, "cv"] = 1.
 
     @staticmethod
