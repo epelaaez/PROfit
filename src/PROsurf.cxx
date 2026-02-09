@@ -798,11 +798,16 @@ PROfile::PROfile(const PROconfig &config, const PROsyst &systs, const PROmodel &
     size_t count = 0;
     for(auto &g:graphs){
         //if(metric->GetModel().nparams)continue;
-        float lo = count < metric.GetModel().nparams ? metric.GetModel().lb(count) :
-            metric.GetSysts().spline_lo[count - metric.GetModel().nparams];
+        float lo, hi;
+        if (with_osc && count < metric.GetModel().nparams) {
+            lo = metric.GetModel().lb(count);
+            hi = metric.GetModel().ub(count);
+        } else {
+            size_t spline_idx = with_osc ? count - metric.GetModel().nparams : count;
+            lo = metric.GetSysts().spline_lo[spline_idx];
+            hi = metric.GetSysts().spline_hi[spline_idx];
+        }
         if(std::isinf(lo)) lo = lo < 0 ? -5 : 5;
-        float hi = count < metric.GetModel().nparams ? metric.GetModel().ub(count) :
-            metric.GetSysts().spline_hi[count - metric.GetModel().nparams];
         if(std::isinf(hi)) hi = hi < 0 ? -5 : 5;
         std::vector<float> tmp = findMinAndBounds(g.get(),1.0, lo, hi);
         barvalues.push_back(float(count)+0.5);
