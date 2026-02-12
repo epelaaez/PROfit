@@ -466,6 +466,27 @@ namespace PROfit{
              * and MCFiles from the <data> block. */
             PROconfig BuildDataConfig() const;
 
+            //---- Detector Variation (DetVar) support ----
+            struct DetVarFile {
+                std::string filename;
+                std::string name;  // "cv" or variation name like "recomb2"
+                float pot;
+                bool is_cv;
+            };
+
+            bool m_has_detvar_section = false;
+            std::vector<DetVarFile> m_detvar_files;
+            // XML template for building per-file DetVar configs
+            // Contains channel/subchannel/model definitions and MCFile template
+            std::string m_detvar_xml_template;
+
+            /* Build a PROconfig for a single DetVar file (CV or variation).
+             * file_index indexes into m_detvar_files. */
+            PROconfig BuildDetVarConfig(size_t file_index) const;
+
+            /* Get number of DetVar files */
+            size_t GetNumDetVarFiles() const { return m_detvar_files.size(); }
+
 
     };
 }

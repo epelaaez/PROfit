@@ -134,7 +134,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
     //Temp usage
     i_prime=0;
-    std::vector<std::string> allowed_elements = {"mode", "detector", "channel", "MCFile","WeightMaps","model","variation_list","systematics","correlation","varied_spectrum", "ShapeOnlyUncertainty", "data", "plotpot"   };
+    std::vector<std::string> allowed_elements = {"mode", "detector", "channel", "MCFile","WeightMaps","model","variation_list","systematics","correlation","varied_spectrum", "ShapeOnlyUncertainty", "data", "plotpot", "DetVarFiles"   };
     for (tinyxml2::XMLElement* elem = doc.FirstChildElement(); elem; elem = elem->NextSiblingElement()) {
         std::string name = elem->Name();
         if (std::find(allowed_elements.begin(), allowed_elements.end(), name) == allowed_elements.end()) {
@@ -887,6 +887,144 @@ int PROconfig::LoadFromXML(const std::string &filename){
             m_mcgen_eventweight_branch_syst.push_back(TEMP_eventweight_branch_syst);
             //next file
             pMC=pMC->NextSiblingElement("MCFile");
+        }
+    }
+
+    // Parse DetVarFiles sections
+    tinyxml2::XMLElement *pDetVar = doc.FirstChildElement("DetVarFiles");
+    if(pDetVar) {
+        m_has_detvar_section = true;
+        log<LOG_INFO>(L"%1% || Found <DetVarFiles> section in XML, parsing detector variation files...") % __func__;
+
+        while(pDetVar) {
+            const char* dv_treename = pDetVar->Attribute("treename");
+            if(!dv_treename) {
+                log<LOG_ERROR>(L"%1% || ERROR: <DetVarFiles> must have a treename attribute") % __func__;
+                exit(EXIT_FAILURE);
+            }
+
+            const char* dv_scale_str = pDetVar->Attribute("scale");
+            std::string dv_scale = dv_scale_str ? dv_scale_str : "1.0";
+
+            // Parse CV file
+            tinyxml2::XMLElement *pCV = pDetVar->FirstChildElement("cv");
+            if(!pCV) {
+                log<LOG_ERROR>(L"%1% || ERROR: <DetVarFiles> must have a <cv> element") % __func__;
+                exit(EXIT_FAILURE);
+            }
+            const char* cv_filename = pCV->Attribute("filename");
+            const char* cv_pot_str = pCV->Attribute("pot");
+            if(!cv_filename || !cv_pot_str) {
+                log<LOG_ERROR>(L"%1% || ERROR: <cv> must have filename and pot attributes") % __func__;
+                exit(EXIT_FAILURE);
+            }
+            DetVarFile cv_file;
+            cv_file.filename = cv_filename;
+            cv_file.name = "cv";
+            cv_file.pot = strtod(cv_pot_str, &end);
+            cv_file.is_cv = true;
+            m_detvar_files.push_back(cv_file);
+            log<LOG_INFO>(L"%1% || DetVar CV file: %2%, POT: %3%") % __func__ % cv_filename % cv_file.pot;
+
+            // Parse variation files
+            tinyxml2::XMLElement *pVar = pDetVar->FirstChildElement("variation");
+            while(pVar) {
+                const char* var_filename = pVar->Attribute("filename");
+                const char* var_name = pVar->Attribute("name");
+                const char* var_pot_str = pVar->Attribute("pot");
+                if(!var_filename || !var_name || !var_pot_str) {
+                    log<LOG_ERROR>(L"%1% || ERROR: <variation> must have filename, name, and pot attributes") % __func__;
+                    exit(EXIT_FAILURE);
+                }
+                DetVarFile var_file;
+                var_file.filename = var_filename;
+                var_file.name = var_name;
+                var_file.pot = strtod(var_pot_str, &end);
+                var_file.is_cv = false;
+                m_detvar_files.push_back(var_file);
+                log<LOG_INFO>(L"%1% || DetVar variation '%2%' file: %3%, POT: %4%") % __func__ % var_name % var_filename % var_file.pot;
+
+                pVar = pVar->NextSiblingElement("variation");
+            }
+
+            // Build XML template for DetVar configs
+            // Contains mode/detector/channel definitions from main config, model, and MCFile template
+            {
+                std::ostringstream dvXml;
+                dvXml << "<?xml version=\"1.0\" ?>\n\n";
+
+                // Mode(s) - use m_mode_names.size() since m_num_modes isn't set yet
+                for(size_t im = 0; im < m_mode_names.size(); im++) {
+                    dvXml << "<mode name=\"" << m_mode_names[im] << "\" />\n";
+                }
+                dvXml << "\n";
+
+                // Detector(s) - use m_detector_names.size() since m_num_detectors isn't set yet
+                for(size_t id = 0; id < m_detector_names.size(); id++) {
+                    dvXml << "<detector name=\"" << m_detector_names[id] << "\" pot=\"";
+                    dvXml << std::scientific << m_det_pot[id] << "\" />\n";
+                }
+                dvXml << "\n";
+
+                // Channels with same subchannels as main config
+                // Use m_channel_names.size() since m_num_channels isn't set yet
+                for(size_t ic = 0; ic < m_channel_names.size(); ic++) {
+                    dvXml << "<channel name=\"" << m_channel_names[ic] << "\"";
+                    if(!m_channel_plotnames[ic].empty()) {
+                        dvXml << " plotname=\"" << m_channel_plotnames[ic] << "\"";
+                    }
+                    dvXml << ">\n";
+                    dvXml << m_channel_bins_xml_strings[ic];
+                    for(size_t sc = 0; sc < m_subchannel_names[ic].size(); sc++) {
+                        dvXml << "\t<subchannel name=\"" << m_subchannel_names[ic][sc] << "\"";
+                        if(!m_subchannel_plotnames[ic][sc].empty()) {
+                            dvXml << " plotname=\"" << m_subchannel_plotnames[ic][sc] << "\"";
+                        }
+                        if(!m_subchannel_colors[ic][sc].empty()) {
+                            dvXml << " color=\"" << m_subchannel_colors[ic][sc] << "\"";
+                        }
+                        dvXml << "/>\n";
+                    }
+                    dvXml << "</channel>\n";
+                }
+                dvXml << "\n";
+
+                // Model (serialize from XML directly)
+                tinyxml2::XMLElement* pModelSer = doc.FirstChildElement("model");
+                if(pModelSer) {
+                    tinyxml2::XMLPrinter printer;
+                    pModelSer->Accept(&printer);
+                    dvXml << printer.CStr() << "\n\n";
+                }
+
+                // MCFile template with placeholders
+                dvXml << "<MCFile treename=\"" << dv_treename << "\" filename=\"__DETVAR_FILENAME__\" scale=\"" << dv_scale << "\" pot=\"__DETVAR_POT__\">\n";
+
+                // Serialize friend trees
+                tinyxml2::XMLElement *pDVFriend = pDetVar->FirstChildElement("friend");
+                while(pDVFriend) {
+                    tinyxml2::XMLPrinter printer;
+                    pDVFriend->Accept(&printer);
+                    dvXml << "\t" << printer.CStr() << "\n";
+                    pDVFriend = pDVFriend->NextSiblingElement("friend");
+                }
+
+                // Serialize branches
+                tinyxml2::XMLElement *pDVBranch = pDetVar->FirstChildElement("branch");
+                while(pDVBranch) {
+                    tinyxml2::XMLPrinter printer;
+                    pDVBranch->Accept(&printer);
+                    dvXml << "\t" << printer.CStr() << "\n";
+                    pDVBranch = pDVBranch->NextSiblingElement("branch");
+                }
+
+                dvXml << "</MCFile>\n";
+
+                m_detvar_xml_template = dvXml.str();
+                log<LOG_INFO>(L"%1% || DetVar XML template built successfully (%2% bytes)") % __func__ % m_detvar_xml_template.size();
+            }
+
+            pDetVar = pDetVar->NextSiblingElement("DetVarFiles");
         }
     }
 
@@ -1980,6 +2118,52 @@ PROconfig PROconfig::BuildDataConfig() const {
     std::filesystem::remove(tmpfile);
 
     return dataconfig;
+}
+
+PROconfig PROconfig::BuildDetVarConfig(size_t file_index) const {
+    if(!m_has_detvar_section) {
+        log<LOG_ERROR>(L"%1% || BuildDetVarConfig called but no <DetVarFiles> section was found in XML!") % __func__;
+        throw std::runtime_error("No <DetVarFiles> section in XML");
+    }
+    if(file_index >= m_detvar_files.size()) {
+        log<LOG_ERROR>(L"%1% || BuildDetVarConfig called with file_index %2% but only %3% DetVar files exist") % __func__ % file_index % m_detvar_files.size();
+        throw std::runtime_error("DetVar file index out of range");
+    }
+
+    const auto& dvfile = m_detvar_files[file_index];
+
+    // Replace placeholders in template
+    std::string xml_str = m_detvar_xml_template;
+    {
+        std::string fn_placeholder = "__DETVAR_FILENAME__";
+        auto pos = xml_str.find(fn_placeholder);
+        if(pos != std::string::npos) {
+            xml_str.replace(pos, fn_placeholder.size(), dvfile.filename);
+        }
+
+        std::string pot_placeholder = "__DETVAR_POT__";
+        pos = xml_str.find(pot_placeholder);
+        if(pos != std::string::npos) {
+            std::ostringstream pot_ss;
+            pot_ss << std::scientific << dvfile.pot;
+            xml_str.replace(pos, pot_placeholder.size(), pot_ss.str());
+        }
+    }
+
+    // Write to temp file and load as PROconfig
+    std::string tmpdir = std::filesystem::temp_directory_path().string();
+    std::string tmpfile = tmpdir + "/profit_detvar_config_tmp_" + std::to_string(getpid()) + "_" + std::to_string(file_index) + ".xml";
+
+    {
+        std::ofstream ofs(tmpfile);
+        ofs << xml_str;
+    }
+
+    log<LOG_INFO>(L"%1% || Loading DetVar config for '%2%' from temporary XML: %3%") % __func__ % dvfile.name.c_str() % tmpfile.c_str();
+    PROconfig dvconfig(tmpfile);
+    std::filesystem::remove(tmpfile);
+
+    return dvconfig;
 }
 
 ROOTFormula::ROOTFormula(const std::string &name, const std::string &formula, TTree *t) {
