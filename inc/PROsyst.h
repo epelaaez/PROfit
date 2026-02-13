@@ -45,7 +45,7 @@ namespace PROfit {
             PROsyst(){}
 
             /*Function: Primary constructor from a vector of SystStructs  */
-            PROsyst(const PROpeller &prop, const PROconfig &config, const std::vector<SystStruct>& systs, bool shapeonly=false, int other_index = -1);
+            PROsyst(const PROpeller &prop, const PROconfig &config, const std::vector<SystStruct>& systs, bool shapeonly=false, int other_index = -1, const PROmodel* model = nullptr, const Eigen::VectorXf* params = nullptr);
 
             PROsyst subset(const std::vector<std::string> &systs) const;
             PROsyst excluding(const std::vector<std::string> &systs) const;

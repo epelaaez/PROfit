@@ -6,18 +6,74 @@
 #include "PROlog.h"
 #include "PROtocall.h"
 #include <Eigen/Eigen>
+#include <random>
 
 namespace PROfit {
 
     bool PROsyst::shape_only = false;
 
-    PROsyst::PROsyst( const PROpeller &prop, const PROconfig &config, const std::vector<SystStruct>& systs, bool shapeonly, int other_index) : other_index(other_index) {
+    PROsyst::PROsyst( const PROpeller &prop, const PROconfig &config, const std::vector<SystStruct>& systs, bool shapeonly, int other_index, const PROmodel* model, const Eigen::VectorXf* params) : other_index(other_index) {
         shape_only = shapeonly;
         for(const auto& syst: systs) {
             log<LOG_DEBUG>(L"%1% || syst mode: %2%") % __func__ % syst.mode.c_str();
             if(syst.mode == "spline" || syst.mode == "norm") {
                 FillSpline(syst);
                 ++n_splines;
+            } else if(syst.mode == "spline_to_covariance") {
+                // Build spline first, then convert to covariance matrix
+                FillSpline(syst);
+                int spline_idx = splines.size() - 1;
+                if(model == nullptr){
+                    log<LOG_ERROR>(L"%1% || spline_to_covariance requires a PROmodel to use spline2cov. "
+                        L"Construct PROsyst with a model (and optional params).") % __func__;
+                    log<LOG_ERROR>(L"Terminating.");
+                    exit(EXIT_FAILURE);
+                }
+
+                // Initialize spline priors/centers for the temporary spline list
+                spline_priors = Eigen::VectorXf::Constant(splines.size(), 1);
+                spline_centers = Eigen::VectorXf::Constant(splines.size(), 0);
+                for(const auto &[name, prior]: config.m_mcgen_variation_prior) {
+                    auto it = std::find(spline_names.begin(), spline_names.end(), name);
+                    if(it != std::end(spline_names)) {
+                        size_t idx = std::distance(std::begin(spline_names), it);
+                        spline_priors(idx) = prior;
+                    }
+                }
+                for(const auto &[name, center]: config.m_mcgen_variation_prior_centers) {
+                    auto it = std::find(spline_names.begin(), spline_names.end(), name);
+                    if(it != std::end(spline_names)) {
+                        size_t idx = std::distance(std::begin(spline_names), it);
+                        spline_centers(idx) = center;
+                    }
+                }
+
+                Eigen::VectorXf cvparams;
+                if(params != nullptr){
+                    cvparams = *params;
+                }else{
+                    cvparams = Eigen::VectorXf::Zero(model->nparams + splines.size());
+                    cvparams.segment(0, model->nparams) = model->default_val;
+                }
+
+                log<LOG_INFO>(L"%1% || Converting spline '%2%' to covariance matrix using spline2cov") % __func__ % syst.systname.c_str();
+                Eigen::MatrixXf frac_cov = spline2cov(spline_idx, config, prop, *model, cvparams, 42);
+                Eigen::MatrixXf corr = GenerateCorrMatrix(frac_cov);
+
+                // Remove the spline (it was the last one appended by FillSpline)
+                syst_map.erase(syst.systname);
+                splines.pop_back();
+                spline_names.pop_back();
+                spline_lo.pop_back();
+                spline_hi.pop_back();
+                spline_binnings.pop_back();
+
+                // Store as covariance instead
+                syst_map[syst.systname] = {covmat.size(), SystType::Covariance};
+                covmat.push_back(frac_cov);
+                corrmat.push_back(corr);
+                covar_names.push_back(syst.systname);
+                ++n_covar;
             } else if(syst.mode == "covariance") {
                 this->CreateMatrix(syst);
                 covar_names.push_back(syst.systname);
@@ -229,6 +285,7 @@ namespace PROfit {
 
         return frac_covar_matrix;
     }
+
 
     Eigen::MatrixXf PROsyst::SumMatrices() const{
 
@@ -924,4 +981,3 @@ namespace PROfit {
     }
 
 };
-

@@ -312,6 +312,7 @@ PYBIND11_MODULE(_profit, m) {
         .def_readonly("m_write_out_tag",  &PROfit::PROconfig::m_write_out_tag)
         .def_readonly("m_num_variation_type_covariance",  &PROfit::PROconfig::m_num_variation_type_covariance)
         .def_readonly("m_num_variation_type_spline",  &PROfit::PROconfig::m_num_variation_type_spline)
+        .def_readonly("m_num_variation_type_spline_to_covariance",  &PROfit::PROconfig::m_num_variation_type_spline_to_covariance)
         .def_readonly("m_num_mcgen_files",  &PROfit::PROconfig::m_num_mcgen_files)
         .def_readonly("m_mcgen_tree_name",  &PROfit::PROconfig::m_mcgen_tree_name)
         .def_readonly("m_mcgen_file_name",  &PROfit::PROconfig::m_mcgen_file_name)
@@ -430,6 +431,12 @@ PYBIND11_MODULE(_profit, m) {
         // There is no way to get around constructing a vector from the list (and copying SystStructs).
         // To make this explicit, we take the vector by value, and pass it to the class by reference.
         .def(py::init([](const PROfit::PROpeller &prop, const PROfit::PROconfig &config, std::vector<PROfit::SystStruct> s) {return PROfit::PROsyst(prop, config, s);}))
+        .def(py::init([](const PROfit::PROpeller &prop, const PROfit::PROconfig &config, std::vector<PROfit::SystStruct> s, const PROfit::PROmodel &model) {
+            return PROfit::PROsyst(prop, config, s, false, -1, &model, nullptr);
+        }))
+        .def(py::init([](const PROfit::PROpeller &prop, const PROfit::PROconfig &config, std::vector<PROfit::SystStruct> s, const PROfit::PROmodel &model, const Eigen::VectorXf &params) {
+            return PROfit::PROsyst(prop, config, s, false, -1, &model, &params);
+        }))
         // Empty PROsyst of size N
         .def(py::init(&init_PROsyst_empty))
         // Empty PROsyst of size determined by config

@@ -327,7 +327,7 @@ namespace PROfit {
                     if(branch_variable->GetIncludeSystematics()){
                         for(const auto &variation: inconfig.m_mcgen_variation_allowlist){
                             std::string type = inconfig.m_mcgen_variation_type_map.at(variation);
-                            if (std::find(allowlist_check.begin(), allowlist_check.end(), variation  ) == allowlist_check.end() && (type=="covariance" || type=="spline")) {
+                            if (std::find(allowlist_check.begin(), allowlist_check.end(), variation  ) == allowlist_check.end() && (type=="covariance" || type=="spline" || type=="spline_to_covariance")) {
                                 log<LOG_ERROR>(L"%1% || ERROR! You have a variation named %2% in your allowlist, so you definitely want it, but its NOT found in the files. Is this a typo? FileID %3%") % __func__ % variation.c_str() %fid  ;
                                 throw std::runtime_error("Allowlist variation not in file.");
                             }
@@ -440,7 +440,7 @@ namespace PROfit {
                     sv.back().scale = inconfig.m_mcgen_variation_scale.at(sys_name);
                     log<LOG_INFO>(L"%1% || Setting scale=%2% for systematic %3%") % __func__ % sv.back().scale % sys_name.c_str();
                 }
-                if(sys_mode == "spline") {
+                if(sys_mode == "spline" || sys_mode == "spline_to_covariance") {
                     bool override_knobs = inconfig.m_mcgen_variation_knobval_override.find(sys_name) != inconfig.m_mcgen_variation_knobval_override.end();
                     if(!override_knobs && map_systematic_knob_vals.find(sys_name) == map_systematic_knob_vals.end()) {
                         log<LOG_WARNING>(L"%1% || Expected %2% to have knob vals associated with it, but couldn't find any. Will use -3 to +3 as default.") % __func__ % sys_name.c_str();
@@ -1021,7 +1021,7 @@ namespace PROfit {
             auto map_iter = eventweight_map.find(var_syst_objs.front()->GetSysName());
             int spline_bin = (var_syst_objs.front()->mode == "covariance") ? -1: var_bin_indices[var_syst_objs.front()->binning];
 
-            if(var_syst_objs.front()->mode == "spline") {
+            if(var_syst_objs.front()->mode == "spline" || var_syst_objs.front()->mode == "spline_to_covariance") {
                 if(spline_bin < 0) continue;
                 for(auto so: var_syst_objs)
                     so->FillCV(spline_bin, mc_weight);

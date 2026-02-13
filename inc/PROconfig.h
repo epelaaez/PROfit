@@ -338,6 +338,7 @@ namespace PROfit{
             int m_num_variation_type_covariance = 0;
             int m_num_variation_type_external_covariance = 0;
             int m_num_variation_type_spline = 0;
+            int m_num_variation_type_spline_to_covariance = 0;
             int m_num_variation_type_flat = 0;
             int m_num_variation_type_norm = 0;
 
