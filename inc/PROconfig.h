@@ -11,6 +11,7 @@
 #include <fstream>
 #include <memory>
 #include <map>
+#include <set>
 #include <unordered_map>
 #include <unordered_set>
 #include <unordered_map>
@@ -469,15 +470,15 @@ namespace PROfit{
             //---- Detector Variation (DetVar) support ----
             struct DetVarFile {
                 std::string filename;
-                std::string name;  // "cv" or variation name like "recomb2"
+                std::string name;  // "cv" or variation name like "Recomb2"
                 float pot;
                 bool is_cv;
-                std::string type = "spline";  // "spline" or "spline_to_covariance"
             };
 
             bool m_has_detvar_section = false;
-            std::string m_detvar_default_type = "spline";
             std::vector<DetVarFile> m_detvar_files;
+            std::vector<std::string> m_detvar_subchannels;  // subchannels to include from DetVar files
+            std::set<std::string> m_detvar_variation_names;  // variation names for lookup during systematics parsing
             // XML template for building per-file DetVar configs
             // Contains channel/subchannel/model definitions and MCFile template
             std::string m_detvar_xml_template;

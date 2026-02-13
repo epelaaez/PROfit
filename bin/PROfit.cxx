@@ -344,7 +344,16 @@ int main(int argc, char* argv[])
             for(size_t idv = 0; idv < config.m_detvar_files.size(); ++idv) {
                 if(config.m_detvar_files[idv].is_cv) continue;
 
-                std::string dvPropBin = analysis_tag + "_detvar_" + config.m_detvar_files[idv].name + "_prop.bin";
+                const std::string& varName = config.m_detvar_files[idv].name;
+
+                // Only create a systematic if this variation has a matching entry in the systematics section
+                if(config.m_mcgen_variation_type_map.count(varName) == 0) {
+                    log<LOG_INFO>(L"%1% || Skipping DetVar '%2%' — no matching entry in <systematics> section.") % __func__ % varName.c_str();
+                    continue;
+                }
+                const std::string& systType = config.m_mcgen_variation_type_map.at(varName);
+
+                std::string dvPropBin = analysis_tag + "_detvar_" + varName + "_prop.bin";
                 PROpeller dvprop;
                 dvprop.load(dvPropBin);
                 PROconfig dvconfig = config.BuildDetVarConfig(idv);
@@ -364,8 +373,7 @@ int main(int argc, char* argv[])
                     varSpec = PROspec(varVec, Eigen::VectorXf::Zero(varVec.size()));
                 }
 
-                std::string sname = "detvar_" + config.m_detvar_files[idv].name;
-                SystStruct ss(sname, 2, config.m_detvar_files[idv].type, "1",
+                SystStruct ss(varName, 2, systType, "1",
                               {0.0f, 1.0f}, {0.0f, 1.0f}, 0);
                 ss.binning = ivar;
                 ss.CreateSpecs(cvSpec.Spec().size());
@@ -375,7 +383,7 @@ int main(int argc, char* argv[])
                 ss.SetHash(config.hash);
 
                 systsstructs[ivar].push_back(std::move(ss));
-                log<LOG_INFO>(L"%1% || Added DetVar SystStruct '%2%' for variable %3% (mode: %4%)") % __func__ % sname.c_str() % ivar % config.m_detvar_files[idv].type.c_str();
+                log<LOG_INFO>(L"%1% || Added DetVar SystStruct '%2%' for variable %3% (mode: %4%)") % __func__ % varName.c_str() % ivar % systType.c_str();
             }
         }
 

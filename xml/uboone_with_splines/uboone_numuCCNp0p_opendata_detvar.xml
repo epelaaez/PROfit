@@ -164,80 +164,27 @@
 
 
 <!-- Detector Variation Files -->
-<!-- The DetVarFiles block defines friend trees, branches, weights, etc. once, -->
-<!-- shared across a central value file and multiple variation files. -->
+<!-- Lists CV and variation files. Branches are auto-inherited from MCFile entries -->
+<!-- with matching associated_subchannel. Only subchannels listed here are included. -->
+<!-- A variation only becomes a systematic if its name appears in <systematics>. -->
+<!-- Friend trees are not assumed, DetVar files likely won't have spline_weights for example. -->
 <DetVarFiles treename="wcpselection/T_KINEvars" scale="1.0">
 
 	<cv filename="/nevis/riverside/data/karan/ngem/data_files/checkout_DetVar_Run45_v10_04_07_19_BNB_nu_overlay_cv_surprise_reco2_hist_5.root" pot="6.9116e20" />
-	<variation name="recomb2" filename="/nevis/riverside/data/karan/ngem/data_files/checkout_DetVar_Run45_v10_04_07_19_BNB_nu_overlay_recomb2_surprise_reco2_hist_5.root" pot="4.5455e20" type="spline"/>
-	<variation name="lyatt" filename="/nevis/riverside/data/karan/ngem/data_files/checkout_DetVar_Run45_v10_04_07_19_BNB_nu_overlay_lya_surprise_reco2_hist_5.root" pot="6.8752e20" type="spline"/>
+	<variation name="Recomb2" filename="/nevis/riverside/data/karan/ngem/data_files/checkout_DetVar_Run45_v10_04_07_19_BNB_nu_overlay_recomb2_surprise_reco2_hist_5.root" pot="4.5455e20" />
+	<variation name="LYAtt" filename="/nevis/riverside/data/karan/ngem/data_files/checkout_DetVar_Run45_v10_04_07_19_BNB_nu_overlay_lya_surprise_reco2_hist_5.root" pot="6.8752e20" />
 
 	<friend treename="wcpselection/T_eval" />
 	<friend treename="wcpselection/T_PFeval" />
 	<friend treename="wcpselection/T_BDTvars" />
 	<friend treename="nuselection/NeutrinoSelectionFilter" />
 
-	<branch
-        	associated_subchannel = "nu_uBooNE_numuCCNpFC_numuCCoverlay"
-        	model_rule            = "1"
-			weight_1              = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) > 0) && (abs(truth_nuPdg) == 14) && (truth_isCC == 1))"
-			weight_2              = "(weight_cv * (weight_cv < 30) * (weight_cv > 0) + 1 * !((weight_cv < 30) * (weight_cv > 0)))"
-		>
-		<variable>kine_reco_Enu</variable>
-		<variable>truth_nuEnergy</variable>
-		<variable>1000.*(mcflux_dk2gen + mcflux_gen2vtx)/truth_nuEnergy</variable>
-	</branch>
-	<branch
-        	associated_subchannel = "nu_uBooNE_numuCCNpFC_nueCCoverlay"
-        	model_rule            = "1"
-			weight_1              = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) > 0) && (abs(truth_nuPdg) == 12) && (truth_isCC == 1))"
-			weight_2              = "(weight_cv * (weight_cv < 30) * (weight_cv > 0) + 1 * !((weight_cv < 30) * (weight_cv > 0)))"
-		>
-		<variable>kine_reco_Enu</variable>
-		<variable>truth_nuEnergy</variable>
-		<variable>1000.*(mcflux_dk2gen + mcflux_gen2vtx)/truth_nuEnergy</variable>
-	</branch>
-	<branch
-        	associated_subchannel = "nu_uBooNE_numuCCNpFC_NCoverlay"
-        	model_rule            = "1"
-			weight_1              = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) > 0) && (truth_isCC == 0))"
-			weight_2              = "(weight_cv * (weight_cv < 30) * (weight_cv > 0) + 1 * !((weight_cv < 30) * (weight_cv > 0)))"
-		>
-		<variable>kine_reco_Enu</variable>
-		<variable>truth_nuEnergy</variable>
-		<variable>1000.*(mcflux_dk2gen + mcflux_gen2vtx)/truth_nuEnergy</variable>
-	</branch>
-
-	<branch
-        	associated_subchannel = "nu_uBooNE_numuCC0pFC_numuCCoverlay"
-        	model_rule            = "1"
-			weight_1              = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0) && (abs(truth_nuPdg) == 14) && (truth_isCC == 1))"
-			weight_2              = "(weight_cv * (weight_cv < 30) * (weight_cv > 0) + 1 * !((weight_cv < 30) * (weight_cv > 0)))"
-		>
-		<variable>kine_reco_Enu</variable>
-		<variable>truth_nuEnergy</variable>
-		<variable>1000.*(mcflux_dk2gen + mcflux_gen2vtx)/truth_nuEnergy</variable>
-	</branch>
-	<branch
-        	associated_subchannel = "nu_uBooNE_numuCC0pFC_nueCCoverlay"
-        	model_rule            = "1"
-			weight_1              = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0) && (abs(truth_nuPdg) == 12) && (truth_isCC == 1))"
-			weight_2              = "(weight_cv * (weight_cv < 30) * (weight_cv > 0) + 1 * !((weight_cv < 30) * (weight_cv > 0)))"
-		>
-		<variable>kine_reco_Enu</variable>
-		<variable>truth_nuEnergy</variable>
-		<variable>1000.*(mcflux_dk2gen + mcflux_gen2vtx)/truth_nuEnergy</variable>
-	</branch>
-	<branch
-        	associated_subchannel = "nu_uBooNE_numuCC0pFC_NCoverlay"
-        	model_rule            = "1"
-			weight_1              = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (Sum$(abs(kine_particle_type)==2212 && kine_energy_particle>35) == 0) && (truth_isCC == 0))"
-			weight_2              = "(weight_cv * (weight_cv < 30) * (weight_cv > 0) + 1 * !((weight_cv < 30) * (weight_cv > 0)))"
-		>
-		<variable>kine_reco_Enu</variable>
-		<variable>truth_nuEnergy</variable>
-		<variable>1000.*(mcflux_dk2gen + mcflux_gen2vtx)/truth_nuEnergy</variable>
-	</branch>
+	<subchannel>nu_uBooNE_numuCCNpFC_numuCCoverlay</subchannel>
+	<subchannel>nu_uBooNE_numuCCNpFC_nueCCoverlay</subchannel>
+	<subchannel>nu_uBooNE_numuCCNpFC_NCoverlay</subchannel>
+	<subchannel>nu_uBooNE_numuCC0pFC_numuCCoverlay</subchannel>
+	<subchannel>nu_uBooNE_numuCC0pFC_nueCCoverlay</subchannel>
+	<subchannel>nu_uBooNE_numuCC0pFC_NCoverlay</subchannel>
 
 </DetVarFiles>
 
@@ -246,7 +193,9 @@
     <!-- MC Statistics -->
 	<!-- <systematic type="mcstat" plotname="MC Stats" tag="other">MCStat</systematic> -->
 
-	<systematic type="spline" binning="var0" plotname="DetVar_LYAtt" tag="DetVar" force_0_cv="true" include_only_weights="1">AxFFCCQEshape_UBGenie</systematic>
+	<!-- DetVar systematics: name matches variation name from <DetVarFiles> -->
+	<allowlist name="Recomb2" type="spline" plotname="Recomb2" tag="DetVar" />
+	<allowlist name="LYAtt" type="spline" plotname="LYAtt" tag="DetVar" />
 
     <!-- Cross Section Systematics, 55 splines -->
 
