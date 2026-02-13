@@ -472,9 +472,11 @@ namespace PROfit{
                 std::string name;  // "cv" or variation name like "recomb2"
                 float pot;
                 bool is_cv;
+                std::string type = "spline";  // "spline" or "spline_to_covariance"
             };
 
             bool m_has_detvar_section = false;
+            std::string m_detvar_default_type = "spline";
             std::vector<DetVarFile> m_detvar_files;
             // XML template for building per-file DetVar configs
             // Contains channel/subchannel/model definitions and MCFile template

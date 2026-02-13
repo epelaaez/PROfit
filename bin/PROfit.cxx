@@ -318,6 +318,70 @@ int main(int argc, char* argv[])
                 log<LOG_INFO>(L"%1% || DetVar propeller for '%2%' already exists: %3%") % __func__ % config.m_detvar_files[idv].name.c_str() % dvPropBin.c_str();
             }
         }
+
+        // Build DetVar SystStructs from processed propellers
+        log<LOG_INFO>(L"%1% || Building DetVar SystStructs from processed propellers...") % __func__;
+
+        // Find CV index
+        size_t cv_idx = 0;
+        for(size_t i = 0; i < config.m_detvar_files.size(); ++i) {
+            if(config.m_detvar_files[i].is_cv) { cv_idx = i; break; }
+        }
+
+        // Load DetVar CV propeller and get its spectrum
+        std::string cvPropBin = analysis_tag + "_detvar_cv_prop.bin";
+        PROpeller cvprop;
+        cvprop.load(cvPropBin);
+        PROconfig cvconfig = config.BuildDetVarConfig(cv_idx);
+        NullModel cvmodel(cvprop);
+        PROsyst emptySyst;
+        Eigen::VectorXf cvparams = Eigen::VectorXf::Constant(cvmodel.nparams, 0);
+
+        // For each variable, build DetVar SystStructs
+        for(size_t ivar = 0; ivar < config.m_num_variables; ++ivar) {
+            PROspec cvSpec = FillSpectra(cvconfig, cvprop, emptySyst, cvmodel, cvparams, true, cvconfig.i_prime);
+
+            for(size_t idv = 0; idv < config.m_detvar_files.size(); ++idv) {
+                if(config.m_detvar_files[idv].is_cv) continue;
+
+                std::string dvPropBin = analysis_tag + "_detvar_" + config.m_detvar_files[idv].name + "_prop.bin";
+                PROpeller dvprop;
+                dvprop.load(dvPropBin);
+                PROconfig dvconfig = config.BuildDetVarConfig(idv);
+                NullModel dvmodel(dvprop);
+                Eigen::VectorXf dvparams = Eigen::VectorXf::Constant(dvmodel.nparams, 0);
+                PROspec varSpec = FillSpectra(dvconfig, dvprop, emptySyst, dvmodel, dvparams, true, dvconfig.i_prime);
+
+                // Zero out variation bins where CV is 0 to avoid division-by-zero
+                // in FillSpline. Physically, if CV has no events in a bin, we can't
+                // compute a meaningful detector variation ratio, so ratio = 1.0.
+                {
+                    Eigen::VectorXf varVec = varSpec.Spec();
+                    const Eigen::VectorXf& cvVec = cvSpec.Spec();
+                    for(int ib = 0; ib < cvVec.size(); ++ib) {
+                        if(cvVec(ib) == 0.0f) varVec(ib) = 0.0f;
+                    }
+                    varSpec = PROspec(varVec, Eigen::VectorXf::Zero(varVec.size()));
+                }
+
+                std::string sname = "detvar_" + config.m_detvar_files[idv].name;
+                SystStruct ss(sname, 2, config.m_detvar_files[idv].type, "1",
+                              {0.0f, 1.0f}, {0.0f, 1.0f}, 0);
+                ss.binning = ivar;
+                ss.CreateSpecs(cvSpec.Spec().size());
+                ss.p_cv = std::make_shared<PROspec>(cvSpec);
+                ss.p_multi_spec[0] = std::make_shared<PROspec>(cvSpec);
+                ss.p_multi_spec[1] = std::make_shared<PROspec>(varSpec);
+                ss.SetHash(config.hash);
+
+                systsstructs[ivar].push_back(std::move(ss));
+                log<LOG_INFO>(L"%1% || Added DetVar SystStruct '%2%' for variable %3% (mode: %4%)") % __func__ % sname.c_str() % ivar % config.m_detvar_files[idv].type.c_str();
+            }
+        }
+
+        // Re-save syststructs with DetVar additions
+        saveSystStructVector(systsstructs, systBinName);
+        log<LOG_INFO>(L"%1% || Saved syststructs with DetVar SystStructs to %2%") % __func__ % systBinName.c_str();
     }
 
     // For process-only command, exit early after MC processing is complete

@@ -169,8 +169,8 @@
 <DetVarFiles treename="wcpselection/T_KINEvars" scale="1.0">
 
 	<cv filename="/nevis/riverside/data/karan/ngem/data_files/checkout_DetVar_Run45_v10_04_07_19_BNB_nu_overlay_cv_surprise_reco2_hist_5.root" pot="6.9116e20" />
-	<variation name="recomb2" filename="/nevis/riverside/data/karan/ngem/data_files/checkout_DetVar_Run45_v10_04_07_19_BNB_nu_overlay_recomb2_surprise_reco2_hist_5.root" pot="4.5455e20" />
-	<variation name="lyatt" filename="/nevis/riverside/data/karan/ngem/data_files/checkout_DetVar_Run45_v10_04_07_19_BNB_nu_overlay_lya_surprise_reco2_hist_5.root" pot="6.8752e20" />
+	<variation name="recomb2" filename="/nevis/riverside/data/karan/ngem/data_files/checkout_DetVar_Run45_v10_04_07_19_BNB_nu_overlay_recomb2_surprise_reco2_hist_5.root" pot="4.5455e20" type="spline"/>
+	<variation name="lyatt" filename="/nevis/riverside/data/karan/ngem/data_files/checkout_DetVar_Run45_v10_04_07_19_BNB_nu_overlay_lya_surprise_reco2_hist_5.root" pot="6.8752e20" type="spline"/>
 
 	<friend treename="wcpselection/T_eval" />
 	<friend treename="wcpselection/T_PFeval" />
@@ -244,11 +244,13 @@
 <systematics>
 
     <!-- MC Statistics -->
-	<systematic type="mcstat" plotname="MC Stats" tag="other">MCStat</systematic>
+	<!-- <systematic type="mcstat" plotname="MC Stats" tag="other">MCStat</systematic> -->
+
+	<systematic type="spline" binning="var0" plotname="DetVar_LYAtt" tag="DetVar" force_0_cv="true" include_only_weights="1">AxFFCCQEshape_UBGenie</systematic>
 
     <!-- Cross Section Systematics, 55 splines -->
 
-	<systematic type="spline" binning="var0" plotname="MACCQE" tag="QE" force_0_cv="true" include_only_weights="1">MaCCQE_UBGenie</systematic>
+	<!-- <systematic type="spline" binning="var0" plotname="MACCQE" tag="QE" force_0_cv="true" include_only_weights="1">MaCCQE_UBGenie</systematic>
 	<systematic type="spline" binning="var0" plotname="AxFFCCQEshape" knobvals="0, 1" tag="QE" force_0_cv="true" include_only_weights="1">AxFFCCQEshape_UBGenie</systematic>
 	<systematic type="spline" binning="var0" plotname="VecFFCCQEshape" knobvals="0, 1" tag="QE" force_0_cv="true" include_only_weights="1">VecFFCCQEshape_UBGenie</systematic>
 	<systematic type="spline" binning="var0" plotname="RPA_CCQE" tag="QE" force_0_cv="true" include_only_weights="1">RPA_CCQE_UBGenie</systematic>
@@ -312,10 +314,10 @@
 
 	<systematic type="spline" binning="var0" plotname="xsr_scc_Fa3_SCC" tag="SCC" force_0_cv="true" include_only_weights="1">xsr_scc_Fa3_SCC</systematic>
 	<systematic type="spline" binning="var0" plotname="xsr_scc_Fv3_SCC" tag="SCC" force_0_cv="true" include_only_weights="1">xsr_scc_Fv3_SCC</systematic>
-
+ -->
 
 	<!-- Flux Systematics, 11 splines -->
-	<systematic type="spline" binning="var0" plotname="horncurrent" knobvals="-1, 0, 1" tag="Flux" force_0_cv="true" include_only_weights="1">horncurrent_FluxUnisim</systematic>
+	<!-- <systematic type="spline" binning="var0" plotname="horncurrent" knobvals="-1, 0, 1" tag="Flux" force_0_cv="true" include_only_weights="1">horncurrent_FluxUnisim</systematic>
 	<systematic type="spline" binning="var0" plotname="expskin" knobvals="-1, 0, 1" tag="Flux" force_0_cv="true" include_only_weights="1">expskin_FluxUnisim</systematic>
 	<systematic type="spline" binning="var0" plotname="kminus" tag="Flux" force_0_cv="true" include_only_weights="1">kminus_PrimaryHadronNormalization</systematic>
 	<systematic type="spline" binning="var0" plotname="kplus" tag="Flux" force_0_cv="true" include_only_weights="1">kplus_PrimaryHadronFeynmanScaling</systematic>
@@ -327,14 +329,14 @@
 	<systematic type="spline" binning="var0" plotname="pionqexsec" knobvals="-1, 0, 1" tag="Flux" force_0_cv="true" include_only_weights="1">pionqexsec_FluxUnisim</systematic>
 	<systematic type="spline" binning="var0" plotname="piontotxsec" knobvals="-1, 0, 1" tag="Flux" force_0_cv="true" include_only_weights="1">piontotxsec_FluxUnisim</systematic>
 	<systematic type="covariance" plotname="piplus_prod" tag="piprod">piplus_PrimaryHadronSWCentralSplineVariation</systematic>
-	<systematic type="covariance" plotname="piminus_prod" tag="piprod">piminus_PrimaryHadronSWCentralSplineVariation</systematic>
+	<systematic type="covariance" plotname="piminus_prod" tag="piprod">piminus_PrimaryHadronSWCentralSplineVariation</systematic> -->
 
 
 	<!-- Re-interaction Systematics -->
-	<systematic type="covariance" tag="Reint" scale="0.001">weightsReint</systematic>
+	<!-- <systematic type="covariance" tag="Reint" scale="0.001">weightsReint</systematic> -->
 
 	<!-- Other Systematics -->
-	<systematic type="norm" binning="reco" plotname="Targets_POT" tag="norm">nu_uBooNE_nuoverlay_overlay:0.02</systematic>
+	<!-- <systematic type="norm" binning="reco" plotname="Targets_POT" tag="norm">nu_uBooNE_nuoverlay_overlay:0.02</systematic> -->
 
 </systematics>
 

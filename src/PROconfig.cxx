@@ -906,6 +906,9 @@ int PROconfig::LoadFromXML(const std::string &filename){
             const char* dv_scale_str = pDetVar->Attribute("scale");
             std::string dv_scale = dv_scale_str ? dv_scale_str : "1.0";
 
+            const char* dv_type_str = pDetVar->Attribute("type");
+            m_detvar_default_type = dv_type_str ? dv_type_str : "spline";
+
             // Parse CV file
             tinyxml2::XMLElement *pCV = pDetVar->FirstChildElement("cv");
             if(!pCV) {
@@ -941,6 +944,8 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 var_file.name = var_name;
                 var_file.pot = strtod(var_pot_str, &end);
                 var_file.is_cv = false;
+                const char* var_type_str = pVar->Attribute("type");
+                var_file.type = var_type_str ? var_type_str : m_detvar_default_type;
                 m_detvar_files.push_back(var_file);
                 log<LOG_INFO>(L"%1% || DetVar variation '%2%' file: %3%, POT: %4%") % __func__ % var_name % var_filename % var_file.pot;
 
@@ -1025,6 +1030,20 @@ int PROconfig::LoadFromXML(const std::string &filename){
             }
 
             pDetVar = pDetVar->NextSiblingElement("DetVarFiles");
+        }
+
+        // Register DetVar variations as systematics in config maps
+        for(const auto& dvf : m_detvar_files) {
+            if(dvf.is_cv) continue;
+            std::string sname = "detvar_" + dvf.name;
+            m_mcgen_variation_type_map[sname] = dvf.type;
+            // Note: do NOT add to m_mcgen_variation_allowlist — that list is for weight
+            // branches in the main MC files. DetVar systematics come from separate files.
+            m_mcgen_variation_prior[sname] = 1.0f;
+            m_mcgen_variation_prior_centers[sname] = 0.0f;
+            m_mcgen_variation_plotname_map[sname] = sname;
+            m_mcgen_variation_tags[sname] = {"DetVar"};
+            log<LOG_INFO>(L"%1% || Registered DetVar systematic '%2%' with type '%3%'") % __func__ % sname.c_str() % dvf.type.c_str();
         }
     }
 
