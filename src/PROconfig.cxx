@@ -890,26 +890,38 @@ int PROconfig::LoadFromXML(const std::string &filename){
         }
     }
 
-    // Parse DetVarFiles sections
-    tinyxml2::XMLElement *pDetVar = doc.FirstChildElement("DetVarFiles");
-    if(pDetVar) {
+    // Parse DetVarFiles section (container of one or more DetVarSection blocks)
+    tinyxml2::XMLElement *pDetVarContainer = doc.FirstChildElement("DetVarFiles");
+    if(pDetVarContainer) {
         m_has_detvar_section = true;
         log<LOG_INFO>(L"%1% || Found <DetVarFiles> section in XML, parsing detector variation files...") % __func__;
 
+        tinyxml2::XMLElement *pDetVar = pDetVarContainer->FirstChildElement("DetVarSection");
+        if(!pDetVar) {
+            log<LOG_ERROR>(L"%1% || ERROR: <DetVarFiles> must contain at least one <DetVarSection> element") % __func__;
+            exit(EXIT_FAILURE);
+        }
+
         while(pDetVar) {
+            const size_t section_idx = m_detvar_xml_templates.size();
+            m_detvar_subchannels_per_section.push_back({});
+            std::vector<std::string>& section_subchannels = m_detvar_subchannels_per_section.back();
+
+            log<LOG_INFO>(L"%1% || Parsing <DetVarSection> index %2%") % __func__ % section_idx;
+
             const char* dv_treename = pDetVar->Attribute("treename");
             if(!dv_treename) {
-                log<LOG_ERROR>(L"%1% || ERROR: <DetVarFiles> must have a treename attribute") % __func__;
+                log<LOG_ERROR>(L"%1% || ERROR: <DetVarSection> must have a treename attribute") % __func__;
                 exit(EXIT_FAILURE);
             }
 
             const char* dv_scale_str = pDetVar->Attribute("scale");
             std::string dv_scale = dv_scale_str ? dv_scale_str : "1.0";
 
-            // Parse CV file
+            // CV file: name is "cv" for section 0, "cv_N" for subsequent sections
             tinyxml2::XMLElement *pCV = pDetVar->FirstChildElement("cv");
             if(!pCV) {
-                log<LOG_ERROR>(L"%1% || ERROR: <DetVarFiles> must have a <cv> element") % __func__;
+                log<LOG_ERROR>(L"%1% || ERROR: <DetVarSection> must have a <cv> element") % __func__;
                 exit(EXIT_FAILURE);
             }
             const char* cv_filename = pCV->Attribute("filename");
@@ -920,11 +932,12 @@ int PROconfig::LoadFromXML(const std::string &filename){
             }
             DetVarFile cv_file;
             cv_file.filename = cv_filename;
-            cv_file.name = "cv";
+            cv_file.name = (section_idx == 0) ? "cv" : ("cv_" + std::to_string(section_idx));
             cv_file.pot = strtod(cv_pot_str, &end);
             cv_file.is_cv = true;
+            cv_file.section_index = section_idx;
             m_detvar_files.push_back(cv_file);
-            log<LOG_INFO>(L"%1% || DetVar CV file: %2%, POT: %3%") % __func__ % cv_filename % cv_file.pot;
+            log<LOG_INFO>(L"%1% || DetVar CV file (section %2%): %3%, POT: %4%") % __func__ % section_idx % cv_filename % cv_file.pot;
 
             // Parse variation files
             tinyxml2::XMLElement *pVar = pDetVar->FirstChildElement("variation");
@@ -941,29 +954,30 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 var_file.name = var_name;
                 var_file.pot = strtod(var_pot_str, &end);
                 var_file.is_cv = false;
+                var_file.section_index = section_idx;
                 m_detvar_files.push_back(var_file);
                 m_detvar_variation_names.insert(var_name);
-                log<LOG_INFO>(L"%1% || DetVar variation '%2%' file: %3%, POT: %4%") % __func__ % var_name % var_filename % var_file.pot;
+                log<LOG_INFO>(L"%1% || DetVar variation '%2%' file (section %3%): %4%, POT: %5%") % __func__ % var_name % section_idx % var_filename % var_file.pot;
 
                 pVar = pVar->NextSiblingElement("variation");
             }
 
-            // Parse subchannel list — these reference branches from MCFile entries
+            // Parse subchannel list for this section
             tinyxml2::XMLElement *pSC = pDetVar->FirstChildElement("subchannel");
             while(pSC) {
                 const char* sc_text = pSC->GetText();
                 if(sc_text) {
-                    m_detvar_subchannels.push_back(sc_text);
-                    log<LOG_INFO>(L"%1% || DetVar subchannel: %2%") % __func__ % sc_text;
+                    section_subchannels.push_back(sc_text);
+                    log<LOG_INFO>(L"%1% || DetVar subchannel (section %2%): %3%") % __func__ % section_idx % sc_text;
                 }
                 pSC = pSC->NextSiblingElement("subchannel");
             }
-            if(m_detvar_subchannels.empty()) {
-                log<LOG_ERROR>(L"%1% || ERROR: <DetVarFiles> must have at least one <subchannel> element") % __func__;
+            if(section_subchannels.empty()) {
+                log<LOG_ERROR>(L"%1% || ERROR: <DetVarSection> must have at least one <subchannel> element") % __func__;
                 exit(EXIT_FAILURE);
             }
 
-            // Build XML template for DetVar configs
+            // Build XML template for this section's DetVar configs
             // Contains mode/detector/channel definitions from main config, model, and MCFile template
             // Branches are auto-inherited from MCFile entries with matching associated_subchannel
             {
@@ -1016,7 +1030,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 // MCFile template with placeholders
                 dvXml << "<MCFile treename=\"" << dv_treename << "\" filename=\"__DETVAR_FILENAME__\" scale=\"" << dv_scale << "\" pot=\"__DETVAR_POT__\">\n";
 
-                // Serialize friend trees from DetVarFiles (DetVar files may have different friends)
+                // Serialize friend trees from this DetVarSection
                 tinyxml2::XMLElement *pDVFriend = pDetVar->FirstChildElement("friend");
                 while(pDVFriend) {
                     tinyxml2::XMLPrinter printer;
@@ -1026,7 +1040,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 }
 
                 // Auto-inherit branches from MCFile entries by matching associated_subchannel
-                for(const auto& sc_name : m_detvar_subchannels) {
+                for(const auto& sc_name : section_subchannels) {
                     bool found = false;
                     for(size_t fi = 0; fi < m_branch_variables.size() && !found; fi++) {
                         for(size_t bi = 0; bi < m_branch_variables[fi].size() && !found; bi++) {
@@ -1061,11 +1075,11 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
                 dvXml << "</MCFile>\n";
 
-                m_detvar_xml_template = dvXml.str();
-                log<LOG_INFO>(L"%1% || DetVar XML template built successfully (%2% bytes)") % __func__ % m_detvar_xml_template.size();
+                m_detvar_xml_templates.push_back(dvXml.str());
+                log<LOG_INFO>(L"%1% || DetVar XML template for section %2% built successfully (%3% bytes)") % __func__ % section_idx % m_detvar_xml_templates.back().size();
             }
 
-            pDetVar = pDetVar->NextSiblingElement("DetVarFiles");
+            pDetVar = pDetVar->NextSiblingElement("DetVarSection");
         }
         // Note: DetVar systematic registration happens during <systematics> parsing
         // when a variation name matches an allowlist entry
@@ -2189,8 +2203,8 @@ PROconfig PROconfig::BuildDetVarConfig(size_t file_index) const {
 
     const auto& dvfile = m_detvar_files[file_index];
 
-    // Replace placeholders in template
-    std::string xml_str = m_detvar_xml_template;
+    // Replace placeholders in the template for this file's section
+    std::string xml_str = m_detvar_xml_templates[dvfile.section_index];
     {
         std::string fn_placeholder = "__DETVAR_FILENAME__";
         auto pos = xml_str.find(fn_placeholder);

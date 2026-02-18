@@ -325,70 +325,81 @@ int main(int argc, char* argv[])
         if(*process_command) {
             log<LOG_INFO>(L"%1% || Building DetVar SystStructs from processed propellers...") % __func__;
 
-            // Find CV index
-            size_t cv_idx = 0;
-            for(size_t i = 0; i < config.m_detvar_files.size(); ++i) {
-                if(config.m_detvar_files[i].is_cv) { cv_idx = i; break; }
-            }
-
-            // Load DetVar CV propeller and get its spectrum
-            std::string cvPropBin = analysis_tag + "_detvar_cv_prop.bin";
-            PROpeller cvprop;
-            cvprop.load(cvPropBin);
-            PROconfig cvconfig = config.BuildDetVarConfig(cv_idx);
-            NullModel cvmodel(cvprop);
             PROsyst emptySyst;
-            Eigen::VectorXf cvparams = Eigen::VectorXf::Constant(cvmodel.nparams, 0);
 
-            // Build DetVar SystStructs and add to all variable slots (matching PROcreate pattern)
-            PROspec cvSpec = FillSpectra(cvconfig, cvprop, emptySyst, cvmodel, cvparams, true, cvconfig.i_prime);
+            // Process each DetVarSection independently: each has its own CV and variations
+            for(size_t isec = 0; isec < config.GetNumDetVarSections(); ++isec) {
 
-            for(size_t idv = 0; idv < config.m_detvar_files.size(); ++idv) {
-                if(config.m_detvar_files[idv].is_cv) continue;
-
-                const std::string& varName = config.m_detvar_files[idv].name;
-
-                // Only create a systematic if this variation has a matching entry in the systematics section
-                if(config.m_mcgen_variation_type_map.count(varName) == 0) {
-                    log<LOG_INFO>(L"%1% || Skipping DetVar '%2%' — no matching entry in <systematics> section.") % __func__ % varName.c_str();
+                // Find CV index for this section
+                size_t cv_idx = SIZE_MAX;
+                for(size_t i = 0; i < config.m_detvar_files.size(); ++i) {
+                    if(config.m_detvar_files[i].is_cv && config.m_detvar_files[i].section_index == isec) {
+                        cv_idx = i; break;
+                    }
+                }
+                if(cv_idx == SIZE_MAX) {
+                    log<LOG_ERROR>(L"%1% || ERROR: No CV file found for DetVar section %2%") % __func__ % isec;
                     continue;
                 }
-                const std::string& systType = config.m_mcgen_variation_type_map.at(varName);
-                int binningIndex = config.m_mcgen_variation_binning_map.count(varName) ? config.m_mcgen_variation_binning_map.at(varName) : config.i_prime;
 
-                std::string dvPropBin = analysis_tag + "_detvar_" + varName + "_prop.bin";
-                PROpeller dvprop;
-                dvprop.load(dvPropBin);
-                PROconfig dvconfig = config.BuildDetVarConfig(idv);
-                NullModel dvmodel(dvprop);
-                Eigen::VectorXf dvparams = Eigen::VectorXf::Constant(dvmodel.nparams, 0);
-                PROspec varSpec = FillSpectra(dvconfig, dvprop, emptySyst, dvmodel, dvparams, true, dvconfig.i_prime);
+                // Load DetVar CV propeller and fill spectrum for this section
+                std::string cvPropBin = analysis_tag + "_detvar_" + config.m_detvar_files[cv_idx].name + "_prop.bin";
+                PROpeller cvprop;
+                cvprop.load(cvPropBin);
+                PROconfig cvconfig = config.BuildDetVarConfig(cv_idx);
+                NullModel cvmodel(cvprop);
+                Eigen::VectorXf cvparams = Eigen::VectorXf::Constant(cvmodel.nparams, 0);
+                PROspec cvSpec = FillSpectra(cvconfig, cvprop, emptySyst, cvmodel, cvparams, true, cvconfig.i_prime);
 
-                // Zero out variation bins where CV is 0 to avoid division-by-zero
-                // in FillSpline. Physically, if CV has no events in a bin, we can't
-                // compute a meaningful detector variation ratio, so ratio = 1.0.
-                {
-                    Eigen::VectorXf varVec = varSpec.Spec();
-                    const Eigen::VectorXf& cvVec = cvSpec.Spec();
-                    for(int ib = 0; ib < cvVec.size(); ++ib) {
-                        if(cvVec(ib) == 0.0f) varVec(ib) = 0.0f;
+                // Build SystStructs for each variation in this section
+                for(size_t idv = 0; idv < config.m_detvar_files.size(); ++idv) {
+                    if(config.m_detvar_files[idv].section_index != isec) continue;
+                    if(config.m_detvar_files[idv].is_cv) continue;
+
+                    const std::string& varName = config.m_detvar_files[idv].name;
+
+                    // Only create a systematic if this variation has a matching entry in the systematics section
+                    if(config.m_mcgen_variation_type_map.count(varName) == 0) {
+                        log<LOG_INFO>(L"%1% || Skipping DetVar '%2%' — no matching entry in <systematics> section.") % __func__ % varName.c_str();
+                        continue;
                     }
-                    varSpec = PROspec(varVec, Eigen::VectorXf::Zero(varVec.size()));
-                }
+                    const std::string& systType = config.m_mcgen_variation_type_map.at(varName);
+                    int binningIndex = config.m_mcgen_variation_binning_map.count(varName) ? config.m_mcgen_variation_binning_map.at(varName) : config.i_prime;
 
-                // Add to every variable slot (matching PROcreate pattern)
-                for(size_t iv = 0; iv < systsstructs.size(); ++iv) {
-                    SystStruct ss(varName, 2, systType, "1",
-                                  {0.0f, 1.0f}, {0.0f, 1.0f}, 0);
-                    ss.binning = binningIndex;
-                    ss.CreateSpecs(cvSpec.Spec().size());
-                    ss.p_cv = std::make_shared<PROspec>(cvSpec);
-                    ss.p_multi_spec[0] = std::make_shared<PROspec>(cvSpec);
-                    ss.p_multi_spec[1] = std::make_shared<PROspec>(varSpec);
-                    ss.SetHash(config.hash);
-                    systsstructs[iv].push_back(std::move(ss));
+                    std::string dvPropBin = analysis_tag + "_detvar_" + varName + "_prop.bin";
+                    PROpeller dvprop;
+                    dvprop.load(dvPropBin);
+                    PROconfig dvconfig = config.BuildDetVarConfig(idv);
+                    NullModel dvmodel(dvprop);
+                    Eigen::VectorXf dvparams = Eigen::VectorXf::Constant(dvmodel.nparams, 0);
+                    PROspec varSpec = FillSpectra(dvconfig, dvprop, emptySyst, dvmodel, dvparams, true, dvconfig.i_prime);
+
+                    // Zero out variation bins where CV is 0 to avoid division-by-zero
+                    // in FillSpline. Physically, if CV has no events in a bin, we can't
+                    // compute a meaningful detector variation ratio, so ratio = 1.0.
+                    {
+                        Eigen::VectorXf varVec = varSpec.Spec();
+                        const Eigen::VectorXf& cvVec = cvSpec.Spec();
+                        for(int ib = 0; ib < cvVec.size(); ++ib) {
+                            if(cvVec(ib) == 0.0f) varVec(ib) = 0.0f;
+                        }
+                        varSpec = PROspec(varVec, Eigen::VectorXf::Zero(varVec.size()));
+                    }
+
+                    // Add to every variable slot (matching PROcreate pattern)
+                    for(size_t iv = 0; iv < systsstructs.size(); ++iv) {
+                        SystStruct ss(varName, 2, systType, "1",
+                                      {0.0f, 1.0f}, {0.0f, 1.0f}, 0);
+                        ss.binning = binningIndex;
+                        ss.CreateSpecs(cvSpec.Spec().size());
+                        ss.p_cv = std::make_shared<PROspec>(cvSpec);
+                        ss.p_multi_spec[0] = std::make_shared<PROspec>(cvSpec);
+                        ss.p_multi_spec[1] = std::make_shared<PROspec>(varSpec);
+                        ss.SetHash(config.hash);
+                        systsstructs[iv].push_back(std::move(ss));
+                    }
+                    log<LOG_INFO>(L"%1% || Added DetVar SystStruct '%2%' (section %3%) to all variable slots (binning=%4%, mode=%5%)") % __func__ % varName.c_str() % isec % binningIndex % systType.c_str();
                 }
-                log<LOG_INFO>(L"%1% || Added DetVar SystStruct '%2%' to all variable slots (binning=%3%, mode=%4%)") % __func__ % varName.c_str() % binningIndex % systType.c_str();
             }
 
             // Re-save syststructs with DetVar additions
@@ -1404,16 +1415,20 @@ int main(int argc, char* argv[])
             }
 
             if(detvar_specs.size() == config.GetNumDetVarFiles()) {
-                // Find the CV index
-                int cv_idx = -1;
+                // Build per-section CV hist maps (each DetVarSection has its own CV)
+                std::map<size_t, std::map<std::string, std::unique_ptr<TH1D>>> cv_hists_by_section;
+                bool any_cv_missing = false;
                 for(size_t i = 0; i < config.m_detvar_files.size(); ++i) {
-                    if(config.m_detvar_files[i].is_cv) { cv_idx = i; break; }
+                    if(config.m_detvar_files[i].is_cv) {
+                        size_t sec = config.m_detvar_files[i].section_index;
+                        cv_hists_by_section[sec] = getCV1DHists(detvar_specs[i], config, binwidth_scale, config.i_prime);
+                    }
                 }
-                if(cv_idx < 0) {
-                    log<LOG_ERROR>(L"%1% || ERROR: No CV file found in DetVar files!") % __func__;
-                } else {
-                    std::map<std::string, std::unique_ptr<TH1D>> cv_hists = getCV1DHists(detvar_specs[cv_idx], config, binwidth_scale, config.i_prime);
-
+                if(cv_hists_by_section.empty()) {
+                    log<LOG_ERROR>(L"%1% || ERROR: No CV files found in DetVar files!") % __func__;
+                    any_cv_missing = true;
+                }
+                if(!any_cv_missing) {
                     TCanvas detvar_canvas;
                     std::string detvar_pdf = final_output_tag + "_PROplot_DetVar.pdf";
                     detvar_canvas.Print((detvar_pdf + "[").c_str(), "pdf");
@@ -1456,14 +1471,16 @@ int main(int argc, char* argv[])
                                 for(size_t idv = 0; idv < detvar_specs.size(); ++idv) {
                                     if(config.m_detvar_files[idv].is_cv) continue;
 
+                                    size_t var_section = config.m_detvar_files[idv].section_index;
+                                    auto& sec_cv_hists = cv_hists_by_section.at(var_section);
                                     std::map<std::string, std::unique_ptr<TH1D>> var_hists = getCV1DHists(detvar_specs[idv], config, binwidth_scale, config.i_prime);
 
                                     TH1D* var_total = (TH1D*)nominal_total->Clone(("var_" + detvar_names[idv]).c_str());
                                     for(size_t sc = 0; sc < config.m_num_subchannels[ic]; sc++){
                                         const std::string& subchannel_name = config.m_fullnames[global_subchannel_index + sc];
-                                        auto cv_it = cv_hists.find(subchannel_name);
+                                        auto cv_it = sec_cv_hists.find(subchannel_name);
                                         auto var_it = var_hists.find(subchannel_name);
-                                        if(cv_it != cv_hists.end()) {
+                                        if(cv_it != sec_cv_hists.end()) {
                                             var_total->Add(&*(cv_it->second), -1.0);
                                         }
                                         if(var_it != var_hists.end()) {

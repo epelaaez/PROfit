@@ -168,23 +168,34 @@
 <!-- with matching associated_subchannel. Only subchannels listed here are included. -->
 <!-- A variation only becomes a systematic if its name appears in <systematics>. -->
 <!-- Friend trees are not assumed, DetVar files likely won't have spline_weights for example. -->
-<DetVarFiles treename="wcpselection/T_KINEvars" scale="1.0">
 
-	<cv filename="/nevis/riverside/data/karan/ngem/data_files/checkout_DetVar_Run45_v10_04_07_19_BNB_nu_overlay_cv_surprise_reco2_hist_5.root" pot="6.9116e20" />
-	<variation name="Recomb2" filename="/nevis/riverside/data/karan/ngem/data_files/checkout_DetVar_Run45_v10_04_07_19_BNB_nu_overlay_recomb2_surprise_reco2_hist_5.root" pot="4.5455e20" />
-	<variation name="LYAtt" filename="/nevis/riverside/data/karan/ngem/data_files/checkout_DetVar_Run45_v10_04_07_19_BNB_nu_overlay_lya_surprise_reco2_hist_5.root" pot="6.8752e20" />
+<!-- TODO: Don't do this all at once, I'm directing the changes over time. -->
+<!-- Add way to exclude certain weights -->
+<!-- Add way to include new weight just for DetVar -->
+<!-- Add way to have different subchannels for different file sets -->
+<!-- Make sure this affects the hash that determines binary compatibility -->
 
-	<friend treename="wcpselection/T_eval" />
-	<friend treename="wcpselection/T_PFeval" />
-	<friend treename="wcpselection/T_BDTvars" />
-	<friend treename="nuselection/NeutrinoSelectionFilter" />
+<DetVarFiles>
 
-	<subchannel>nu_uBooNE_numuCCNpFC_numuCCoverlay</subchannel>
-	<subchannel>nu_uBooNE_numuCCNpFC_nueCCoverlay</subchannel>
-	<subchannel>nu_uBooNE_numuCCNpFC_NCoverlay</subchannel>
-	<subchannel>nu_uBooNE_numuCC0pFC_numuCCoverlay</subchannel>
-	<subchannel>nu_uBooNE_numuCC0pFC_nueCCoverlay</subchannel>
-	<subchannel>nu_uBooNE_numuCC0pFC_NCoverlay</subchannel>
+	<DetVarSection treename="wcpselection/T_KINEvars" scale="1.0">
+
+		<cv filename="/nevis/riverside/data/karan/ngem/data_files/checkout_DetVar_Run45_v10_04_07_19_BNB_nu_overlay_cv_surprise_reco2_hist_5.root" pot="6.9116e20" />
+		<variation name="Recomb2" filename="/nevis/riverside/data/karan/ngem/data_files/checkout_DetVar_Run45_v10_04_07_19_BNB_nu_overlay_recomb2_surprise_reco2_hist_5.root" pot="4.5455e20" />
+		<variation name="LYAtt" filename="/nevis/riverside/data/karan/ngem/data_files/checkout_DetVar_Run45_v10_04_07_19_BNB_nu_overlay_lya_surprise_reco2_hist_5.root" pot="6.8752e20" />
+
+		<friend treename="wcpselection/T_eval" />
+		<friend treename="wcpselection/T_PFeval" />
+		<friend treename="wcpselection/T_BDTvars" />
+		<friend treename="nuselection/NeutrinoSelectionFilter" />
+
+		<subchannel>nu_uBooNE_numuCCNpFC_numuCCoverlay</subchannel>
+		<subchannel>nu_uBooNE_numuCCNpFC_nueCCoverlay</subchannel>
+		<subchannel>nu_uBooNE_numuCCNpFC_NCoverlay</subchannel>
+		<subchannel>nu_uBooNE_numuCC0pFC_numuCCoverlay</subchannel>
+		<subchannel>nu_uBooNE_numuCC0pFC_nueCCoverlay</subchannel>
+		<subchannel>nu_uBooNE_numuCC0pFC_NCoverlay</subchannel>
+
+	</DetVarSection>
 
 </DetVarFiles>
 

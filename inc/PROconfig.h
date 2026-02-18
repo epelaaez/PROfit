@@ -470,25 +470,30 @@ namespace PROfit{
             //---- Detector Variation (DetVar) support ----
             struct DetVarFile {
                 std::string filename;
-                std::string name;  // "cv" or variation name like "Recomb2"
+                std::string name;  // "cv" / "cv_N" or variation name like "Recomb2"
                 float pot;
                 bool is_cv;
+                size_t section_index;  // which DetVarSection this file belongs to
             };
 
             bool m_has_detvar_section = false;
             std::vector<DetVarFile> m_detvar_files;
-            std::vector<std::string> m_detvar_subchannels;  // subchannels to include from DetVar files
+            // Per-section subchannel lists (one inner vector per DetVarSection)
+            std::vector<std::vector<std::string>> m_detvar_subchannels_per_section;
             std::set<std::string> m_detvar_variation_names;  // variation names for lookup during systematics parsing
-            // XML template for building per-file DetVar configs
-            // Contains channel/subchannel/model definitions and MCFile template
-            std::string m_detvar_xml_template;
+            // Per-section XML templates for building per-file DetVar configs
+            // Each template contains channel/subchannel/model definitions and an MCFile template
+            std::vector<std::string> m_detvar_xml_templates;
 
             /* Build a PROconfig for a single DetVar file (CV or variation).
              * file_index indexes into m_detvar_files. */
             PROconfig BuildDetVarConfig(size_t file_index) const;
 
-            /* Get number of DetVar files */
+            /* Get number of DetVar files (across all sections) */
             size_t GetNumDetVarFiles() const { return m_detvar_files.size(); }
+
+            /* Get number of DetVarSection blocks */
+            size_t GetNumDetVarSections() const { return m_detvar_xml_templates.size(); }
 
 
     };
