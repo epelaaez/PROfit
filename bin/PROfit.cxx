@@ -259,12 +259,14 @@ int main(int argc, char* argv[])
     std::string propBinName = analysis_tag+"_prop.bin";
     std::string systBinName = analysis_tag+"_syst.bin";
 
-    if((*process_command) || (!std::filesystem::exists(systBinName) || !std::filesystem::exists(propBinName))  ){
+    bool need_main_process = (*process_command) || (!std::filesystem::exists(systBinName) || !std::filesystem::exists(propBinName));
+
+    if(need_main_process){
         log<LOG_INFO>(L"%1% || Processing PROpeller and PROsysts from XML defined root files, and saving to binary output also: %2%") % __func__ % propBinName.c_str();
         //Process the CAF files to grab and fill all SystStructs and PROpeller
         PROcess_CAFAna(config, systsstructs, prop,noxrootd);
-        prop.save(propBinName);    
-        saveSystStructVector(systsstructs,systBinName);
+        prop.save(propBinName);
+        // Defer saveSystStructVector until after DetVar SystStructs are added below
         log<LOG_INFO>(L"%1% || Done processing PROpeller and PROsysts from XML defined root files, and saving to binary output also: %2%") % __func__ % propBinName.c_str();
 
     }else{
@@ -299,11 +301,18 @@ int main(int argc, char* argv[])
 
     }
 
+    // DetVar propeller binary names include the config hash so that changes to
+    // include_only_weights, extra_weight, or any other DetVar section parameter
+    // automatically produce a new filename rather than reusing a stale binary.
+    auto dvPropBinFor = [&](const std::string& name) {
+        return analysis_tag + "_detvar_" + name + "_" + std::to_string(config.hash) + "_prop.bin";
+    };
+
     // Process DetVar files if present in XML
     if(config.m_has_detvar_section) {
         // Step 1: Process DetVar propellers (if binaries don't exist or process requested)
         for(size_t idv = 0; idv < config.GetNumDetVarFiles(); ++idv) {
-            std::string dvPropBin = analysis_tag + "_detvar_" + config.m_detvar_files[idv].name + "_prop.bin";
+            std::string dvPropBin = dvPropBinFor(config.m_detvar_files[idv].name);
 
             if((*process_command) || !std::filesystem::exists(dvPropBin)) {
                 log<LOG_INFO>(L"%1% || Processing DetVar file '%2%' and saving to: %3%") % __func__ % config.m_detvar_files[idv].name.c_str() % dvPropBin.c_str();
@@ -320,9 +329,9 @@ int main(int argc, char* argv[])
             }
         }
 
-        // Step 2: Build DetVar SystStructs and add to systsstructs (only during process step,
-        // since the saved binary already includes them on subsequent loads)
-        if(*process_command) {
+        // Step 2: Build DetVar SystStructs and add to systsstructs when main processing ran
+        // (covers both explicit 'process' command and first-run-with-missing-binaries)
+        if(need_main_process) {
             log<LOG_INFO>(L"%1% || Building DetVar SystStructs from processed propellers...") % __func__;
 
             PROsyst emptySyst;
@@ -343,7 +352,7 @@ int main(int argc, char* argv[])
                 }
 
                 // Load DetVar CV propeller and fill spectrum for this section
-                std::string cvPropBin = analysis_tag + "_detvar_" + config.m_detvar_files[cv_idx].name + "_prop.bin";
+                std::string cvPropBin = dvPropBinFor(config.m_detvar_files[cv_idx].name);
                 PROpeller cvprop;
                 cvprop.load(cvPropBin);
                 PROconfig cvconfig = config.BuildDetVarConfig(cv_idx);
@@ -366,7 +375,7 @@ int main(int argc, char* argv[])
                     const std::string& systType = config.m_mcgen_variation_type_map.at(varName);
                     int binningIndex = config.m_mcgen_variation_binning_map.count(varName) ? config.m_mcgen_variation_binning_map.at(varName) : config.i_prime;
 
-                    std::string dvPropBin = analysis_tag + "_detvar_" + varName + "_prop.bin";
+                    std::string dvPropBin = dvPropBinFor(varName);
                     PROpeller dvprop;
                     dvprop.load(dvPropBin);
                     PROconfig dvconfig = config.BuildDetVarConfig(idv);
@@ -402,10 +411,14 @@ int main(int argc, char* argv[])
                 }
             }
 
-            // Re-save syststructs with DetVar additions
+            // Save systsstructs now that DetVar SystStructs have been added
             saveSystStructVector(systsstructs, systBinName);
             log<LOG_INFO>(L"%1% || Saved syststructs with DetVar SystStructs to %2%") % __func__ % systBinName.c_str();
         }
+    } else if(need_main_process) {
+        // No DetVar section: save systsstructs now (deferred from above)
+        saveSystStructVector(systsstructs, systBinName);
+        log<LOG_INFO>(L"%1% || Saved syststructs (no DetVar) to %2%") % __func__ % systBinName.c_str();
     }
 
     // For process-only command, exit early after MC processing is complete
@@ -1396,7 +1409,7 @@ int main(int argc, char* argv[])
             std::vector<PROspec> detvar_specs;
             std::vector<std::string> detvar_names;
             for(size_t idv = 0; idv < config.GetNumDetVarFiles(); ++idv) {
-                std::string dvPropBin = analysis_tag + "_detvar_" + config.m_detvar_files[idv].name + "_prop.bin";
+                std::string dvPropBin = dvPropBinFor(config.m_detvar_files[idv].name);
                 if(!std::filesystem::exists(dvPropBin)) {
                     log<LOG_ERROR>(L"%1% || DetVar propeller binary not found: %2%. Run 'process' first.") % __func__ % dvPropBin.c_str();
                     break;
@@ -1437,87 +1450,112 @@ int main(int argc, char* argv[])
                     for(size_t im = 0; im < config.m_num_modes; im++){
                         for(size_t id = 0; id < config.m_num_detectors; id++){
                             for(size_t ic = 0; ic < config.m_num_channels; ic++){
-                                // Build nominal total for this channel
-                                TH1D* nominal_total = nullptr;
-                                for(size_t sc = 0; sc < config.m_num_subchannels[ic]; sc++){
-                                    const std::string& subchannel_name = config.m_fullnames[global_subchannel_index + sc];
-                                    const auto &h = other_hists[config.i_prime][subchannel_name];
-                                    if(sc == 0) {
-                                        nominal_total = (TH1D*)h->Clone("nominal_total");
-                                    } else {
-                                        nominal_total->Add(&*h);
-                                    }
-                                }
-
-                                // Style nominal
-                                nominal_total->SetLineColor(kBlack);
-                                nominal_total->SetLineWidth(3);
-                                nominal_total->SetFillColor(kWhite);
-                                nominal_total->SetFillStyle(0);
-                                nominal_total->SetTitle((config.m_mode_names[im] + " " + config.m_detector_names[id] + " " + config.m_channel_names[ic] + " DetVar").c_str());
-                                if(binwidth_scale)
-                                    nominal_total->GetYaxis()->SetTitle("Events/GeV");
-                                else
-                                    nominal_total->GetYaxis()->SetTitle("Events");
-
-                                float ymax = nominal_total->GetMaximum();
-
-                                // Build variation totals: modified = nominal - cv + variation
-                                std::vector<TH1D*> var_totals;
-                                int color_idx = 0;
+                                // Direct DetVar plot: show detvar_cv and detvar_variation spectra directly
                                 int colors[] = {kRed, kBlue, kGreen+2, kMagenta, kCyan+1, kOrange+1, kViolet+1, kTeal+1};
                                 int ncolors = sizeof(colors)/sizeof(colors[0]);
 
-                                for(size_t idv = 0; idv < detvar_specs.size(); ++idv) {
-                                    if(config.m_detvar_files[idv].is_cv) continue;
-
-                                    size_t var_section = config.m_detvar_files[idv].section_index;
-                                    auto& sec_cv_hists = cv_hists_by_section.at(var_section);
-                                    std::map<std::string, std::unique_ptr<TH1D>> var_hists = getCV1DHists(detvar_specs[idv], config, binwidth_scale, config.i_prime);
-
-                                    TH1D* var_total = (TH1D*)nominal_total->Clone(("var_" + detvar_names[idv]).c_str());
-                                    for(size_t sc = 0; sc < config.m_num_subchannels[ic]; sc++){
+                                // Build CV total per section (summed over subchannels of this channel)
+                                std::map<size_t, TH1D*> cv_total_per_section;
+                                for(auto& [sec_idx, sec_cv_hists] : cv_hists_by_section) {
+                                    TH1D* cv_total = nullptr;
+                                    for(size_t sc = 0; sc < config.m_num_subchannels[ic]; sc++) {
                                         const std::string& subchannel_name = config.m_fullnames[global_subchannel_index + sc];
                                         auto cv_it = sec_cv_hists.find(subchannel_name);
-                                        auto var_it = var_hists.find(subchannel_name);
                                         if(cv_it != sec_cv_hists.end()) {
-                                            var_total->Add(&*(cv_it->second), -1.0);
-                                        }
-                                        if(var_it != var_hists.end()) {
-                                            var_total->Add(&*(var_it->second), 1.0);
+                                            if(!cv_total)
+                                                cv_total = (TH1D*)cv_it->second->Clone(("cv_total_sec" + std::to_string(sec_idx)).c_str());
+                                            else
+                                                cv_total->Add(&*(cv_it->second));
                                         }
                                     }
-
-                                    var_total->SetLineColor(colors[color_idx % ncolors]);
-                                    var_total->SetLineWidth(2);
-                                    var_total->SetFillColor(kWhite);
-                                    var_total->SetFillStyle(0);
-                                    if(var_total->GetMaximum() > ymax) ymax = var_total->GetMaximum();
-                                    var_totals.push_back(var_total);
-                                    color_idx++;
+                                    if(cv_total) cv_total_per_section[sec_idx] = cv_total;
                                 }
 
-                                nominal_total->SetMaximum(ymax * 1.15);
-                                nominal_total->Draw("hist");
+                                if(!cv_total_per_section.empty()) {
+                                    // Use first section CV for axis/title setup
+                                    TH1D* ref_cv = cv_total_per_section.begin()->second;
+                                    ref_cv->SetLineColor(kBlack);
+                                    ref_cv->SetLineWidth(3);
+                                    ref_cv->SetFillColor(kWhite);
+                                    ref_cv->SetFillStyle(0);
+                                    ref_cv->SetTitle((config.m_mode_names[im] + " " + config.m_detector_names[id] + " " + config.m_channel_names[ic] + " DetVar").c_str());
+                                    if(binwidth_scale)
+                                        ref_cv->GetYaxis()->SetTitle("Events/GeV");
+                                    else
+                                        ref_cv->GetYaxis()->SetTitle("Events");
 
-                                std::unique_ptr<TLegend> leg = std::make_unique<TLegend>(0.55, 0.65, 0.89, 0.89);
-                                leg->SetFillStyle(0);
-                                leg->SetLineWidth(0);
-                                leg->AddEntry(nominal_total, "Nominal", "l");
+                                    float ymax = 0;
+                                    for(auto& [sec_idx, cv_h] : cv_total_per_section)
+                                        if(cv_h->GetMaximum() > ymax) ymax = cv_h->GetMaximum();
 
-                                int var_idx = 0;
-                                for(size_t idv = 0; idv < detvar_specs.size(); ++idv) {
-                                    if(config.m_detvar_files[idv].is_cv) continue;
-                                    var_totals[var_idx]->Draw("hist same");
-                                    leg->AddEntry(var_totals[var_idx], detvar_names[idv].c_str(), "l");
-                                    var_idx++;
+                                    // Build variation totals directly from DetVar variation spectra
+                                    std::vector<TH1D*> var_totals;
+                                    std::vector<std::string> var_labels;
+                                    int color_idx = 0;
+
+                                    for(size_t idv = 0; idv < detvar_specs.size(); ++idv) {
+                                        if(config.m_detvar_files[idv].is_cv) continue;
+
+                                        std::map<std::string, std::unique_ptr<TH1D>> var_hists = getCV1DHists(detvar_specs[idv], config, binwidth_scale, config.i_prime);
+
+                                        TH1D* var_total = nullptr;
+                                        for(size_t sc = 0; sc < config.m_num_subchannels[ic]; sc++) {
+                                            const std::string& subchannel_name = config.m_fullnames[global_subchannel_index + sc];
+                                            auto var_it = var_hists.find(subchannel_name);
+                                            if(var_it != var_hists.end()) {
+                                                if(!var_total)
+                                                    var_total = (TH1D*)var_it->second->Clone(("var_" + detvar_names[idv]).c_str());
+                                                else
+                                                    var_total->Add(&*(var_it->second));
+                                            }
+                                        }
+
+                                        if(var_total) {
+                                            var_total->SetLineColor(colors[color_idx % ncolors]);
+                                            var_total->SetLineWidth(2);
+                                            var_total->SetFillColor(kWhite);
+                                            var_total->SetFillStyle(0);
+                                            if(var_total->GetMaximum() > ymax) ymax = var_total->GetMaximum();
+                                            var_totals.push_back(var_total);
+                                            var_labels.push_back(detvar_names[idv]);
+                                        }
+                                        color_idx++;
+                                    }
+
+                                    ref_cv->SetMaximum(ymax * 1.15);
+                                    ref_cv->Draw("hist");
+
+                                    std::unique_ptr<TLegend> leg = std::make_unique<TLegend>(0.55, 0.65, 0.89, 0.89);
+                                    leg->SetFillStyle(0);
+                                    leg->SetLineWidth(0);
+                                    std::string cv_label = cv_total_per_section.size() == 1
+                                        ? "DetVar CV"
+                                        : ("DetVar CV (sec " + std::to_string(cv_total_per_section.begin()->first) + ")");
+                                    leg->AddEntry(ref_cv, cv_label.c_str(), "l");
+
+                                    // Draw additional section CVs if more than one section
+                                    bool first_sec = true;
+                                    for(auto& [sec_idx, cv_h] : cv_total_per_section) {
+                                        if(first_sec) { first_sec = false; continue; }
+                                        cv_h->SetLineColor(kGray+2);
+                                        cv_h->SetLineWidth(3);
+                                        cv_h->SetFillColor(kWhite);
+                                        cv_h->SetFillStyle(0);
+                                        cv_h->Draw("hist same");
+                                        leg->AddEntry(cv_h, ("DetVar CV (sec " + std::to_string(sec_idx) + ")").c_str(), "l");
+                                    }
+
+                                    for(size_t vi = 0; vi < var_totals.size(); ++vi) {
+                                        var_totals[vi]->Draw("hist same");
+                                        leg->AddEntry(var_totals[vi], var_labels[vi].c_str(), "l");
+                                    }
+                                    leg->Draw("same");
+
+                                    detvar_canvas.Print(detvar_pdf.c_str(), "pdf");
+
+                                    for(auto& [sec_idx, cv_h] : cv_total_per_section) delete cv_h;
+                                    for(auto* h : var_totals) delete h;
                                 }
-                                leg->Draw("same");
-
-                                detvar_canvas.Print(detvar_pdf.c_str(), "pdf");
-
-                                delete nominal_total;
-                                for(auto* h : var_totals) delete h;
 
                                 global_subchannel_index += config.m_num_subchannels[ic];
                             }

@@ -172,12 +172,12 @@
 <!-- TODO: Don't do this all at once, I'm directing the changes over time. -->
 <!-- Add way to exclude certain weights -->
 <!-- Add way to include new weight just for DetVar -->
-<!-- Add way to have different subchannels for different file sets -->
 <!-- Make sure this affects the hash that determines binary compatibility -->
 
 <DetVarFiles>
 
-	<DetVarSection treename="wcpselection/T_KINEvars" scale="1.0">
+	<!-- optional include_only_weights, here we include 1 and 2 (cut weight and xs weight, same as default) -->
+	<DetVarSection treename="wcpselection/T_KINEvars" scale="1.0" include_only_weights="1,2">
 
 		<cv filename="/nevis/riverside/data/karan/ngem/data_files/checkout_DetVar_Run45_v10_04_07_19_BNB_nu_overlay_cv_surprise_reco2_hist_5.root" pot="6.9116e20" />
 		<variation name="Recomb2" filename="/nevis/riverside/data/karan/ngem/data_files/checkout_DetVar_Run45_v10_04_07_19_BNB_nu_overlay_recomb2_surprise_reco2_hist_5.root" pot="4.5455e20" />
@@ -195,6 +195,9 @@
 		<subchannel>nu_uBooNE_numuCC0pFC_nueCCoverlay</subchannel>
 		<subchannel>nu_uBooNE_numuCC0pFC_NCoverlay</subchannel>
 
+		<!-- optional extra weight, parsed as a string to a TTreeFormula -->
+		<!-- <extra_weight>0.5 * (kine_reco_Enu > 700) + 1 * !(kine_reco_Enu > 700)</extra_weight>-->
+
 	</DetVarSection>
 
 </DetVarFiles>
@@ -205,8 +208,8 @@
 	<!-- <systematic type="mcstat" plotname="MC Stats" tag="other">MCStat</systematic> -->
 
 	<!-- DetVar systematics: name matches variation name from <DetVarFiles> -->
-	<allowlist name="Recomb2" type="spline" plotname="Recomb2" tag="DetVar" />
-	<allowlist name="LYAtt" type="spline" plotname="LYAtt" tag="DetVar" />
+	<systematic name="Recomb2" type="spline" plotname="Recomb2" tag="DetVar" />
+	<systematic name="LYAtt" type="spline" plotname="LYAtt" tag="DetVar" />
 
     <!-- Cross Section Systematics, 55 splines -->
 

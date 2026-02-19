@@ -918,6 +918,36 @@ int PROconfig::LoadFromXML(const std::string &filename){
             const char* dv_scale_str = pDetVar->Attribute("scale");
             std::string dv_scale = dv_scale_str ? dv_scale_str : "1.0";
 
+            // Parse include_only_weights for this section (1-based weight indices, comma-separated)
+            const char* dv_iow_str = pDetVar->Attribute("include_only_weights");
+            std::vector<int> section_iow;
+            if(dv_iow_str) {
+                const char *c = dv_iow_str, *begin = NULL;
+                while(*c) {
+                    if(begin && (isspace((unsigned char)*c) || *c == ',')) {
+                        section_iow.push_back(atoi(begin));
+                        begin = NULL;
+                    } else if(!begin && !isspace((unsigned char)*c) && *c != ',') begin = c;
+                    ++c;
+                }
+                if(begin) section_iow.push_back(atoi(begin));
+                log<LOG_INFO>(L"%1% || Parsed include_only_weights for DetVar section %2%: %3% indices") % __func__ % section_idx % section_iow.size();
+            }
+            m_detvar_include_only_weights_per_section.push_back(section_iow);
+
+            // Parse extra_weight child elements (additional weight expressions only for DetVar files)
+            std::vector<std::string> section_extra_weights;
+            tinyxml2::XMLElement *pEW = pDetVar->FirstChildElement("extra_weight");
+            while(pEW) {
+                const char* ew_text = pEW->GetText();
+                if(ew_text) {
+                    section_extra_weights.push_back(ew_text);
+                    log<LOG_INFO>(L"%1% || Parsed extra_weight for DetVar section %2%: '%3%'") % __func__ % section_idx % ew_text;
+                }
+                pEW = pEW->NextSiblingElement("extra_weight");
+            }
+            m_detvar_extra_weights_per_section.push_back(section_extra_weights);
+
             // CV file: name is "cv" for section 0, "cv_N" for subsequent sections
             tinyxml2::XMLElement *pCV = pDetVar->FirstChildElement("cv");
             if(!pCV) {
@@ -1054,9 +1084,16 @@ int PROconfig::LoadFromXML(const std::string &filename){
                                 if(m_mcgen_eventweight_branch_syst[fi][bi] == 0) {
                                     dvXml << " incl_systematics=\"false\"";
                                 }
-                                // Weights
+                                // Weights (filtered by include_only_weights if set for this section)
+                                const std::vector<int>& sec_iow = m_detvar_include_only_weights_per_section[section_idx];
+                                int out_wi = 1;
                                 for(size_t wi = 0; wi < m_mcgen_weight_names[fi][bi].size(); wi++) {
-                                    dvXml << " weight_" << (wi+1) << "=\"" << m_mcgen_weight_names[fi][bi][wi] << "\"";
+                                    if(!sec_iow.empty() && std::find(sec_iow.begin(), sec_iow.end(), (int)(wi+1)) == sec_iow.end()) continue;
+                                    dvXml << " weight_" << out_wi++ << "=\"" << m_mcgen_weight_names[fi][bi][wi] << "\"";
+                                }
+                                // Append extra weights defined only for this DetVarSection
+                                for(const auto& ew : m_detvar_extra_weights_per_section[section_idx]) {
+                                    dvXml << " weight_" << out_wi++ << "=\"" << ew << "\"";
                                 }
                                 dvXml << ">\n";
                                 // Variables
@@ -1077,6 +1114,8 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
                 m_detvar_xml_templates.push_back(dvXml.str());
                 log<LOG_INFO>(L"%1% || DetVar XML template for section %2% built successfully (%3% bytes)") % __func__ % section_idx % m_detvar_xml_templates.back().size();
+                // DEBUG: log full template so weight injection can be verified in output
+                log<LOG_INFO>(L"%1% || DetVar XML template section %2% content:\n%3%") % __func__ % section_idx % m_detvar_xml_templates.back().c_str();
             }
 
             pDetVar = pDetVar->NextSiblingElement("DetVarSection");
@@ -2150,6 +2189,11 @@ uint32_t PROconfig::CalcHash() const{
         unique_string << vecToString(vec);
 
     unique_string << vecToString(m_mcgen_variation_allowlist);
+
+    // DetVar section parameters: templates embed filtered/extra weights, so this covers
+    // include_only_weights and extra_weight changes too
+    for(const auto& tmpl : m_detvar_xml_templates)
+        unique_string << tmpl;
 
     for(const auto& vec: m_branch_variables){
         for(const auto& br: vec){

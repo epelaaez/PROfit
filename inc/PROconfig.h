@@ -480,6 +480,10 @@ namespace PROfit{
             std::vector<DetVarFile> m_detvar_files;
             // Per-section subchannel lists (one inner vector per DetVarSection)
             std::vector<std::vector<std::string>> m_detvar_subchannels_per_section;
+            // Per-section include_only_weights: 1-based indices of weight_N to use (empty = use all)
+            std::vector<std::vector<int>> m_detvar_include_only_weights_per_section;
+            // Per-section extra weights: additional weight expressions appended after inherited weights
+            std::vector<std::vector<std::string>> m_detvar_extra_weights_per_section;
             std::set<std::string> m_detvar_variation_names;  // variation names for lookup during systematics parsing
             // Per-section XML templates for building per-file DetVar configs
             // Each template contains channel/subchannel/model definitions and an MCFile template

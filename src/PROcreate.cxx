@@ -593,6 +593,11 @@ namespace PROfit {
             }
         }
 
+        // DEBUG: count events for weight printout (resets per PROcess_CAFAna call)
+        int _debug_weight_count = 0;
+        const int _debug_weight_max = 500;
+        const bool _debug_weight_active = inconfig.m_mcgen_variation_type_map.empty(); // true only for DetVar mini-configs (no <systematics> section)
+
         time_t start_time = time(nullptr), time_stamp = time(nullptr);
         log<LOG_INFO>(L"%1% || Start reading the files..") % __func__;
         for(int fid=0; fid < num_files; ++fid) {
@@ -695,8 +700,22 @@ namespace PROfit {
 
                 //branch loop
                 for(int ib = 0; ib != num_branch; ++ib) {
+                    /*// DEBUG: print per-weight values for first _debug_weight_max entries in DetVar processing
+                    if(_debug_weight_active && _debug_weight_count < _debug_weight_max && ib == 0) {
+                        int nw = branches[ib]->NumWeights();
+                        log<LOG_WARNING>(L"%1% || [WEIGHT DEBUG] entry=%2% branch=%3% nweights=%4%") % __func__ % i % ib % nw;
+                        for(int wi = 0; wi < nw; ++wi) {
+                            log<LOG_WARNING>(L"%1% || [WEIGHT DEBUG]   weight_%2% = %3%") % __func__ % (wi+1) % branches[ib]->GetWeight(wi);
+                        }
+                        log<LOG_WARNING>(L"%1% || [WEIGHT DEBUG]   TotalWeight = %2%") % __func__ % branches[ib]->GetTotalWeight();
+                        if(++_debug_weight_count >= _debug_weight_max) {
+                            log<LOG_WARNING>(L"%1% || [WEIGHT DEBUG] Printed %2% entries, terminating.") % __func__ % _debug_weight_max;
+                            exit(0);
+                        }
+                    }
+                    */
                     process_cafana_event(inconfig, branches[ib], f_event_weights[fid][0], inconfig.m_mcgen_pot[fid], subchannel_index[ib], syst_vector, sys_weight_value, inprop);
-                } 
+                }
 
             } //end of entry loop
 
