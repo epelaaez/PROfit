@@ -134,7 +134,7 @@ namespace PROfit{
 
     void plot_detector_ratios(const PROconfig &config, std::vector<TH1D> data_hists,  std::vector<TH1D> cv_hists, std::optional<PROerrorbar> errband, std::vector<TH1D> bf_hists, std::optional<PROerrorbar> posterrband, TH2D &pre_corr, TH2D &post_corr, std::string filename, int var_index = 0);
 
-    void plot_channels(const std::string &filename, const PROconfig &config, std::optional<PROspec> cv, std::optional<PROspec> best_fit, std::optional<PROdata> data, std::optional<PROerrorbar> errband, std::optional<PROerrorbar> posterrband, std::optional<PROsyst> pre_allcovsyst, std::optional<PROsyst> post_allcovsyst, std::vector<TPaveText> &texts, PlotBounds &bounds, PlotOptions opt = PlotOptions::Default, int var_index = 0);
+    void plot_channels(const std::string &filename, const PROconfig &config, std::optional<PROspec> cv, std::optional<PROspec> best_fit, std::optional<PROdata> data, std::optional<PROerrorbar> errband, std::optional<PROerrorbar> posterrband, std::vector<TPaveText> &texts, PlotBounds &bounds, PlotOptions opt = PlotOptions::Default, int var_index = 0, bool ratio_bool = false);
 
     //some helper functions for PROplot
     std::map<std::string, std::unique_ptr<TH1D>> getCV1DHists(const PROspec & spec, const PROconfig& inconfig, bool scale = false, int var_index = 0);
@@ -151,6 +151,7 @@ namespace PROfit{
                 posteriors.emplace_back("", (";"+config.m_mcgen_variation_plotname_map.at(metric.GetSysts().spline_names[i])).c_str(), 60, -3, 3);
 
             Eigen::VectorXf cv = FillSpectra(config, prop, metric.GetSysts(), metric.GetModel(), best_fit, true, var_index).Spec();
+            Eigen::VectorXf cv_coll = CollapseMatrix(config, cv);
             Eigen::MatrixXf L; 
             if(metric.GetSysts().GetNCovar() > 0) L = metric.GetSysts().DecomposeFractionalCovariance(config, cv);
             else L = Eigen::MatrixXf::Zero(config.m_num_variable_bins_total_collapsed[var_index], config.m_num_variable_bins_total_collapsed[var_index]);
@@ -161,6 +162,7 @@ namespace PROfit{
             int nphys = metric.GetModel().nparams;
             Eigen::VectorXf splines_bf = best_fit.segment(nphys, nspline);
             post_covar = Eigen::MatrixXf::Constant(nspline, nspline, 0);
+	    Eigen::MatrixXf post_hist_covar = Eigen::MatrixXf::Constant(cv_coll.size(), cv_coll.size(), 0);
             size_t accepted = 0;
             std::vector<Eigen::VectorXf> specs;
             const auto action = [&](const Eigen::VectorXf &value) {
@@ -172,13 +174,16 @@ namespace PROfit{
                     posteriors[i].Fill(value(i+nphys));
                 Eigen::VectorXf splines = value.segment(nphys, nspline);
                 Eigen::VectorXf diff = splines-splines_bf;
+                Eigen::VectorXf diff_hist = specs.back() - cv_coll;
                 post_covar += diff * diff.transpose();
+                post_hist_covar += diff_hist * diff_hist.transpose();
                 bool print_autocorrelation_values = false;
                 if(print_autocorrelation_values){
                     log<LOG_INFO>(L"%1% || AUTO  %2% : %3%") % __func__ % accepted % value;
                 }
             };
             met.run(burnin, iterations, action);
+            post_hist_covar /= accepted;
             post_covar /= accepted;
             log<LOG_INFO>(L"%1% || Acceptance rate %2%") % __func__ % ((float)accepted / iterations);
 
@@ -217,6 +222,7 @@ namespace PROfit{
                 ebar.error_point(i) = cv(i)*scale_factor;
                 log<LOG_DEBUG>(L"%1% || ErrorBand bin %2% %3% %4% %5% %6% ") % __func__ % i % cv(i) % ehi % elo % scale_factor ;
             }
+            ebar.covariance = post_hist_covar;
             return ebar;
         }
 
