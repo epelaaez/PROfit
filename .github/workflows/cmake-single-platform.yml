@@ -24,7 +24,7 @@ jobs:
     - name: Install HDF5
       run: sudo apt-get update && sudo apt-get install -y libhdf5-dev
     - name: Install Boost
-      run: sudo add-apt-repository ppa:mhire/boost -y && sudo apt-get update && sudo apt install libboost1.82-dev
+      run: sudo add-apt-repository ppa:mhier/libboost-latest -y && sudo apt-get update && sudo apt install libboost1.82-dev
     - name: Install ROOT
       run: wget https://root.cern/download/root_v6.28.12.Linux-ubuntu22-x86_64-gcc11.4.tar.gz && tar -xzvf root_v6.28.12.Linux-ubuntu22-x86_64-gcc11.4.tar.gz
     - name: Configure CMake
