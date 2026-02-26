@@ -23,8 +23,15 @@ jobs:
     - uses: actions/checkout@v4
     - name: Install HDF5
       run: sudo apt-get update && sudo apt-get install -y libhdf5-dev
-    - name: Install Boost
-      run: sudo add-apt-repository ppa:mhier/libboost-latest -y && sudo apt-get update && sudo apt install libboost1.82-dev
+    - name: Install Boost 1.82.0
+      uses: MarkusJx/install-boost@v2.4.5
+      id: install-boost
+      with:
+        # A list of available versions can be found at: 
+        # https://github.com/MarkusJx/prebuilt-boost/releases
+        boost_version: 1.82.0
+        # Optional: If you only need specific libraries (e.g., system, filesystem)
+        # boost_install_dir: ${{ github.workspace }}/boost
     - name: Install ROOT
       run: wget https://root.cern/download/root_v6.28.12.Linux-ubuntu22-x86_64-gcc11.4.tar.gz && tar -xzvf root_v6.28.12.Linux-ubuntu22-x86_64-gcc11.4.tar.gz
     - name: Configure CMake
