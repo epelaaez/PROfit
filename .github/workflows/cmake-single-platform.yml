@@ -36,7 +36,7 @@ jobs:
       run: cd ${{github.workspace}}/build && make -j10
     - name: plot
       # Build your program with the given configuration
-      run: cd ${{github.workspace}}/ci && export PATH=$PATH:$PWD../build/bin && PROfit -x ci_quick.xml -t quick_v0.1_FullSBN_nue_app plot 
+      run: cd ${{github.workspace}}/ci && export PATH=$PATH:$PWD/../build/bin && PROfit -x ci_quick.xml -t quick_v0.1_FullSBN_nue_app plot 
     # - name: Test
     #   run: export PATH=${{github.workspace}}/build/bin && PROfit -x ${{github.workspace}}/xml/PROfit_Tutorial_Oct2025v1_SPINE_ICARUS_numu_dis.xml --log workflow.out -w 4 surface -g 40 --logx --logy --xlo 0.001
     # - name: Test
