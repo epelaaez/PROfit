@@ -61,7 +61,6 @@ namespace PROfit{
     }
 
     std::map<std::string, std::unique_ptr<TH2D>> covarianceTH2D(const PROsyst &syst, const PROconfig &config, const PROspec &cv) {
-        log<LOG_DEBUG>(L"%1% || just inside") % __func__;
         std::map<std::string, std::unique_ptr<TH2D>> ret;
         Eigen::MatrixXf fractional_cov = syst.fractional_covariance;
         Eigen::MatrixXf diag = cv.Spec().array().matrix().asDiagonal(); 
@@ -945,6 +944,8 @@ namespace PROfit{
                 }
                 for(size_t channel = 0; channel < config.m_num_channels; ++channel) {
 
+                    log<LOG_DEBUG>(L"%1% || channel %2%") % __func__ % channel;
+
                     std::string xtitle = config.m_channel_variable_units[channel][other_index];
                     std::string ratio_titles = ";"+xtitle+";"+rat_y_title;
 
@@ -960,6 +961,7 @@ namespace PROfit{
                         if(config.m_channel_variable_dims[channel][other_index] == 2){
                             cv2dhists = getCV2DHists(*cv, config, (bool)(opt & PlotOptions::BinWidthScaled), other_index);
                         }
+
                         cv1dhists = getCV1DHists(*cv, config, (bool)(opt & PlotOptions::BinWidthScaled), other_index);
                     }
 
@@ -978,13 +980,11 @@ namespace PROfit{
                     PROerrorbar *errband_1d = NULL;
                     if(errband){
                         errband_1d = make_1d_err(*errband, channel_nbins_x, channel_nbins_y, tot_offset, config.m_channel_variable_dims[channel][other_index]);
-                        log<LOG_DEBUG>(L"%1% || err") % __func__;
                     }
 
                     PROerrorbar *posterrband_1d = NULL;
                     if(posterrband){
                         posterrband_1d = make_1d_err(*posterrband, channel_nbins_x, channel_nbins_y, tot_offset, config.m_channel_variable_dims[channel][other_index]);
-                        log<LOG_DEBUG>(L"%1% || posterr") % __func__;
                     }
 
                     if(config.m_channel_variable_dims[channel][other_index] == 2){
@@ -1241,8 +1241,8 @@ namespace PROfit{
 			                                                  config.m_num_variable_bins_total_collapsed[config.i_prime], config.m_num_variable_bins_total_collapsed[config.i_prime],
 									  0, config.m_num_variable_bins_total_collapsed[config.i_prime]);
 
-	    Eigen::MatrixXf cov_coll = CollapseMatrix(config, errband->covariance);
-	    Eigen::MatrixXf post_cov_coll = CollapseMatrix(config, posterrband->covariance);
+	    Eigen::MatrixXf cov_coll = errband->covariance;
+	    Eigen::MatrixXf post_cov_coll = posterrband->covariance;
 
             log<LOG_DEBUG>(L"%1% || Converting covariance to correlation") % __func__;
 	    for(int i = 0; i < cov_coll.rows(); i++){
