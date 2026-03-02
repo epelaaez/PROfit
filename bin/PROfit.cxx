@@ -1829,7 +1829,7 @@ int main(int argc, char* argv[])
         metric->setBounds(global_ub, global_lb);
         size_t nparams = metric->GetModel().nparams + metric->GetSysts().GetNSplines();
         std::uniform_real_distribution<float> latin_distribution(-2, 2);
-        size_t nchains = 40;
+        size_t nchains = 8;
         std::vector<std::vector<float>> samples = latin_hypercube_sampling(nchains, nparams, latin_distribution, myseed.global_rng);
         recenter_latin_samples(samples, global_ub, global_lb);
         std::vector<Eigen::VectorXf> samples_eigen; 
@@ -2063,7 +2063,7 @@ void mcmc_worker(std::vector<std::vector<Eigen::VectorXf>> &chains, Eigen::Vecto
         simple_target target{*metric};
         adaptive_proposal proposal(*metric, dseed(rng));
         Metropolis mcmc(target, proposal, initial, dseed(rng));
-        mcmc.run(100'000, 1'000'000, action);
+        mcmc.run(250'000, 1'000'000, action);
     }
     //return chain;
 }

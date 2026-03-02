@@ -216,6 +216,7 @@ namespace PROfit {
         static constexpr bool has_tune = true;
         std::vector<Eigen::VectorXf> proposed;
         Eigen::VectorXf last_proposed;
+        Eigen::VectorXf last_accepted;
         Eigen::VectorXf mean;
         Eigen::MatrixXf cov;
         size_t tune_calls = 0;
@@ -257,6 +258,7 @@ namespace PROfit {
                 //grab the bits that correspond to the active only.
                 sub_diagL = Eigen::MatrixXf::Identity(active.size(), active.size());
                 sub_diagL = diagL(active, active);  
+                last_accepted = Eigen::VectorXf::Zero(nparams);
 
             }
 
@@ -304,12 +306,14 @@ namespace PROfit {
 
 
         void tune(bool accepted) {
+
             //if (accepted) {
                 ++tune_calls;
-                Eigen::VectorXf delta = last_proposed - mean;
+                if(accepted) last_accepted = last_proposed;
+                Eigen::VectorXf delta = last_accepted - mean;
                 mean += delta / tune_calls;
                 if (tune_calls > 1) {
-                    cov += (delta * (last_proposed - mean).transpose() - cov) / tune_calls;
+                    cov += (delta * (last_accepted - mean).transpose() - cov) / tune_calls;
                 }
                 for (int idx : fixed) {
                     cov.row(idx).setZero();
