@@ -36,6 +36,7 @@ PROconfig::PROconfig(const std::string &xml, bool rate_only):
     LoadFromXML(m_xmlname);
 
     hash = PROconfig::CalcHash();
+    detvar_hash = PROconfig::CalcDetVarHash();
     construct_variable_collapsing_matrices();
 
 }
@@ -2190,11 +2191,6 @@ uint32_t PROconfig::CalcHash() const{
 
     unique_string << vecToString(m_mcgen_variation_allowlist);
 
-    // DetVar section parameters: templates embed filtered/extra weights, so this covers
-    // include_only_weights and extra_weight changes too
-    for(const auto& tmpl : m_detvar_xml_templates)
-        unique_string << tmpl;
-
     for(const auto& vec: m_branch_variables){
         for(const auto& br: vec){
             unique_string << br->associated_hist << br->associated_systematic << br->model_rule;
@@ -2209,6 +2205,41 @@ uint32_t PROconfig::CalcHash() const{
     MurmurHash3_x86_32(unique_string.str().c_str(), unique_string.str().size(), fixed_seed, &hash);
 
     log<LOG_INFO>(L"%1% || MurmurHash output hash %2% ") % __func__ % hash;
+
+    return hash;
+}
+
+uint32_t PROconfig::CalcDetVarHash() const{
+    int fixed_seed = 404;
+    uint32_t hash;
+    std::ostringstream unique_string;
+
+    auto vecToString = [](const auto& vec) -> std::string {
+        std::ostringstream oss;
+        for (const auto& v : vec) {
+            oss << v;
+        }
+        return oss.str();
+    };
+
+    // Binning and channel structure — DetVar propellers are filled into these bins,
+    // so any change to channels or bin edges requires reprocessing.
+    unique_string << vecToString(m_fullnames);
+    for (const auto& vec1 : m_channel_variable_bins){
+        for (const auto& vec2 : vec1){
+            for (const auto& vec3 : vec2.bin_edges) {
+                unique_string << vecToString(vec3);
+            }
+        }
+    }
+
+    // DetVar section content: filenames, POTs, subchannels, include_only_weights, extra_weight
+    for(const auto& tmpl : m_detvar_xml_templates)
+        unique_string << tmpl;
+
+    MurmurHash3_x86_32(unique_string.str().c_str(), unique_string.str().size(), fixed_seed, &hash);
+
+    log<LOG_INFO>(L"%1% || MurmurHash detvar_hash output %2% ") % __func__ % hash;
 
     return hash;
 }

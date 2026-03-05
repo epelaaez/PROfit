@@ -169,10 +169,7 @@
 <!-- A variation only becomes a systematic if its name appears in <systematics>. -->
 <!-- Friend trees are not assumed, DetVar files likely won't have spline_weights for example. -->
 
-<!-- TODO: Don't do this all at once, I'm directing the changes over time. -->
-<!-- Add way to exclude certain weights -->
-<!-- Add way to include new weight just for DetVar -->
-<!-- Make sure this affects the hash that determines binary compatibility -->
+<!-- TODO: Make sure this affects the hash that determines binary compatibility -->
 
 <DetVarFiles>
 
@@ -205,7 +202,7 @@
 <systematics>
 
     <!-- MC Statistics -->
-	<!-- <systematic type="mcstat" plotname="MC Stats" tag="other">MCStat</systematic> -->
+	<systematic type="mcstat" plotname="MC Stats" tag="other">MCStat</systematic>
 
 	<!-- DetVar systematics: name matches variation name from <DetVarFiles> -->
 	<systematic name="Recomb2" type="spline" plotname="Recomb2" tag="DetVar" />
@@ -213,7 +210,7 @@
 
     <!-- Cross Section Systematics, 55 splines -->
 
-	<!-- <systematic type="spline" binning="var0" plotname="MACCQE" tag="QE" force_0_cv="true" include_only_weights="1">MaCCQE_UBGenie</systematic>
+	<systematic type="spline" binning="var0" plotname="MACCQE" tag="QE" force_0_cv="true" include_only_weights="1">MaCCQE_UBGenie</systematic>
 	<systematic type="spline" binning="var0" plotname="AxFFCCQEshape" knobvals="0, 1" tag="QE" force_0_cv="true" include_only_weights="1">AxFFCCQEshape_UBGenie</systematic>
 	<systematic type="spline" binning="var0" plotname="VecFFCCQEshape" knobvals="0, 1" tag="QE" force_0_cv="true" include_only_weights="1">VecFFCCQEshape_UBGenie</systematic>
 	<systematic type="spline" binning="var0" plotname="RPA_CCQE" tag="QE" force_0_cv="true" include_only_weights="1">RPA_CCQE_UBGenie</systematic>
@@ -230,16 +227,16 @@
 	<systematic type="spline" binning="var0" plotname="MvCCRES" tag="RES" force_0_cv="true" include_only_weights="1">MvCCRES_UBGenie</systematic>
 	<systematic type="spline" binning="var0" plotname="MaNCRES" tag="RES" force_0_cv="true" include_only_weights="1">MaNCRES_UBGenie</systematic>
 	<systematic type="spline" binning="var0" plotname="MvNCRES" tag="RES" force_0_cv="true" include_only_weights="1">MvNCRES_UBGenie</systematic>
-	<systematic type="spline" binning="var0" plotname="RDecBR1eta" tag="RES" force_0_cv="true" include_only_weights="1">RDecBR1eta_UBGenie</systematic>
-	<systematic type="spline" binning="var0" plotname="Theta_Delta2Npi" knobvals="0, 1" tag="RES" force_0_cv="true" include_only_weights="1">Theta_Delta2Npi_UBGenie</systematic>
-	<systematic type="spline" binning="var0" plotname="RDecBR1gamma" tag="RES" force_0_cv="true" include_only_weights="1">RDecBR1gamma_UBGenie</systematic>
-	<systematic type="spline" binning="var0" plotname="ThetaDelta2NRad" knobvals="0, 1" tag="RES" force_0_cv="true" include_only_weights="1">ThetaDelta2NRad_UBGenie</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="RDecBR1eta" tag="RES" force_0_cv="true" include_only_weights="1">RDecBR1eta_UBGenie</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="Theta_Delta2Npi" knobvals="0, 1" tag="RES" force_0_cv="true" include_only_weights="1">Theta_Delta2Npi_UBGenie</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="RDecBR1gamma" tag="RES" force_0_cv="true" include_only_weights="1">RDecBR1gamma_UBGenie</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="ThetaDelta2NRad" knobvals="0, 1" tag="RES" force_0_cv="true" include_only_weights="1">ThetaDelta2NRad_UBGenie</systematic>
 
-	<systematic type="spline" binning="var0" plotname="NormCCCOH" knobvals="-1, 0, 1, 2, 3" tag="COH" force_0_cv="true" include_only_weights="1">NormCCCOH_UBGenie</systematic>
-	<systematic type="spline" binning="var0" plotname="NormNCCOH" knobvals="-1, 0, 1, 2, 3" tag="COH" force_0_cv="true" include_only_weights="1">NormNCCOH_UBGenie</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="NormCCCOH" knobvals="-1, 0, 1, 2, 3" tag="COH" force_0_cv="true" include_only_weights="1">NormCCCOH_UBGenie</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="NormNCCOH" knobvals="-1, 0, 1, 2, 3" tag="COH" force_0_cv="true" include_only_weights="1">NormNCCOH_UBGenie</systematic>
 
-	<systematic type="spline" binning="var0" plotname="MaNCEL" tag="NC" force_0_cv="true" include_only_weights="1">MaNCEL_UBGenie</systematic>
-	<systematic type="spline" binning="var0" plotname="EtaNCEL" tag="NC" force_0_cv="true" include_only_weights="1">EtaNCEL_UBGenie</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="MaNCEL" tag="NC" force_0_cv="true" include_only_weights="1">MaNCEL_UBGenie</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="EtaNCEL" tag="NC" force_0_cv="true" include_only_weights="1">EtaNCEL_UBGenie</systematic>
 
 	<systematic type="spline_to_covariance" binning="var0" plotname="AGKYxF1pi" tag="Hadr." force_0_cv="true" include_only_weights="1">AGKYxF1pi_UBGenie</systematic>
 	<systematic type="spline_to_covariance" binning="var0" plotname="AGKYpT1pi" tag="Hadr." force_0_cv="true" include_only_weights="1">AGKYpT1pi_UBGenie</systematic>
@@ -277,10 +274,10 @@
 
 	<systematic type="spline" binning="var0" plotname="xsr_scc_Fa3_SCC" tag="SCC" force_0_cv="true" include_only_weights="1">xsr_scc_Fa3_SCC</systematic>
 	<systematic type="spline" binning="var0" plotname="xsr_scc_Fv3_SCC" tag="SCC" force_0_cv="true" include_only_weights="1">xsr_scc_Fv3_SCC</systematic>
- -->
+
 
 	<!-- Flux Systematics, 11 splines -->
-	<!-- <systematic type="spline" binning="var0" plotname="horncurrent" knobvals="-1, 0, 1" tag="Flux" force_0_cv="true" include_only_weights="1">horncurrent_FluxUnisim</systematic>
+	<systematic type="spline" binning="var0" plotname="horncurrent" knobvals="-1, 0, 1" tag="Flux" force_0_cv="true" include_only_weights="1">horncurrent_FluxUnisim</systematic>
 	<systematic type="spline" binning="var0" plotname="expskin" knobvals="-1, 0, 1" tag="Flux" force_0_cv="true" include_only_weights="1">expskin_FluxUnisim</systematic>
 	<systematic type="spline" binning="var0" plotname="kminus" tag="Flux" force_0_cv="true" include_only_weights="1">kminus_PrimaryHadronNormalization</systematic>
 	<systematic type="spline" binning="var0" plotname="kplus" tag="Flux" force_0_cv="true" include_only_weights="1">kplus_PrimaryHadronFeynmanScaling</systematic>
@@ -292,14 +289,14 @@
 	<systematic type="spline" binning="var0" plotname="pionqexsec" knobvals="-1, 0, 1" tag="Flux" force_0_cv="true" include_only_weights="1">pionqexsec_FluxUnisim</systematic>
 	<systematic type="spline" binning="var0" plotname="piontotxsec" knobvals="-1, 0, 1" tag="Flux" force_0_cv="true" include_only_weights="1">piontotxsec_FluxUnisim</systematic>
 	<systematic type="covariance" plotname="piplus_prod" tag="piprod">piplus_PrimaryHadronSWCentralSplineVariation</systematic>
-	<systematic type="covariance" plotname="piminus_prod" tag="piprod">piminus_PrimaryHadronSWCentralSplineVariation</systematic> -->
+	<systematic type="covariance" plotname="piminus_prod" tag="piprod">piminus_PrimaryHadronSWCentralSplineVariation</systematic>
 
 
 	<!-- Re-interaction Systematics -->
-	<!-- <systematic type="covariance" tag="Reint" scale="0.001">weightsReint</systematic> -->
+	<systematic type="covariance" tag="Reint" scale="0.001">weightsReint</systematic>
 
 	<!-- Other Systematics -->
-	<!-- <systematic type="norm" binning="reco" plotname="Targets_POT" tag="norm">nu_uBooNE_nuoverlay_overlay:0.02</systematic> -->
+	<systematic type="norm" binning="reco" plotname="Targets_POT" tag="norm">nu_uBooNE_nuoverlay_overlay:0.02</systematic>
 
 </systematics>
 

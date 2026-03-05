@@ -249,6 +249,11 @@ namespace PROfit{
 
     std::string convertToXRootD(std::string fname_orig);
 
+    // Save/load a map of name -> PROpeller for all DetVar files in one combined binary.
+    // The detvar_hash is stored inside the binary and checked on load.
+    void saveDetVarProps(const std::map<std::string, PROpeller>& props, uint32_t detvar_hash, const std::string& filename);
+    uint32_t loadDetVarProps(std::map<std::string, PROpeller>& props, const std::string& filename);
+
 
 };
 #endif

@@ -249,6 +249,7 @@ namespace PROfit{
              * Function: Use TinyXML2 to load XML */
             int LoadFromXML(const std::string & filename);
             uint32_t hash;
+            uint32_t detvar_hash;
 
             static bool SameChannels(const PROconfig &one, const PROconfig &two);
 
@@ -453,6 +454,7 @@ namespace PROfit{
 
             /* Calculate hash of unique properties of XML config for PROpeller */
             uint32_t CalcHash() const;
+            uint32_t CalcDetVarHash() const;
 
             //---- Embedded data support ----
             // Whether a <data> section was found in the XML

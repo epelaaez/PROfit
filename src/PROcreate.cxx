@@ -27,7 +27,31 @@ namespace PROfit {
     void loadSystStructVector(std::vector<std::vector<SystStruct>> &structs, const std::string &filename) {
         std::ifstream ifs(filename, std::ios::binary);
         boost::archive::binary_iarchive ia(ifs);
-        ia & structs;  
+        ia & structs;
+    }
+
+    void saveDetVarProps(const std::map<std::string, PROpeller>& props, uint32_t detvar_hash, const std::string& filename) {
+        auto start = std::chrono::high_resolution_clock::now();
+        std::ofstream ofs(filename, std::ios::binary);
+        boost::archive::binary_oarchive oa(ofs);
+        oa & detvar_hash;
+        oa & props;
+        auto end = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double> elapsed = end - start;
+        log<LOG_INFO>(L"%1% || Saved combined DetVar props (%2% entries) to %3% in %4% seconds") % __func__ % props.size() % filename.c_str() % elapsed.count();
+    }
+
+    uint32_t loadDetVarProps(std::map<std::string, PROpeller>& props, const std::string& filename) {
+        auto start = std::chrono::high_resolution_clock::now();
+        std::ifstream ifs(filename, std::ios::binary);
+        boost::archive::binary_iarchive ia(ifs);
+        uint32_t detvar_hash;
+        ia & detvar_hash;
+        ia & props;
+        auto end = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double> elapsed = end - start;
+        log<LOG_INFO>(L"%1% || Loaded combined DetVar props (%2% entries) from %3% in %4% seconds") % __func__ % props.size() % filename.c_str() % elapsed.count();
+        return detvar_hash;
     }
 
 
