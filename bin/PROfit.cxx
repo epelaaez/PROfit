@@ -1835,12 +1835,13 @@ int main(int argc, char* argv[])
         std::vector<Eigen::VectorXf> samples_eigen; 
         for(size_t i = 0; i < samples.size(); ++i)
             samples_eigen.push_back(Eigen::VectorXf::Map(samples[i].data(), samples[i].size()));
+        size_t mcmc_threads = mcmc_chains >= nthread ? nthread : mcmc_chains;
         std::vector<std::vector<std::vector<Eigen::VectorXf>>> chains;
-        chains.reserve(nthread);
+        chains.reserve(mcmc_threads);
         std::vector<std::thread> threads;
-        size_t chains_per_thread = mcmc_chains / nthread;
-        size_t addone = nthread - mcmc_chains%nthread;
-        for(size_t i = 0; i < nthread; ++i) {
+        size_t chains_per_thread = mcmc_chains / mcmc_threads;
+        size_t addone = mcmc_threads - mcmc_chains%mcmc_threads;
+        for(size_t i = 0; i < mcmc_threads; ++i) {
             chains.emplace_back();
             threads.emplace_back(
                     [&, i](){
@@ -1882,13 +1883,13 @@ int main(int argc, char* argv[])
                         tree.Branch(sname.c_str(), &v(i));
                     }
                 }
-                //for(const auto &p : chain) {
+                for(const auto &p : chain) {
                 //    twod[0].Fill(p(1), p(0));
                 //    oned[0].Fill(p(1));
                 //    oned[1].Fill(p(0));
-                //    v = p;
-                //    tree.Fill();
-                //}
+                    v = p;
+                    tree.Fill();
+                }
                 tree.Write();
             }
         }
