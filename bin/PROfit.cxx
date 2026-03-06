@@ -206,7 +206,7 @@ int main(int argc, char* argv[])
 
     CLI::App *promcmc_command = app.add_subcommand("mcmc", "Get bayesian posteriors using MCMC");
     promcmc_command->add_option("--vars", mcmc_vars, "Variables to find posteriors of.");
-    promcmc_command->add_option("--nchains", mcmc_chains, "Number of chains to run with MCMC.");
+    promcmc_command->add_option("--nchains", mcmc_chains, "Number of chains to run with MCMC.")->default_val(1);
 
     //PROtest, test things
     CLI::App *protest_command = app.add_subcommand("protest", "Testing ground for rapid quick tests.");
