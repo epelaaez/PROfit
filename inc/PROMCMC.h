@@ -34,11 +34,7 @@ namespace PROfit {
                 bool step() {
                     Eigen::VectorXf p = proposal(current);
                     float acceptance;
-                    try {
                     acceptance = proposal.within_bound(p) ? std::min(1.0f, target(p)/target(current) * proposal.P(current, p)/proposal.P(p, current)) : 0;
-                    } catch(...) {
-                        acceptance = 0;
-                    }
                     float u = uniform(rng);
 
                     if(u <= acceptance) {
