@@ -1861,7 +1861,7 @@ int main(int argc, char* argv[])
         //                     200, -3, 0, 200, -2, 2));
         //oned.push_back(TH1D("one1", ";sin^{2}2#theta_{#mu#mu};Posterior PDF", 200, -3, 0));
         //oned.push_back(TH1D("one2", ";#Deltam^{2}_{41} [eV^{2}];Posterior PDF", 200, -2, 2));
-        TFile fout((final_output_tag+"PROMCMC_chains.root").c_str(), "RECREATE");
+        TFile fout((final_output_tag+"_PROMCMC_chains.root").c_str(), "RECREATE");
         size_t chain_counter = 0;
         for(const auto &tchains : chains) {
             for(const auto &chain : tchains) {
