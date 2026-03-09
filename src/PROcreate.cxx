@@ -404,8 +404,15 @@ namespace PROfit {
                 }
             }
         }
-
-
+        
+        //Do we have any external systeatics?
+        if(inconfig.m_num_variation_type_hist1d>0 || inconfig.m_num_variation_type_hist2d>0){
+            for(auto& allow_sys : inconfig.m_mcgen_variation_type_map){
+                if(allow_sys.second=="hist1d" || allow_sys.second=="hist2d"){
+                    map_systematic_num_universe[allow_sys.first] = 1;
+                }
+            }
+        }
 
         size_t total_num_systematics = map_systematic_num_universe.size();
         log<LOG_INFO>(L"%1% || Found %2% unique variations") % __func__ % total_num_systematics;
@@ -469,6 +476,12 @@ namespace PROfit {
                     sv.back().binning = binningindex;
                     log<LOG_INFO>(L"%1% || Systematic variation %2% is a match for an externally loaded covariance systematic. Processing a such. ") % __func__ % sys_name.c_str();
                     log<LOG_INFO>(L"%1% || External filename:  %2%, External Matrix :%3% . Use for variable number %4%") % __func__ % sv.back().external_filename.c_str() % sys_name.c_str() % sv.back().binning;
+                }
+                if(sys_mode == "hist1d" || sys_mode == "hist2d") {
+                    map_systematic_knob_vals[sys_name] = {1.0f};
+                    sv.back().knob_index = map_systematic_knob_vals[sys_name];
+                    sv.back().knobval = sv.back().knob_index;
+                    sv.back().binning = binningindex;
                 }
                 if(sys_mode == "norm") {
                     log<LOG_INFO>(L"%1% || Systematic variation %2% is a match for a spline norm systematic. Processing a such. ") % __func__ % sys_name.c_str();
@@ -1087,6 +1100,33 @@ namespace PROfit {
                     }
                 }
                 continue;
+            } else if(var_syst_objs.front()->mode == "hist1d") {
+                if(spline_bin < 0) continue;
+                int var_num = inconfig.m_mcgen_variation_histaxisvars_map.at(var_syst_objs.front()->systname)[0];
+                float val = vars[var_num].first();
+                int bin = inconfig.m_mcgen_variation_hist1d_map.at(var_syst_objs.front()->systname)->FindBin(val);
+                float wgt = inconfig.m_mcgen_variation_hist1d_map.at(var_syst_objs.front()->systname)->GetBinContent(bin);
+
+                // Only filling 1 sigma, so just combine CV and Universe filling
+                for(auto so: var_syst_objs) {
+                    so->FillCV(spline_bin, mc_weight);
+                    so->FillUniverse(0, spline_bin, wgt);
+                }
+                
+            } else if(var_syst_objs.front()->mode == "hist2d") {
+                if(spline_bin < 0) continue;
+                int xvar_num = inconfig.m_mcgen_variation_histaxisvars_map.at(var_syst_objs.front()->systname)[0];
+                int yvar_num = inconfig.m_mcgen_variation_histaxisvars_map.at(var_syst_objs.front()->systname)[1];
+                float xval = vars[xvar_num].first();
+                float yval = vars[yvar_num].first();
+                int bin = inconfig.m_mcgen_variation_hist1d_map.at(var_syst_objs.front()->systname)->FindBin(xval, yval);
+                float wgt = inconfig.m_mcgen_variation_hist1d_map.at(var_syst_objs.front()->systname)->GetBinContent(bin);
+
+                // Only filling 1 sigma, so just combine CV and Universe filling
+                for(auto so: var_syst_objs) {
+                    so->FillCV(spline_bin, mc_weight);
+                    so->FillUniverse(0, spline_bin, wgt);
+                }
             }
         }
 

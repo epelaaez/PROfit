@@ -7,6 +7,8 @@
 #include <sstream>
 #include <fstream>
 #include <filesystem>
+#include "TFile.h"
+#include "TH1.h"
 #include "TTree.h"
 #include "TTreeFormula.h"
 #include "TFriendElement.h"
@@ -925,6 +927,8 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 const char *include_only_weights_str = pAllowList->Attribute("include_only_weights");
                 const char *scale = pAllowList->Attribute("scale");
                 const char *filename = pAllowList->Attribute("filename");
+                const char *xvar = pAllowList->Attribute("xvar");
+                const char *yvar = pAllowList->Attribute("yvar");
 
 
                 m_mcgen_variation_type.push_back(variation_type);
@@ -933,6 +937,30 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 if(prior) m_mcgen_variation_prior[wt] = std::strtof(prior, NULL);
                 if(filename) m_mcgen_variation_external_filename_map[wt] = filename;
                 m_mcgen_variation_plotname_map[wt] = plot_name ? plot_name : wt;
+                if(variation_type && (strcmp(variation_type, "hist1d") == 0 || strcmp(variation_type, "hist2d") == 0)) {
+                    if(!xvar) {
+                        log<LOG_ERROR>(L"%1% || Expected xvar attribute for %2% systematic.")
+                            % __func__ % variation_type;
+                        exit(EXIT_FAILURE);
+                    }
+                    int v = atoi(xvar+3);
+                    m_mcgen_variation_histaxisvars_map[wt][0] = v;
+                    TFile fin(filename);
+                    if(strcmp(variation_type, "hist1d") == 0) {
+                        m_mcgen_variation_hist1d_map[wt] = (TH1*)fin.Get<TH1>(wt.c_str())->Clone();
+                    } else { 
+                        m_mcgen_variation_hist2d_map[wt] = (TH2*)fin.Get<TH2>(wt.c_str())->Clone();
+                    }
+                }
+                if(variation_type && strcmp(variation_type, "hist2d")) {
+                    if(!yvar) {
+                        log<LOG_ERROR>(L"%1% || Expected yvar attribute for hist2d systematic.")
+                            % __func__;
+                        exit(EXIT_FAILURE);
+                    }
+                    int v = atoi(yvar+3);
+                    m_mcgen_variation_histaxisvars_map[wt][1] = v;
+                }
                 if(!binning || strcmp(binning, "reco") == 0) {
                     m_mcgen_variation_binning_map[wt] = i_prime;
                 } else if(strncmp(binning, "var", 3) == 0) {
@@ -1298,6 +1326,10 @@ int PROconfig::LoadFromXML(const std::string &filename){
             m_use_mcstats = true;
         }else if(m_mcgen_variation_type[i] == "external_covariance"){
             m_num_variation_type_external_covariance+=1;
+        } else if(m_mcgen_variation_type[i] == "hist1d"){
+            m_num_variation_type_hist1d+=1;
+        } else if(m_mcgen_variation_type[i] == "hist2d"){
+            m_num_variation_type_hist2d+=1;
         }
 
     }
