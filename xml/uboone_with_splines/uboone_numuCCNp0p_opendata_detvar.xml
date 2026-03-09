@@ -173,8 +173,8 @@
 
 <DetVarFiles>
 
-	<!-- optional include_only_weights, here we include 1 and 2 (cut weight and xs weight, same as default) -->
-	<DetVarSection treename="wcpselection/T_KINEvars" scale="1.0" include_only_weights="1,2">
+	<!-- optional include_only_weights, here we include 1 and 2 (cut weight and xs weight, same as default). Use run, subrun, event to match events between CV and variation files. -->
+	<DetVarSection treename="wcpselection/T_KINEvars" scale="1.0" include_only_weights="1,2" cv_variation_matching_vars="run,subrun,event">
 
 		<cv filename="/nevis/riverside/data/karan/ngem/data_files/checkout_DetVar_Run45_v10_04_07_19_BNB_nu_overlay_cv_surprise_reco2_hist_5.root" pot="6.9116e20" />
 		<variation name="Recomb2" filename="/nevis/riverside/data/karan/ngem/data_files/checkout_DetVar_Run45_v10_04_07_19_BNB_nu_overlay_recomb2_surprise_reco2_hist_5.root" pot="4.5455e20" />

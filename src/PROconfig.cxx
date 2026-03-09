@@ -949,6 +949,21 @@ int PROconfig::LoadFromXML(const std::string &filename){
             }
             m_detvar_extra_weights_per_section.push_back(section_extra_weights);
 
+            // Parse cv_variation_matching_vars for this section (comma-separated branch names)
+            const char* dv_mvars_str = pDetVar->Attribute("cv_variation_matching_vars");
+            std::vector<std::string> section_matching_vars;
+            if(dv_mvars_str) {
+                std::istringstream mvars_ss(dv_mvars_str);
+                std::string tok;
+                while(std::getline(mvars_ss, tok, ',')) {
+                    tok.erase(0, tok.find_first_not_of(" \t"));
+                    if(!tok.empty()) tok.erase(tok.find_last_not_of(" \t") + 1);
+                    if(!tok.empty()) section_matching_vars.push_back(tok);
+                }
+                log<LOG_INFO>(L"%1% || Parsed cv_variation_matching_vars for DetVar section %2%: %3% vars") % __func__ % section_idx % section_matching_vars.size();
+            }
+            m_detvar_matching_vars_per_section.push_back(section_matching_vars);
+
             // CV file: name is "cv" for section 0, "cv_N" for subsequent sections
             tinyxml2::XMLElement *pCV = pDetVar->FirstChildElement("cv");
             if(!pCV) {
@@ -2237,6 +2252,11 @@ uint32_t PROconfig::CalcDetVarHash() const{
     for(const auto& tmpl : m_detvar_xml_templates)
         unique_string << tmpl;
 
+    // Include matching vars so that adding/removing cv_variation_matching_vars forces reprocessing
+    for(const auto& sec_vars : m_detvar_matching_vars_per_section)
+        for(const auto& v : sec_vars)
+            unique_string << v;
+
     MurmurHash3_x86_32(unique_string.str().c_str(), unique_string.str().size(), fixed_seed, &hash);
 
     log<LOG_INFO>(L"%1% || MurmurHash detvar_hash output %2% ") % __func__ % hash;
@@ -2308,6 +2328,9 @@ PROconfig PROconfig::BuildDetVarConfig(size_t file_index) const {
     log<LOG_INFO>(L"%1% || Loading DetVar config for '%2%' from temporary XML: %3%") % __func__ % dvfile.name.c_str() % tmpfile.c_str();
     PROconfig dvconfig(tmpfile);
     std::filesystem::remove(tmpfile);
+
+    // Propagate matching var branch names directly onto the mini-config so PROcess_CAFAna can read them.
+    dvconfig.m_detvar_matching_vars = m_detvar_matching_vars_per_section[dvfile.section_index];
 
     return dvconfig;
 }

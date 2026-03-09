@@ -486,10 +486,16 @@ namespace PROfit{
             std::vector<std::vector<int>> m_detvar_include_only_weights_per_section;
             // Per-section extra weights: additional weight expressions appended after inherited weights
             std::vector<std::vector<std::string>> m_detvar_extra_weights_per_section;
+            // Per-section branch names used to match events between CV and variation files.
+            // Parsed from cv_variation_matching_vars="run,subrun,event" on <DetVarSection>.
+            std::vector<std::vector<std::string>> m_detvar_matching_vars_per_section;
             std::set<std::string> m_detvar_variation_names;  // variation names for lookup during systematics parsing
             // Per-section XML templates for building per-file DetVar configs
             // Each template contains channel/subchannel/model definitions and an MCFile template
             std::vector<std::string> m_detvar_xml_templates;
+            // Set on DetVar mini-configs (via BuildDetVarConfig) to carry matching var branch
+            // names into PROcess_CAFAna without round-tripping through the XML template.
+            std::vector<std::string> m_detvar_matching_vars;
 
             /* Build a PROconfig for a single DetVar file (CV or variation).
              * file_index indexes into m_detvar_files. */

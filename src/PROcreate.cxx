@@ -643,6 +643,22 @@ namespace PROfit {
             }
             log<LOG_DEBUG>(L"%1% || Finished setting up systematic weight formula") % __func__;
 
+            // Set up matching variable formulas (used for DetVar CV/variation event alignment)
+            const bool has_matching_vars = !inconfig.m_detvar_matching_vars.empty();
+            std::vector<std::unique_ptr<TTreeFormula>> matching_var_formulas;
+            if(has_matching_vars) {
+                if(inprop.matching_var_values.empty()) {
+                    inprop.matching_var_values.resize(inconfig.m_detvar_matching_vars.size());
+                    inprop.has_matching_vars = true;
+                }
+                for(size_t iv = 0; iv < inconfig.m_detvar_matching_vars.size(); ++iv) {
+                    const std::string& vname = inconfig.m_detvar_matching_vars[iv];
+                    matching_var_formulas.push_back(std::make_unique<TTreeFormula>(
+                        ("matchingVar_" + std::to_string(fid) + "_" + vname).c_str(),
+                        vname.c_str(), chains[fid]));
+                    log<LOG_INFO>(L"%1% || Set up matching var formula '%2%' for file %3%") % __func__ % vname.c_str() % fid;
+                }
+            }
 
             // grab the subchannel index
             int num_branch = inconfig.m_branch_variables[fid].size();
@@ -703,9 +719,13 @@ namespace PROfit {
                    for(size_t is = 0; is != total_num_systematics; ++is){
                         if(syst_vector[0][is].HasWeightFormula()){
                             sys_weight_formula[is]->UpdateFormulaLeaves();
-                            sys_weight_formula[is]->GetNdata();	
+                            sys_weight_formula[is]->GetNdata();
                         }
                     }//end sys
+                    for(auto& mf : matching_var_formulas) {
+                        mf->UpdateFormulaLeaves();
+                        mf->GetNdata();
+                    }
                     TObjArray* tbranches = chains[fid]->GetListOfBranches();
                     for (int i = 0; i < tbranches->GetEntries(); i++) {
                         TBranch* branch = (TBranch*)tbranches->At(i);
@@ -720,6 +740,13 @@ namespace PROfit {
                     if(syst_vector[0][is].HasWeightFormula()){
                         sys_weight_value[is] = sys_weight_formula[is]->EvalInstance();
                     }
+                }
+
+                // Evaluate matching var values once per TTree entry (same for all branches)
+                std::vector<float> current_matching_vals;
+                if(has_matching_vars) {
+                    for(auto& mf : matching_var_formulas)
+                        current_matching_vals.push_back(mf->EvalInstance());
                 }
 
                 //branch loop
@@ -738,7 +765,14 @@ namespace PROfit {
                         }
                     }
                     */
+                    const size_t prop_size_before = inprop.NEvent();
                     process_cafana_event(inconfig, branches[ib], f_event_weights[fid][0], inconfig.m_mcgen_pot[fid], subchannel_index[ib], syst_vector, sys_weight_value, inprop);
+                    // Store matching vars only if process_cafana_event actually added an entry
+                    // (it skips zero-weight events without pushing to added_weights).
+                    if(has_matching_vars && inprop.NEvent() > prop_size_before) {
+                        for(size_t iv = 0; iv < current_matching_vals.size(); ++iv)
+                            inprop.matching_var_values[iv].push_back(current_matching_vals[iv]);
+                    }
                 }
 
             } //end of entry loop
