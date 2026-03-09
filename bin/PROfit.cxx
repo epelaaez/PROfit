@@ -492,7 +492,7 @@ int main(int argc, char* argv[])
                     matchedVarSpec = PROspec(varVec, Eigen::VectorXf::Zero(varVec.size()));
                 }
 
-                for(size_t iv = 0; iv < systsstructs.size(); ++iv) {
+                {
                     SystStruct ss(varName, 2, systType, "1",
                                   {0.0f, 1.0f}, {0.0f, 1.0f}, 0);
                     ss.binning = binningIndex;
@@ -501,7 +501,7 @@ int main(int argc, char* argv[])
                     ss.p_multi_spec[0] = std::make_shared<PROspec>(matchedCvSpec);
                     ss.p_multi_spec[1] = std::make_shared<PROspec>(matchedVarSpec);
                     ss.SetHash(config.hash);
-                    systsstructs[iv].push_back(std::move(ss));
+                    systsstructs[binningIndex].push_back(std::move(ss));
                 }
                 log<LOG_INFO>(L"%1% || Added DetVar SystStruct '%2%' (section %3%, binning=%4%, mode=%5%)") % __func__ % varName.c_str() % isec % binningIndex % systType.c_str();
             }

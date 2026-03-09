@@ -1130,8 +1130,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
                 m_detvar_xml_templates.push_back(dvXml.str());
                 log<LOG_INFO>(L"%1% || DetVar XML template for section %2% built successfully (%3% bytes)") % __func__ % section_idx % m_detvar_xml_templates.back().size();
-                // DEBUG: log full template so weight injection can be verified in output
-                log<LOG_INFO>(L"%1% || DetVar XML template section %2% content:\n%3%") % __func__ % section_idx % m_detvar_xml_templates.back().c_str();
+                log<LOG_DEBUG>(L"%1% || DetVar XML template section %2% content:\n%3%") % __func__ % section_idx % m_detvar_xml_templates.back().c_str();
             }
 
             pDetVar = pDetVar->NextSiblingElement("DetVarSection");
