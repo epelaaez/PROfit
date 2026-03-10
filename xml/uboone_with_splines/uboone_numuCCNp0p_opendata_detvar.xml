@@ -169,8 +169,6 @@
 <!-- A variation only becomes a systematic if its name appears in <systematics>. -->
 <!-- Friend trees are not assumed, DetVar files likely won't have spline_weights for example. -->
 
-<!-- TODO: Make sure this affects the hash that determines binary compatibility -->
-
 <DetVarFiles>
 
 	<!-- optional include_only_weights, here we include 1 and 2 (cut weight and xs weight, same as default). Use run, subrun, event to match events between CV and variation files. -->

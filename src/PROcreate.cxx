@@ -33,6 +33,11 @@ namespace PROfit {
     void saveDetVarProps(const std::map<std::string, PROpeller>& props, uint32_t detvar_hash, const std::string& filename) {
         auto start = std::chrono::high_resolution_clock::now();
         std::ofstream ofs(filename, std::ios::binary);
+        if(!ofs.is_open()) {
+            log<LOG_ERROR>(L"%1% || ERROR: Could not open file for writing: %2%") % __func__ % filename.c_str();
+            log<LOG_ERROR>(L"Terminating.");
+            exit(EXIT_FAILURE);
+        }
         boost::archive::binary_oarchive oa(ofs);
         oa & detvar_hash;
         oa & props;
@@ -44,6 +49,11 @@ namespace PROfit {
     uint32_t loadDetVarProps(std::map<std::string, PROpeller>& props, const std::string& filename) {
         auto start = std::chrono::high_resolution_clock::now();
         std::ifstream ifs(filename, std::ios::binary);
+        if(!ifs.is_open()) {
+            log<LOG_ERROR>(L"%1% || ERROR: Could not open file for reading: %2%") % __func__ % filename.c_str();
+            log<LOG_ERROR>(L"Terminating.");
+            exit(EXIT_FAILURE);
+        }
         boost::archive::binary_iarchive ia(ifs);
         uint32_t detvar_hash;
         ia & detvar_hash;

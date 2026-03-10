@@ -40,22 +40,20 @@
 #include <random>
 #include <stdexcept>
 #include <string>
-#include <unordered_map>
-#include <unordered_set>
+#include <set>
 #include <vector>
 #include "TMath.h"
 
 using namespace PROfit;
 
-// Compute a hash key for event i_event in prop from its matching_var_values.
-// Uses boost-style hash_combine on integer-cast values.
-static size_t DetVarMatchingKey(const PROpeller& prop, size_t i_event) {
-    size_t h = 0;
-    for(const auto& vals : prop.matching_var_values) {
-        int v = static_cast<int>(std::round(vals[i_event]));
-        h ^= std::hash<int>{}(v) + 0x9e3779b9 + (h << 6) + (h >> 2);
-    }
-    return h;
+// Build a collision-free composite key for event i_event from its matching_var_values.
+// Returns a vector of integer-cast values, one per matching variable (e.g. run, subrun, event).
+static std::vector<int> DetVarMatchingKey(const PROpeller& prop, size_t i_event) {
+    std::vector<int> key;
+    key.reserve(prop.matching_var_values.size());
+    for(const auto& vals : prop.matching_var_values)
+        key.push_back(static_cast<int>(std::round(vals[i_event])));
+    return key;
 }
 
 // Build PROspec objects for CV and variation using only events whose matching keys appear
@@ -69,20 +67,18 @@ static bool BuildDetVarMatchedSpecs(
     if(!cvprop.has_matching_vars || !varprop.has_matching_vars) return false;
     if(cvprop.matching_var_values.size() != varprop.matching_var_values.size()) return false;
 
-    // Step 1: build lookup key -> list of event indices for CV
-    std::unordered_map<size_t, std::vector<size_t>> cv_key_map;
-    cv_key_map.reserve(cvprop.NEvent());
+    // Step 1: build lookup key -> list of event indices for CV.
+    // Use std::map with vector<int> keys for guaranteed collision-free RSE matching.
+    std::map<std::vector<int>, std::vector<size_t>> cv_key_map;
     for(size_t i = 0; i < cvprop.NEvent(); ++i)
         cv_key_map[DetVarMatchingKey(cvprop, i)].push_back(i);
 
     // Step 2: find the set of keys present in both CV and variation;
     // track unique var keys to compute CV-only / var-only / overlapping counts.
-    std::unordered_set<size_t> var_key_set;
-    var_key_set.reserve(varprop.NEvent());
-    std::unordered_set<size_t> common_keys;
-    common_keys.reserve(varprop.NEvent());
+    std::set<std::vector<int>> var_key_set;
+    std::set<std::vector<int>> common_keys;
     for(size_t j = 0; j < varprop.NEvent(); ++j) {
-        size_t k = DetVarMatchingKey(varprop, j);
+        auto k = DetVarMatchingKey(varprop, j);
         var_key_set.insert(k);
         if(cv_key_map.count(k)) common_keys.insert(k);
     }
@@ -1968,7 +1964,6 @@ int main(int argc, char* argv[])
                 bool unprinted = true;
                 chan++;
                 int col = chan%2==0 ? kRed: kBlue;
-                int lastsbindex = 0;
 
                 for(const auto &[fixed_pts, curve]: syst_bins) {
 
