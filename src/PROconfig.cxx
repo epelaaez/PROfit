@@ -1087,11 +1087,11 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
                 // Auto-inherit branches from MCFile entries by matching associated_subchannel
                 for(const auto& sc_name : section_subchannels) {
-                    bool found = false;
-                    for(size_t fi = 0; fi < m_branch_variables.size() && !found; fi++) {
-                        for(size_t bi = 0; bi < m_branch_variables[fi].size() && !found; bi++) {
+                    bool found_any = false;
+                    for(size_t fi = 0; fi < m_branch_variables.size(); fi++) {
+                        for(size_t bi = 0; bi < m_branch_variables[fi].size(); bi++) {
                             if(m_branch_variables[fi][bi]->associated_hist == sc_name) {
-                                found = true;
+                                found_any = true;
                                 // Reconstruct <branch> XML from stored data
                                 dvXml << "\t<branch associated_subchannel=\"" << sc_name << "\"";
                                 if(m_branch_variables[fi][bi]->model_rule >= 0) {
@@ -1120,7 +1120,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                             }
                         }
                     }
-                    if(!found) {
+                    if(!found_any) {
                         log<LOG_ERROR>(L"%1% || ERROR: DetVar subchannel '%2%' not found in any MCFile branch") % __func__ % sc_name.c_str();
                         exit(EXIT_FAILURE);
                     }
@@ -2247,7 +2247,10 @@ uint32_t PROconfig::CalcDetVarHash() const{
         }
     }
 
-    // DetVar section content: filenames, POTs, subchannels, include_only_weights, extra_weight
+    // DetVar section content: filenames, POTs, names, section indices, and template content
+    for(const auto& dv : m_detvar_files) {
+        unique_string << dv.section_index << dv.name << dv.filename << dv.pot << dv.is_cv;
+    }
     for(const auto& tmpl : m_detvar_xml_templates)
         unique_string << tmpl;
 
