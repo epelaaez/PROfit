@@ -97,6 +97,10 @@ namespace PROfit{
                     ar & variable_midbin;
                     ar & variable_values;
                     ar & hash;
+                    ar & has_matching_vars;
+                    if(has_matching_vars) {
+                        ar & matching_var_values;
+                    }
                 }
 
         public:
