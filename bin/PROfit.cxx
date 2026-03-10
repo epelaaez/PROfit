@@ -446,7 +446,6 @@ int main(int argc, char* argv[])
                 continue;
             }
 
-            const std::string& cvName = config.m_detvar_files[cv_idx].name;
             PROpeller& cvprop = dvprops.at(DetVarKey(config, cv_idx));
             PROconfig cvconfig = config.BuildDetVarConfig(cv_idx);
             NullModel cvmodel(cvprop);
@@ -1554,11 +1553,8 @@ int main(int argc, char* argv[])
                         size_t sec = config.m_detvar_files[idv].section_index;
                         auto cv_it = plot_cv_idx_by_section.find(sec);
                         if(cv_it != plot_cv_idx_by_section.end()) {
-                            const std::string& cvName = config.m_detvar_files[cv_it->second].name;
                             PROpeller& cvprop_plot = plot_dvprops.at(DetVarKey(config, cv_it->second));
                             MatchedPair mp;
-                            mp.cv = full_spec;
-                            mp.var = full_spec;
                             if(BuildDetVarMatchedSpecs(cvprop_plot, dvprop, binningIndex,
                                                        (int)config.m_num_variable_bins_total[binningIndex],
                                                        mp.cv, mp.var)) {

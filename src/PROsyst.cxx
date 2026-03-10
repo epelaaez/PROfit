@@ -20,15 +20,15 @@ namespace PROfit {
                 FillSpline(syst);
                 ++n_splines;
             } else if(syst.mode == "spline_to_covariance") {
-                // Build spline first, then convert to covariance matrix
-                FillSpline(syst);
-                int spline_idx = splines.size() - 1;
                 if(model == nullptr){
                     log<LOG_ERROR>(L"%1% || spline_to_covariance requires a PROmodel to use spline2cov. "
                         L"Construct PROsyst with a model (and optional params).") % __func__;
                     log<LOG_ERROR>(L"Terminating.");
                     exit(EXIT_FAILURE);
                 }
+                // Build spline first, then convert to covariance matrix
+                FillSpline(syst);
+                size_t spline_idx = splines.size() - 1;
 
                 // Build temporary priors/centers for the current spline list (including the
                 // just-added spline) needed by spline2cov. Use locals so we don't clobber the
@@ -295,7 +295,6 @@ namespace PROfit {
 
         return frac_covar_matrix;
     }
-
 
     Eigen::MatrixXf PROsyst::SumMatrices() const{
 
