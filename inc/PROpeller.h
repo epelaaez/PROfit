@@ -97,14 +97,6 @@ namespace PROfit{
                     ar & variable_midbin;
                     ar & variable_values;
                     ar & hash;
-                    // Version 1 adds per-event matching var values for DetVar CV/variation alignment.
-                    // Old binaries (version 0) simply skip these fields on load.
-                    if(version >= 1) {
-                        ar & has_matching_vars;
-                        if(has_matching_vars) {
-                            ar & matching_var_values;
-                        }
-                    }
                 }
 
         public:
@@ -262,8 +254,5 @@ namespace PROfit{
     };
 
 }
-
-// Version 1 added has_matching_vars + matching_var_values for DetVar event alignment.
-BOOST_CLASS_VERSION(PROfit::PROpeller, 1)
 
 #endif
