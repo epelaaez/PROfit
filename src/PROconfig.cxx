@@ -952,7 +952,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                         m_mcgen_variation_hist2d_map[wt] = (TH2*)fin.Get<TH2>(wt.c_str())->Clone();
                     }
                 }
-                if(variation_type && strcmp(variation_type, "hist2d")) {
+                if(variation_type && strcmp(variation_type, "hist2d") == 0) {
                     if(!yvar) {
                         log<LOG_ERROR>(L"%1% || Expected yvar attribute for hist2d systematic.")
                             % __func__;
