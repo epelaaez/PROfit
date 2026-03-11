@@ -16,7 +16,7 @@ namespace PROfit {
         shape_only = shapeonly;
         for(const auto& syst: systs) {
             log<LOG_DEBUG>(L"%1% || syst mode: %2%") % __func__ % syst.mode.c_str();
-            if(syst.mode == "spline" || syst.mode == "norm") {
+            if(syst.mode == "spline" || syst.mode == "norm" || syst.mode == "hist1d" || syst.mode == "hist2d") {
                 FillSpline(syst);
                 ++n_splines;
             } else if(syst.mode == "spline_to_covariance") {

@@ -906,7 +906,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 if(text) wt = std::string(text);
 
                 //check for known attributes
-                const std::vector<std::string> expected_attrs = {"type", "plotname", "binning", "knobvals", "tag", "prior", "center", "force_0_cv", "include_only_weights", "scale","filename"};
+                const std::vector<std::string> expected_attrs = {"type", "plotname", "binning", "knobvals", "tag", "prior", "center", "force_0_cv", "include_only_weights", "scale","filename", "xvar", "yvar"};
                 for (const tinyxml2::XMLAttribute* attr = pAllowList->FirstAttribute(); attr; attr = attr->Next()) {
                     std::string name = attr->Name();
                     if (std::find(expected_attrs.begin(), expected_attrs.end(), name) == expected_attrs.end()) {
@@ -948,8 +948,10 @@ int PROconfig::LoadFromXML(const std::string &filename){
                     TFile fin(filename);
                     if(strcmp(variation_type, "hist1d") == 0) {
                         m_mcgen_variation_hist1d_map[wt] = (TH1*)fin.Get<TH1>(wt.c_str())->Clone();
+                        m_mcgen_variation_hist1d_map[wt]->SetDirectory(0);
                     } else { 
                         m_mcgen_variation_hist2d_map[wt] = (TH2*)fin.Get<TH2>(wt.c_str())->Clone();
+                        m_mcgen_variation_hist2d_map[wt]->SetDirectory(0);
                     }
                 }
                 if(variation_type && strcmp(variation_type, "hist2d") == 0) {

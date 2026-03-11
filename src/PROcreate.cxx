@@ -1110,7 +1110,7 @@ namespace PROfit {
                 // Only filling 1 sigma, so just combine CV and Universe filling
                 for(auto so: var_syst_objs) {
                     so->FillCV(spline_bin, mc_weight);
-                    so->FillUniverse(0, spline_bin, wgt);
+                    so->FillUniverse(0, spline_bin, wgt*mc_weight);
                 }
                 
             } else if(var_syst_objs.front()->mode == "hist2d") {
@@ -1125,7 +1125,7 @@ namespace PROfit {
                 // Only filling 1 sigma, so just combine CV and Universe filling
                 for(auto so: var_syst_objs) {
                     so->FillCV(spline_bin, mc_weight);
-                    so->FillUniverse(0, spline_bin, wgt);
+                    so->FillUniverse(0, spline_bin, wgt*mc_weight);
                 }
             }
         }
