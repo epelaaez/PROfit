@@ -97,9 +97,11 @@ namespace PROfit{
                     ar & variable_midbin;
                     ar & variable_values;
                     ar & hash;
-                    ar & has_matching_vars;
-                    if(has_matching_vars) {
-                        ar & matching_var_values;
+                    if(version >= 1) {
+                        ar & has_matching_vars;
+                        if(has_matching_vars) {
+                            ar & matching_var_values;
+                        }
                     }
                 }
 
@@ -258,5 +260,7 @@ namespace PROfit{
     };
 
 }
+
+BOOST_CLASS_VERSION(PROfit::PROpeller, 1)
 
 #endif

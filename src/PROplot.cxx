@@ -412,6 +412,7 @@ namespace PROfit{
 
                 data_ratio->SetLineColor(kBlack);
                 data_ratio->SetLineWidth(2);
+                data_ratio->SetLineStyle(kSolid);
                 data_ratio->SetMarkerStyle(kFullCircle);
                 data_ratio->SetMarkerColor(kBlack);
                 data_ratio->SetMarkerSize(1);
@@ -729,6 +730,7 @@ namespace PROfit{
                 g->SetPointError(i, ex, ey);
                 g->SetLineColor(kBlack);
                 g->SetLineWidth(2);
+                g->SetLineStyle(kSolid);
                 g->SetMarkerStyle(kFullCircle);
                 g->SetMarkerColor(kBlack);
                 g->SetMarkerSize(1);
@@ -871,6 +873,7 @@ namespace PROfit{
             one->GetXaxis()->SetTitleOffset(0.85);
             ratio->SetLineColor(kBlack);
             ratio->SetLineWidth(2);
+            ratio->SetLineStyle(kSolid);
             ratio->SetMarkerStyle(kFullCircle);
             ratio->SetMarkerColor(kBlack);
             ratio->SetMarkerSize(1);
