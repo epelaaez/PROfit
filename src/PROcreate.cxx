@@ -1119,8 +1119,8 @@ namespace PROfit {
                 int yvar_num = inconfig.m_mcgen_variation_histaxisvars_map.at(var_syst_objs.front()->systname)[1];
                 float xval = vars[xvar_num].first();
                 float yval = vars[yvar_num].first();
-                int bin = inconfig.m_mcgen_variation_hist1d_map.at(var_syst_objs.front()->systname)->FindBin(xval, yval);
-                float wgt = inconfig.m_mcgen_variation_hist1d_map.at(var_syst_objs.front()->systname)->GetBinContent(bin);
+                int bin = inconfig.m_mcgen_variation_hist2d_map.at(var_syst_objs.front()->systname)->FindBin(xval, yval);
+                float wgt = inconfig.m_mcgen_variation_hist2d_map.at(var_syst_objs.front()->systname)->GetBinContent(bin);
 
                 // Only filling 1 sigma, so just combine CV and Universe filling
                 for(auto so: var_syst_objs) {
