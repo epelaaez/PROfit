@@ -8,10 +8,7 @@
 
 using namespace PROfit;
 
-static inline
-
-
-std::vector<std::vector<float>> latin_hypercube_sampling(size_t num_samples, size_t dimensions, std::uniform_real_distribution<float>&dis, std::mt19937 &gen) {
+std::vector<std::vector<float>> PROfit::latin_hypercube_sampling(size_t num_samples, size_t dimensions, std::uniform_real_distribution<float>&dis, std::mt19937 &gen) {
     std::vector<std::vector<float>> samples(num_samples, std::vector<float>(dimensions));
 
     for (size_t d = 0; d < dimensions; ++d) {
@@ -27,6 +24,21 @@ std::vector<std::vector<float>> latin_hypercube_sampling(size_t num_samples, siz
     }
 
     return samples;
+}
+
+void PROfit::recenter_latin_samples(std::vector<std::vector<float>> &samples, const Eigen::VectorXf &ub, const Eigen::VectorXf &lb) {
+    for(std::vector<float> &pt: samples) {
+        for(size_t i = 0; i < pt.size(); ++i) {
+            if(ub(i) != 3 || lb(i) != -3) {
+                float width = std::isinf(ub(i)) || std::isinf(lb(i)) ? 4 : ub(i) - lb(i);
+                float center = std::isinf(ub(i)) ? lb(i) + width/2.0 :
+                    std::isinf(lb(i)) ? ub(i) - width/2.0 :
+                    (ub(i) + lb(i)) / 2.0;
+                float randpt = pt[i] / 4.0;
+                pt[i] = center + randpt * width;
+            }
+        }
+    }
 }
 
 static inline

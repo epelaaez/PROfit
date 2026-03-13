@@ -30,6 +30,7 @@
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <future>
 #include <cstdlib>
 #include <exception>
 #include <fstream>
@@ -53,6 +54,7 @@ std::wostream *OSTREAM = &wcout;
 std::wofstream LOG_FILE_STREAM;
 bool LOGGING_TO_FILE = false;
 
+void mcmc_worker(std::vector<std::vector<Eigen::VectorXf>> &chains, Eigen::VectorXf initial, PROmetric *metric, uint32_t seed, size_t nchains, size_t burnin, size_t steps);
 
 int main(int argc, char* argv[])
 {
@@ -109,6 +111,9 @@ int main(int argc, char* argv[])
     std::string reweights_file;
     std::vector<std::string> mockreweights;
     std::vector<TH2D*> weighthists;
+
+    std::vector<std::string> mcmc_vars;
+    size_t mcmc_chains;
 
     std::map<std::string, float> bound_list;
     PlotBounds pbounds; 
@@ -203,6 +208,10 @@ int main(int argc, char* argv[])
 
     //PROglobal
     CLI::App *proglobal_command = app.add_subcommand("global", "Just do a single global fit.");
+
+    CLI::App *promcmc_command = app.add_subcommand("mcmc", "Get bayesian posteriors using MCMC");
+    promcmc_command->add_option("--vars", mcmc_vars, "Variables to find posteriors of.");
+    promcmc_command->add_option("--nchains", mcmc_chains, "Number of chains to run with MCMC.")->default_val(1);
 
     //PROtest, test things
     CLI::App *protest_command = app.add_subcommand("protest", "Testing ground for rapid quick tests.");
@@ -1961,6 +1970,86 @@ int main(int argc, char* argv[])
 
     }
 
+    if(*promcmc_command) {
+        metric->setBounds(global_ub, global_lb);
+        size_t nparams = metric->GetModel().nparams + metric->GetSysts().GetNSplines();
+        std::uniform_real_distribution<float> latin_distribution(-2, 2);
+        std::vector<std::vector<float>> samples = latin_hypercube_sampling(mcmc_chains, nparams, latin_distribution, myseed.global_rng);
+        recenter_latin_samples(samples, global_ub, global_lb);
+        std::vector<Eigen::VectorXf> samples_eigen; 
+        for(size_t i = 0; i < samples.size(); ++i)
+            samples_eigen.push_back(Eigen::VectorXf::Map(samples[i].data(), samples[i].size()));
+        size_t mcmc_threads = mcmc_chains >= nthread ? nthread : mcmc_chains;
+        std::vector<std::vector<std::vector<Eigen::VectorXf>>> chains;
+        chains.reserve(mcmc_threads);
+        std::vector<std::thread> threads;
+        size_t chains_per_thread = mcmc_chains / mcmc_threads;
+        size_t addone = mcmc_threads - mcmc_chains%mcmc_threads;
+        for(size_t i = 0; i < mcmc_threads; ++i) {
+            chains.emplace_back();
+            threads.emplace_back(
+                    [&, i](){
+                        mcmc_worker(chains[i], samples_eigen[i], metric->Clone(), myseed.getThreadSeeds()->at(i), chains_per_thread + (i >= addone), fitConfig.MCMCburn, fitConfig.MCMCiter);
+                    });
+        }
+        for(auto&& t : threads) {
+            t.join();
+        }
+
+        //std::vector<TH2D> twod;
+        //std::vector<TH1D> oned;
+        // TODO: This is hardcoded for numu disappearance right now
+        // TODO: How do we input binnings for these plots in a nice way?
+        // TODO: Is it better to write out the chain to a cvs/root file and plot externally?
+        //twod.push_back(TH2D("two", ";sin^{2}2#theta_{#mu#mu};#Deltam^{2}_{41} [eV^{2}];MCMC Points",
+        //                     200, -3, 0, 200, -2, 2));
+        //oned.push_back(TH1D("one1", ";sin^{2}2#theta_{#mu#mu};Posterior PDF", 200, -3, 0));
+        //oned.push_back(TH1D("one2", ";#Deltam^{2}_{41} [eV^{2}];Posterior PDF", 200, -2, 2));
+        TFile fout((final_output_tag+"_PROMCMC_chains.root").c_str(), "RECREATE");
+        size_t chain_counter = 0;
+        for(const auto &tchains : chains) {
+            for(const auto &chain : tchains) {
+                chain_counter++;
+                std::string name = "chain"+std::to_string(chain_counter);
+                TTree tree(name.c_str(), name.c_str());
+                Eigen::VectorXf v = Eigen::VectorXf::Zero(nparams);
+                for(size_t i = 0; i < metric->GetModel().nparams; ++i)
+                    tree.Branch(metric->GetModel().param_names[i].c_str(), &v(i));
+                for(size_t i = metric->GetModel().nparams; i < nparams; ++i) {
+                    const std::string &sname = metric->GetSysts().spline_names[i-metric->GetModel().nparams];
+                    std::string::size_type l = sname.find(':');
+                    // TODO: This only handles names with a single colon in them. I don't think we ever have more than that, it's really just meant for the 'flat' and 'norm' systs.
+                    if(l != std::string::npos) {
+                        std::string bname = sname;
+                        bname[l] = '_';
+                        tree.Branch(bname.c_str(), &v(i));
+                    } else {
+                        tree.Branch(sname.c_str(), &v(i));
+                    }
+                }
+                for(const auto &p : chain) {
+                //    twod[0].Fill(p(1), p(0));
+                //    oned[0].Fill(p(1));
+                //    oned[1].Fill(p(0));
+                    v = p;
+                    tree.Fill();
+                }
+                tree.Write();
+            }
+        }
+        //TCanvas c;
+        //c.Divide(2,2);
+        //c.cd(1);
+        //oned[0].Scale(1.0/oned[0].Integral());
+        //oned[0].Draw("hist");
+        //c.cd(3);
+        //twod[0].Draw("colz");
+        //c.cd(4);
+        //oned[1].Scale(1.0/oned[1].Integral());
+        //oned[1].Draw("hist");
+        //c.Print("mcmc_corner_plot.pdf");
+    }
+
     //***********************************************************************
     //***********************************************************************
     //******************** TEST AREA TEST AREA     **************************
@@ -2102,4 +2191,17 @@ int main(int argc, char* argv[])
     return 0;
 }
 
+void mcmc_worker(std::vector<std::vector<Eigen::VectorXf>> &chains, Eigen::VectorXf initial, PROmetric *metric, uint32_t seed, size_t nchains, size_t burnin, size_t steps) {
+    std::uniform_int_distribution<uint32_t> dseed(0, std::numeric_limits<uint32_t>::max());
+    std::mt19937 rng(seed);
+    for(size_t i = 0; i < nchains; ++i) {
+        chains.emplace_back();
+        std::vector<Eigen::VectorXf> &chain = chains.back();
+        auto action = [&chain](const Eigen::VectorXf &pt) { chain.push_back(pt); };
+        simple_target target{*metric};
+        adaptive_proposal proposal(*metric, dseed(rng));
+        Metropolis mcmc(target, proposal, initial, dseed(rng));
+        mcmc.run(burnin, steps, action);
+    }
+}
 

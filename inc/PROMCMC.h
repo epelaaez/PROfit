@@ -33,7 +33,8 @@ namespace PROfit {
 
                 bool step() {
                     Eigen::VectorXf p = proposal(current);
-                    float acceptance = proposal.within_bound(p) ? std::min(1.0f, target(p)/target(current) * proposal.P(current, p)/proposal.P(p, current)) : 0;
+                    float acceptance;
+                    acceptance = proposal.within_bound(p) ? std::min(1.0f, target(p)/target(current) * proposal.P(current, p)/proposal.P(p, current)) : 0;
                     float u = uniform(rng);
 
                     if(u <= acceptance) {
@@ -67,7 +68,7 @@ namespace PROfit {
         PROmetric &metric;
 
         float operator()(Eigen::VectorXf &value) {
-            Eigen::VectorXf empty;
+            Eigen::VectorXf empty = value;
             return std::exp(-0.5f*metric(value, empty, false));
         }
     };
@@ -211,6 +212,7 @@ namespace PROfit {
         static constexpr bool has_tune = true;
         std::vector<Eigen::VectorXf> proposed;
         Eigen::VectorXf last_proposed;
+        Eigen::VectorXf last_accepted;
         Eigen::VectorXf mean;
         Eigen::MatrixXf cov;
         size_t tune_calls = 0;
@@ -252,6 +254,7 @@ namespace PROfit {
                 //grab the bits that correspond to the active only.
                 sub_diagL = Eigen::MatrixXf::Identity(active.size(), active.size());
                 sub_diagL = diagL(active, active);  
+                last_accepted = Eigen::VectorXf::Zero(nparams);
 
             }
 
@@ -299,19 +302,21 @@ namespace PROfit {
 
 
         void tune(bool accepted) {
-            if (accepted) {
+
+            //if (accepted) {
                 ++tune_calls;
-                Eigen::VectorXf delta = last_proposed - mean;
+                if(accepted) last_accepted = last_proposed;
+                Eigen::VectorXf delta = last_accepted - mean;
                 mean += delta / tune_calls;
                 if (tune_calls > 1) {
-                    cov += (delta * (last_proposed - mean).transpose() - cov) / tune_calls;
+                    cov += (delta * (last_accepted - mean).transpose() - cov) / tune_calls;
                 }
                 for (int idx : fixed) {
                     cov.row(idx).setZero();
                     cov.col(idx).setZero();
                 }
 
-            }
+            //}
             accept_history.push_back(accepted);
             if (accept_history.size() == adapt_window) {
                 float acc_rate = std::count(accept_history.begin(), accept_history.end(), true) / float(adapt_window);
