@@ -7,6 +7,8 @@
 #include <Eigen/Eigen>
 #include "LBFGSB.h"
 
+#include <random>
+
 namespace PROfit {
 
     struct PROfitterConfig {
@@ -447,6 +449,10 @@ namespace PROfit {
 
 
     };
+    
+    std::vector<std::vector<float>> latin_hypercube_sampling(size_t num_samples, size_t dimensions, std::uniform_real_distribution<float>&dis, std::mt19937 &gen);
+
+    void recenter_latin_samples(std::vector<std::vector<float>> &samples, const Eigen::VectorXf &ub, const Eigen::VectorXf &lb);
 
 }
 

@@ -121,7 +121,7 @@ PROsurf::PROsurf(PROmetric &metric,  size_t x_idx, size_t y_idx, size_t nbinsx, 
 
 }
 
-void PROsurf::FillSurfaceStat(const PROconfig &config, const PROfitterConfig &fitconfig, std::string filename) {
+void PROsurf::FillSurfaceStat(const PROconfig &config, const PROfitterConfig &fitconfig, std::string filename, const Eigen::VectorXf &cv_params, uint32_t seed) {
     std::ofstream chi_file;
     if(!filename.empty()){
         chi_file.open(filename);
@@ -137,23 +137,56 @@ void PROsurf::FillSurfaceStat(const PROconfig &config, const PROfitterConfig &fi
         chi_file << "\n";
     }
 
-    // I think this will be needed for stat fits with more than 2 physics parameters
-    (void)fitconfig;
-
-    PROsyst dummy_syst;
-    dummy_syst.fractional_covariance = Eigen::MatrixXf::Constant(config.m_num_variable_bins_total[config.i_prime], config.m_num_variable_bins_total[config.i_prime], 0);
-    Eigen::VectorXf empty_vec;
-
     PROmetric *local_metric = metric.Clone();
-    local_metric->override_systs(dummy_syst);
+    PROsyst newsyst = local_metric->GetSysts();
+    newsyst.fractional_covariance = Eigen::MatrixXf::Constant(config.m_num_variable_bins_total[config.i_prime], config.m_num_variable_bins_total[config.i_prime], 0);
+    local_metric->override_systs(newsyst);
+    // When doing actual fits here we need to set the bounds of the metric
+    // so the bounds of the systs are the cv values
     float min_chi = 1e9;
+    Eigen::VectorXf dummy_grad = cv_params;
+    Eigen::VectorXf params = cv_params;
+    Eigen::VectorXf last;
 
-    for(size_t i = 0; i < nbinsx; i++) {
-        for(size_t j = 0; j < nbinsy; j++) {
-            Eigen::VectorXf physics_params{{(float)edges_y(j), (float)edges_x(i)}};
-            float fx = (*local_metric)(physics_params, empty_vec, false);
-            if(fx < min_chi) min_chi = fx;
-            surface(i, j) = fx;
+    // TODO: If x_idx or y_idx refers to a systematic I think this may or may not be what we want
+    // TODO: If one of the model parameters is fixed (using --fix) this will not fix that parameter (Will the regular surface fit fix that parameter? Or fix a systematic we wanted to fix?)
+
+    if(local_metric->GetModel().nparams - 2 == 0) {
+        for(size_t i = 0; i < nbinsx; i++) {
+            for(size_t j = 0; j < nbinsy; j++) {
+                params(y_idx) = (float)edges_y(j);
+                params(x_idx) = (float)edges_x(i);
+                float fx = (*local_metric)(params, dummy_grad, false);
+                if(fx < min_chi) min_chi = fx;
+                surface(i, j) = fx;
+            }
+        }
+    } else {
+        Eigen::VectorXf lb = params;
+        for(size_t i = 0; i < local_metric->GetModel().nparams; ++i)
+            lb(i) = local_metric->GetModel().lb(i);
+        Eigen::VectorXf ub = params;
+        for(size_t i = 0; i < local_metric->GetModel().nparams; ++i)
+            ub(i) = local_metric->GetModel().ub(i);
+
+        for(size_t i = 0; i < nbinsx; i++) {
+            for(size_t j = 0; j < nbinsy; j++) {
+                lb(y_idx) = (float)edges_y(j);
+                ub(y_idx) = (float)edges_y(j);
+                lb(x_idx) = (float)edges_x(i);
+                ub(x_idx) = (float)edges_x(i);
+                local_metric->setBounds(lb,ub);
+                PROfitter fitter(ub, lb, fitconfig, seed+i+nbinsx*j);
+                float fx;
+                if(i != 0 || j != 0){
+                    fx = fitter.Fit(*local_metric, last);
+                }else{
+                    fx = fitter.Fit(*local_metric);
+                }
+                last = fitter.best_fit;
+                if(fx < min_chi) min_chi = fx;
+                surface(i, j) = fx;
+            }
         }
     }
     for(size_t i = 0; i < nbinsx; ++i) {

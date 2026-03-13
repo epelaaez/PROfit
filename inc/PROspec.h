@@ -37,10 +37,12 @@ namespace PROfit{
             Eigen::VectorXf error_down;
             Eigen::VectorXf error_up;
             Eigen::VectorXf error_point;
+            Eigen::MatrixXf covariance;
             PROerrorbar(size_t size){
                 error_down = Eigen::VectorXf::Zero(size);
                 error_up = Eigen::VectorXf::Zero(size);
                 error_point = Eigen::VectorXf::Zero(size);
+                covariance = Eigen::MatrixXf::Zero(size, size);
             };
     };
 

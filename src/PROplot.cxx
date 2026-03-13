@@ -61,7 +61,6 @@ namespace PROfit{
     }
 
     std::map<std::string, std::unique_ptr<TH2D>> covarianceTH2D(const PROsyst &syst, const PROconfig &config, const PROspec &cv) {
-        log<LOG_DEBUG>(L"%1% || just inside") % __func__;
         std::map<std::string, std::unique_ptr<TH2D>> ret;
         Eigen::MatrixXf fractional_cov = syst.fractional_covariance;
         Eigen::MatrixXf diag = cv.Spec().array().matrix().asDiagonal(); 
@@ -204,11 +203,14 @@ namespace PROfit{
         std::vector<Eigen::VectorXf> specs;
         std::uniform_int_distribution<uint32_t> dseed(0, std::numeric_limits<uint32_t>::max());
 
+	Eigen::MatrixXf cov = Eigen::MatrixXf::Zero(cv.size(), cv.size());
+        Eigen::VectorXf delta;
         //Fills already collapsed
         for(size_t i = 0; i < nerrorsample; ++i){
             Eigen::VectorXf var = FillSystRandomThrow(config, prop, syst, model,cv_spec, cvparams, dseed(PROseed::global_rng), other_index).Spec();
             specs.push_back(var);
-
+            delta = cv - var;
+            cov += delta  * delta.transpose();
         }
 
         PROerrorbar ebar(cv.size());
@@ -226,6 +228,7 @@ namespace PROfit{
             ebar.error_down(i) =  elo;
             ebar.error_point(i) = cv(i)*scale_factor;
         }
+	ebar.covariance = cov/nerrorsample;
         return ebar;
     }
 
@@ -252,22 +255,25 @@ namespace PROfit{
     }
 
     PROerrorbar* make_1d_err(PROerrorbar errband, size_t nbinsx, size_t nbinsy=1, int offset = 0, int dims=1){
+	// note: since this is just for plotting diagonals, won't worry about filling in
+	//       covariance for collapsed 2d histogram.
         PROerrorbar* errband_1d = new PROerrorbar(nbinsx);
         log<LOG_DEBUG>(L"%1% || input err_band pt: %2%") % __func__ % errband.error_point;
         log<LOG_DEBUG>(L"%1% || input err_band up: %2%") % __func__ % errband.error_up;
         // sum error points, combine errors in quadrature
         for(size_t bx = 0; bx < nbinsx; bx++){
             if(dims == 2){
-                double up_err_sq = 0;
-                double down_err_sq = 0;
-                for(size_t by = 0; by < nbinsy; by++){
-                    size_t b = bx*nbinsy + by;
-                    errband_1d->error_point(bx) += errband.error_point(b+offset);
-                    up_err_sq += std::pow(errband.error_up(b+offset), 2);
-                    down_err_sq += std::pow(errband.error_down(b+offset), 2);
+
+                double err_sq = 0;
+                for(int by1 = nbinsy*bx+offset; by1 < nbinsy*(bx+1)+offset; by1++){
+                    errband_1d->error_point(bx) += errband.error_point(by1);
+                    for(int by2 = nbinsy*bx+offset; by2 < nbinsy*(bx+1)+offset; by2++){
+                        err_sq += errband.covariance(by1, by2);
+                    }
                 }
-                errband_1d->error_up(bx) = std::sqrt(up_err_sq);
-                errband_1d->error_down(bx) = std::sqrt(down_err_sq);
+
+                errband_1d->error_up(bx) = std::sqrt(err_sq);
+                errband_1d->error_down(bx) = std::sqrt(err_sq);
             }
             else{
                 errband_1d->error_point(bx) = errband.error_point(bx+offset);
@@ -277,6 +283,7 @@ namespace PROfit{
         }
         log<LOG_DEBUG>(L"%1% || err_band pt: %2%") % __func__ % errband_1d->error_point;
         log<LOG_DEBUG>(L"%1% || err_band up: %2%") % __func__ % errband_1d->error_up;
+        log<LOG_DEBUG>(L"%1% || err_band down: %2%") % __func__ % errband_1d->error_down;
         return errband_1d;
     }
 
@@ -899,7 +906,7 @@ namespace PROfit{
         log<LOG_DEBUG>(L"%1% || Finishing Plotting 1D Histogram %2%") % __func__ % hist_titles.c_str();
     }
 
-    void plot_channels(const std::string &filename, const PROconfig &config, std::optional<PROspec> cv, std::optional<PROspec> best_fit, std::optional<PROdata> data, std::optional<PROerrorbar> errband, std::optional<PROerrorbar> posterrband, std::optional<PROsyst> pre_allcovsyst, std::optional<PROsyst> post_allcovsyst, std::vector<TPaveText> &texts, PlotBounds &bounds, PlotOptions opt, int other_index) {
+    void plot_channels(const std::string &filename, const PROconfig &config, std::optional<PROspec> cv, std::optional<PROspec> best_fit, std::optional<PROdata> data, std::optional<PROerrorbar> errband, std::optional<PROerrorbar> posterrband, std::vector<TPaveText> &texts, PlotBounds &bounds, PlotOptions opt, int other_index, bool ratio_bool) {
 
         log<LOG_DEBUG>(L"%1% || Starting plot_channels") % __func__;
         std::string rat_y_title = bool(opt&PlotOptions::DataMCRatio) ? "Data/MC" : "Data/Best-Fit";
@@ -940,6 +947,8 @@ namespace PROfit{
                 }
                 for(size_t channel = 0; channel < config.m_num_channels; ++channel) {
 
+                    log<LOG_DEBUG>(L"%1% || channel %2%") % __func__ % channel;
+
                     std::string xtitle = config.m_channel_variable_units[channel][other_index];
                     std::string ratio_titles = ";"+xtitle+";"+rat_y_title;
 
@@ -955,6 +964,7 @@ namespace PROfit{
                         if(config.m_channel_variable_dims[channel][other_index] == 2){
                             cv2dhists = getCV2DHists(*cv, config, (bool)(opt & PlotOptions::BinWidthScaled), other_index);
                         }
+
                         cv1dhists = getCV1DHists(*cv, config, (bool)(opt & PlotOptions::BinWidthScaled), other_index);
                     }
 
@@ -973,13 +983,11 @@ namespace PROfit{
                     PROerrorbar *errband_1d = NULL;
                     if(errband){
                         errband_1d = make_1d_err(*errband, channel_nbins_x, channel_nbins_y, tot_offset, config.m_channel_variable_dims[channel][other_index]);
-                        log<LOG_DEBUG>(L"%1% || err") % __func__;
                     }
 
                     PROerrorbar *posterrband_1d = NULL;
                     if(posterrband){
                         posterrband_1d = make_1d_err(*posterrband, channel_nbins_x, channel_nbins_y, tot_offset, config.m_channel_variable_dims[channel][other_index]);
-                        log<LOG_DEBUG>(L"%1% || posterr") % __func__;
                     }
 
                     if(config.m_channel_variable_dims[channel][other_index] == 2){
@@ -1211,11 +1219,10 @@ namespace PROfit{
                     // should probably be switching this to a more clear boolean...
                     plot_hist1ds(&c, &cv_hist, channel_errband, cvstack, &subplots, bf_hist, post_channel_errband, data_hist, &dat_str, opt, hist_titles, ratio_titles, filename, bounds, text);
                     ++global_channel_index;
-                    if(pre_allcovsyst.has_value()){
-                        cv_hists.push_back(cv_hist);
+                    cv_hists.push_back(cv_hist);
+		    if(data){
                         data_hists.push_back(*data_hist);
-                        bf_hists.push_back(*bf_hist);
-
+                        if(posterrband) bf_hists.push_back(*bf_hist);
                     }
                     tot_offset += nbins_p_2dchan;
                 }
@@ -1223,16 +1230,32 @@ namespace PROfit{
         }
         c.Print((filename+"]").c_str());
 
-        if(pre_allcovsyst.has_value() && data_hists.size() >= 2){
-            Eigen::MatrixXf fractional_cov = pre_allcovsyst->fractional_covariance;
-            Eigen::MatrixXf diag = cv->Spec().array().matrix().asDiagonal();
+        log<LOG_DEBUG>(L"%1% || ratio_bool: %2%") % __func__ % ratio_bool;
+        if(ratio_bool && data_hists.size() >= 2){
 
-            if(diag.rows() == fractional_cov.rows()){
-                std::map<std::string, std::unique_ptr<TH2D>> pre_matrices = covarianceTH2D(pre_allcovsyst.value(), config, *cv);
-                std::map<std::string, std::unique_ptr<TH2D>> post_matrices = covarianceTH2D(post_allcovsyst.value(), config, *best_fit);
+	    //std::map<std::string, std::unique_ptr<TH2D>> pre_matrices = covarianceTH2D(errband->covariance, config, *cv);
+	    //std::map<std::string, std::unique_ptr<TH2D>> post_matrices = covarianceTH2D(posterrband->covariance, config, *best_fit);
 
-                plot_detector_ratios(config, data_hists, cv_hists, errband, bf_hists, posterrband, *pre_matrices["collapsed_total_cor"], *post_matrices["collapsed_total_cor"],  filename, other_index);
-            }
+	    std::unique_ptr<TH2D> corr_coll = std::make_unique<TH2D>("ccor", "Collapsed Correlation Matrix;Bin # ;Bin #", config.m_num_variable_bins_total_collapsed[config.i_prime], 0,
+			                                             config.m_num_variable_bins_total_collapsed[config.i_prime], config.m_num_variable_bins_total_collapsed[config.i_prime],
+								     0, config.m_num_variable_bins_total_collapsed[config.i_prime]);
+
+	    std::unique_ptr<TH2D> post_corr_coll = std::make_unique<TH2D>("ccor", "Collapsed Correlation Matrix;Bin # ;Bin #", config.m_num_variable_bins_total_collapsed[config.i_prime], 0,
+			                                                  config.m_num_variable_bins_total_collapsed[config.i_prime], config.m_num_variable_bins_total_collapsed[config.i_prime],
+									  0, config.m_num_variable_bins_total_collapsed[config.i_prime]);
+
+	    Eigen::MatrixXf cov_coll = errband->covariance;
+	    Eigen::MatrixXf post_cov_coll = posterrband->covariance;
+
+            log<LOG_DEBUG>(L"%1% || Converting covariance to correlation") % __func__;
+	    for(int i = 0; i < cov_coll.rows(); i++){
+	        for(int j = 0; j < cov_coll.rows(); j++){
+		    corr_coll->SetBinContent(i+1, j+1, cov_coll(i, j)/cov_coll(i, i)/cov_coll(j, j));
+		    post_corr_coll->SetBinContent(i+1, j+1, post_cov_coll(i, j)/post_cov_coll(i, i)/post_cov_coll(j, j));
+		}
+	    }
+
+            plot_detector_ratios(config, data_hists, cv_hists, errband, bf_hists, posterrband, *corr_coll, *post_corr_coll,  filename, other_index);
         }
 
 
