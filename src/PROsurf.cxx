@@ -433,6 +433,7 @@ void PROsurf::FillSurface(const PROfitterConfig &fitconfig, std::string filename
 
     int loopSize = grid.size();
     int chunkSize = loopSize / nThreads;
+    int remainder = loopSize % nThreads;
 
     std::vector<std::future<std::vector<surfOut>>> futures; 
 
