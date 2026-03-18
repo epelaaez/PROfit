@@ -438,11 +438,17 @@ void PROsurf::FillSurface(const PROfitterConfig &fitconfig, std::string filename
 
     log<LOG_INFO>(L"%1% || Starting THREADS  : %2% , Loops %3%, Chunks %4%") % __func__ % nThreads % loopSize % chunkSize;
 
+    int start = 0;
+    int end = 0;
     for (int t = 0; t < nThreads; ++t) {
-        int start = t * chunkSize;
-        int end = (t == nThreads - 1) ? loopSize : start + chunkSize;
-        futures.emplace_back(std::async(std::launch::async, [&, start, end]() {
-                    return this->PointHelper(fitconfig, grid, start, end, proseed.getThreadSeeds()->at(t));
+        start = end;
+        end = start + chunkSize;
+        if(t < remainder) end++;
+        // make new vars for async, avoid mem issues
+        int thread_start = start;
+        int thread_end = end;
+        futures.emplace_back(std::async(std::launch::async, [&, thread_start, thread_end]() {
+                    return this->PointHelper(fitconfig, grid, thread_start, thread_end, proseed.getThreadSeeds()->at(t));
                     }));
 
     }
