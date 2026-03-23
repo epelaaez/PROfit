@@ -1844,7 +1844,7 @@ namespace PROfit{
                                 //    hsum->SetBinContent(i+1, hsum->GetBinContent(i+1)+inv_diag1d*VarVec(i)*inv_diag1d);
                                 //}
                                 for(size_t i = 0; i < channel_bins.size(); ++i) {
-                                    h->SetBinContent(i+1, rat_frac_cov(i,i));
+                                    h->SetBinContent(i+1, sqrt(rat_frac_cov(i,i)));
                                     hsum->SetBinContent(i+1, hsum->GetBinContent(i+1)+rat_frac_cov(i,i));
                                 }
 
