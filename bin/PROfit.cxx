@@ -1934,13 +1934,21 @@ int main(int argc, char* argv[])
                             int ndf = config.m_channel_variable_bins[ic][io].NBinsAlong(0) - bool(opt&PlotOptions::AreaNormalized);
                             log<LOG_INFO>(L"%1% || -- the datamc chi^2/ndof is %2%/%3% .") % __func__ % chival % ndf;
                             chi2text.AddText(("#chi^{2}/ndf = "+to_string_prec(chival,2)+"/"+std::to_string(ndf)).c_str());
+                            chi2text.SetFillColor(0);
+                            chi2text.SetBorderSize(0);
+                            chi2text.SetTextAlign(12);
+                            channel_chitexts.push_back(chi2text);
                         }else{
                             chi2text.AddText("");
                         }
-                        chi2text.SetFillColor(0);
-                        chi2text.SetBorderSize(0);
-                        chi2text.SetTextAlign(12);
-                        channel_chitexts.push_back(chi2text);
+                        // For now don't add chi2text to non-prime variables
+                        // We just use an empty string anyway and there's a weird
+                        // bug that shows up in the ErrorBand plots with this.
+                        // (They show "A line segment" in the space where the chi2 would be.)
+                        //chi2text.SetFillColor(0);
+                        //chi2text.SetBorderSize(0);
+                        //chi2text.SetTextAlign(12);
+                        //channel_chitexts.push_back(chi2text);
                         global_channel_index++;
                     }
                 }
