@@ -30,6 +30,7 @@
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <future>
 #include <cstdlib>
 #include <exception>
 #include <fstream>
@@ -40,10 +41,99 @@
 #include <random>
 #include <stdexcept>
 #include <string>
+#include <set>
 #include <vector>
 #include "TMath.h"
 
 using namespace PROfit;
+
+// Unique key for DetVar propeller maps (names can be reused across sections).
+static std::string DetVarKey(const PROconfig& config, size_t file_index) {
+    const auto& dv = config.m_detvar_files[file_index];
+    return "sec" + std::to_string(dv.section_index) + "::" + dv.name;
+}
+
+// Build a collision-free composite key for event i_event from its matching_var_values.
+// Returns a vector of integer-cast values, one per matching variable (e.g. run, subrun, event).
+static std::vector<int> DetVarMatchingKey(const PROpeller& prop, size_t i_event) {
+    std::vector<int> key;
+    key.reserve(prop.matching_var_values.size());
+    for(const auto& vals : prop.matching_var_values)
+        key.push_back(static_cast<int>(std::round(vals[i_event])));
+    return key;
+}
+
+// Build PROspec objects for CV and variation using only events whose matching keys appear
+// in both propellers. var_idx selects which variable's bin indices to use.
+// Returns false (leaving out_cv/out_var unchanged) if either propeller lacks matching vars.
+static bool BuildDetVarMatchedSpecs(
+        const PROpeller& cvprop, const PROpeller& varprop,
+        int var_idx, int spec_size,
+        PROspec& out_cv, PROspec& out_var) {
+
+    if(!cvprop.has_matching_vars || !varprop.has_matching_vars) return false;
+    if(cvprop.matching_var_values.size() != varprop.matching_var_values.size()) return false;
+
+    // Step 1: build lookup key -> list of event indices for CV.
+    // Use std::map with vector<int> keys for guaranteed collision-free RSE matching.
+    std::map<std::vector<int>, std::vector<size_t>> cv_key_map;
+    for(size_t i = 0; i < cvprop.NEvent(); ++i)
+        cv_key_map[DetVarMatchingKey(cvprop, i)].push_back(i);
+
+    // Step 2: find the set of keys present in both CV and variation;
+    // track unique var keys to compute CV-only / var-only / overlapping counts.
+    std::set<std::vector<int>> var_key_set;
+    std::set<std::vector<int>> common_keys;
+    for(size_t j = 0; j < varprop.NEvent(); ++j) {
+        auto k = DetVarMatchingKey(varprop, j);
+        var_key_set.insert(k);
+        if(cv_key_map.count(k)) common_keys.insert(k);
+    }
+
+    const size_t n_cv_only      = cv_key_map.size() - common_keys.size();
+    const size_t n_var_only     = var_key_set.size() - common_keys.size();
+    const size_t n_overlapping  = common_keys.size();
+    log<LOG_INFO>(L"DetVar matching: total CV: %1%, total var: %2%")
+        % cv_key_map.size() % var_key_set.size();
+    log<LOG_INFO>(L"DetVar matching: num CV only: %1%, num var only: %2%, num overlapping: %3%")
+        % n_cv_only % n_var_only % n_overlapping;
+
+    // Step 3: fill matched CV spec
+    PROspec matched_cv(spec_size);
+    size_t n_cv_prop_matched = 0;
+    for(size_t i = 0; i < cvprop.NEvent(); ++i) {
+        if(!common_keys.count(DetVarMatchingKey(cvprop, i))) continue;
+        ++n_cv_prop_matched;
+        int bin = cvprop.variable_bin_indices[var_idx][i];
+        if(bin >= 0) matched_cv.QuickFill(bin, cvprop.added_weights[i]);
+    }
+
+    // Step 4: fill matched var spec
+    PROspec matched_var(spec_size);
+    size_t n_var_prop_matched = 0;
+    for(size_t j = 0; j < varprop.NEvent(); ++j) {
+        if(!common_keys.count(DetVarMatchingKey(varprop, j))) continue;
+        ++n_var_prop_matched;
+        int bin = varprop.variable_bin_indices[var_idx][j];
+        if(bin >= 0) matched_var.QuickFill(bin, varprop.added_weights[j]);
+    }
+    log<LOG_INFO>(L"DetVar matching: matched propeller events CV: %1%, var: %2% (total propeller events CV: %3%, var: %4%)")
+        % n_cv_prop_matched % n_var_prop_matched % cvprop.NEvent() % varprop.NEvent();
+
+    // Renormalize matched_var to the matched_cv total so the comparison is purely
+    // shape/efficiency: removes the effect of different statistics between CV and var files.
+    const float cv_matched_total = matched_cv.Spec().sum();
+    const float var_matched_total = matched_var.Spec().sum();
+    if(var_matched_total > 0.0f && cv_matched_total > 0.0f) {
+        const float renorm = cv_matched_total / var_matched_total;
+        matched_var = PROspec(matched_var.Spec() * renorm, matched_var.Error() * renorm);
+        log<LOG_INFO>(L"DetVar matching: renorm factor (CV_matched/var_matched) = %1%") % renorm;
+    }
+
+    out_cv  = std::move(matched_cv);
+    out_var = std::move(matched_var);
+    return true;
+}
 
 log_level_t GLOBAL_LEVEL = LOG_INFO;
 log_level_t FILE_LEVEL = LOG_INFO;
@@ -53,6 +143,7 @@ std::wostream *OSTREAM = &wcout;
 std::wofstream LOG_FILE_STREAM;
 bool LOGGING_TO_FILE = false;
 
+void mcmc_worker(std::vector<std::vector<Eigen::VectorXf>> &chains, Eigen::VectorXf initial, PROmetric *metric, uint32_t seed, size_t nchains, size_t burnin, size_t steps);
 
 int main(int argc, char* argv[])
 {
@@ -109,6 +200,9 @@ int main(int argc, char* argv[])
     std::string reweights_file;
     std::vector<std::string> mockreweights;
     std::vector<TH2D*> weighthists;
+
+    std::vector<std::string> mcmc_vars;
+    size_t mcmc_chains;
 
     std::map<std::string, float> bound_list;
     PlotBounds pbounds; 
@@ -204,6 +298,10 @@ int main(int argc, char* argv[])
     //PROglobal
     CLI::App *proglobal_command = app.add_subcommand("global", "Just do a single global fit.");
 
+    CLI::App *promcmc_command = app.add_subcommand("mcmc", "Get bayesian posteriors using MCMC");
+    promcmc_command->add_option("--vars", mcmc_vars, "Variables to find posteriors of.");
+    promcmc_command->add_option("--nchains", mcmc_chains, "Number of chains to run with MCMC.")->default_val(1);
+
     //PROtest, test things
     CLI::App *protest_command = app.add_subcommand("protest", "Testing ground for rapid quick tests.");
 
@@ -259,12 +357,14 @@ int main(int argc, char* argv[])
     std::string propBinName = analysis_tag+"_prop.bin";
     std::string systBinName = analysis_tag+"_syst.bin";
 
-    if((*process_command) || (!std::filesystem::exists(systBinName) || !std::filesystem::exists(propBinName))  ){
+    bool need_main_process = (*process_command) || (!std::filesystem::exists(systBinName) || !std::filesystem::exists(propBinName));
+
+    if(need_main_process){
         log<LOG_INFO>(L"%1% || Processing PROpeller and PROsysts from XML defined root files, and saving to binary output also: %2%") % __func__ % propBinName.c_str();
         //Process the CAF files to grab and fill all SystStructs and PROpeller
         PROcess_CAFAna(config, systsstructs, prop,noxrootd);
-        prop.save(propBinName);    
-        saveSystStructVector(systsstructs,systBinName);
+        prop.save(propBinName);
+        saveSystStructVector(systsstructs, systBinName);
         log<LOG_INFO>(L"%1% || Done processing PROpeller and PROsysts from XML defined root files, and saving to binary output also: %2%") % __func__ % propBinName.c_str();
 
     }else{
@@ -297,6 +397,131 @@ int main(int argc, char* argv[])
             }
         }
 
+    }
+
+    // Combined DetVar propeller binary: one file for all DetVar files, keyed by section+name.
+    // Uses detvar_hash (binning + DetVar section only), so changes to <DetVarFiles> or
+    // top-level binning trigger reprocessing without invalidating the main prop/syst binaries.
+    if(config.m_has_detvar_section) {
+        std::string dvAllPropsBin = analysis_tag + "_detvar_props.bin";
+        bool need_detvar_process = (*process_command) || !std::filesystem::exists(dvAllPropsBin);
+
+        std::map<std::string, PROpeller> dvprops;
+
+        if(need_detvar_process) {
+            log<LOG_INFO>(L"%1% || Processing all DetVar files into combined binary: %2%") % __func__ % dvAllPropsBin.c_str();
+            for(size_t idv = 0; idv < config.GetNumDetVarFiles(); ++idv) {
+                const std::string& name = config.m_detvar_files[idv].name;
+                const std::string key = DetVarKey(config, idv);
+                log<LOG_INFO>(L"%1% || Processing DetVar file '%2%'") % __func__ % name.c_str();
+                PROconfig dvconfig = config.BuildDetVarConfig(idv);
+                PROpeller dvprop;
+                std::vector<std::vector<SystStruct>> dvsystsstructs;
+                PROcess_CAFAna(dvconfig, dvsystsstructs, dvprop, noxrootd);
+                dvprops[key] = std::move(dvprop);
+                log<LOG_INFO>(L"%1% || Done processing DetVar file '%2%'") % __func__ % name.c_str();
+            }
+            saveDetVarProps(dvprops, config.detvar_hash, dvAllPropsBin);
+        } else {
+            log<LOG_INFO>(L"%1% || Loading DetVar props from combined binary: %2%") % __func__ % dvAllPropsBin.c_str();
+            uint32_t loaded_detvar_hash = loadDetVarProps(dvprops, dvAllPropsBin);
+            log<LOG_INFO>(L"%1% || Config detvar_hash (%2%) and binary detvar_hash (%3%).") % __func__ % config.detvar_hash % loaded_detvar_hash;
+            if(config.detvar_hash != loaded_detvar_hash) {
+                if(force) {
+                    log<LOG_WARNING>(L"%1% || WARNING config detvar_hash (%2%) and binary detvar_hash (%3%) not compatible!") % __func__ % config.detvar_hash % loaded_detvar_hash;
+                } else {
+                    log<LOG_ERROR>(L"%1% || ERROR config detvar_hash (%2%) and binary detvar_hash (%3%) not compatible!") % __func__ % config.detvar_hash % loaded_detvar_hash;
+                    return 1;
+                }
+            }
+        }
+
+        // Build DetVar SystStructs in memory from dvprops (not stored in syst.bin —
+        // they live in the DetVar binary so either binary can be regenerated independently).
+        log<LOG_INFO>(L"%1% || Building DetVar SystStructs from DetVar props...") % __func__;
+        PROsyst emptySyst;
+
+        for(size_t isec = 0; isec < config.GetNumDetVarSections(); ++isec) {
+
+            // Find CV index for this section
+            size_t cv_idx = SIZE_MAX;
+            for(size_t i = 0; i < config.m_detvar_files.size(); ++i) {
+                if(config.m_detvar_files[i].is_cv && config.m_detvar_files[i].section_index == isec) {
+                    cv_idx = i; break;
+                }
+            }
+            if(cv_idx == SIZE_MAX) {
+                log<LOG_ERROR>(L"%1% || ERROR: No CV file found for DetVar section %2%") % __func__ % isec;
+                continue;
+            }
+
+            PROpeller& cvprop = dvprops.at(DetVarKey(config, cv_idx));
+            PROconfig cvconfig = config.BuildDetVarConfig(cv_idx);
+            NullModel cvmodel(cvprop);
+            Eigen::VectorXf cvparams = Eigen::VectorXf::Constant(cvmodel.nparams, 0);
+            int cv_binning = cvconfig.i_prime;
+            if(cv_binning < 0 || cv_binning >= (int)config.m_num_variables)
+                cv_binning = config.i_prime;
+            PROspec cvSpec = FillSpectra(cvconfig, cvprop, emptySyst, cvmodel, cvparams, true, cv_binning);
+
+            for(size_t idv = 0; idv < config.m_detvar_files.size(); ++idv) {
+                if(config.m_detvar_files[idv].section_index != isec) continue;
+                if(config.m_detvar_files[idv].is_cv) continue;
+
+                const std::string& varName = config.m_detvar_files[idv].name;
+
+                if(config.m_mcgen_variation_type_map.count(varName) == 0) {
+                    log<LOG_INFO>(L"%1% || Skipping DetVar '%2%' — no matching entry in <systematics> section.") % __func__ % varName.c_str();
+                    continue;
+                }
+                const std::string& systType = config.m_mcgen_variation_type_map.at(varName);
+                int binningIndex = config.m_mcgen_variation_binning_map.count(varName) ? config.m_mcgen_variation_binning_map.at(varName) : config.i_prime;
+                if(binningIndex < 0 || binningIndex >= (int)config.m_num_variables)
+                    binningIndex = config.i_prime;
+
+                PROpeller& dvprop = dvprops.at(DetVarKey(config, idv));
+                PROconfig dvconfig = config.BuildDetVarConfig(idv);
+                NullModel dvmodel(dvprop);
+                Eigen::VectorXf dvparams = Eigen::VectorXf::Constant(dvmodel.nparams, 0);
+                PROspec varSpec = FillSpectra(dvconfig, dvprop, emptySyst, dvmodel, dvparams, true, binningIndex);
+
+                // Attempt to build matched specs using only common (run,subrun,event) events.
+                // If both propellers have matching vars stored, replace cvSpec/varSpec for this pair.
+                PROspec matchedCvSpec = cvSpec;
+                PROspec matchedVarSpec = varSpec;
+                const bool matched = BuildDetVarMatchedSpecs(
+                    cvprop, dvprop, binningIndex, (int)config.m_num_variable_bins_total[binningIndex],
+                    matchedCvSpec, matchedVarSpec);
+                if(matched) {
+                    log<LOG_INFO>(L"%1% || DetVar '%2%': using event-matched spectra for spline building") % __func__ % varName.c_str();
+                } else {
+                    log<LOG_INFO>(L"%1% || DetVar '%2%': no matching vars stored, using full spectra") % __func__ % varName.c_str();
+                }
+
+                // Zero out variation bins where CV is 0 to avoid division-by-zero.
+                {
+                    Eigen::VectorXf varVec = matchedVarSpec.Spec();
+                    const Eigen::VectorXf& cvVec = matchedCvSpec.Spec();
+                    for(int ib = 0; ib < cvVec.size(); ++ib) {
+                        if(cvVec(ib) == 0.0f) varVec(ib) = 0.0f;
+                    }
+                    matchedVarSpec = PROspec(varVec, Eigen::VectorXf::Zero(varVec.size()));
+                }
+
+                {
+                    SystStruct ss(varName, 2, systType, "1",
+                                  {0.0f, 1.0f}, {0.0f, 1.0f}, 0);
+                    ss.binning = binningIndex;
+                    ss.CreateSpecs(matchedCvSpec.Spec().size());
+                    ss.p_cv = std::make_shared<PROspec>(matchedCvSpec);
+                    ss.p_multi_spec[0] = std::make_shared<PROspec>(matchedCvSpec);
+                    ss.p_multi_spec[1] = std::make_shared<PROspec>(matchedVarSpec);
+                    ss.SetHash(config.hash);
+                    systsstructs[binningIndex].push_back(std::move(ss));
+                }
+                log<LOG_INFO>(L"%1% || Added DetVar SystStruct '%2%' (section %3%, binning=%4%, mode=%5%)") % __func__ % varName.c_str() % isec % binningIndex % systType.c_str();
+            }
+        }
     }
 
     // For process-only command, exit early after MC processing is complete
@@ -917,7 +1142,7 @@ int main(int argc, char* argv[])
 	}
         if(binwidth_scale) opt |= PlotOptions::BinWidthScaled;
         if(area_normalized) opt |= PlotOptions::AreaNormalized;
-        plot_channels((final_output_tag+"_PROfile_hists.pdf"), config, cv, bf, data, err_band, post_err_band, {}, {}, texts, pbounds, opt);
+        plot_channels((final_output_tag+"_PROfile_hists.pdf"), config, cv, bf, data, err_band, post_err_band, texts, pbounds, opt);
 
         TCanvas c;
         c.Print((final_output_tag+"_postfit_posteriors.pdf[").c_str());
@@ -1273,7 +1498,7 @@ int main(int argc, char* argv[])
         for(size_t io = 0; io < config.m_num_variables; ++io) {
 
             variable_cvs.push_back(FillSpectra(config, prop, variable_systs[config.i_prime],*model,CVParams, !eventbyevent, io));
-            plot_channels(final_output_tag+"_PROplot_Variable_"+std::to_string(io)+"_CV.pdf", config, variable_cvs.back(), {}, {}, {}, {}, {}, {}, notext, pbounds, opt, io);
+            plot_channels(final_output_tag+"_PROplot_Variable_"+std::to_string(io)+"_CV.pdf", config, variable_cvs.back(), {}, {}, {}, {}, notext, pbounds, opt, io);
         }
 
         std::string filename = final_output_tag+"_fractional_systematics.pdf";
@@ -1282,6 +1507,275 @@ int main(int argc, char* argv[])
         std::vector<std::map<std::string, std::unique_ptr<TH1D>>> other_hists;
         for(size_t io = 0; io < config.m_num_variables; ++io) {
             other_hists.push_back(getCV1DHists(variable_cvs[io], config, binwidth_scale, io));
+        }
+
+        // DetVar plotting (uses combined DetVar propellers binary)
+        if(config.m_has_detvar_section) {
+            log<LOG_INFO>(L"%1% || Plotting detector variations...") % __func__;
+
+            std::string dvAllPropsBin = analysis_tag + "_detvar_props.bin";
+            std::map<std::string, PROpeller> plot_dvprops;
+            std::vector<PROspec> detvar_specs;
+            std::vector<std::string> detvar_names;
+            std::vector<int> detvar_binning;
+            // Matched pairs for _DetVarOverlapping PDF (var file index -> matched cv+var specs)
+            struct MatchedPair { PROspec cv; PROspec var; };
+            std::map<size_t, MatchedPair> matched_pairs;
+
+            if(!std::filesystem::exists(dvAllPropsBin)) {
+                log<LOG_ERROR>(L"%1% || DetVar combined binary not found: %2%. Run 'process' first.") % __func__ % dvAllPropsBin.c_str();
+            } else {
+                uint32_t loaded_detvar_hash = loadDetVarProps(plot_dvprops, dvAllPropsBin);
+                if(config.detvar_hash != loaded_detvar_hash) {
+                    log<LOG_WARNING>(L"%1% || WARNING config detvar_hash (%2%) and binary detvar_hash (%3%) not compatible. DetVar plots may be stale.") % __func__ % config.detvar_hash % loaded_detvar_hash;
+                }
+
+                // Precompute section CV index by section for matching
+                std::map<size_t, size_t> plot_cv_idx_by_section; // section_idx -> detvar file index
+                for(size_t idv = 0; idv < config.GetNumDetVarFiles(); ++idv) {
+                    if(config.m_detvar_files[idv].is_cv)
+                        plot_cv_idx_by_section[config.m_detvar_files[idv].section_index] = idv;
+                }
+
+                for(size_t idv = 0; idv < config.GetNumDetVarFiles(); ++idv) {
+                    const std::string& name = config.m_detvar_files[idv].name;
+                    const std::string key = DetVarKey(config, idv);
+                    if(plot_dvprops.count(key) == 0) {
+                        log<LOG_ERROR>(L"%1% || DetVar entry '%2%' not found in combined binary. Run 'process' first.") % __func__ % name.c_str();
+                        break;
+                    }
+
+                    PROconfig dvconfig = config.BuildDetVarConfig(idv);
+                    PROpeller& dvprop = plot_dvprops.at(key);
+
+                    std::unique_ptr<PROmodel> dv_model = std::make_unique<NullModel>(dvprop);
+                    PROsyst dvsysts;
+                    Eigen::VectorXf dvparams = Eigen::VectorXf::Constant(dv_model->nparams, 0);
+
+                    int binningIndex = config.m_mcgen_variation_binning_map.count(name) ? config.m_mcgen_variation_binning_map.at(name) : config.i_prime;
+                    if(binningIndex < 0 || binningIndex >= (int)config.m_num_variables)
+                        binningIndex = config.i_prime;
+
+                    // Always use full spec for _DetVarFull PDF
+                    PROspec full_spec = FillSpectra(dvconfig, dvprop, dvsysts, *dv_model, dvparams, !eventbyevent, binningIndex);
+                    detvar_specs.push_back(full_spec);
+                    detvar_names.push_back(name);
+                    detvar_binning.push_back(binningIndex);
+
+                    // For variation files, build matched pair for _DetVarOverlapping PDF
+                    if(!config.m_detvar_files[idv].is_cv) {
+                        size_t sec = config.m_detvar_files[idv].section_index;
+                        auto cv_it = plot_cv_idx_by_section.find(sec);
+                        if(cv_it != plot_cv_idx_by_section.end()) {
+                            PROpeller& cvprop_plot = plot_dvprops.at(DetVarKey(config, cv_it->second));
+                            MatchedPair mp;
+                            if(BuildDetVarMatchedSpecs(cvprop_plot, dvprop, binningIndex,
+                                                       (int)config.m_num_variable_bins_total[binningIndex],
+                                                       mp.cv, mp.var)) {
+                                matched_pairs[idv] = std::move(mp);
+                                log<LOG_INFO>(L"%1% || DetVar plot '%2%': matched pair built for Overlapping PDF") % __func__ % name.c_str();
+                            }
+                        }
+                    }
+                }
+            }
+
+            if(detvar_specs.size() == config.GetNumDetVarFiles()) {
+                // Build per-section CV hist maps (each DetVarSection has its own CV)
+                std::map<size_t, std::map<std::string, std::unique_ptr<TH1D>>> cv_hists_by_section;
+                bool any_cv_missing = false;
+                for(size_t i = 0; i < config.m_detvar_files.size(); ++i) {
+                    if(config.m_detvar_files[i].is_cv) {
+                        size_t sec = config.m_detvar_files[i].section_index;
+                        cv_hists_by_section[sec] = getCV1DHists(detvar_specs[i], config, binwidth_scale, detvar_binning[i]);
+                    }
+                }
+                if(cv_hists_by_section.empty()) {
+                    log<LOG_ERROR>(L"%1% || ERROR: No CV files found in DetVar files!") % __func__;
+                    any_cv_missing = true;
+                }
+                if(!any_cv_missing) {
+                    TCanvas detvar_canvas;
+                    std::string detvar_pdf = final_output_tag + "_PROplot_DetVarFull.pdf";
+                    detvar_canvas.Print((detvar_pdf + "[").c_str(), "pdf");
+
+                    size_t global_subchannel_index = 0;
+                        for(size_t im = 0; im < config.m_num_modes; im++){
+                            for(size_t id = 0; id < config.m_num_detectors; id++){
+                                for(size_t ic = 0; ic < config.m_num_channels; ic++){
+                                    // Direct DetVar plot: show detvar_cv and detvar_variation spectra directly
+                                    int colors[] = {kRed, kBlue, kGreen+2, kMagenta, kCyan+1, kOrange+1, kViolet+1, kTeal+1};
+                                    int ncolors = sizeof(colors)/sizeof(colors[0]);
+
+                                    // Per-section pages: draw only variations belonging to the same section as the CV
+                                    for(const auto& [sec_idx, sec_cv_hists] : cv_hists_by_section) {
+                                        TH1D* cv_total = nullptr;
+                                        for(size_t sc = 0; sc < config.m_num_subchannels[ic]; sc++) {
+                                            const std::string& subchannel_name = config.m_fullnames[global_subchannel_index + sc];
+                                            auto cv_it = sec_cv_hists.find(subchannel_name);
+                                            if(cv_it != sec_cv_hists.end()) {
+                                                if(!cv_total)
+                                                    cv_total = (TH1D*)cv_it->second->Clone(("cv_total_sec" + std::to_string(sec_idx)).c_str());
+                                                else
+                                                    cv_total->Add(&*(cv_it->second));
+                                            }
+                                        }
+                                        if(!cv_total) continue;
+
+                                        cv_total->SetLineColor(kBlack);
+                                        cv_total->SetLineWidth(3);
+                                        cv_total->SetFillColor(kWhite);
+                                        cv_total->SetFillStyle(0);
+                                        cv_total->SetTitle((config.m_mode_names[im] + " " + config.m_detector_names[id] + " " + config.m_channel_names[ic] + " DetVar (sec " + std::to_string(sec_idx) + ")").c_str());
+                                        if(binwidth_scale)
+                                            cv_total->GetYaxis()->SetTitle("Events/GeV");
+                                        else
+                                            cv_total->GetYaxis()->SetTitle("Events");
+
+                                        float ymax = cv_total->GetMaximum();
+
+                                        // Build variation totals for this section only
+                                        std::vector<TH1D*> var_totals;
+                                        std::vector<std::string> var_labels;
+                                        int color_idx = 0;
+
+                                        for(size_t idv = 0; idv < detvar_specs.size(); ++idv) {
+                                            if(config.m_detvar_files[idv].is_cv) continue;
+                                            if(config.m_detvar_files[idv].section_index != sec_idx) continue;
+
+                                            std::map<std::string, std::unique_ptr<TH1D>> var_hists = getCV1DHists(detvar_specs[idv], config, binwidth_scale, detvar_binning[idv]);
+
+                                            TH1D* var_total = nullptr;
+                                            for(size_t sc = 0; sc < config.m_num_subchannels[ic]; sc++) {
+                                                const std::string& subchannel_name = config.m_fullnames[global_subchannel_index + sc];
+                                                auto var_it = var_hists.find(subchannel_name);
+                                                if(var_it != var_hists.end()) {
+                                                    if(!var_total)
+                                                        var_total = (TH1D*)var_it->second->Clone(("var_" + detvar_names[idv]).c_str());
+                                                    else
+                                                        var_total->Add(&*(var_it->second));
+                                                }
+                                            }
+
+                                            if(var_total) {
+                                                var_total->SetLineColor(colors[color_idx % ncolors]);
+                                                var_total->SetLineWidth(2);
+                                                var_total->SetFillColor(kWhite);
+                                                var_total->SetFillStyle(0);
+                                                if(var_total->GetMaximum() > ymax) ymax = var_total->GetMaximum();
+                                                var_totals.push_back(var_total);
+                                                var_labels.push_back(detvar_names[idv]);
+                                            }
+                                            color_idx++;
+                                        }
+
+                                        cv_total->SetMaximum(ymax * 1.15);
+                                        cv_total->Draw("hist");
+
+                                        std::unique_ptr<TLegend> leg = std::make_unique<TLegend>(0.55, 0.65, 0.89, 0.89);
+                                        leg->SetFillStyle(0);
+                                        leg->SetLineWidth(0);
+                                        leg->AddEntry(cv_total, ("DetVar CV (sec " + std::to_string(sec_idx) + ")").c_str(), "l");
+
+                                        for(size_t vi = 0; vi < var_totals.size(); ++vi) {
+                                            var_totals[vi]->Draw("hist same");
+                                            leg->AddEntry(var_totals[vi], var_labels[vi].c_str(), "l");
+                                        }
+                                        leg->Draw("same");
+
+                                        detvar_canvas.Print(detvar_pdf.c_str(), "pdf");
+
+                                        delete cv_total;
+                                        for(auto* h : var_totals) delete h;
+                                    }
+
+                                    global_subchannel_index += config.m_num_subchannels[ic];
+                                }
+                            }
+                        }
+                    detvar_canvas.Print((detvar_pdf + "]").c_str(), "pdf");
+                    log<LOG_INFO>(L"%1% || DetVar full plots saved to %2%") % __func__ % detvar_pdf.c_str();
+
+                    // _DetVarOverlapping PDF: one page per channel × variation, matched CV vs matched var
+                    if(!matched_pairs.empty()) {
+                        TCanvas ov_canvas;
+                        std::string ov_pdf = final_output_tag + "_PROplot_DetVarOverlapping.pdf";
+                        ov_canvas.Print((ov_pdf + "[").c_str(), "pdf");
+
+                        size_t ov_global_subchannel_index = 0;
+                        for(size_t im = 0; im < config.m_num_modes; im++){
+                            for(size_t id = 0; id < config.m_num_detectors; id++){
+                                for(size_t ic = 0; ic < config.m_num_channels; ic++){
+                                    for(size_t idv = 0; idv < detvar_specs.size(); ++idv) {
+                                        if(config.m_detvar_files[idv].is_cv) continue;
+                                        auto mp_it = matched_pairs.find(idv);
+                                        if(mp_it == matched_pairs.end()) continue;
+
+                                        const MatchedPair& mp = mp_it->second;
+                                        std::map<std::string, std::unique_ptr<TH1D>> cv_hists_ov = getCV1DHists(mp.cv, config, binwidth_scale, detvar_binning[idv]);
+                                        std::map<std::string, std::unique_ptr<TH1D>> var_hists_ov = getCV1DHists(mp.var, config, binwidth_scale, detvar_binning[idv]);
+
+                                        TH1D* cv_total_ov = nullptr;
+                                        TH1D* var_total_ov = nullptr;
+                                        for(size_t sc = 0; sc < config.m_num_subchannels[ic]; sc++) {
+                                            const std::string& subchannel_name = config.m_fullnames[ov_global_subchannel_index + sc];
+                                            auto cv_hit = cv_hists_ov.find(subchannel_name);
+                                            if(cv_hit != cv_hists_ov.end()) {
+                                                if(!cv_total_ov) cv_total_ov = (TH1D*)cv_hit->second->Clone("cv_matched_ov_total");
+                                                else cv_total_ov->Add(&*(cv_hit->second));
+                                            }
+                                            auto var_hit = var_hists_ov.find(subchannel_name);
+                                            if(var_hit != var_hists_ov.end()) {
+                                                if(!var_total_ov) var_total_ov = (TH1D*)var_hit->second->Clone("var_matched_ov_total");
+                                                else var_total_ov->Add(&*(var_hit->second));
+                                            }
+                                        }
+
+                                        if(cv_total_ov && var_total_ov) {
+                                            cv_total_ov->SetLineColor(kBlack);
+                                            cv_total_ov->SetLineWidth(3);
+                                            cv_total_ov->SetFillColor(kWhite);
+                                            cv_total_ov->SetFillStyle(0);
+                                            var_total_ov->SetLineColor(kRed);
+                                            var_total_ov->SetLineWidth(2);
+                                            var_total_ov->SetFillColor(kWhite);
+                                            var_total_ov->SetFillStyle(0);
+
+                                            float ymax_ov = std::max(cv_total_ov->GetMaximum(), var_total_ov->GetMaximum());
+                                            cv_total_ov->SetMaximum(ymax_ov * 1.15);
+                                            std::string ov_title = config.m_mode_names[im] + " " + config.m_detector_names[id] + " " + config.m_channel_names[ic] + " " + detvar_names[idv] + " (Matched)";
+                                            cv_total_ov->SetTitle(ov_title.c_str());
+                                            if(binwidth_scale) cv_total_ov->GetYaxis()->SetTitle("Events/GeV");
+                                            else cv_total_ov->GetYaxis()->SetTitle("Events");
+
+                                            cv_total_ov->Draw("hist");
+                                            var_total_ov->Draw("hist same");
+
+                                            std::unique_ptr<TLegend> ov_leg = std::make_unique<TLegend>(0.55, 0.75, 0.89, 0.89);
+                                            ov_leg->SetFillStyle(0);
+                                            ov_leg->SetLineWidth(0);
+                                            ov_leg->AddEntry(cv_total_ov, "Matched CV", "l");
+                                            ov_leg->AddEntry(var_total_ov, detvar_names[idv].c_str(), "l");
+                                            ov_leg->Draw("same");
+
+                                            ov_canvas.Print(ov_pdf.c_str(), "pdf");
+
+                                            delete cv_total_ov;
+                                            delete var_total_ov;
+                                        } else {
+                                            if(cv_total_ov) delete cv_total_ov;
+                                            if(var_total_ov) delete var_total_ov;
+                                        }
+                                    }
+                                    ov_global_subchannel_index += config.m_num_subchannels[ic];
+                                }
+                            }
+                        }
+                        ov_canvas.Print((ov_pdf + "]").c_str(), "pdf");
+                        log<LOG_INFO>(L"%1% || DetVar overlapping plots saved to %2%") % __func__ % ov_pdf.c_str();
+                    }
+                }
+            }
         }
 
         TCanvas c;
@@ -1460,7 +1954,7 @@ int main(int argc, char* argv[])
             if(!config.m_channel_variable_plot_bool.at(io))continue;// For now skip the L/E 250 bin. 
             other_err_bands.push_back(getErrorBand(config, prop, variable_systs[io], *model, variable_cvs[io], CVParams, binwidth_scale, io));
             plot_channels(final_output_tag+"_PROplot_Variable_"+std::to_string(io)+"_ErrorBand.pdf", config, variable_cvs[io], {}, variable_data[io], 
-                    other_err_bands.back(), {}, {}, {}, other_channel_chitexts[io], pbounds, opt | PlotOptions::DataMCRatio, io);
+                    other_err_bands.back(), {}, other_channel_chitexts[io], pbounds, opt | PlotOptions::DataMCRatio, io);
         }
 
 
@@ -1478,7 +1972,6 @@ int main(int argc, char* argv[])
                 bool unprinted = true;
                 chan++;
                 int col = chan%2==0 ? kRed: kBlue;
-                int lastsbindex = 0;
 
                 for(const auto &[fixed_pts, curve]: syst_bins) {
 
@@ -1966,9 +2459,89 @@ int main(int argc, char* argv[])
 	}
         if(binwidth_scale) opt |= PlotOptions::BinWidthScaled;
         if(area_normalized) opt |= PlotOptions::AreaNormalized;
-        plot_channels((final_output_tag+"_PROglobal_hists.pdf"), config, cv, bf, data, err_band, post_err_band, pre_allcovsyst, post_allcovsyst, texts, pbounds,opt);
+        plot_channels((final_output_tag+"_PROglobal_hists.pdf"), config, cv, bf, data, err_band, post_err_band, texts, pbounds, opt, 0, true);
 
 
+    }
+
+    if(*promcmc_command) {
+        metric->setBounds(global_ub, global_lb);
+        size_t nparams = metric->GetModel().nparams + metric->GetSysts().GetNSplines();
+        std::uniform_real_distribution<float> latin_distribution(-2, 2);
+        std::vector<std::vector<float>> samples = latin_hypercube_sampling(mcmc_chains, nparams, latin_distribution, myseed.global_rng);
+        recenter_latin_samples(samples, global_ub, global_lb);
+        std::vector<Eigen::VectorXf> samples_eigen; 
+        for(size_t i = 0; i < samples.size(); ++i)
+            samples_eigen.push_back(Eigen::VectorXf::Map(samples[i].data(), samples[i].size()));
+        size_t mcmc_threads = mcmc_chains >= nthread ? nthread : mcmc_chains;
+        std::vector<std::vector<std::vector<Eigen::VectorXf>>> chains;
+        chains.reserve(mcmc_threads);
+        std::vector<std::thread> threads;
+        size_t chains_per_thread = mcmc_chains / mcmc_threads;
+        size_t addone = mcmc_threads - mcmc_chains%mcmc_threads;
+        for(size_t i = 0; i < mcmc_threads; ++i) {
+            chains.emplace_back();
+            threads.emplace_back(
+                    [&, i](){
+                        mcmc_worker(chains[i], samples_eigen[i], metric->Clone(), myseed.getThreadSeeds()->at(i), chains_per_thread + (i >= addone), fitConfig.MCMCburn, fitConfig.MCMCiter);
+                    });
+        }
+        for(auto&& t : threads) {
+            t.join();
+        }
+
+        //std::vector<TH2D> twod;
+        //std::vector<TH1D> oned;
+        // TODO: This is hardcoded for numu disappearance right now
+        // TODO: How do we input binnings for these plots in a nice way?
+        // TODO: Is it better to write out the chain to a cvs/root file and plot externally?
+        //twod.push_back(TH2D("two", ";sin^{2}2#theta_{#mu#mu};#Deltam^{2}_{41} [eV^{2}];MCMC Points",
+        //                     200, -3, 0, 200, -2, 2));
+        //oned.push_back(TH1D("one1", ";sin^{2}2#theta_{#mu#mu};Posterior PDF", 200, -3, 0));
+        //oned.push_back(TH1D("one2", ";#Deltam^{2}_{41} [eV^{2}];Posterior PDF", 200, -2, 2));
+        TFile fout((final_output_tag+"_PROMCMC_chains.root").c_str(), "RECREATE");
+        size_t chain_counter = 0;
+        for(const auto &tchains : chains) {
+            for(const auto &chain : tchains) {
+                chain_counter++;
+                std::string name = "chain"+std::to_string(chain_counter);
+                TTree tree(name.c_str(), name.c_str());
+                Eigen::VectorXf v = Eigen::VectorXf::Zero(nparams);
+                for(size_t i = 0; i < metric->GetModel().nparams; ++i)
+                    tree.Branch(metric->GetModel().param_names[i].c_str(), &v(i));
+                for(size_t i = metric->GetModel().nparams; i < nparams; ++i) {
+                    const std::string &sname = metric->GetSysts().spline_names[i-metric->GetModel().nparams];
+                    std::string::size_type l = sname.find(':');
+                    // TODO: This only handles names with a single colon in them. I don't think we ever have more than that, it's really just meant for the 'flat' and 'norm' systs.
+                    if(l != std::string::npos) {
+                        std::string bname = sname;
+                        bname[l] = '_';
+                        tree.Branch(bname.c_str(), &v(i));
+                    } else {
+                        tree.Branch(sname.c_str(), &v(i));
+                    }
+                }
+                for(const auto &p : chain) {
+                //    twod[0].Fill(p(1), p(0));
+                //    oned[0].Fill(p(1));
+                //    oned[1].Fill(p(0));
+                    v = p;
+                    tree.Fill();
+                }
+                tree.Write();
+            }
+        }
+        //TCanvas c;
+        //c.Divide(2,2);
+        //c.cd(1);
+        //oned[0].Scale(1.0/oned[0].Integral());
+        //oned[0].Draw("hist");
+        //c.cd(3);
+        //twod[0].Draw("colz");
+        //c.cd(4);
+        //oned[1].Scale(1.0/oned[1].Integral());
+        //oned[1].Draw("hist");
+        //c.Print("mcmc_corner_plot.pdf");
     }
 
     //***********************************************************************
@@ -2112,4 +2685,18 @@ int main(int argc, char* argv[])
     return 0;
 }
 
+
+void mcmc_worker(std::vector<std::vector<Eigen::VectorXf>> &chains, Eigen::VectorXf initial, PROmetric *metric, uint32_t seed, size_t nchains, size_t burnin, size_t steps) {
+    std::uniform_int_distribution<uint32_t> dseed(0, std::numeric_limits<uint32_t>::max());
+    std::mt19937 rng(seed);
+    for(size_t i = 0; i < nchains; ++i) {
+        chains.emplace_back();
+        std::vector<Eigen::VectorXf> &chain = chains.back();
+        auto action = [&chain](const Eigen::VectorXf &pt) { chain.push_back(pt); };
+        simple_target target{*metric};
+        adaptive_proposal proposal(*metric, dseed(rng));
+        Metropolis mcmc(target, proposal, initial, dseed(rng));
+        mcmc.run(burnin, steps, action);
+    }
+}
 

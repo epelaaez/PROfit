@@ -88,7 +88,7 @@ namespace PROfit{
 
             // Serialization function for boost that will allow for save state of propeller
             template <class Archive>
-                void serialize(Archive& ar, [[maybe_unused]] const unsigned int version) {
+                void serialize(Archive& ar, const unsigned int version) {
                     ar & added_weights;
                     ar & model_rule;
                     ar & variable_mc_stat_err;
@@ -97,6 +97,12 @@ namespace PROfit{
                     ar & variable_midbin;
                     ar & variable_values;
                     ar & hash;
+                    if(version >= 1) {
+                        ar & has_matching_vars;
+                        if(has_matching_vars) {
+                            ar & matching_var_values;
+                        }
+                    }
                 }
 
         public:
@@ -118,6 +124,11 @@ namespace PROfit{
 
             std::vector<float> added_weights;
             std::vector<int>   model_rule;
+            // Per-event matching var values for DetVar CV/variation alignment.
+            // Outer index: matching variable; inner index: event.
+            // Only populated when m_detvar_matching_vars is set on the mini-config.
+            bool has_matching_vars = false;
+            std::vector<std::vector<float>> matching_var_values;
             // Vector of variable values and bin indices.
             // Outer vector is per-variable, inner vector is per-event 
             std::vector<std::vector<int>> variable_bin_indices;
@@ -249,4 +260,7 @@ namespace PROfit{
     };
 
 }
+
+BOOST_CLASS_VERSION(PROfit::PROpeller, 1)
+
 #endif

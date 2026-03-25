@@ -54,7 +54,9 @@ namespace PROfit {
             const size_t nbins_var = inconfig.m_num_variable_bins_total[var_index];
             Eigen::VectorXf systw = Eigen::VectorXf::Constant(nbins_var, 1);
             
-            for(int i = 0; i < shifts.size(); ++i) {
+            // Iterate up to insyst.GetNSplines(), not shifts.size(): params may be
+            // over-sized when shared across variables with different spline counts.
+            for(int i = 0; i < (int)insyst.GetNSplines(); ++i) {
                 size_t binning = insyst.spline_binnings[i];
 
                 if(binning == var_index) {

@@ -11,9 +11,9 @@
 #include <fstream>
 #include <memory>
 #include <map>
+#include <set>
 #include <unordered_map>
 #include <unordered_set>
-#include <unordered_map>
 #include <climits>
 #include <cstdlib>
 #include <numeric>
@@ -250,6 +250,7 @@ namespace PROfit{
              * Function: Use TinyXML2 to load XML */
             int LoadFromXML(const std::string & filename);
             uint32_t hash;
+            uint32_t detvar_hash;
 
             static bool SameChannels(const PROconfig &one, const PROconfig &two);
 
@@ -459,6 +460,7 @@ namespace PROfit{
 
             /* Calculate hash of unique properties of XML config for PROpeller */
             uint32_t CalcHash() const;
+            uint32_t CalcDetVarHash() const;
 
             //---- Embedded data support ----
             // Whether a <data> section was found in the XML
@@ -472,6 +474,44 @@ namespace PROfit{
              * Returns a PROconfig with one "data" subchannel per channel
              * and MCFiles from the <data> block. */
             PROconfig BuildDataConfig() const;
+
+            //---- Detector Variation (DetVar) support ----
+            struct DetVarFile {
+                std::string filename;
+                std::string name;  // "cv" / "cv_N" or variation name like "Recomb2"
+                float pot;
+                bool is_cv;
+                size_t section_index;  // which DetVarSection this file belongs to
+            };
+
+            bool m_has_detvar_section = false;
+            std::vector<DetVarFile> m_detvar_files;
+            // Per-section subchannel lists (one inner vector per DetVarSection)
+            std::vector<std::vector<std::string>> m_detvar_subchannels_per_section;
+            // Per-section include_only_weights: 1-based indices of weight_N to use (empty = use all)
+            std::vector<std::vector<int>> m_detvar_include_only_weights_per_section;
+            // Per-section extra weights: additional weight expressions appended after inherited weights
+            std::vector<std::vector<std::string>> m_detvar_extra_weights_per_section;
+            // Per-section branch names used to match events between CV and variation files.
+            // Parsed from cv_variation_matching_vars="run,subrun,event" on <DetVarSection>.
+            std::vector<std::vector<std::string>> m_detvar_matching_vars_per_section;
+            std::set<std::string> m_detvar_variation_names;  // variation names for lookup during systematics parsing
+            // Per-section XML templates for building per-file DetVar configs
+            // Each template contains channel/subchannel/model definitions and an MCFile template
+            std::vector<std::string> m_detvar_xml_templates;
+            // Set on DetVar mini-configs (via BuildDetVarConfig) to carry matching var branch
+            // names into PROcess_CAFAna without round-tripping through the XML template.
+            std::vector<std::string> m_detvar_matching_vars;
+
+            /* Build a PROconfig for a single DetVar file (CV or variation).
+             * file_index indexes into m_detvar_files. */
+            PROconfig BuildDetVarConfig(size_t file_index) const;
+
+            /* Get number of DetVar files (across all sections) */
+            size_t GetNumDetVarFiles() const { return m_detvar_files.size(); }
+
+            /* Get number of DetVarSection blocks */
+            size_t GetNumDetVarSections() const { return m_detvar_xml_templates.size(); }
 
 
     };

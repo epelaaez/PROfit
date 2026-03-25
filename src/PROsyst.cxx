@@ -20,33 +20,41 @@ namespace PROfit {
                 FillSpline(syst);
                 ++n_splines;
             } else if(syst.mode == "spline_to_covariance") {
-                // Build spline first, then convert to covariance matrix
-                FillSpline(syst);
-                int spline_idx = splines.size() - 1;
                 if(model == nullptr){
                     log<LOG_ERROR>(L"%1% || spline_to_covariance requires a PROmodel to use spline2cov. "
                         L"Construct PROsyst with a model (and optional params).") % __func__;
                     log<LOG_ERROR>(L"Terminating.");
                     exit(EXIT_FAILURE);
                 }
+                // Build spline first, then convert to covariance matrix
+                FillSpline(syst);
+                size_t spline_idx = splines.size() - 1;
 
-                // Initialize spline priors/centers for the temporary spline list
-                spline_priors = Eigen::VectorXf::Constant(splines.size(), 1);
-                spline_centers = Eigen::VectorXf::Constant(splines.size(), 0);
+                // Build temporary priors/centers for the current spline list (including the
+                // just-added spline) needed by spline2cov. Use locals so we don't clobber the
+                // member variables, which are properly initialised after the full syst loop.
+                Eigen::VectorXf tmp_priors  = Eigen::VectorXf::Constant(splines.size(), 1);
+                Eigen::VectorXf tmp_centers = Eigen::VectorXf::Constant(splines.size(), 0);
                 for(const auto &[name, prior]: config.m_mcgen_variation_prior) {
                     auto it = std::find(spline_names.begin(), spline_names.end(), name);
                     if(it != std::end(spline_names)) {
                         size_t idx = std::distance(std::begin(spline_names), it);
-                        spline_priors(idx) = prior;
+                        tmp_priors(idx) = prior;
                     }
                 }
                 for(const auto &[name, center]: config.m_mcgen_variation_prior_centers) {
                     auto it = std::find(spline_names.begin(), spline_names.end(), name);
                     if(it != std::end(spline_names)) {
                         size_t idx = std::distance(std::begin(spline_names), it);
-                        spline_centers(idx) = center;
+                        tmp_centers(idx) = center;
                     }
                 }
+                // Temporarily assign so that spline2cov (via FillSplineRandomThrow) sees
+                // the correct priors, then restore the saved state afterwards.
+                Eigen::VectorXf saved_priors  = spline_priors;
+                Eigen::VectorXf saved_centers = spline_centers;
+                spline_priors  = tmp_priors;
+                spline_centers = tmp_centers;
 
                 Eigen::VectorXf cvparams;
                 if(params != nullptr){
@@ -58,6 +66,8 @@ namespace PROfit {
 
                 log<LOG_INFO>(L"%1% || Converting spline '%2%' to covariance matrix using spline2cov") % __func__ % syst.systname.c_str();
                 Eigen::MatrixXf frac_cov = spline2cov(spline_idx, config, prop, *model, cvparams, 42);
+                spline_priors  = saved_priors;
+                spline_centers = saved_centers;
                 Eigen::MatrixXf corr = GenerateCorrMatrix(frac_cov);
 
                 // Remove the spline (it was the last one appended by FillSpline)
@@ -285,7 +295,6 @@ namespace PROfit {
 
         return frac_covar_matrix;
     }
-
 
     Eigen::MatrixXf PROsyst::SumMatrices() const{
 
