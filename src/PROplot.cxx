@@ -1820,32 +1820,32 @@ namespace PROfit{
                                 i++;
                                 TH1F* h = new TH1F((tag+"_Channel_"+std::to_string(global_channel_index)+"_"+std::to_string(i)).c_str(), (tag + ";" + config.m_channel_variable_units[channel][other_index]).c_str(), bin_edges.size()-2, bin_edges.data());
 
-                                if(config.m_channel_variable_dims[channel][other_index] == 2)  channel_nbins_y = config.m_channel_variable_bins[channel][other_index].NBinsAlong(1);
+                                if(config.m_channel_variable_dims[channel][other_index] == 2) {
+                                    channel_nbins_y = config.m_channel_variable_bins[channel][other_index].NBinsAlong(1);
+                                    Eigen::MatrixXf rat_diag = collapsed_diag(channel_bins, channel_bins) + collapsed_diag(channel_bins2, channel_bins2);
+                                    Eigen::MatrixXf rat_full_cov = rat_diag * rat_frac_cov * rat_diag;
+                                    Eigen::VectorXf VarVec = Eigen::VectorXf::Zero(channel_nbins_x);
+                                    Eigen::VectorXf diag1d = Eigen::VectorXf::Zero(channel_nbins_x);
+                                    for(int i = 0; i < channel_nbins_x; i++){
+                                        for(int j = channel_nbins_y*i; j < channel_nbins_y*(i+1); j++){
+                                            diag1d(i) += rat_diag(j, j);
+                                            for(int k = channel_nbins_y*i; k < channel_nbins_y*(i+1); k++){
+                                                VarVec(i) += rat_full_cov(j, k);
+                                            }
+                                        }
+                                    }
 
-                                // I think all this is for projecting 2D binning to 1D
-                                // Not handling that right now.
-                                //Eigen::VectorXf VarVec = Eigen::VectorXf::Zero(channel_nbins_x);
-                                //Eigen::VectorXf diag1d = Eigen::VectorXf::Zero(channel_nbins_x);
-                                //Eigen::MatrixXf channel_diag = collapsed_diag(channel_bins, channel_bins);
-
-                                //for(int i = 0; i < channel_nbins_x; i++){
-                                //    for(int j = channel_nbins_y*i; j < channel_nbins_y*(i+1); j++){
-                                //        diag1d(i) += channel_diag(j, j);
-                                //        for(int k = channel_nbins_y*i; k < channel_nbins_y*(i+1); k++){
-                                //            VarVec(i) += channel_cov(j, k);
-                                //        }
-                                //    }
-                                //}
-
-                                //float inv_diag1d;
-                                //for (size_t i = 0; i < channel_nbins_x; ++i) {
-                                //    inv_diag1d = 1/diag1d(i);
-                                //    h->SetBinContent(i+1, sqrt(inv_diag1d*VarVec(i)*inv_diag1d));
-                                //    hsum->SetBinContent(i+1, hsum->GetBinContent(i+1)+inv_diag1d*VarVec(i)*inv_diag1d);
-                                //}
-                                for(size_t i = 0; i < channel_bins.size(); ++i) {
-                                    h->SetBinContent(i+1, sqrt(rat_frac_cov(i,i)));
-                                    hsum->SetBinContent(i+1, hsum->GetBinContent(i+1)+rat_frac_cov(i,i));
+                                    float inv_diag1d;
+                                    for (size_t i = 0; i < channel_nbins_x; ++i) {
+                                        inv_diag1d = 1/diag1d(i);
+                                        h->SetBinContent(i+1, sqrt(inv_diag1d*VarVec(i)*inv_diag1d));
+                                        hsum->SetBinContent(i+1, hsum->GetBinContent(i+1)+inv_diag1d*VarVec(i)*inv_diag1d);
+                                    }
+                                } else {
+                                    for(size_t i = 0; i < channel_bins.size(); ++i) {
+                                        h->SetBinContent(i+1, sqrt(rat_frac_cov(i,i)));
+                                        hsum->SetBinContent(i+1, hsum->GetBinContent(i+1)+rat_frac_cov(i,i));
+                                    }
                                 }
 
                                 const std::string &plotname = config.m_mcgen_variation_plotname_map.at(systname);
