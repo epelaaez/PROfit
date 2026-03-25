@@ -1876,7 +1876,7 @@ namespace PROfit{
                             log<LOG_INFO>(L"%1% || hsum for tag '%2%': nbins=%3%, max=%4%, integral=%5%")
                                 % __func__ % tag.c_str() % hsum->GetNbinsX() % hsum->GetMaximum() % hsum->Integral();
 
-                            hsum->SetXTitle(config.m_channel_variable_units[channel][other_index].c_str());
+                            hsum->SetXTitle((config.m_detector_plotnames[det]+"/"+config.m_detector_plotnames[det2]+" "+config.m_channel_variable_units[channel][other_index]).c_str());
                             hsum->SetYTitle("Fractional Uncertainty");
                             hsum->SetLineColor(kBlack);
                             hsum->SetLineWidth(2);
@@ -1931,7 +1931,7 @@ namespace PROfit{
                             hsum->SetBinContent(i+1, sqrt(hsum->GetBinContent(i+1)));
                         }
                         leg->AddEntry(hsum,"Sum","l");
-                        hsum->SetXTitle(config.m_channel_plotnames[channel].c_str());
+                        hsum->SetXTitle((config.m_detector_plotnames[det]+"/"+config.m_detector_plotnames[det2]+" "+config.m_channel_variable_units[channel][other_index]).c_str());
                         hsum->SetTitle(("Summary: "+name).c_str());
                         hsum->SetYTitle("Fractional Uncertainty");
                         hsum->SetLineColor(kBlack);
