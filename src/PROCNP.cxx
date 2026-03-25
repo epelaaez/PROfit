@@ -78,12 +78,14 @@ float PROCNP::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
 
     Eigen::VectorXf subvector2 = param.segment(model.nparams, syst->GetNSplines());
     //log<LOG_DEBUG>(L"%1% || Created spline subvector with size %2%") % __func__ % subvector2.size();
+    Eigen::VectorXf noshiftvec = Eigen::VectorXf::Zero(param.size());
+    noshiftvec.head(model.nparams) = subvector1;
 
     PROspec result = FillSpectra(config, peller, *syst, model, param, strat == BinnedChi2);
 
 
     Eigen::MatrixXf inverted_collapsed_full_covariance(config.m_num_variable_bins_total_collapsed[config.i_prime],config.m_num_variable_bins_total_collapsed[config.i_prime]);
-    Eigen::VectorXf collapsed_cv = CollapseMatrix(config, FillSpectra(config, peller, *syst, model, subvector1, strat != EventByEvent).Spec());
+    Eigen::VectorXf collapsed_cv = CollapseMatrix(config, FillSpectra(config, peller, *syst, model, noshiftvec, strat != EventByEvent).Spec());
     Eigen::MatrixXf collapsed_stat_covariance = Eigen::MatrixXf::Zero(data.Spec().size(), data.Spec().size());
     Eigen::VectorXf normdata = shape_only 
         ? data.Normalize(config,result)
@@ -166,7 +168,9 @@ float PROCNP::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
                 Eigen::MatrixXf new_collapsed_stat_covariance = collapsed_stat_covariance;
                 if(i < model.nparams) {
                     Eigen::VectorXf subvector1 = param_plus.segment(0, model.nparams);
-                    Eigen::VectorXf collapsed_cv = CollapseMatrix(config, FillSpectra(config, peller, *syst, model, subvector1, strat != EventByEvent).Spec(),config.i_prime);
+                    Eigen::VectorXf noshiftvec = Eigen::VectorXf::Zero(param.size());
+                    noshiftvec.head(model.nparams) = subvector1;
+                    Eigen::VectorXf collapsed_cv = CollapseMatrix(config, FillSpectra(config, peller, *syst, model, noshiftvec, strat != EventByEvent).Spec(),config.i_prime);
                     for(long j = 0; j < data.Spec().size(); ++j)
                         new_collapsed_stat_covariance(j,j) = normdata(j) == 0 ? collapsed_cv(j)/2 :
                             3 / (1.0 / normdata(j) + 2.0 / collapsed_cv(j));
@@ -210,7 +214,9 @@ float PROCNP::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
                     Eigen::MatrixXf new_collapsed_stat_covariance = collapsed_stat_covariance;
                     if(i < model.nparams) {
                         Eigen::VectorXf subvector1 = param_plus.segment(0, model.nparams);
-                        Eigen::VectorXf collapsed_cv = CollapseMatrix(config, FillSpectra(config, peller, *syst, model, subvector1, strat != EventByEvent).Spec(),config.i_prime);
+                        Eigen::VectorXf noshiftvec = Eigen::VectorXf::Zero(param.size());
+                        noshiftvec.head(model.nparams) = subvector1;
+                        Eigen::VectorXf collapsed_cv = CollapseMatrix(config, FillSpectra(config, peller, *syst, model, noshiftvec, strat != EventByEvent).Spec(),config.i_prime);
                         for(long j = 0; j < data.Spec().size(); ++j)
                             new_collapsed_stat_covariance(j,j) = normdata(j) == 0 ? collapsed_cv(j)/2 :
                                 3 / (1.0 / normdata(j) + 2.0 / collapsed_cv(j));
@@ -238,7 +244,9 @@ float PROCNP::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
                     Eigen::MatrixXf new_collapsed_stat_covariance = collapsed_stat_covariance;
                     if(i < model.nparams) {
                         Eigen::VectorXf subvector1 = param_minus.segment(0, model.nparams);
-                        Eigen::VectorXf collapsed_cv = CollapseMatrix(config, FillSpectra(config, peller, *syst, model, subvector1, strat != EventByEvent).Spec(),config.i_prime);
+                        Eigen::VectorXf noshiftvec = Eigen::VectorXf::Zero(param.size());
+                        noshiftvec.head(model.nparams) = subvector1;
+                        Eigen::VectorXf collapsed_cv = CollapseMatrix(config, FillSpectra(config, peller, *syst, model, noshiftvec, strat != EventByEvent).Spec(),config.i_prime);
                         for(long j = 0; j < data.Spec().size(); ++j)
                             new_collapsed_stat_covariance(j,j) = normdata(j) == 0 ? collapsed_cv(j)/2 :
                                 3 / (1.0 / normdata(j) + 2.0 / collapsed_cv(j));
@@ -333,6 +341,8 @@ void PROCNP::print(const Eigen::VectorXf &param){
 
     // Get Spectra from FillSpectra
     Eigen::VectorXf subvector1 = param.segment(0, model.nparams);
+    Eigen::VectorXf noshiftvec = Eigen::VectorXf::Zero(param.size());
+    noshiftvec.head(model.nparams) = subvector1;
     Eigen::VectorXf subvector2 = param.segment(model.nparams, syst->GetNSplines());
 
     PROspec result = FillSpectra(config, peller, *syst, model, param, strat == BinnedChi2);
@@ -340,7 +350,7 @@ void PROCNP::print(const Eigen::VectorXf &param){
     result.Print();
 
     Eigen::MatrixXf inverted_collapsed_full_covariance(config.m_num_variable_bins_total_collapsed[config.i_prime],config.m_num_variable_bins_total_collapsed[config.i_prime]);
-    PROspec cv = FillSpectra(config, peller, *syst, model, subvector1, strat != EventByEvent);
+    PROspec cv = FillSpectra(config, peller, *syst, model, noshiftvec, strat != EventByEvent);
     log<LOG_INFO>(L"%1% || CV is : \n ") % __func__ ;
     cv.Print();
     Eigen::MatrixXf collapsed_data_stat_covariance = data.Spec().array().matrix().asDiagonal();
