@@ -1806,66 +1806,79 @@ public:
     }
 
     float Pee(const Eigen::VectorXf &params, float le) {
-        double probs_returned[3][3];
+        float probs_returned[3][3];
         NuFastLBL::Probability_Matter_LBL(params(2), params(3), params(4), params(5), 
                   params(0), params(1), le, 1.0, rho_earth, Ye_earth, 0, &probs_returned);
         return probs_returned[0][0];
     }
     
     float Pemu(const Eigen::VectorXf &params, float le) {
-        double probs_returned[3][3];
+        float probs_returned[3][3];
         NuFastLBL::Probability_Matter_LBL(params(2), params(3), params(4), params(5), 
                   params(0), params(1), le, 1.0, rho_earth, Ye_earth, 0, &probs_returned);
         return probs_returned[0][1];
     }
     
     float Petau(const Eigen::VectorXf &params, float le) {
-        double probs_returned[3][3];
+        float probs_returned[3][3];
         NuFastLBL::Probability_Matter_LBL(params(2), params(3), params(4), params(5), 
                   params(0), params(1), le, 1.0, rho_earth, Ye_earth, 0, &probs_returned);
         return probs_returned[0][2];
     }
     
     float Pmue(const Eigen::VectorXf &params, float le) {
-        double probs_returned[3][3];
+        float probs_returned[3][3];
         NuFastLBL::Probability_Matter_LBL(params(2), params(3), params(4), params(5), 
                   params(0), params(1), le, 1.0, rho_earth, Ye_earth, 0, &probs_returned);
         return probs_returned[1][0];
     }
     
     float Pmumu(const Eigen::VectorXf &params, float le) {
-        double probs_returned[3][3];
+        float probs_returned[3][3];
         NuFastLBL::Probability_Matter_LBL(params(2), params(3), params(4), params(5), 
                   params(0), params(1), le, 1.0, rho_earth, Ye_earth, 0, &probs_returned);
         return probs_returned[1][1];
     }
     
     float Pmutau(const Eigen::VectorXf &params, float le) {
-        double probs_returned[3][3];
+        float probs_returned[3][3];
         NuFastLBL::Probability_Matter_LBL(params(2), params(3), params(4), params(5), 
                   params(0), params(1), le, 1.0, rho_earth, Ye_earth, 0, &probs_returned);
         return probs_returned[1][2];
     }
     
     float Ptaue(const Eigen::VectorXf &params, float le) {
-        double probs_returned[3][3];
+        float probs_returned[3][3];
         NuFastLBL::Probability_Matter_LBL(params(2), params(3), params(4), params(5), 
                   params(0), params(1), le, 1.0, rho_earth, Ye_earth, 0, &probs_returned);
         return probs_returned[2][0];
     }
     
     float Ptaumu(const Eigen::VectorXf &params, float le) {
-        double probs_returned[3][3];
+        float probs_returned[3][3];
         NuFastLBL::Probability_Matter_LBL(params(2), params(3), params(4), params(5), 
                   params(0), params(1), le, 1.0, rho_earth, Ye_earth, 0, &probs_returned);
         return probs_returned[2][1];
     }
     
     float Ptautau(const Eigen::VectorXf &params, float le) {
-        double probs_returned[3][3];
+        float probs_returned[3][3];
         NuFastLBL::Probability_Matter_LBL(params(2), params(3), params(4), params(5), 
                   params(0), params(1), le, 1.0, rho_earth, Ye_earth, 0, &probs_returned);
         return probs_returned[2][2];
+    }
+
+    Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<float> &le_arr) const override {
+        // Eigen matrices are column major by default so we want this layout to get a contiguous
+        // probs array from each column, then transpose before returning.
+        Eigen::MatrixXf probs(model_functions.size(), le_arr.size());
+        probs.row(0).setConstant(1);
+        for(size_t i = 0; i < le_arr.size(); ++i) {
+            NuFastLBL::Probability_Matter_LBL(phys(2), phys(3), phys(4), phys(5), 
+                      phys(0), phys(1), le_arr[i], 1.0, rho_earth, Ye_earth, 0, 
+                      (float(*)[3][3])((float*)probs.col(i).data()+1));
+        }
+        return probs.transpose();
     }
 };
 
