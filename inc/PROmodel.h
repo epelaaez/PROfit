@@ -8,6 +8,7 @@
 
 #include <Eigen/src/Core/Matrix.h>
 #include <cstdlib>
+#include <cmath>
 #include <functional>
 #include <limits>
 #include <memory>
@@ -1779,8 +1780,8 @@ public:
             "sin^2#theta_{13}", "sin^{2}#theta_{23}", "delta_{CP}"}; 
         lb = Eigen::VectorXf(6);
         ub = Eigen::VectorXf(6);
-        lb << -2, -std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity();
-        ub << 2, 0, 0;
+        lb << 6e-5f, -3e-3f, 0.2f, 0.01f, 0.3f, -M_PI;
+        ub << 9e-5f, 3e-3f, 0.4f, 0.04f, 0.7f, M_PI;
     }
 
     float Pee(const Eigen::VectorXf &params, float le) {
@@ -2024,6 +2025,8 @@ std::unique_ptr<PROmodel> get_model_from_string(const PROconfig& config, const P
         return std::unique_ptr<PROmodel>(new PRO3p1_decay_invis(prop,config.m_model_parameter_map));
     } else if(name == "3+2") {
         return std::unique_ptr<PROmodel>(new PRO3p2(prop, config.m_model_parameter_map));
+    } else if(name == "LBL") {
+        return std::unique_ptr<PROmodel>(new PROLBL(prop, config.m_model_parameter_map));
     }
     log<LOG_ERROR>(L"%1% || Unrecognized model name %2%. Try numudis, nueapp, nuedis, 3+1, 3+1_angles, 3+1_3(A,B,C) and 3+1_decay_invis, 3+2. for now. Terminating.") % __func__ % name.c_str();
     exit(EXIT_FAILURE);
