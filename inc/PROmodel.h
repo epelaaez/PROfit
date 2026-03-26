@@ -1765,7 +1765,7 @@ public:
         model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Ptaumu(v,le); });
         model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Ptautau(v,le); });
 
-        prob_types = {0, 1};
+        prob_types = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
 
         if(parameter_map.find("L/E") == parameter_map.end()) {
             log<LOG_ERROR>(L"%1%, %2% || Missing expected parameter: 'L/E'.Make sure its in your model section of XML. ") % __func__ % __LINE__;
