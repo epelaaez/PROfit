@@ -1022,18 +1022,28 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
     // Summary bar chart - scales from 1 to dozens of parameters
     log<LOG_DEBUG>(L"%1% || Are all lines the same : %2% %3% %4% %5% %6%") % __func__ % nBins % barvalues.size() % bfvalues.size() % values1_down.size() % values1_up.size() ;
 
-    // Scale canvas width with number of parameters; height is fixed
-    int c2_width  = std::max(600, std::min(3600, 150 * nBins));
+    float minVal = *std::min_element(values1_down.begin(), values1_down.end());
+    float maxVal = *std::max_element(values1_up.begin(), values1_up.end());
+
+    { // _1sigma_detailed.pdf scope
+    // 50px/bin keeps the aspect ratio reasonable for large parameter counts;
+    // height is fixed so NDC font/line sizes stay consistent.
+    int c2_width  = std::max(600, std::min(5000, 50 * nBins));
     int c2_height = 500;
-    TCanvas *c2 = new TCanvas((filename+"1sigma").c_str(), (filename+"1sigma").c_str(), c2_width, c2_height);
+    float axis_label_size = std::max(0.030f, std::min(0.045f, 1.8f / nBins));
+    float x_label_size    = std::max(0.015f, std::min(0.030f, 1.2f / nBins));
+    int   profile_lw      = (nBins > 20) ? 1 : 2;
+    float bar_halfwidth   = std::max(0.08f, std::min(0.4f, 4.0f / nBins));
+    float marker_offset   = bar_halfwidth * 0.6f;
+
+    TCanvas *c2 = new TCanvas((filename+"1sigma_detailed").c_str(), (filename+"1sigma_detailed").c_str(), c2_width, c2_height);
     c2->cd();
     c2->SetLeftMargin(0.09);
     c2->SetBottomMargin(0.30);
     c2->SetRightMargin(0.28);
     c2->SetTopMargin(0.08);
 
-    // Recompute derived vectors (not stored as members)
-    std::vector<float> barvalues_err(nBins, 0.3f);
+    // Derived error vectors for profile_pts
     std::vector<float> values1_errdown, values1_errup;
     for(int i = 0; i < nBins; ++i) {
         values1_errdown.push_back(std::abs(values1_down[i] - bfvalues[i]));
@@ -1041,15 +1051,14 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
     }
 
     // Y-axis range: cover the post-fit band; always show ±1 (prior reference)
-    float minVal = *std::min_element(values1_down.begin(), values1_down.end());
-    float maxVal = *std::max_element(values1_up.begin(), values1_up.end());
-    minVal = std::min(minVal, -1.2f);
-    maxVal = std::max(maxVal, 1.2f);
-    float y_axis_min = minVal * 1.15f;
-    float y_axis_max = maxVal * 1.15f;
+    float minVal_det = minVal;
+    float maxVal_det = maxVal;
+    minVal_det = std::min(minVal_det, -1.2f);
+    maxVal_det = std::max(maxVal_det, 1.2f);
+    float y_axis_min = minVal_det * 1.15f;
+    float y_axis_max = maxVal_det * 1.15f;
 
     // TH1F frame to establish axes (persists for the lifetime of the canvas)
-    float axis_label_size = std::max(0.030f, std::min(0.045f, 1.8f / nBins));
     TH1F *frame = new TH1F((filename+"_frame").c_str(), "", nBins, 0, nBins);
     frame->SetMinimum(y_axis_min);
     frame->SetMaximum(y_axis_max);
@@ -1070,8 +1079,12 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
     prior_band->SetLineWidth(1);
     prior_band->Draw("same");
 
-    // Post-fit ±1σ bars: blue
+    // Post-fit ±1σ bars: blue; half-width shrinks for many bins
     TGraphAsymmErrors todraw = onesig;
+    for(int i = 0; i < nBins; ++i) {
+        todraw.SetPointError(i, bar_halfwidth, bar_halfwidth,
+                             todraw.GetErrorYlow(i), todraw.GetErrorYhigh(i));
+    }
     if(mask_osc) {
         for(size_t i = 0; i < model.nparams; ++i) {
             todraw.SetPoint(i, 0, 0);
@@ -1085,17 +1098,17 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
     todraw.Draw("2 same");
 
     // Horizontal reference lines
-    TLine l_zero(0, 0, nBins + 0.5, 0);
+    TLine l_zero(0, 0, nBins, 0);
     l_zero.SetLineStyle(2);
     l_zero.SetLineColor(kGray+2);
     l_zero.SetLineWidth(1);
     l_zero.Draw();
-    TLine l_pm1(0, 1, nBins + 0.5, 1);
+    TLine l_pm1(0, 1, nBins, 1);
     l_pm1.SetLineStyle(3);
     l_pm1.SetLineColor(kGray+2);
     l_pm1.SetLineWidth(1);
     l_pm1.Draw();
-    TLine l_mm1(0, -1, nBins + 0.5, -1);
+    TLine l_mm1(0, -1, nBins, -1);
     l_mm1.SetLineStyle(3);
     l_mm1.SetLineColor(kGray+2);
     l_mm1.SetLineWidth(1);
@@ -1117,7 +1130,7 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
     profile_pts.SetMarkerSize(marker_size);
     profile_pts.SetMarkerColor(kBlack);
     profile_pts.SetLineColor(kBlack);
-    profile_pts.SetLineWidth(2);
+    profile_pts.SetLineWidth(profile_lw);
     profile_pts.Draw("P same");
 
     // Arrow/marker helper for out-of-range values
@@ -1154,18 +1167,18 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
 
         // Red square: global best-fit (init_seed)
         if(vec_idx < init_seed.size()) {
-            drawMarkerWithArrow2(x_center - 0.13f, (float)init_seed[vec_idx], kRed, 21, marker_size);
+            drawMarkerWithArrow2(x_center - marker_offset, (float)init_seed[vec_idx], kRed, 21, marker_size);
         }
 
         // Orange diamond: injected true values (true_params)
         if(vec_idx < (int)true_params.size()) {
             log<LOG_INFO>(L"%1% || _1sigma marker i=%2%: true_params[%3%]=%4%") % __func__ % i % vec_idx % true_params[vec_idx];
-            drawMarkerWithArrow2(x_center + 0.13f, (float)true_params[vec_idx], kOrange+7, 33, marker_size * 1.1f);
+            drawMarkerWithArrow2(x_center + marker_offset, (float)true_params[vec_idx], kOrange+7, 33, marker_size * 1.1f);
         }
     }
 
     // Parameter labels (rotated -45 degrees)
-    float text_size = std::max(0.015f, std::min(0.030f, 1.2f / nBins));
+    float text_size = x_label_size;
     float label_y = y_axis_min - y_range_size * 0.04f;
     for(size_t i = 0; i < barvalues.size(); ++i) {
         if(mask_osc && with_osc && i < model.nparams) continue;
@@ -1214,6 +1227,160 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
     t->DrawText(0.96, 0.97, pv.c_str());
 
     c2->Update();
+    c2->SaveAs((filename+"_1sigma_detailed.pdf").c_str(),"pdf");
+    delete c2;
+    } // end _1sigma_detailed.pdf scope
+
+    //Next version
+    TCanvas *c2 =  new TCanvas((filename+"1sigma").c_str(), (filename+"1sigma").c_str() , 20*nparams, 400);
+    c2->cd();
+    c2->SetBottomMargin(0.25);
+    c2->SetRightMargin(0.05);
+
+    onesig.SetFillColor(kBlue-7);
+    onesig.SetStats(0);
+    //onesig.SetMinimum(min(-1.2,minVal*1.2));
+    onesig.SetMinimum(minVal*1.1);
+    onesig.SetMaximum(maxVal*1.1);
+
+    onesig.GetXaxis()->SetNdivisions(barvalues.size());  // Set number of tick marks
+    onesig.GetXaxis()->SetLabelSize(0);  // Hide default numerical labels
+
+    onesig.SetTitle("");
+    TGraphAsymmErrors todraw2 = onesig;
+    if(mask_osc) {
+        for(size_t i = 0; i < model.nparams; ++i) {
+            todraw2.SetPoint(i, 0,0);
+            todraw2.SetPointError(i, 0, 0, 0, 0);
+        }
+    }
+    todraw2.Draw("A2");
+    //onesig.Draw("A2");
+    //onesig.GetYaxis()->SetTitle("#sigma Shift");
+    todraw2.GetYaxis()->SetTitle("Posterior 1#sigma Error");
+    todraw2.GetYaxis()->SetTitleOffset(0.8);
+
+    float y_min = todraw2.GetMinimum();
+    for (size_t i = 0; i < barvalues.size(); ++i) {
+        // In syst-only mode (with_osc=false), all entries are splines
+        // In with_osc mode, first model.nparams entries are physics, rest are splines
+        std::string label;
+        if (with_osc && i < model.nparams) {
+            label = "Log_{10}(" + model.pretty_param_names[i] + ")";
+        } else {
+            label = config.m_mcgen_variation_plotname_map.at(names[i]);
+        }
+        TLatex* text = new TLatex(barvalues[i], y_min - 0.05, label.c_str());  // Position text below axis
+        text->SetTextAlign(13);
+        text->SetTextSize(0.03);
+        text->SetTextAngle(-45);
+        text->Draw();
+    }
+    TText *t = new TText();
+    t->SetNDC();
+    t->SetTextFont(42);
+    t->SetTextSize(0.03);
+    t->SetTextAlign(33);
+    std::string pv = "PROfit v"+std::string(PROJECT_VERSION_STR);
+    t->DrawText(0.895, 0.955, pv.c_str());
+
+    c2->Update();
+
+    //if (twosig) {
+    //    TGraphAsymmErrors *h2 = new TGraphAsymmErrors(barvalues.size(),barvalues.data(), bfvalues.data(), barvalues_err.data(), barvalues_err.data(), values2_down.data(), values2_up.data());
+    //    h2->SetFillColor(38);
+    //    h2->Se
+
+
+    TLine l(0,0,nBins+0.5,0);
+    l.SetLineStyle(2);
+    l.SetLineColor(kBlack);
+    l.SetLineWidth(1);
+    l.Draw();
+    TLine l2(0,-1,nBins+0.5,-1);
+    l2.SetLineStyle(3);
+    l2.SetLineColor(kBlack);
+    l2.SetLineWidth(1);
+    l2.Draw();
+    TLine l3(0,1,nBins+0.5,1);
+    l3.SetLineStyle(3);
+    l3.SetLineColor(kBlack);
+    l3.SetLineWidth(1);
+    l3.Draw();
+
+
+
+    // Get y-axis range for out-of-bounds handling
+    float y_axis_min_orig = minVal * 1.1;
+    float y_axis_max_orig = maxVal * 1.1;
+    float y_range_orig = y_axis_max_orig - y_axis_min_orig;
+    log<LOG_INFO>(L"%1% || _1sigma plot y-axis range: min=%2%, max=%3%") % __func__ % y_axis_min_orig % y_axis_max_orig;
+    float arrow_margin_orig = y_range_orig * 0.08;  // margin from edge for out-of-range markers
+    float arrow_length_orig = y_range_orig * 0.06;  // length of the arrow
+
+    // Horizontal offsets to prevent marker overlap
+    float offset_blue = -0.12;   // init_seed (blue) - left
+    float offset_red = 0.0;      // true_params (red) - center
+    float offset_black = 0.12;   // best fit (black) - right
+
+    // Helper lambda to draw a marker with out-of-range arrow handling
+    auto drawMarkerWithArrow = [&](float x, float y, int color, float marker_size) {
+        bool below_range = y < y_axis_min_orig;
+        bool above_range = y > y_axis_max_orig;
+
+        float draw_y = y;
+        if (below_range) {
+            draw_y = y_axis_min_orig + arrow_margin_orig;
+        } else if (above_range) {
+            draw_y = y_axis_max_orig - arrow_margin_orig;
+        }
+
+        TMarker* marker = new TMarker(x, draw_y, 29);
+        marker->SetMarkerSize(marker_size);
+        marker->SetMarkerColor(color);
+        marker->Draw();
+
+        // Draw arrow if out of range
+        if (below_range) {
+            TArrow* arr = new TArrow(x, draw_y - arrow_length_orig * 0.3, x, y_axis_min_orig + arrow_length_orig * 0.2, 0.008, "|>");
+            arr->SetLineColor(color);
+            arr->SetFillColor(color);
+            arr->SetLineWidth(1);
+            arr->Draw();
+        } else if (above_range) {
+            TArrow* arr = new TArrow(x, draw_y + arrow_length_orig * 0.3, x, y_axis_max_orig - arrow_length_orig * 0.2, 0.008, "|>");
+            arr->SetLineColor(color);
+            arr->SetFillColor(color);
+            arr->SetLineWidth(1);
+            arr->Draw();
+        }
+    };
+
+    for (int i = 0; i < nBins; ++i) {
+        if(mask_osc && i < model.nparams) continue;
+        // In syst-only mode, init_seed/true_params are full-size but plot indices are spline-only
+        int vec_idx = with_osc ? i : (i + model.nparams);
+        float x_center = i + 0.5;
+
+        // Blue star: init_seed (best fit seed)
+        drawMarkerWithArrow(x_center + offset_blue, init_seed[vec_idx], kBlue, 0.6);
+
+        // Red star: true_params (injected truth)
+        if (vec_idx < true_params.size()) {
+            if (i < 3) {  // Log first few for debugging
+                log<LOG_INFO>(L"%1% || _1sigma marker i=%2%: true_params[%3%]=%4%, below_range=%5%")
+                    % __func__ % i % vec_idx % true_params[vec_idx] % (true_params[vec_idx] < y_axis_min_orig);
+            }
+            drawMarkerWithArrow(x_center + offset_red, true_params[vec_idx], kRed, 0.5);
+        }
+
+        // Black star: best fit value
+        drawMarkerWithArrow(x_center + offset_black, bfvalues[i], kBlack, 0.5);
+    }
+
+
+
+    t->DrawText(0.895, 0.955, pv.c_str());
     c2->SaveAs((filename+"_1sigma.pdf").c_str(),"pdf");
     delete c2;
 
