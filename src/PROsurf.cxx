@@ -1247,20 +1247,20 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
     onesig.GetXaxis()->SetLabelSize(0);  // Hide default numerical labels
 
     onesig.SetTitle("");
-    TGraphAsymmErrors todraw2 = onesig;
+    TGraphAsymmErrors todraw = onesig;
     if(mask_osc) {
         for(size_t i = 0; i < model.nparams; ++i) {
-            todraw2.SetPoint(i, 0,0);
-            todraw2.SetPointError(i, 0, 0, 0, 0);
+            todraw.SetPoint(i, 0,0);
+            todraw.SetPointError(i, 0, 0, 0, 0);
         }
     }
-    todraw2.Draw("A2");
+    todraw.Draw("A2");
     //onesig.Draw("A2");
     //onesig.GetYaxis()->SetTitle("#sigma Shift");
-    todraw2.GetYaxis()->SetTitle("Posterior 1#sigma Error");
-    todraw2.GetYaxis()->SetTitleOffset(0.8);
+    todraw.GetYaxis()->SetTitle("Posterior 1#sigma Error");
+    todraw.GetYaxis()->SetTitleOffset(0.8);
 
-    float y_min = todraw2.GetMinimum();
+    float y_min = todraw.GetMinimum();
     for (size_t i = 0; i < barvalues.size(); ++i) {
         // In syst-only mode (with_osc=false), all entries are splines
         // In with_osc mode, first model.nparams entries are physics, rest are splines
@@ -1311,12 +1311,12 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
 
 
     // Get y-axis range for out-of-bounds handling
-    float y_axis_min_orig = minVal * 1.1;
-    float y_axis_max_orig = maxVal * 1.1;
-    float y_range_orig = y_axis_max_orig - y_axis_min_orig;
-    log<LOG_INFO>(L"%1% || _1sigma plot y-axis range: min=%2%, max=%3%") % __func__ % y_axis_min_orig % y_axis_max_orig;
-    float arrow_margin_orig = y_range_orig * 0.08;  // margin from edge for out-of-range markers
-    float arrow_length_orig = y_range_orig * 0.06;  // length of the arrow
+    float y_axis_min = minVal * 1.1;
+    float y_axis_max = maxVal * 1.1;
+    float y_range = y_axis_max - y_axis_min;
+    log<LOG_INFO>(L"%1% || _1sigma plot y-axis range: min=%2%, max=%3%") % __func__ % y_axis_min % y_axis_max;
+    float arrow_margin = y_range * 0.08;  // margin from edge for out-of-range markers
+    float arrow_length = y_range * 0.06;  // length of the arrow
 
     // Horizontal offsets to prevent marker overlap
     float offset_blue = -0.12;   // init_seed (blue) - left
@@ -1325,14 +1325,14 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
 
     // Helper lambda to draw a marker with out-of-range arrow handling
     auto drawMarkerWithArrow = [&](float x, float y, int color, float marker_size) {
-        bool below_range = y < y_axis_min_orig;
-        bool above_range = y > y_axis_max_orig;
+        bool below_range = y < y_axis_min;
+        bool above_range = y > y_axis_max;
 
         float draw_y = y;
         if (below_range) {
-            draw_y = y_axis_min_orig + arrow_margin_orig;
+            draw_y = y_axis_min + arrow_margin;
         } else if (above_range) {
-            draw_y = y_axis_max_orig - arrow_margin_orig;
+            draw_y = y_axis_max - arrow_margin;
         }
 
         TMarker* marker = new TMarker(x, draw_y, 29);
@@ -1342,13 +1342,13 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
 
         // Draw arrow if out of range
         if (below_range) {
-            TArrow* arr = new TArrow(x, draw_y - arrow_length_orig * 0.3, x, y_axis_min_orig + arrow_length_orig * 0.2, 0.008, "|>");
+            TArrow* arr = new TArrow(x, draw_y - arrow_length * 0.3, x, y_axis_min + arrow_length * 0.2, 0.008, "|>");
             arr->SetLineColor(color);
             arr->SetFillColor(color);
             arr->SetLineWidth(1);
             arr->Draw();
         } else if (above_range) {
-            TArrow* arr = new TArrow(x, draw_y + arrow_length_orig * 0.3, x, y_axis_max_orig - arrow_length_orig * 0.2, 0.008, "|>");
+            TArrow* arr = new TArrow(x, draw_y + arrow_length * 0.3, x, y_axis_max - arrow_length * 0.2, 0.008, "|>");
             arr->SetLineColor(color);
             arr->SetFillColor(color);
             arr->SetLineWidth(1);
@@ -1369,7 +1369,7 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
         if (vec_idx < true_params.size()) {
             if (i < 3) {  // Log first few for debugging
                 log<LOG_INFO>(L"%1% || _1sigma marker i=%2%: true_params[%3%]=%4%, below_range=%5%")
-                    % __func__ % i % vec_idx % true_params[vec_idx] % (true_params[vec_idx] < y_axis_min_orig);
+                    % __func__ % i % vec_idx % true_params[vec_idx] % (true_params[vec_idx] < y_axis_min);
             }
             drawMarkerWithArrow(x_center + offset_red, true_params[vec_idx], kRed, 0.5);
         }
