@@ -1503,6 +1503,9 @@ int main(int argc, char* argv[])
 
         std::string filename = final_output_tag+"_fractional_systematics.pdf";
         plotPriorFractionalSystematicBreakdown(config, variable_cvs[config.i_prime], allcovsyst, filename,config.i_prime);
+        std::string rfilename = final_output_tag+"_ratio_fractional_systematics.pdf";
+        if(config.m_num_detectors > 1)
+            plotPriorFractionalSystematicRatios(config, variable_cvs[config.i_prime], allcovsyst, rfilename,config.i_prime);
 
         std::vector<std::map<std::string, std::unique_ptr<TH1D>>> other_hists;
         for(size_t io = 0; io < config.m_num_variables; ++io) {
