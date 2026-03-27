@@ -904,6 +904,8 @@ namespace PROfit {
     }
 
     Eigen::MatrixXf PROsyst::DecomposeFractionalCovariance(const PROconfig &config, const Eigen::VectorXf &cv_vec) const {
+        if(cv_vec.size() == last_decomp_spec.size() && cv_vec == last_decomp_spec) 
+          return last_decomp_mat;
         Eigen::MatrixXf diag = cv_vec.asDiagonal();
         Eigen::MatrixXf full_cov = diag * fractional_covariance * diag;
         Eigen::MatrixXf coll = other_index < 0 ? CollapseMatrix(config, full_cov) : CollapseMatrix(config, full_cov, other_index);
@@ -962,6 +964,8 @@ namespace PROfit {
             fallback_sampler.col(i) = U.col(keep[i]) * std::sqrt(S(keep[i]));
         }
 
+        last_decomp_spec = cv_vec;
+        last_decomp_mat = fallback_sampler;
         return fallback_sampler;
 
     }

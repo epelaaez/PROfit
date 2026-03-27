@@ -158,6 +158,8 @@ namespace PROfit {
             std::vector<Eigen::MatrixXf> corrmat;
             int other_index;
             static bool shape_only;
+            mutable Eigen::VectorXf last_decomp_spec;
+            mutable Eigen::MatrixXf last_decomp_mat;
     };
 
 };

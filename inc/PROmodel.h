@@ -1802,7 +1802,7 @@ public:
         lb << 6e-5f, -3e-3f, 0.2f, 0.01f, 0.3f, -M_PI;
         ub << 9e-5f, 3e-3f, 0.4f, 0.04f, 0.7f, M_PI;
         default_val = Eigen::VectorXf(6);
-        default_val << 0, 0, 0, 0, 0, 0;
+        default_val << 1e-5, 1e-3, 0, 0, 0, 0;
     }
 
     float Pee(const Eigen::VectorXf &params, float le) {
@@ -1869,13 +1869,13 @@ public:
     }
 
     Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<float> &le_arr) const override {
-        // Eigen matrices are column major by default so we want this layout to get a contiguous
-        // probs array from each column, then transpose before returning.
+        // Eigen matrices are column major by default so we want this layout to get a 
+        // contiguous probs array from each column, then transpose before returning.
         Eigen::MatrixXf probs(model_functions.size(), le_arr.size());
         probs.row(0).setConstant(1);
         for(size_t i = 0; i < le_arr.size(); ++i) {
             NuFastLBL::Probability_Matter_LBL(phys(2), phys(3), phys(4), phys(5), 
-                      phys(0), phys(1), le_arr[i], 1.0, rho_earth, Ye_earth, 0, 
+                      phys(0), phys(1), 1300, le_arr[i], rho_earth, Ye_earth, 0,
                       (float(*)[3][3])((float*)probs.col(i).data()+1));
         }
         return probs.transpose();

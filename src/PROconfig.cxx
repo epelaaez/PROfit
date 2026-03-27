@@ -2399,8 +2399,8 @@ void ROOTFormula::LoadEvent(unsigned eventno) {
     if (this_tree_number != treeNumber) {
         treeNumber = this_tree_number;
         for (const std::unique_ptr<TTreeFormula> &f: fs) {
-            f->GetNdata();
             f->UpdateFormulaLeaves();
+            f->GetNdata();
         }
     }
 }
