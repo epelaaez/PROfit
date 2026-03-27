@@ -1064,8 +1064,9 @@ namespace PROfit {
         std::vector<int> var_bin_indices;
         for(size_t i = 0; i < vars.size(); ++i) {
             var_bin_indices.push_back(FindGlobalVariableBin(inconfig, vars[i], subchannel_index, i));
-            //log<LOG_INFO>(L"%1% || GURP  var %2%  value: %3% bin: %4% : sbindex %5% ") % __func__ %   i % vars[i] % FindGlobalVariableBin(inconfig, vars[i], subchannel_index, i) % subchannel_index;
+            //log<LOG_INFO>(L"%1% || GURP  var %2%  value: %3% bin: %4% : sbindex %5% : weight %6%") % __func__ %   i % vars[i].first() % FindGlobalVariableBin(inconfig, vars[i], subchannel_index, i) % subchannel_index % mc_weight;
         }
+
 
         if(mc_weight == 0)
             return;
