@@ -1010,8 +1010,13 @@ int main(int argc, char* argv[])
         log<LOG_INFO>(L"%1% || ################################################") % __func__;
 
         log<LOG_INFO>(L"%1% || Starting a metropolis hastings chain to estimate the covariance matrix around the above best fit. Run and Burn is (%2%,%3%);") % __func__%fitConfig.MCMCiter % fitConfig.MCMCburn;
+        std::vector<int> fixed;
+        for(size_t i = 0; i< global_fixed.size();i++){
+            if(global_fixed.at(i) == 1)
+                fixed.push_back(i);
+        }
         //Metropolis mh(simple_target{*metric}, simple_proposal(*metric, dseed(PROseed::global_rng)), best_fit, dseed(PROseed::global_rng));
-        Metropolis mh(simple_target{*metric}, adaptive_proposal(*metric, dseed(PROseed::global_rng)), best_fit, dseed(PROseed::global_rng));
+        Metropolis mh(simple_target{*metric}, adaptive_proposal(*metric, dseed(PROseed::global_rng), fixed), best_fit, dseed(PROseed::global_rng));
 
         Eigen::MatrixXf covmat = Eigen::MatrixXf::Constant(N_params, N_params, 0);
         size_t count = 0;
@@ -1520,6 +1525,9 @@ int main(int argc, char* argv[])
 
         std::string filename = final_output_tag+"_fractional_systematics.pdf";
         plotPriorFractionalSystematicBreakdown(config, variable_cvs[config.i_prime], allcovsyst, filename,config.i_prime);
+        std::string rfilename = final_output_tag+"_ratio_fractional_systematics.pdf";
+        if(config.m_num_detectors > 1)
+            plotPriorFractionalSystematicRatios(config, variable_cvs[config.i_prime], allcovsyst, rfilename,config.i_prime);
 
         std::vector<std::map<std::string, std::unique_ptr<TH1D>>> other_hists;
         for(size_t io = 0; io < config.m_num_variables; ++io) {
@@ -1951,13 +1959,21 @@ int main(int argc, char* argv[])
                             int ndf = config.m_channel_variable_bins[ic][io].NBinsAlong(0) - bool(opt&PlotOptions::AreaNormalized);
                             log<LOG_INFO>(L"%1% || -- the datamc chi^2/ndof is %2%/%3% .") % __func__ % chival % ndf;
                             chi2text.AddText(("#chi^{2}/ndf = "+to_string_prec(chival,2)+"/"+std::to_string(ndf)).c_str());
+                            chi2text.SetFillColor(0);
+                            chi2text.SetBorderSize(0);
+                            chi2text.SetTextAlign(12);
+                            channel_chitexts.push_back(chi2text);
                         }else{
                             chi2text.AddText("");
                         }
-                        chi2text.SetFillColor(0);
-                        chi2text.SetBorderSize(0);
-                        chi2text.SetTextAlign(12);
-                        channel_chitexts.push_back(chi2text);
+                        // For now don't add chi2text to non-prime variables
+                        // We just use an empty string anyway and there's a weird
+                        // bug that shows up in the ErrorBand plots with this.
+                        // (They show "A line segment" in the space where the chi2 would be.)
+                        //chi2text.SetFillColor(0);
+                        //chi2text.SetBorderSize(0);
+                        //chi2text.SetTextAlign(12);
+                        //channel_chitexts.push_back(chi2text);
                         global_channel_index++;
                     }
                 }
@@ -2350,8 +2366,13 @@ int main(int argc, char* argv[])
         }
         log<LOG_INFO>(L"%1% || ################################################") % __func__;
 
-        log<LOG_INFO>(L"%1% || Starting a metropolis hastings chain to estimate the covariance matrix around the above best fit. Run and Burn is (%2%,%3%);") % __func__%fitConfig.MCMCiter % fitConfig.MCMCburn;
-        Metropolis mh(simple_target{*metric}, adaptive_proposal(*metric, dseed(PROseed::global_rng)), best_fit, dseed(PROseed::global_rng));
+        log<LOG_INFO>(L"%1% || Starting a metropolis hastings chain to estimate the covariance matrix aroud the above best fit. Run and Burn is (%2%,%3%);") % __func__%fitConfig.MCMCiter % fitConfig.MCMCburn;
+        std::vector<int> fixed;
+        for(size_t i = 0; i< global_fixed.size();i++){
+            if(global_fixed.at(i) == 1)
+                fixed.push_back(i);
+        }
+        Metropolis mh(simple_target{*metric}, adaptive_proposal(*metric, dseed(PROseed::global_rng), fixed), best_fit, dseed(PROseed::global_rng));
 
         Eigen::MatrixXf covmat = Eigen::MatrixXf::Constant(N_params, N_params, 0);
         size_t count = 0;

@@ -3,11 +3,12 @@
 
 #include "PROconfig.h"
 #include "PROpeller.h"
+#include "NuFastLBL.h"
 
 #include <Eigen/Eigen>
 
-#include <Eigen/src/Core/Matrix.h>
 #include <cstdlib>
+#include <cmath>
 #include <functional>
 #include <limits>
 #include <memory>
@@ -68,6 +69,8 @@ public:
         size_t idx = it->second;
         return is_log10[idx] ? std::pow(10.0f, value) : value;
     }
+
+    virtual ~PROmodel(){}
 
 };
 
@@ -1744,6 +1747,141 @@ public:
 
 };
 
+class PROLBL : public PROmodel {
+public:
+    static constexpr float rho_earth = 3; // g/cc
+	static constexpr float Ye_earth = 0.5;
+
+    PROLBL(const PROpeller &prop, const std::map<std::string,int> &parameter_map) {
+
+        model_functions.push_back([this](const Eigen::VectorXf &v, float) {(void)this;(void)v; return 1.0; });
+        model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pee(v,le); });
+        model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pemu(v,le); });
+        model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Petau(v,le); });
+        model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pmue(v,le); });
+        model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pmumu(v,le); });
+        model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pmutau(v,le); });
+        model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Ptaue(v,le); });
+        model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Ptaumu(v,le); });
+        model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Ptautau(v,le); });
+
+        prob_types = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+
+        if(parameter_map.find("L/E") == parameter_map.end()) {
+            log<LOG_ERROR>(L"%1%, %2% || Missing expected parameter: 'L/E'.Make sure its in your model section of XML. ") % __func__ % __LINE__;
+            throw std::runtime_error("Missing parameter: L/E");
+        }
+
+        ivar = parameter_map.at("L/E");
+
+        size_t nvar = prop.variable_mc_stat_err.size();
+        hists.resize(nvar);
+        for(size_t v = 0; v <nvar ;v++){
+            for(size_t m = 0; m < model_functions.size(); ++m) {
+                hists.at(v).emplace_back(Eigen::MatrixXf::Constant(prop.variable_hist_storage(ivar,v).rows(), prop.variable_hist_storage(ivar,v).cols(),0.0));
+                Eigen::MatrixXf &h = hists.at(v).back();
+                for(size_t i = 0; i < prop.NEvent(); ++i) {
+                    if(prop.model_rule[i] != (int)m) continue;
+                    int tbin = prop.VariableBinIndex(ivar, i), rbin = prop.VariableBinIndex(v, i);
+                    if(tbin<0 || rbin<0) continue;
+                    h(tbin, rbin) += prop.added_weights[i];
+                }
+            }
+        }
+
+
+        nparams = 6;
+        param_names = {"dmsq_21", "dmsq_31", "sinsqt12", "sinsqt13", "sinsqt23", "delta_CP"}; 
+        pretty_param_names = {"#Delta m^{2}_{21}", "#Delta m^{2}_{31}", "sin^{2}#theta_{12}",
+            "sin^2#theta_{13}", "sin^{2}#theta_{23}", "delta_{CP}"}; 
+        pretty_param_units = {"eV^{2}", "eV^{2}", "", "", "", "rad"}; 
+        is_log10 = {false, false, false, false, false, false};
+        build_param_index();
+        lb = Eigen::VectorXf(6);
+        ub = Eigen::VectorXf(6);
+        lb << 6e-5f, -3e-3f, 0.2f, 0.01f, 0.3f, -M_PI;
+        ub << 9e-5f, 3e-3f, 0.4f, 0.04f, 0.7f, M_PI;
+        default_val = Eigen::VectorXf(6);
+        default_val << 1e-5, 1e-3, 0, 0, 0, 0;
+    }
+
+    float Pee(const Eigen::VectorXf &params, float le) {
+        float probs_returned[3][3];
+        NuFastLBL::Probability_Matter_LBL(params(2), params(3), params(4), params(5), 
+                  params(0), params(1), 1300, le, rho_earth, Ye_earth, 0, &probs_returned);
+        return probs_returned[0][0];
+    }
+    
+    float Pemu(const Eigen::VectorXf &params, float le) {
+        float probs_returned[3][3];
+        NuFastLBL::Probability_Matter_LBL(params(2), params(3), params(4), params(5), 
+                  params(0), params(1), 1300, le, rho_earth, Ye_earth, 0, &probs_returned);
+        return probs_returned[0][1];
+    }
+    
+    float Petau(const Eigen::VectorXf &params, float le) {
+        float probs_returned[3][3];
+        NuFastLBL::Probability_Matter_LBL(params(2), params(3), params(4), params(5), 
+                  params(0), params(1), 1300, le, rho_earth, Ye_earth, 0, &probs_returned);
+        return probs_returned[0][2];
+    }
+    
+    float Pmue(const Eigen::VectorXf &params, float le) {
+        float probs_returned[3][3];
+        NuFastLBL::Probability_Matter_LBL(params(2), params(3), params(4), params(5), 
+                  params(0), params(1), 1300, le, rho_earth, Ye_earth, 0, &probs_returned);
+        return probs_returned[1][0];
+    }
+    
+    float Pmumu(const Eigen::VectorXf &params, float le) {
+        float probs_returned[3][3];
+        NuFastLBL::Probability_Matter_LBL(params(2), params(3), params(4), params(5), 
+                  params(0), params(1), 1300, le, rho_earth, Ye_earth, 0, &probs_returned);
+        return probs_returned[1][1];
+    }
+    
+    float Pmutau(const Eigen::VectorXf &params, float le) {
+        float probs_returned[3][3];
+        NuFastLBL::Probability_Matter_LBL(params(2), params(3), params(4), params(5), 
+                  params(0), params(1), 1300, le, rho_earth, Ye_earth, 0, &probs_returned);
+        return probs_returned[1][2];
+    }
+    
+    float Ptaue(const Eigen::VectorXf &params, float le) {
+        float probs_returned[3][3];
+        NuFastLBL::Probability_Matter_LBL(params(2), params(3), params(4), params(5), 
+                  params(0), params(1), 1300, le, rho_earth, Ye_earth, 0, &probs_returned);
+        return probs_returned[2][0];
+    }
+    
+    float Ptaumu(const Eigen::VectorXf &params, float le) {
+        float probs_returned[3][3];
+        NuFastLBL::Probability_Matter_LBL(params(2), params(3), params(4), params(5), 
+                  params(0), params(1), 1300, le, rho_earth, Ye_earth, 0, &probs_returned);
+        return probs_returned[2][1];
+    }
+    
+    float Ptautau(const Eigen::VectorXf &params, float le) {
+        float probs_returned[3][3];
+        NuFastLBL::Probability_Matter_LBL(params(2), params(3), params(4), params(5), 
+                  params(0), params(1), 1300, le, rho_earth, Ye_earth, 0, &probs_returned);
+        return probs_returned[2][2];
+    }
+
+    Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<float> &le_arr) const override {
+        // Eigen matrices are column major by default so we want this layout to get a 
+        // contiguous probs array from each column, then transpose before returning.
+        Eigen::MatrixXf probs(model_functions.size(), le_arr.size());
+        probs.row(0).setConstant(1);
+        for(size_t i = 0; i < le_arr.size(); ++i) {
+            NuFastLBL::Probability_Matter_LBL(phys(2), phys(3), phys(4), phys(5), 
+                      phys(0), phys(1), 1300, le_arr[i], rho_earth, Ye_earth, 0,
+                      (float(*)[3][3])((float*)probs.col(i).data()+1));
+        }
+        return probs.transpose();
+    }
+};
+
 // Main interface to different models
 static inline
 std::unique_ptr<PROmodel> get_model_from_string(const PROconfig& config, const PROpeller &prop) {
@@ -1769,6 +1907,8 @@ std::unique_ptr<PROmodel> get_model_from_string(const PROconfig& config, const P
         return std::unique_ptr<PROmodel>(new PRO3p1_decay_invis(prop,config.m_model_parameter_map));
     } else if(name == "3+2") {
         return std::unique_ptr<PROmodel>(new PRO3p2(prop, config.m_model_parameter_map));
+    } else if(name == "LBL") {
+        return std::unique_ptr<PROmodel>(new PROLBL(prop, config.m_model_parameter_map));
     }
     log<LOG_ERROR>(L"%1% || Unrecognized model name %2%. Try numudis, nueapp, nuedis, 3+1, 3+1_angles, 3+1_3(A,B,C) and 3+1_decay_invis, 3+2. for now. Terminating.") % __func__ % name.c_str();
     exit(EXIT_FAILURE);

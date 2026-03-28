@@ -1615,4 +1615,356 @@ namespace PROfit{
         c.Print((filename+"]").c_str());
         return 0;
     };
+
+    int plotPriorFractionalSystematicRatios(const PROconfig &config, const PROspec &spec, const PROsyst &allsplinesyst, std::string filename, int other_index) {
+        //Input PROsyst needs to be the allsplinesyst for now
+
+        std::vector<int> colors = {
+            kAzure+1,      // Light blue
+            kRed+1,        // Bright red
+            kGreen+3,      // Medium green
+            kOrange+7,      // Deep orange
+            kBlue+2,        // Darker blue
+            kViolet+2,      // Purple/violet
+            kGray+1,         // Light gray
+            kYellow+2,      // Golden yellow
+            kTeal+3,        // Teal
+            kPink+2,        // Pink
+            kMagenta+2,     // Magenta
+            kSpring+5      // Blue-green
+        };
+
+        std::vector<int> line_styles = {
+            1,  // Solid (base style)
+            1,  // Dashed
+        };
+
+        //This is for prior everthing of course
+        std::map<std::string,std::vector<std::string>> used_tags;
+        for(const auto &name: allsplinesyst.covar_names){
+            log<LOG_INFO>(L"%1% || Systematic %2% ") % __func__ % name.c_str();
+            auto it = config.m_mcgen_variation_tags.find(name);
+            if (it == config.m_mcgen_variation_tags.end()) {
+                log<LOG_WARNING>(L"%1% || Systematic %2% not in tags map") % __func__ % name.c_str();
+                continue;
+            }
+            const vector<std::string>& mtags = it->second;
+            log<LOG_INFO>(L"%1% || -- has tags %2%") % __func__ %  mtags;
+            for(auto &t: mtags){
+                used_tags[t].push_back(name);
+            }
+        }
+        for(const auto &[tag, vec]: used_tags) {
+            log<LOG_INFO>(L"%1% || So for tag %2% we include %3%") % __func__ % tag.c_str() % vec;
+        }
+
+        int nTags = used_tags.size()+1;
+        int gridCols = std::ceil(std::sqrt(nTags));
+        int gridRows = std::ceil(nTags / float(gridCols));
+
+        TCanvas c("c", "Systematics Comparison", 1600, 1200);  
+        c.Print((filename+"[").c_str());
+        c.Divide(gridCols, gridRows);
+
+        Eigen::MatrixXf diag = spec.Spec().array().matrix().asDiagonal();
+        Eigen::MatrixXf collapsed_diag = CollapseMatrix(config, diag);
+
+        // Diagnostic: Check collapsed_diag for issues
+        bool has_nan = collapsed_diag.array().isNaN().any();
+        bool has_inf = collapsed_diag.array().isInf().any();
+        float min_diag = collapsed_diag.diagonal().minCoeff();
+        float max_diag = collapsed_diag.diagonal().maxCoeff();
+        log<LOG_INFO>(L"%1% || collapsed_diag diagnostics: size=%2%x%3%, has_nan=%4%, has_inf=%5%, diag_min=%6%, diag_max=%7%")
+            % __func__ % collapsed_diag.rows() % collapsed_diag.cols() % has_nan % has_inf % min_diag % max_diag;
+
+        // Check if matrix is actually diagonal (off-diagonal elements should be ~0)
+        Eigen::MatrixXf off_diag = collapsed_diag;
+        off_diag.diagonal().setZero();
+        float max_off_diag = off_diag.array().abs().maxCoeff();
+        log<LOG_INFO>(L"%1% || collapsed_diag max off-diagonal element: %2% (should be ~0 if truly diagonal)")
+            % __func__ % max_off_diag;
+
+        // Check determinant / condition for invertibility
+        Eigen::JacobiSVD<Eigen::MatrixXf> svd(collapsed_diag);
+        float cond_number = svd.singularValues()(0) / svd.singularValues()(svd.singularValues().size()-1);
+        float min_singular = svd.singularValues().minCoeff();
+        log<LOG_INFO>(L"%1% || collapsed_diag condition number: %2%, min singular value: %3%")
+            % __func__ % cond_number % min_singular;
+
+        if (min_singular < 1e-10) {
+            log<LOG_ERROR>(L"%1% || WARNING: collapsed_diag is nearly singular (min singular value = %2%). Matrix inverse will be unreliable!")
+                % __func__ % min_singular;
+        }
+
+        // adding 1e-6 to diagonal entries that are zero, to make the matrix invertible when there are zero-uncertainty bins
+        // logging a warning in each of these cases.
+        for (size_t i = 0; i < collapsed_diag.rows(); ++i) {
+            if (collapsed_diag(i,i) == 0) {
+                log<LOG_WARNING>(L"%1% || WARNING: collapsed_diag(i,i) is zero for bin %2%! Adding 1e-6 to make the matrix invertible.")
+                    % __func__ % i;
+                collapsed_diag(i,i) = 1e-6;
+            }
+        }
+
+        // Compute inverse and check it
+        Eigen::MatrixXf collapsed_diag_inv = collapsed_diag.inverse();
+        bool inv_has_nan = collapsed_diag_inv.array().isNaN().any();
+        bool inv_has_inf = collapsed_diag_inv.array().isInf().any();
+        float inv_max = collapsed_diag_inv.array().abs().maxCoeff();
+        log<LOG_INFO>(L"%1% || collapsed_diag inverse diagnostics: has_nan=%2%, has_inf=%3%, max_abs=%4%")
+            % __func__ % inv_has_nan % inv_has_inf % inv_max;
+
+        if (inv_has_nan || inv_has_inf) {
+            log<LOG_ERROR>(L"%1% || FATAL: collapsed_diag.inverse() contains NaN or Inf! This will cause empty plots.") % __func__;
+        }
+
+        size_t global_channel_index = 0;
+        for(size_t mode = 0; mode < config.m_num_modes; ++mode) {
+            for(size_t det = 0; det < config.m_num_detectors; ++det) {
+                for(size_t det2 = det+1; det2 < config.m_num_detectors; ++det2) {
+                    for(size_t channel = 0; channel < config.m_num_channels; ++channel) {
+                        size_t global_channel_index2 = global_channel_index + (det2 - det) * config.m_num_channels;
+
+                        std::string name = config.m_mode_plotnames[mode]+" "+config.m_detector_plotnames[det]+"/"+config.m_detector_plotnames[det2]+" "+config.m_channel_plotnames[channel]; 
+                        c.Clear();
+                        c.Divide(gridCols, gridRows);
+
+                        int padIndex = 1;
+
+                        std::vector<float> bin_edges = config.GetChannelVariableBins(global_channel_index,other_index).Edges();
+                        size_t binstart = config.GetCollapsedGlobalVariableBinStart(global_channel_index,other_index);
+                        size_t binstart2 = config.GetCollapsedGlobalVariableBinStart(global_channel_index2,other_index);
+                        size_t nbins = config.m_channel_variable_bins[channel][other_index].NBins();
+                        std::vector<int> channel_bins(nbins);
+                        std::iota(channel_bins.begin(), channel_bins.end(), binstart);
+                        std::vector<int> channel_bins2(nbins);
+                        std::iota(channel_bins2.begin(), channel_bins2.end(), binstart2);
+
+                        // Diagnostic: Check bin_edges validity
+                        log<LOG_INFO>(L"%1% || Channel %2%: bin_edges.size()=%3%, nbins=%4%, binstart=%5%")
+                            % __func__ % global_channel_index % bin_edges.size() % nbins % binstart;
+                        log<LOG_INFO>(L"%1% || Channel %2%: bin_edges.size()=%3%, nbins=%4%, binstart=%5%")
+                            % __func__ % global_channel_index2 % bin_edges.size() % nbins % binstart2;
+                        if (!bin_edges.empty()) {
+                            log<LOG_INFO>(L"%1% || Channel %2%: bin_edges range [%3%, %4%]")
+                                % __func__ % global_channel_index % bin_edges.front() % bin_edges.back();
+                        }
+                        if (bin_edges.empty()) {
+                            log<LOG_ERROR>(L"%1% || FATAL: bin_edges is empty for channel %2%! Histogram will be invalid.")
+                                % __func__ % global_channel_index;
+                        }
+                        if (bin_edges.size() != nbins + 1) {
+                            log<LOG_ERROR>(L"%1% || WARNING: bin_edges.size() (%2%) != nbins+1 (%3%) for channel %4%")
+                                % __func__ % bin_edges.size() % (nbins + 1) % global_channel_index;
+                        }
+                        log<LOG_INFO>(L"%1% || Channel %2%: gridCols=%3%, gridRows=%4%, nTags=%5%")
+                            % __func__ % global_channel_index % gridCols % gridRows % nTags;
+
+                        std::vector<TH1F*> vsums;
+                        std::vector<std::string> vnames;
+                        for (const auto &[tag, vec] : used_tags) {
+
+                            c.cd(padIndex++);
+                            if (!gPad) {
+                                log<LOG_ERROR>(L"%1% || FATAL: gPad is null after c.cd(%2%)! Canvas subdivision failed.")
+                                    % __func__ % (padIndex-1);
+                            } else {
+                                log<LOG_INFO>(L"%1% || Pad %2%: gPad=%3%, name=%4%")
+                                    % __func__ % (padIndex-1) % (void*)gPad % gPad->GetName();
+                            }
+
+                            TLegend* leg = new TLegend(0.11, 0.6, 0.89, 0.89);
+                            leg->SetNColumns(3);
+
+
+                            TH1F* hsum = new TH1F( ("Sum_"+tag+"_"+std::to_string(global_channel_index)).c_str(), tag.c_str(), bin_edges.size()-1, bin_edges.data());
+                            hsum->Reset();
+                            std::vector<TH1F*> hvec;
+                            int i = 0;
+                size_t channel_nbins_y = 1;// start with assumption of 1d
+                            size_t channel_nbins_x = config.m_channel_variable_bins[channel][other_index].NBinsAlong(0);
+
+                            for(const auto & systname:vec){
+
+                                Eigen::MatrixXf frac_covariance = allsplinesyst.GrabMatrix(systname);
+                                Eigen::MatrixXf full_covariance = diag*(frac_covariance)*diag;
+                                Eigen::MatrixXf collapsed_full_covariance = CollapseMatrix(config, full_covariance);
+                                Eigen::MatrixXf collapsed_frac_covariance = collapsed_diag_inv*collapsed_full_covariance*collapsed_diag_inv;
+
+                                Eigen::MatrixXf channel_cov = collapsed_full_covariance(channel_bins, channel_bins);
+                                Eigen::MatrixXf rat_frac_cov = collapsed_frac_covariance(channel_bins, channel_bins) + collapsed_frac_covariance(channel_bins2, channel_bins2) - collapsed_frac_covariance(channel_bins, channel_bins2) - collapsed_frac_covariance(channel_bins2, channel_bins);
+
+                                // Diagnostic: Check channel_cov diagonal for bad values
+                                bool cov_has_nan = channel_cov.diagonal().array().isNaN().any();
+                                bool cov_has_inf = channel_cov.diagonal().array().isInf().any();
+                                bool cov_has_neg = (channel_cov.diagonal().array() < 0).any();
+                                float cov_diag_min = channel_cov.diagonal().minCoeff();
+                                float cov_diag_max = channel_cov.diagonal().maxCoeff();
+                                if (cov_has_nan || cov_has_inf || cov_has_neg) {
+                                    log<LOG_ERROR>(L"%1% || BAD channel_cov for %2%: has_nan=%3%, has_inf=%4%, has_neg=%5%, min=%6%, max=%7%")
+                                        % __func__ % systname.c_str() % cov_has_nan % cov_has_inf % cov_has_neg % cov_diag_min % cov_diag_max;
+                                }
+
+                                log<LOG_INFO>(L"%1% || Channel: %2%/%3% | Det: %4%/%5% | Mode: %6%/%7% | Tag: %8% | Syst: %9% | Bins: %10% [%11%:%12%]") 
+                                    % __func__ 
+                                    % channel % config.m_num_channels
+                                    % det % config.m_num_detectors
+                                    % mode % config.m_num_modes
+                                    % tag.c_str() 
+                                    % systname.c_str()
+                                    % nbins
+                                    % binstart % (binstart + nbins - 1);
+
+                                int color_idx = i % colors.size();
+                                int style_idx = (i / 4) % line_styles.size();  
+                                i++;
+                                TH1F* h = new TH1F((tag+"_Channel_"+std::to_string(global_channel_index)+"_"+std::to_string(i)).c_str(), (tag + ";" + config.m_channel_variable_units[channel][other_index]).c_str(), bin_edges.size()-2, bin_edges.data());
+
+                                if(config.m_channel_variable_dims[channel][other_index] == 2) {
+                                    channel_nbins_y = config.m_channel_variable_bins[channel][other_index].NBinsAlong(1);
+                                    Eigen::MatrixXf rat_diag = collapsed_diag(channel_bins, channel_bins) + collapsed_diag(channel_bins2, channel_bins2);
+                                    Eigen::MatrixXf rat_full_cov = rat_diag * rat_frac_cov * rat_diag;
+                                    Eigen::VectorXf VarVec = Eigen::VectorXf::Zero(channel_nbins_x);
+                                    Eigen::VectorXf diag1d = Eigen::VectorXf::Zero(channel_nbins_x);
+                                    for(int i = 0; i < channel_nbins_x; i++){
+                                        for(int j = channel_nbins_y*i; j < channel_nbins_y*(i+1); j++){
+                                            diag1d(i) += rat_diag(j, j);
+                                            for(int k = channel_nbins_y*i; k < channel_nbins_y*(i+1); k++){
+                                                VarVec(i) += rat_full_cov(j, k);
+                                            }
+                                        }
+                                    }
+
+                                    float inv_diag1d;
+                                    for (size_t i = 0; i < channel_nbins_x; ++i) {
+                                        inv_diag1d = 1/diag1d(i);
+                                        h->SetBinContent(i+1, sqrt(inv_diag1d*VarVec(i)*inv_diag1d));
+                                        hsum->SetBinContent(i+1, hsum->GetBinContent(i+1)+inv_diag1d*VarVec(i)*inv_diag1d);
+                                    }
+                                } else {
+                                    for(size_t i = 0; i < channel_bins.size(); ++i) {
+                                        h->SetBinContent(i+1, sqrt(rat_frac_cov(i,i)));
+                                        hsum->SetBinContent(i+1, hsum->GetBinContent(i+1)+rat_frac_cov(i,i));
+                                    }
+                                }
+
+                                const std::string &plotname = config.m_mcgen_variation_plotname_map.at(systname);
+                                leg->AddEntry(h, plotname.c_str(), "l");
+                                h->SetLineColor(colors[color_idx]);
+                                h->SetLineStyle(line_styles[style_idx]);
+                                hvec.push_back(h);
+
+                            }//end syst
+                            for (size_t i = 0; i < channel_nbins_x; ++i) {
+                                hsum->SetBinContent(i+1, sqrt(hsum->GetBinContent(i+1)));
+                            }
+                            leg->AddEntry(hsum,"Sum","l");
+
+                            // Diagnostic: Check hsum for bad values before drawing
+                            bool hsum_has_bad = false;
+                            for (int bin = 1; bin <= hsum->GetNbinsX(); ++bin) {
+                                double val = hsum->GetBinContent(bin);
+                                if (std::isnan(val) || std::isinf(val)) {
+                                    hsum_has_bad = true;
+                                    break;
+                                }
+                            }
+                            if (hsum_has_bad) {
+                                log<LOG_ERROR>(L"%1% || FATAL: hsum histogram for tag '%2%' contains NaN or Inf values! Plot will be empty.")
+                                    % __func__ % tag.c_str();
+                            }
+                            log<LOG_INFO>(L"%1% || hsum for tag '%2%': nbins=%3%, max=%4%, integral=%5%")
+                                % __func__ % tag.c_str() % hsum->GetNbinsX() % hsum->GetMaximum() % hsum->Integral();
+
+                            hsum->SetXTitle((config.m_detector_plotnames[det]+"/"+config.m_detector_plotnames[det2]+" "+config.m_channel_variable_units[channel][other_index]).c_str());
+                            hsum->SetYTitle("Fractional Uncertainty");
+                            hsum->SetLineColor(kBlack);
+                            hsum->SetLineWidth(2);
+                            hsum->SetLineStyle(1);
+                            hsum->SetMinimum(0);
+                            hsum->SetStats(0);
+                            hsum->Draw("HIST");
+                            hsum->SetMaximum(hsum->GetMaximum()*1.7);
+                            gPad->Modified();
+                            gPad->Update();
+
+
+                            vsums.push_back(hsum);
+                            vnames.push_back(tag);
+                            for(auto &h:hvec) h->Draw("HIST SAME");
+
+                            leg->Draw();
+
+                            TText *t = new TText();
+                            t->SetNDC();                
+                            t->SetTextFont(42);                          
+                            t->SetTextSize(0.03);      
+                            t->SetTextAlign(33);        
+                            std::string pv = "PROfit v"+std::string(PROJECT_VERSION_STR);
+                            t->DrawText(0.895, 0.945, pv.c_str()); 
+
+                        }//end tag
+
+
+                        //and each sum of sums to wrap it off!
+                        c.cd(padIndex++);
+
+                        TH1F* hsum = new TH1F( ("USum_"+std::to_string(global_channel_index)).c_str(),("Summary! "+name).c_str(), bin_edges.size()-1, bin_edges.data());
+                        hsum->Reset();
+                        TLegend* leg = new TLegend(0.11, 0.6, 0.89, 0.89);
+                        leg->SetNColumns(3);
+                        std::vector<TH1F*> hvec;
+                        for(size_t t=0; t< vsums.size(); t++){
+                            int color_idx = t % colors.size();
+                            for (size_t i = 0; i < nbins; ++i) {
+                                hsum->SetBinContent(i+1, hsum->GetBinContent(i+1)+pow(vsums.at(t)->GetBinContent(i+1),2));
+                            }
+                            TH1F * h = (TH1F*)vsums.at(t)->Clone((to_string(global_channel_index)+vnames[t]).c_str());
+                            leg->AddEntry(h, vnames[t].c_str(), "l");
+                            h->SetLineColor(colors[color_idx]);
+                            h->SetLineStyle(1);
+                            h->SetLineWidth(1);
+                            hvec.push_back(h);
+                        }
+
+                        for (size_t i = 0; i < nbins; ++i) {
+                            hsum->SetBinContent(i+1, sqrt(hsum->GetBinContent(i+1)));
+                        }
+                        leg->AddEntry(hsum,"Sum","l");
+                        hsum->SetXTitle((config.m_detector_plotnames[det]+"/"+config.m_detector_plotnames[det2]+" "+config.m_channel_variable_units[channel][other_index]).c_str());
+                        hsum->SetTitle(("Summary: "+name).c_str());
+                        hsum->SetYTitle("Fractional Uncertainty");
+                        hsum->SetLineColor(kBlack);
+                        hsum->SetLineWidth(2);
+                        hsum->SetLineStyle(1);
+                        hsum->SetMinimum(0);
+                        hsum->SetStats(0);  
+                        hsum->Draw("HIST");
+                        hsum->SetMaximum(hsum->GetMaximum()*1.7);
+                        gPad->Modified();
+                        gPad->Update();
+                        for(auto &h:hvec) h->Draw("HIST SAME");
+                        leg->Draw();
+
+                        TText *t = new TText();
+                        t->SetNDC();                
+                        t->SetTextFont(42);                          
+                        t->SetTextSize(0.03);      
+                        t->SetTextAlign(33);        
+                        std::string pv = "PROfit v"+std::string(PROJECT_VERSION_STR);
+                        t->DrawText(0.895, 0.945, pv.c_str()); 
+
+                        c.Update();
+                        c.Print(filename.c_str());
+                        global_channel_index++;
+                    }
+                    global_channel_index -= config.m_num_channels;
+                }
+                global_channel_index += config.m_num_channels;
+            }
+        }
+
+        c.Print((filename+"]").c_str());
+        return 0;
+    };
 }
