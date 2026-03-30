@@ -1818,7 +1818,7 @@ namespace PROfit{
                                 int color_idx = i % colors.size();
                                 int style_idx = (i / 4) % line_styles.size();  
                                 i++;
-                                TH1F* h = new TH1F((tag+"_Channel_"+std::to_string(global_channel_index)+"_"+std::to_string(i)).c_str(), (tag + ";" + config.m_channel_variable_units[channel][other_index]).c_str(), bin_edges.size()-2, bin_edges.data());
+                                TH1F* h = new TH1F((tag+"_Channel_"+std::to_string(global_channel_index)+"_"+std::to_string(i)).c_str(), (tag + ";" + config.m_channel_variable_units[channel][other_index]).c_str(), bin_edges.size()-1, bin_edges.data());
 
                                 if(config.m_channel_variable_dims[channel][other_index] == 2) {
                                     channel_nbins_y = config.m_channel_variable_bins[channel][other_index].NBinsAlong(1);
