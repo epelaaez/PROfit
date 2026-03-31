@@ -154,6 +154,6 @@ float PROpoisson::getSingleChannelChi(size_t global_channel_index, const PROspec
     return value;
 }
 
-void PROpoisson::print(const Eigen::VectorXf &param){
+void PROpoisson::print([[maybe_unused]] const Eigen::VectorXf &param){
     return;
 }

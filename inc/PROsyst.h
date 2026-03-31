@@ -152,7 +152,7 @@ namespace PROfit {
         private:
             std::map<std::string, std::pair<size_t, SystType>> syst_map;
             std::vector<Spline> splines;
-            [[maybe_unused]] size_t n_splines = 0;
+            size_t n_splines = 0;
             size_t n_covar = 0;
             std::vector<Eigen::MatrixXf> covmat;
             std::vector<Eigen::MatrixXf> corrmat;

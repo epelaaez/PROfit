@@ -841,7 +841,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                     log<LOG_ERROR>(L"%1% || ERROR: Need at least 1 variable passed in. You passed zero ") % __func__;
                     log<LOG_ERROR>(L"Terminating.");
                     exit(EXIT_FAILURE);
-                }else if(nvar!=m_num_variables){
+                }else if((size_t)nvar!=m_num_variables){
                     log<LOG_ERROR>(L"%1% || ERROR: The number of variables in this MCFile %2%, is not the same as n_num_variables in bookeeping of XML %3%. ") % __func__ % nvar % m_num_variables;
                     log<LOG_ERROR>(L"%1% || ERROR: They need to be the same for now, Sorry. ") % __func__;
                     log<LOG_ERROR>(L"Terminating.");
@@ -1177,7 +1177,6 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 const char *knobs = pAllowList->Attribute("knobvals");
                 const char *tags = pAllowList->Attribute("tag");
                 const char *prior = pAllowList->Attribute("prior");
-                const char *center = pAllowList->Attribute("center");
                 const char *force_0_cv = pAllowList->Attribute("force_0_cv");
                 const char *include_only_weights_str = pAllowList->Attribute("include_only_weights");
                 const char *scale = pAllowList->Attribute("scale");

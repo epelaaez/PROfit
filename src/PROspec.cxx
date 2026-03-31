@@ -101,7 +101,6 @@ TH1D PROspec::toTH1DSlices(PROconfig const & inconfig, int subchannel_index, int
     int channel_index = inconfig.GetLocalChannelIndexFromGlobalSubchannelIndex(subchannel_index);
 
     //set up hist specs
-    int nbins_tot = inconfig.m_channel_variable_bins[channel_index][other_index].NBins();
     int nbins_dim = inconfig.m_channel_variable_bins[channel_index][other_index].NBinsAlong(dim);
     std::vector<float> bin_edges = inconfig.m_channel_variable_bins[channel_index][other_index].Edges(dim);
     std::string hist_name = inconfig.m_fullnames[subchannel_index];
@@ -173,8 +172,8 @@ TH2D PROspec::toTH2D(PROconfig const & inconfig, int subchannel_index, int other
     TH2D hSpec(hist_name.c_str(),hist_name.c_str(), channel_nbins_x, edges_x.data(), channel_nbins_y, edges_y.data());
     hSpec.GetXaxis()->SetTitle(xaxis_title.c_str());
 
-    for(int xbin = 0; xbin < channel_nbins_x; xbin++){
-        for(int ybin = 0; ybin < channel_nbins_y; ybin++){
+    for(int xbin = 0; xbin < (int)channel_nbins_x; xbin++){
+        for(int ybin = 0; ybin < (int)channel_nbins_y; ybin++){
             hSpec.SetBinContent(xbin+1, ybin+1, spec_2d(xbin*channel_nbins_y+ybin));
         }
     }

@@ -709,7 +709,7 @@ namespace PROfit {
 
         std::vector<SplineSegment> all_segments;
 
-        for (size_t i = 0; i < nbins; ++i) {
+        for (int i = 0; i < nbins; ++i) {
             std::vector<SplineSegment> bin_segments;
 
             // This comment is copy-pasted from CAFAna:
