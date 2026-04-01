@@ -1400,7 +1400,8 @@ int main(int argc, char* argv[])
                     throwp(i+N_phys_params) = d(PROseed::global_rng);
                 for(size_t i = 0; i < config.m_num_variable_bins_total[config.i_prime]; i++)
                     throwC(i) = d(PROseed::global_rng);
-                PROspec shifted = FillSpectra(config, prop, metric->GetSysts(), metric->GetModel(), throwp, !eventbyevent);
+                bool binned = (eventbyevent ? PROmetric::EventByEvent : PROmetric::BinnedChi2) != 0;
+                PROspec shifted = FillSpectra(config, prop, metric->GetSysts(), metric->GetModel(), throwp, binned);
                 PROspec newSpec = statonly_brazil ? PROspec::PoissonVariation(collapsed_cv, dseed(myseed.global_rng)) :
                     PROspec::PoissonVariation(PROspec(CollapseMatrix(config, shifted.Spec()) + L * throwC, CollapseMatrix(config, shifted.Error())), dseed(myseed.global_rng));
                 PROdata data(newSpec.Spec(), newSpec.Error());
