@@ -1,6 +1,8 @@
 #ifndef PROSEED_H
 #define PROSEED_H
 
+#include "PROlog.h"
+
 #include <random>
 #include <thread>
 #include <vector>
@@ -31,7 +33,6 @@ namespace PROfit{
             std::vector<uint32_t>* getThreadSeeds(){
                 return &thread_seeds;
             }
-
 
             static inline std::mt19937 global_rng; 
         private:
