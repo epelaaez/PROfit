@@ -355,6 +355,7 @@ namespace PROfit{
             std::vector<float> m_mcgen_scale;	
             std::vector<int> m_mcgen_numfriends;	
             std::vector<bool> m_mcgen_fake;
+            std::vector<float> m_mcgen_partial_load_frac;
             std::map<std::string,std::vector<std::string>> m_mcgen_file_friend_map;
             std::map<std::string,std::vector<std::string>> m_mcgen_file_friend_treename_map;
             std::vector<std::vector<std::vector<std::string>>> m_mcgen_weight_names; // file × branch × weight_index

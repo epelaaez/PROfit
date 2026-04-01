@@ -593,7 +593,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
         {
 
 
-            std::vector<std::string> expected_attrs = {"treename","filename","maxevents","scale","pot","fake"};
+            std::vector<std::string> expected_attrs = {"treename","filename","maxevents","scale","pot","fake","partial_load_frac"};
             for (const tinyxml2::XMLAttribute* attr = pMC->FirstAttribute(); attr; attr = attr->Next()) {
                 std::string name = attr->Name();
                 if (std::find(expected_attrs.begin(), expected_attrs.end(), name) == expected_attrs.end()) {
@@ -650,6 +650,13 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 m_mcgen_fake.push_back(false);
             }else{
                 m_mcgen_fake.push_back(true);
+            }
+
+            const char* partial_load_frac = pMC->Attribute("partial_load_frac");
+            if(partial_load_frac==NULL){
+                m_mcgen_partial_load_frac.push_back(1.0);
+            }else{
+                m_mcgen_partial_load_frac.push_back(strtod(partial_load_frac,&end));
             }
 
             log<LOG_DEBUG>(L"%1% || MultisimFile %2%, treename: %3%  ") % __func__ % m_mcgen_file_name.back().c_str() % m_mcgen_tree_name.back().c_str();
@@ -1666,6 +1673,11 @@ int PROconfig::LoadFromXML(const std::string &filename){
         // Serialize MCFile elements from inside the <data> section
         tinyxml2::XMLElement* pDataMC = pData->FirstChildElement("MCFile");
         while(pDataMC) {
+            const char* frac = pDataMC->Attribute("partial_load_frac");
+            if(frac != nullptr && strtod(frac, nullptr) != 1.0) {
+                log<LOG_ERROR>(L"%1% || ERROR: partial_load_frac is not supported on data MCFiles (found value: %2%). Partial loading only applies to MC/EXT.") % __func__ % frac;
+                throw std::invalid_argument("partial_load_frac is not supported on data MCFiles");
+            }
             tinyxml2::XMLPrinter printer;
             pDataMC->Accept(&printer);
             dataXml << printer.CStr() << "\n";
