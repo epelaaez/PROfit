@@ -1034,7 +1034,8 @@ public:
         dmsq   = std::pow(10.0f, dmsq);
         sinsq2thmumu = std::pow(10.0f, sinsq2thmumu);
 
-        float prob    = sB*sinsq2thmumu;
+        float sinterm = std::sin(1.266932679f * dmsq * le);
+        float prob    = sB*sinsq2thmumu * sinterm * sinterm;
 
         if (prob < 0.0f || prob > 1.0f) {
             log<LOG_ERROR>(
