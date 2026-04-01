@@ -1161,7 +1161,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 }
 
                 //check for known attributes
-                const std::vector<std::string> expected_attrs = {"name", "type", "plotname", "binning", "knobvals", "tag", "prior", "force_0_cv", "include_only_weights", "scale","filename", "xvar", "yvar"};
+                const std::vector<std::string> expected_attrs = {"name", "type", "plotname", "binning", "knobvals", "tag", "prior", "center", "force_0_cv", "include_only_weights", "scale","filename", "xvar", "yvar"};
                 for (const tinyxml2::XMLAttribute* attr = pAllowList->FirstAttribute(); attr; attr = attr->Next()) {
                     std::string name = attr->Name();
                     if (std::find(expected_attrs.begin(), expected_attrs.end(), name) == expected_attrs.end()) {
@@ -1177,6 +1177,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 const char *knobs = pAllowList->Attribute("knobvals");
                 const char *tags = pAllowList->Attribute("tag");
                 const char *prior = pAllowList->Attribute("prior");
+                const char *center = pAllowList->Attribute("center");
                 const char *force_0_cv = pAllowList->Attribute("force_0_cv");
                 const char *include_only_weights_str = pAllowList->Attribute("include_only_weights");
                 const char *scale = pAllowList->Attribute("scale");
@@ -1197,6 +1198,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                     log<LOG_INFO>(L"%1% || Systematic '%2%' matches a DetVar variation; skipping weight-branch allowlist.") % __func__ % wt.c_str();
                 }
                 if(prior) m_mcgen_variation_prior[wt] = std::strtof(prior, NULL);
+                if(center) m_mcgen_variation_prior_centers[wt] = std::strtof(center, NULL);
                 if(filename) m_mcgen_variation_external_filename_map[wt] = filename;
                 m_mcgen_variation_plotname_map[wt] = plot_name ? plot_name : wt;
                 if(variation_type && (strcmp(variation_type, "hist1d") == 0 || strcmp(variation_type, "hist2d") == 0)) {
