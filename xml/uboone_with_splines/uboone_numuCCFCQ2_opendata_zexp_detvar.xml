@@ -130,6 +130,11 @@
 		<cv filename="/nevis/riverside/data/karan/ngem/data_files/checkout_DetVar_Run45_v10_04_07_19_BNB_nu_overlay_cv_surprise_reco2_hist_5.root" pot="6.9116e20" partial_load_frac="0.1"/>
 		<variation name="Recomb2" filename="/nevis/riverside/data/karan/ngem/data_files/checkout_DetVar_Run45_v10_04_07_19_BNB_nu_overlay_recomb2_surprise_reco2_hist_5.root" pot="4.5455e20" partial_load_frac="0.1"/>
 		<variation name="LYAtt" filename="/nevis/riverside/data/karan/ngem/data_files/checkout_DetVar_Run45_v10_04_07_19_BNB_nu_overlay_lya_surprise_reco2_hist_5.root" pot="6.8752e20" partial_load_frac="0.1" />
+		<variation name="LYDown" filename="/nevis/riverside/data/karan/ngem/data_files/checkout_DetVar_Run45_v10_04_07_19_BNB_nu_overlay_lyd_surprise_reco2_hist_5.root" pot="1" partial_load_frac="0.1" />
+		<variation name="LYRayleigh" filename="/nevis/riverside/data/karan/ngem/data_files/checkout_DetVar_Run45_v10_04_07_19_BNB_nu_overlay_lyr_surprise_reco2_hist_5.root" pot="1" partial_load_frac="0.1" />
+		<variation name="SCE" filename="/nevis/riverside/data/karan/ngem/data_files/checkout_DetVar_Run45_v10_04_07_19_BNB_nu_overlay_sce_surprise_reco2_hist_5.root" pot="1" partial_load_frac="0.1" />
+		<variation name="WireModX" filename="/nevis/riverside/data/karan/ngem/data_files/checkout_DetVar_Run45_v10_04_07_19_BNB_nu_overlay_WMX_surprise_reco2_hist_5.root" pot="1" partial_load_frac="0.1" />
+		<variation name="WireModYZ" filename="/nevis/riverside/data/karan/ngem/data_files/checkout_DetVar_Run45_v10_04_07_19_BNB_nu_overlay_WMYZ_surprise_reco2_hist_5.root" pot="1" partial_load_frac="0.1" />
 
 		<friend treename="wcpselection/T_eval" />
 		<friend treename="wcpselection/T_PFeval" />
@@ -152,6 +157,11 @@
 	<!-- DetVar systematics: name matches variation name from <DetVarFiles> -->
 	<systematic name="Recomb2" type="spline" plotname="Recomb2" tag="DetVar" />
 	<systematic name="LYAtt" type="spline" plotname="LYAtt" tag="DetVar" />
+	<systematic name="LYDown" type="spline" plotname="LYDown" tag="DetVar" />
+	<systematic name="LYRayleigh" type="spline" plotname="LYRayleigh" tag="DetVar" />
+	<systematic name="SCE" type="spline" plotname="SCE" tag="DetVar" />
+	<systematic name="WireModX" type="spline" plotname="WireModX" tag="DetVar" />
+	<systematic name="WireModYZ" type="spline" plotname="WireModYZ" tag="DetVar" />
 
     <!-- Cross Section Systematics, 55 splines -->
 
