@@ -1009,7 +1009,7 @@ int main(int argc, char* argv[])
         }
         log<LOG_INFO>(L"%1% || ################################################") % __func__;
 
-        log<LOG_INFO>(L"%1% || Starting a metropolis hastings chain to estimate the covariace matrix aroud the above best fit. Run and Burn is (%2%,%3%);") % __func__%fitConfig.MCMCiter % fitConfig.MCMCburn;
+        log<LOG_INFO>(L"%1% || Starting a metropolis hastings chain to estimate the covariance matrix around the above best fit. Run and Burn is (%2%,%3%);") % __func__%fitConfig.MCMCiter % fitConfig.MCMCburn;
         std::vector<int> fixed;
         for(size_t i = 0; i< global_fixed.size();i++){
             if(global_fixed.at(i) == 1)
@@ -1155,12 +1155,16 @@ int main(int argc, char* argv[])
         Eigen::VectorXf inv_sqrt_diag_nuis = spline_covariance.diagonal().array().abs().max(1e-10f).sqrt().inverse();
         Eigen::MatrixXf corrmat_nuis = inv_sqrt_diag_nuis.asDiagonal() * spline_covariance * inv_sqrt_diag_nuis.asDiagonal();
 
-        TH2F spline_cov("pc", "", corrmat_nuis.cols(), 0, corrmat_nuis.cols(), corrmat_nuis.rows(), 0, corrmat_nuis.rows());
+        TH2F spline_cov("postfit_corr_nuisance_only", "", corrmat_nuis.cols(), 0, corrmat_nuis.cols(), corrmat_nuis.rows(), 0, corrmat_nuis.rows());
+        TH2F spline_cov_cov("postfit_cov_nuisance_only", "", spline_covariance.cols(), 0, spline_covariance.cols(), spline_covariance.rows(), 0, spline_covariance.rows());
         for(int i = 0; i < corrmat_nuis.cols(); ++i) {
             spline_cov.GetXaxis()->SetBinLabel(i+1, config.m_mcgen_variation_plotname_map[metric->GetSysts().spline_names[i]].c_str());
             spline_cov.GetYaxis()->SetBinLabel(i+1, config.m_mcgen_variation_plotname_map[metric->GetSysts().spline_names[i]].c_str());
+            spline_cov_cov.GetXaxis()->SetBinLabel(i+1, config.m_mcgen_variation_plotname_map[metric->GetSysts().spline_names[i]].c_str());
+            spline_cov_cov.GetYaxis()->SetBinLabel(i+1, config.m_mcgen_variation_plotname_map[metric->GetSysts().spline_names[i]].c_str());
             for(int j = 0; j < corrmat_nuis.rows(); ++j) {
                 spline_cov.SetBinContent(i+1, j+1, corrmat_nuis(i,j));
+                spline_cov_cov.SetBinContent(i+1, j+1, spline_covariance(i,j));
             }
         }
         spline_cov.Draw("colz");
@@ -1187,6 +1191,24 @@ int main(int argc, char* argv[])
         //err_band->Write("prefit_errband");
         //post_err_band->Write("postfit_errband");
         post_hist.Write("best_fit");
+        spline_cov.Write();
+        spline_cov_cov.Write();
+        if(global_fit_result.size() > 0) {
+            bool use_phys_gfr = (size_t)global_fit_result.size() == N_phys_params + metric->GetSysts().GetNSplines();
+            TH1D global_fit_hist("global_fit_result", "Global Best Fit Parameters", global_fit_result.size(), 0, global_fit_result.size());
+            for(long i = 0; i < global_fit_result.size(); i++) {
+                std::string pname;
+                if(use_phys_gfr && i < (long)N_phys_params)
+                    pname = metric->GetModel().param_names[i];
+                else {
+                    long idx = use_phys_gfr ? i - N_phys_params : i;
+                    pname = config.m_mcgen_variation_plotname_map.at(metric->GetSysts().spline_names[idx]);
+                }
+                global_fit_hist.GetXaxis()->SetBinLabel(i+1, pname.c_str());
+                global_fit_hist.SetBinContent(i+1, global_fit_result(i));
+            }
+            global_fit_hist.Write();
+        }
 
         //***********************************************************************
         //***********************************************************************
@@ -2344,7 +2366,7 @@ int main(int argc, char* argv[])
         }
         log<LOG_INFO>(L"%1% || ################################################") % __func__;
 
-        log<LOG_INFO>(L"%1% || Starting a metropolis hastings chain to estimate the covariace matrix aroud the above best fit. Run and Burn is (%2%,%3%);") % __func__%fitConfig.MCMCiter % fitConfig.MCMCburn;
+        log<LOG_INFO>(L"%1% || Starting a metropolis hastings chain to estimate the covariance matrix aroud the above best fit. Run and Burn is (%2%,%3%);") % __func__%fitConfig.MCMCiter % fitConfig.MCMCburn;
         std::vector<int> fixed;
         for(size_t i = 0; i< global_fixed.size();i++){
             if(global_fixed.at(i) == 1)
