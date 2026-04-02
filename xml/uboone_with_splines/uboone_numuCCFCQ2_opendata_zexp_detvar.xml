@@ -1,0 +1,271 @@
+<?xml version="1.0" ?>
+
+<mode name="nu" />
+
+<detector name="uBooNE" pot="4.031e19" />
+
+<channel name="numuCCFC" plotname="Reconstructed log10(Q^2 / GeV^2)">
+	<bins unit="Reconstructed log10(Q^2 / GeV^2)" min="-3" max="3" nbins="40"/>
+	<bins unit="True Neutrino Energy [MeV]" min="0" max="3000" nbins="20"/>
+	<bins unit="True L/E" min="0" max="3000" nbins="250" plot="false"/>
+	<subchannel name="nueCCoverlay" plotname="#nu_{e}CC overlay" color="#12fc50"/>
+	<subchannel name="ext" plotname="Ext" color="#3f8036"/>
+	<subchannel name="NCoverlay" plotname="NC overlay" color="#fc9312"/>
+	<subchannel name="dirt" plotname="Dirt" color="#895129"/>
+	<subchannel name="numuCCoverlay" plotname="#nu_{#mu}CC overlay" color="#21B1FF"/>
+</channel>
+
+<model tag="numudis">
+    <rule index="0" name="No Osc"/>
+    <rule index="1" name="Numu Dis"/>
+    <parameter name="L/E" variable_index="2"/>
+</model>
+
+<!-- This file is available at /exp/uboone/data/users/lhagaman/PROfit_files/nu_overlay_splines_50.root, 4.1 GB -->
+<!-- <MCFile treename="wcpselection/T_KINEvars" filename="/nevis/riverside/data/leehagaman/ngem/data_files/nu_overlay_splines_50.root" scale = "1.0" pot="4.692e19"> -->
+<!-- This file is available at /exp/uboone/data/users/lhagaman/PROfit_files/run4b_nuoverlay_retuple_splines.root, 65 GB -->
+<!-- <MCFile treename="wcpselection/T_KINEvars" filename="/nevis/riverside/data/leehagaman/ngem/data_files/run4b_nuoverlay_retuple_splines.root" scale = "1.0" pot="7.378e20"> -->
+
+<MCFile treename="wcpselection/T_KINEvars" filename="/nevis/riverside/data/leehagaman/ngem/data_files/run4b_nuoverlay_retuple_splines_FAweights.root" scale = "1.0" pot="7.378e20" partial_load_frac="0.1">
+	<friend treename="wcpselection/T_eval" />
+	<friend treename="wcpselection/T_PFeval" />
+	<friend treename="wcpselection/T_BDTvars" />
+	<friend treename="spline_weights" />
+	<friend treename="nuselection/NeutrinoSelectionFilter" />
+	<branch
+        	associated_subchannel = "nu_uBooNE_numuCCFC_numuCCoverlay"
+        	model_rule            = "1"
+			weight_1              = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (reco_muonMomentum[3] > 0)) && (abs(truth_nuPdg) == 14) && (truth_isCC == 1)"
+			weight_2              = "(weight_spline * (weight_minerva_FA * weight_spline < 30) * (weight_minerva_FA * weight_spline > 0) + 1 * !((weight_minerva_FA * weight_spline < 30) * (weight_minerva_FA * weight_spline > 0)))"
+			weight_3              = "(weight_minerva_FA * (weight_minerva_FA * weight_spline < 30) * (weight_minerva_FA * weight_spline > 0) + 1 * !((weight_minerva_FA * weight_spline < 30) * (weight_minerva_FA * weight_spline > 0)))"
+		>
+		<variable>log10(2*(kine_reco_Enu/1000)*reco_muonMomentum[3]*(1 - reco_muonMomentum[2]/sqrt(reco_muonMomentum[0]*reco_muonMomentum[0] + reco_muonMomentum[1]*reco_muonMomentum[1] + reco_muonMomentum[2]*reco_muonMomentum[2])) - 0.011164)</variable>
+		<variable>truth_nuEnergy</variable>
+		<variable>1000.*(mcflux_dk2gen + mcflux_gen2vtx)/truth_nuEnergy</variable>
+	</branch>
+	<branch
+        	associated_subchannel = "nu_uBooNE_numuCCFC_nueCCoverlay"
+        	model_rule            = "1"
+			weight_1              = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (reco_muonMomentum[3] > 0)) && (abs(truth_nuPdg) == 12) && (truth_isCC == 1)"
+			weight_2              = "(weight_spline * (weight_minerva_FA * weight_spline < 30) * (weight_minerva_FA * weight_spline > 0) + 1 * !((weight_minerva_FA * weight_spline < 30) * (weight_minerva_FA * weight_spline > 0)))"
+			weight_3              = "(weight_minerva_FA * (weight_minerva_FA * weight_spline < 30) * (weight_minerva_FA * weight_spline > 0) + 1 * !((weight_minerva_FA * weight_spline < 30) * (weight_minerva_FA * weight_spline > 0)))"
+		>
+		<variable>log10(2*(kine_reco_Enu/1000)*reco_muonMomentum[3]*(1 - reco_muonMomentum[2]/sqrt(reco_muonMomentum[0]*reco_muonMomentum[0] + reco_muonMomentum[1]*reco_muonMomentum[1] + reco_muonMomentum[2]*reco_muonMomentum[2])) - 0.011164)</variable>
+		<variable>truth_nuEnergy</variable>
+		<variable>1000.*(mcflux_dk2gen + mcflux_gen2vtx)/truth_nuEnergy</variable>
+	</branch>
+	<branch
+        	associated_subchannel = "nu_uBooNE_numuCCFC_NCoverlay"
+        	model_rule            = "1"
+			weight_1              = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (reco_muonMomentum[3] > 0)) && (truth_isCC == 0)"
+			weight_2              = "(weight_spline * (weight_minerva_FA * weight_spline < 30) * (weight_minerva_FA * weight_spline > 0) + 1 * !((weight_minerva_FA * weight_spline < 30) * (weight_minerva_FA * weight_spline > 0)))"
+			weight_3              = "(weight_minerva_FA * (weight_minerva_FA * weight_spline < 30) * (weight_minerva_FA * weight_spline > 0) + 1 * !((weight_minerva_FA * weight_spline < 30) * (weight_minerva_FA * weight_spline > 0)))"
+		>
+		<variable>log10(2*(kine_reco_Enu/1000)*reco_muonMomentum[3]*(1 - reco_muonMomentum[2]/sqrt(reco_muonMomentum[0]*reco_muonMomentum[0] + reco_muonMomentum[1]*reco_muonMomentum[1] + reco_muonMomentum[2]*reco_muonMomentum[2])) - 0.011164)</variable>
+		<variable>truth_nuEnergy</variable>
+		<variable>1000.*(mcflux_dk2gen + mcflux_gen2vtx)/truth_nuEnergy</variable>
+	</branch>
+
+</MCFile>
+
+<!-- This file is available at /exp/uboone/data/users/lhagaman/PROfit_files/run4b_dirt_surprise_200_splines.root -->
+<MCFile treename="wcpselection/T_KINEvars" filename="/nevis/riverside/data/leehagaman/ngem/data_files/run4b_dirt_surprise_200_splines_FAweights.root" scale = "1.0" pot="1.664e19" >
+	<friend treename="wcpselection/T_eval" />
+	<friend treename="wcpselection/T_PFeval" />
+	<friend treename="wcpselection/T_BDTvars" />
+	<friend treename="spline_weights" />
+	<friend treename="nuselection/NeutrinoSelectionFilter" />
+	<branch
+        	associated_subchannel = "nu_uBooNE_numuCCFC_dirt"
+        	model_rule            = "1"
+			weight_1              = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (reco_muonMomentum[3] > 0))"
+			weight_2              = "(weight_spline * (weight_minerva_FA * weight_spline < 30) * (weight_minerva_FA * weight_spline > 0) + 1 * !((weight_minerva_FA * weight_spline < 30) * (weight_minerva_FA * weight_spline > 0)))"
+			weight_3              = "(weight_minerva_FA * (weight_minerva_FA * weight_spline < 30) * (weight_minerva_FA * weight_spline > 0) + 1 * !((weight_minerva_FA * weight_spline < 30) * (weight_minerva_FA * weight_spline > 0)))"
+		>
+		<variable>log10(2*(kine_reco_Enu/1000)*reco_muonMomentum[3]*(1 - reco_muonMomentum[2]/sqrt(reco_muonMomentum[0]*reco_muonMomentum[0] + reco_muonMomentum[1]*reco_muonMomentum[1] + reco_muonMomentum[2]*reco_muonMomentum[2])) - 0.011164)</variable>
+		<variable>truth_nuEnergy</variable>
+		<variable>1000.*(mcflux_dk2gen + mcflux_gen2vtx)/truth_nuEnergy</variable>
+	</branch>
+</MCFile>
+
+<!-- This file is available at /pnfs/uboone/persistent/users/uboonepro/surprise/run4b_full_samples/wc_processed/BNB/MCC9.10_Run4b_v10_04_07_09_Run4b_BNB_beam_off_surprise_reco2_hist.root -->
+<MCFile treename="wcpselection/T_KINEvars" filename="/nevis/riverside/data/leehagaman/ngem/data_files/MCC9.10_Run4b_v10_04_07_09_Run4b_BNB_beam_off_surprise_reco2_hist.root" scale = "1.0" pot="3.874e20" >
+	<friend treename="wcpselection/T_eval" />
+	<friend treename="wcpselection/T_PFeval" />
+	<friend treename="wcpselection/T_BDTvars" />
+	<branch
+        	associated_subchannel = "nu_uBooNE_numuCCFC_ext"
+			incl_systematics      = "false"
+        	model_rule            = "0"
+			weight_1              = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (reco_muonMomentum[3] > 0))"
+		>
+		<variable>kine_reco_Enu</variable>
+		<variable>0</variable>
+		<variable>0</variable>
+	</branch>
+</MCFile>
+
+
+
+<!-- Detector Variation Files -->
+<!-- Lists CV and variation files. Branches are auto-inherited from MCFile entries -->
+<!-- with matching associated_subchannel. Only subchannels listed here are included. -->
+<!-- A variation only becomes a systematic if its name appears in <systematics>. -->
+<!-- Friend trees are not assumed, DetVar files likely won't have spline_weights for example. -->
+
+
+<!-- Detector Variation Files -->
+<!-- Lists CV and variation files. Branches are auto-inherited from MCFile entries -->
+<!-- with matching associated_subchannel. Only subchannels listed here are included. -->
+<!-- A variation only becomes a systematic if its name appears in <systematics>. -->
+<!-- Friend trees are not assumed, DetVar files likely won't have spline_weights for example. -->
+
+<DetVarFiles>
+
+	<!-- optional include_only_weights, here we include 1 (cut weight), and separately load the xs weight (since we don't have z-expansion postprocessing). 
+	We Use run, subrun, event to match events between CV and variation files. -->
+	<DetVarSection treename="wcpselection/T_KINEvars" scale="1.0" include_only_weights="1" cv_variation_matching_vars="run,subrun,event"
+		extra_weight="(weight_spline * (weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0) + 1 * !((weight_cv * weight_spline < 30) * (weight_cv * weight_spline > 0)))">
+
+		<cv filename="/nevis/riverside/data/karan/ngem/data_files/checkout_DetVar_Run45_v10_04_07_19_BNB_nu_overlay_cv_surprise_reco2_hist_5.root" pot="6.9116e20" partial_load_frac="0.1"/>
+		<variation name="Recomb2" filename="/nevis/riverside/data/karan/ngem/data_files/checkout_DetVar_Run45_v10_04_07_19_BNB_nu_overlay_recomb2_surprise_reco2_hist_5.root" pot="4.5455e20" partial_load_frac="0.1"/>
+		<variation name="LYAtt" filename="/nevis/riverside/data/karan/ngem/data_files/checkout_DetVar_Run45_v10_04_07_19_BNB_nu_overlay_lya_surprise_reco2_hist_5.root" pot="6.8752e20" partial_load_frac="0.1" />
+
+		<friend treename="wcpselection/T_eval" />
+		<friend treename="wcpselection/T_PFeval" />
+		<friend treename="wcpselection/T_BDTvars" />
+		<friend treename="nuselection/NeutrinoSelectionFilter" />
+
+		<subchannel>nu_uBooNE_numuCCFC_numuCCoverlay</subchannel>
+		<subchannel>nu_uBooNE_numuCCFC_nueCCoverlay</subchannel>
+		<subchannel>nu_uBooNE_numuCCFC_NCoverlay</subchannel>
+
+	</DetVarSection>
+
+</DetVarFiles>
+
+<systematics>
+
+    <!-- MC Statistics -->
+	<systematic type="mcstat" plotname="MC Stats" tag="other">MCStat</systematic>
+
+	<!-- DetVar systematics: name matches variation name from <DetVarFiles> -->
+	<systematic name="Recomb2" type="spline" plotname="Recomb2" tag="DetVar" />
+	<systematic name="LYAtt" type="spline" plotname="LYAtt" tag="DetVar" />
+
+    <!-- Cross Section Systematics, 55 splines -->
+
+	<!-- <systematic type="spline" binning="var0" plotname="MACCQE" tag="QE" force_0_cv="true" include_only_weights="1,2">MaCCQE_UBGenie</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="AxFFCCQEshape" knobvals="0, 1" tag="QE" force_0_cv="true" include_only_weights="1,2">AxFFCCQEshape_UBGenie</systematic> -->
+
+	<systematic type="spline" binning="var0" plotname="FAzexpPCA1" knobvals="-3, -2, -1, 0, 1, 2, 3" tag="QE" force_0_cv="true" include_only_weights="1,2">weight_spline_FAzexpPCA1</systematic>
+	<systematic type="spline" binning="var0" plotname="FAzexpPCA2" knobvals="-3, -2, -1, 0, 1, 2, 3" tag="QE" force_0_cv="true" include_only_weights="1,2">weight_spline_FAzexpPCA2</systematic>
+	<systematic type="spline" binning="var0" plotname="FAzexpPCA3" knobvals="-3, -2, -1, 0, 1, 2, 3" tag="QE" force_0_cv="true" include_only_weights="1,2">weight_spline_FAzexpPCA3</systematic>
+	<systematic type="spline" binning="var0" plotname="FAzexpPCA4" knobvals="-3, -2, -1, 0, 1, 2, 3" tag="QE" force_0_cv="true" include_only_weights="1,2">weight_spline_FAzexpPCA4</systematic>
+	
+	<systematic type="spline" binning="var0" plotname="VecFFCCQEshape" knobvals="0, 1" tag="QE" force_0_cv="true" include_only_weights="1,2">VecFFCCQEshape_UBGenie</systematic>
+	<systematic type="spline" binning="var0" plotname="RPA_CCQE" tag="QE" force_0_cv="true" include_only_weights="1,2">RPA_CCQE_UBGenie</systematic>
+	<systematic type="spline" binning="var0" plotname="CoulombCCQE" tag="QE" force_0_cv="true" include_only_weights="1,2">CoulombCCQE_UBGenie</systematic>
+
+	<systematic type="spline_to_covariance" binning="var0" plotname="NormCCMEC" knobvals="-2, -1, 0, 1, 2, 3" tag="MEC" force_0_cv="true" include_only_weights="1,2">NormCCMEC_UBGenie</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="NormNCMEC" knobvals="-1, 0, 1, 2, 3" tag="MEC" force_0_cv="true" include_only_weights="1,2">NormNCMEC_UBGenie</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="XSecShape_CCMEC" knobvals="0, 1" tag="MEC" force_0_cv="true" include_only_weights="1,2">XSecShape_CCMEC_UBGenie</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="DecayAngMEC" knobvals="0, 1" tag="MEC" force_0_cv="true" include_only_weights="1,2">DecayAngMEC_UBGenie</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="FracPN_CCMEC" tag="MEC" force_0_cv="true" include_only_weights="1,2">FracPN_CCMEC_UBGenie</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="FracDelta_CCMEC" tag="MEC" force_0_cv="true" include_only_weights="1,2">FracDelta_CCMEC_UBGenie</systematic>
+
+	<systematic type="spline_to_covariance" binning="var0" plotname="MaCCRES" tag="RES" force_0_cv="true" include_only_weights="1,2">MaCCRES_UBGenie</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="MvCCRES" tag="RES" force_0_cv="true" include_only_weights="1,2">MvCCRES_UBGenie</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="MaNCRES" tag="RES" force_0_cv="true" include_only_weights="1,2">MaNCRES_UBGenie</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="MvNCRES" tag="RES" force_0_cv="true" include_only_weights="1,2">MvNCRES_UBGenie</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="RDecBR1eta" tag="RES" force_0_cv="true" include_only_weights="1,2">RDecBR1eta_UBGenie</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="Theta_Delta2Npi" knobvals="0, 1" tag="RES" force_0_cv="true" include_only_weights="1,2">Theta_Delta2Npi_UBGenie</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="RDecBR1gamma" tag="RES" force_0_cv="true" include_only_weights="1,2">RDecBR1gamma_UBGenie</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="ThetaDelta2NRad" knobvals="0, 1" tag="RES" force_0_cv="true" include_only_weights="1,2">ThetaDelta2NRad_UBGenie</systematic>
+
+	<systematic type="spline_to_covariance" binning="var0" plotname="NormCCCOH" knobvals="-1, 0, 1, 2, 3" tag="COH" force_0_cv="true" include_only_weights="1,2">NormCCCOH_UBGenie</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="NormNCCOH" knobvals="-1, 0, 1, 2, 3" tag="COH" force_0_cv="true" include_only_weights="1,2">NormNCCOH_UBGenie</systematic>
+
+	<systematic type="spline_to_covariance" binning="var0" plotname="MaNCEL" tag="NC" force_0_cv="true" include_only_weights="1,2">MaNCEL_UBGenie</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="EtaNCEL" tag="NC" force_0_cv="true" include_only_weights="1,2">EtaNCEL_UBGenie</systematic>
+
+	<systematic type="spline_to_covariance" binning="var0" plotname="AGKYxF1pi" tag="Hadr." force_0_cv="true" include_only_weights="1,2">AGKYxF1pi_UBGenie</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="AGKYpT1pi" tag="Hadr." force_0_cv="true" include_only_weights="1,2">AGKYpT1pi_UBGenie</systematic>
+
+	<systematic type="spline_to_covariance" binning="var0" plotname="NonRESBGvbarnNC1pi" tag="Non-RES" force_0_cv="true" include_only_weights="1,2">NonRESBGvbarnNC1pi_UBGenie</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="NonRESBGvbarnNC2pi" tag="Non-RES" force_0_cv="true" include_only_weights="1,2">NonRESBGvbarnNC2pi_UBGenie</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="NonRESBGvbarpNC1pi" tag="Non-RES" force_0_cv="true" include_only_weights="1,2">NonRESBGvbarpNC1pi_UBGenie</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="NonRESBGvbarpNC2pi" tag="Non-RES" force_0_cv="true" include_only_weights="1,2">NonRESBGvbarpNC2pi_UBGenie</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="NonRESBGvnNC1pi" tag="Non-RES" force_0_cv="true" include_only_weights="1,2">NonRESBGvnNC1pi_UBGenie</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="NonRESBGvnNC2pi" tag="Non-RES" force_0_cv="true" include_only_weights="1,2">NonRESBGvnNC2pi_UBGenie</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="NonRESBGvpNC1pi" tag="Non-RES" force_0_cv="true" include_only_weights="1,2">NonRESBGvpNC1pi_UBGenie</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="NonRESBGvpNC2pi" tag="Non-RES" force_0_cv="true" include_only_weights="1,2">NonRESBGvpNC2pi_UBGenie</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="NonRESBGvbarnCC1pi" tag="Non-RES" force_0_cv="true" include_only_weights="1,2">NonRESBGvbarnCC1pi_UBGenie</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="NonRESBGvbarnCC2pi" tag="Non-RES" force_0_cv="true" include_only_weights="1,2">NonRESBGvbarnCC2pi_UBGenie</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="NonRESBGvbarpCC1pi" tag="Non-RES" force_0_cv="true" include_only_weights="1,2">NonRESBGvbarpCC1pi_UBGenie</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="NonRESBGvbarpCC2pi" tag="Non-RES" force_0_cv="true" include_only_weights="1,2">NonRESBGvbarpCC2pi_UBGenie</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="NonRESBGvnCC1pi" tag="Non-RES" force_0_cv="true" include_only_weights="1,2">NonRESBGvnCC1pi_UBGenie</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="NonRESBGvnCC2pi" tag="Non-RES" force_0_cv="true" include_only_weights="1,2">NonRESBGvnCC2pi_UBGenie</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="NonRESBGvpCC1pi" tag="Non-RES" force_0_cv="true" include_only_weights="1,2">NonRESBGvpCC1pi_UBGenie</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="NonRESBGvpCC2pi" tag="Non-RES" force_0_cv="true" include_only_weights="1,2">NonRESBGvpCC2pi_UBGenie</systematic>
+
+	<systematic type="spline_to_covariance" binning="var0" plotname="AhtBY" tag="Struct." force_0_cv="true" include_only_weights="1,2">AhtBY_UBGenie</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="BhtBY" tag="Struct." force_0_cv="true" include_only_weights="1,2">BhtBY_UBGenie</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="CV1uBY" tag="Struct." force_0_cv="true" include_only_weights="1,2">CV1uBY_UBGenie</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="CV2uBY" tag="Struct." force_0_cv="true" include_only_weights="1,2">CV2uBY_UBGenie</systematic>
+
+	<systematic type="spline_to_covariance" binning="var0" plotname="MFP_pi" tag="FSI" force_0_cv="true" include_only_weights="1,2">MFP_pi_UBGenie</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="MFP_N" tag="FSI" force_0_cv="true" include_only_weights="1,2">MFP_N_UBGenie</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="FrCEx_pi" tag="FSI" force_0_cv="true" include_only_weights="1,2">FrCEx_pi_UBGenie</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="FrInel_pi" tag="FSI" force_0_cv="true" include_only_weights="1,2">FrInel_pi_UBGenie</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="FrAbs_pi" tag="FSI" force_0_cv="true" include_only_weights="1,2">FrAbs_pi_UBGenie</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="FrCEx_N" tag="FSI" force_0_cv="true" include_only_weights="1,2">FrCEx_N_UBGenie</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="FrInel_N" tag="FSI" force_0_cv="true" include_only_weights="1,2">FrInel_N_UBGenie</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="FrAbs_N" tag="FSI" force_0_cv="true" include_only_weights="1,2">FrAbs_N_UBGenie</systematic>
+
+	<systematic type="spline_to_covariance" binning="var0" plotname="xsr_scc_Fa3_SCC" tag="SCC" force_0_cv="true" include_only_weights="1,2">xsr_scc_Fa3_SCC</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="xsr_scc_Fv3_SCC" tag="SCC" force_0_cv="true" include_only_weights="1,2">xsr_scc_Fv3_SCC</systematic>
+
+
+	<!-- Flux Systematics, 11 splines (expskin_FluxUnisim was saved with var, CV, var weights, the duplicate will be ignored)-->
+	<systematic type="spline" binning="var0" plotname="horncurrent" knobvals="-1, 0, 1" tag="Flux" force_0_cv="true" include_only_weights="1,2">horncurrent_FluxUnisim</systematic>
+	<systematic type="spline" binning="var0" plotname="expskin" knobvals="-1, 0, 1" tag="Flux" force_0_cv="true" include_only_weights="1,2">expskin_FluxUnisim</systematic>
+	<systematic type="spline" binning="var0" plotname="kminus" tag="Flux" force_0_cv="true" include_only_weights="1,2">kminus_PrimaryHadronNormalization</systematic>
+	<systematic type="spline" binning="var0" plotname="kplus" tag="Flux" force_0_cv="true" include_only_weights="1,2">kplus_PrimaryHadronFeynmanScaling</systematic>
+	<systematic type="spline" binning="var0" plotname="kzero" tag="Flux" force_0_cv="true" include_only_weights="1,2">kzero_PrimaryHadronSanfordWang</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="nucleoninexsec" knobvals="-1, 0, 1" tag="Flux" force_0_cv="true" include_only_weights="1,2">nucleoninexsec_FluxUnisim</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="nucleonqexsec" knobvals="-1, 0, 1" tag="Flux" force_0_cv="true" include_only_weights="1,2">nucleonqexsec_FluxUnisim</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="nucleontotxsec" knobvals="-1, 0, 1" tag="Flux" force_0_cv="true" include_only_weights="1,2">nucleontotxsec_FluxUnisim</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="pioninexsec" knobvals="-1, 0, 1" tag="Flux" force_0_cv="true" include_only_weights="1,2">pioninexsec_FluxUnisim</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="pionqexsec" knobvals="-1, 0, 1" tag="Flux" force_0_cv="true" include_only_weights="1,2">pionqexsec_FluxUnisim</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="piontotxsec" knobvals="-1, 0, 1" tag="Flux" force_0_cv="true" include_only_weights="1,2">piontotxsec_FluxUnisim</systematic>
+	<systematic type="covariance" plotname="piplus_prod" tag="piprod">piplus_PrimaryHadronSWCentralSplineVariation</systematic>
+	<systematic type="covariance" plotname="piminus_prod" tag="piprod">piminus_PrimaryHadronSWCentralSplineVariation</systematic>
+
+
+	<!-- Re-interaction Systematics -->
+	<systematic type="covariance" tag="Reint" scale="0.001">weightsReint</systematic>
+
+	<!-- Other Systematics -->
+	<!-- <systematic type="norm" binning="reco" plotname="Targets_POT" tag="norm">nu_uBooNE_nuoverlay_overlay:0.02</systematic> -->
+
+</systematics>
+
+<!-- Embedded data definition -->
+<data>
+  <MCFile treename="wcpselection/T_KINEvars" filename="/nevis/riverside/data/leehagaman/ngem/data_files/checkout_MCC9.10_Run4b_v10_04_07_11_BNB_beam_on_surprise_reco2_hist_opendata_20700.root" scale = "1.0" pot="4.031e19" >
+    <friend treename="wcpselection/T_eval" />
+    <friend treename="wcpselection/T_PFeval" />
+    <friend treename="wcpselection/T_BDTvars" />
+
+    <branch
+        	associated_subchannel = "nu_uBooNE_numuCCFC_data"
+        	model_rule            = "0"
+			weight_1              = "((0 < kine_reco_Enu) && (match_isFC == 1) && (numu_score > 0.9) && (reco_muonMomentum[3] > 0))"
+		>
+		<variable>log10(2*(kine_reco_Enu/1000)*reco_muonMomentum[3]*(1 - reco_muonMomentum[2]/sqrt(reco_muonMomentum[0]*reco_muonMomentum[0] + reco_muonMomentum[1]*reco_muonMomentum[1] + reco_muonMomentum[2]*reco_muonMomentum[2])) - 0.011164)</variable>
+		<variable>0</variable>
+		<variable>0</variable>
+	</branch>
+  </MCFile>
+</data>

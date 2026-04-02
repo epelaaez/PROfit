@@ -481,6 +481,7 @@ namespace PROfit{
                 std::string filename;
                 std::string name;  // "cv" / "cv_N" or variation name like "Recomb2"
                 float pot;
+                float partial_load_frac = 1.0f;
                 bool is_cv;
                 size_t section_index;  // which DetVarSection this file belongs to
             };

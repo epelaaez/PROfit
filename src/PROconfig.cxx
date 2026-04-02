@@ -945,16 +945,12 @@ int PROconfig::LoadFromXML(const std::string &filename){
             }
             m_detvar_include_only_weights_per_section.push_back(section_iow);
 
-            // Parse extra_weight child elements (additional weight expressions only for DetVar files)
+            // Parse extra_weight attribute on <DetVarSection> (same attribute style as weight_N on <branch>)
             std::vector<std::string> section_extra_weights;
-            tinyxml2::XMLElement *pEW = pDetVar->FirstChildElement("extra_weight");
-            while(pEW) {
-                const char* ew_text = pEW->GetText();
-                if(ew_text) {
-                    section_extra_weights.push_back(ew_text);
-                    log<LOG_INFO>(L"%1% || Parsed extra_weight for DetVar section %2%: '%3%'") % __func__ % section_idx % ew_text;
-                }
-                pEW = pEW->NextSiblingElement("extra_weight");
+            const char* ew_attr = pDetVar->Attribute("extra_weight");
+            if(ew_attr && strcmp(ew_attr, "") != 0) {
+                section_extra_weights.push_back(ew_attr);
+                log<LOG_INFO>(L"%1% || Parsed extra_weight for DetVar section %2%: '%3%'") % __func__ % section_idx % ew_attr;
             }
             m_detvar_extra_weights_per_section.push_back(section_extra_weights);
 
@@ -991,6 +987,8 @@ int PROconfig::LoadFromXML(const std::string &filename){
             cv_file.pot = strtod(cv_pot_str, &end);
             cv_file.is_cv = true;
             cv_file.section_index = section_idx;
+            { const char* frac = pCV->Attribute("partial_load_frac");
+              cv_file.partial_load_frac = frac ? (float)strtod(frac, nullptr) : 1.0f; }
             m_detvar_files.push_back(cv_file);
             log<LOG_INFO>(L"%1% || DetVar CV file (section %2%): %3%, POT: %4%") % __func__ % section_idx % cv_filename % cv_file.pot;
 
@@ -1010,6 +1008,8 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 var_file.pot = strtod(var_pot_str, &end);
                 var_file.is_cv = false;
                 var_file.section_index = section_idx;
+                { const char* frac = pVar->Attribute("partial_load_frac");
+                  var_file.partial_load_frac = frac ? (float)strtod(frac, nullptr) : 1.0f; }
                 m_detvar_files.push_back(var_file);
                 m_detvar_variation_names.insert(var_name);
                 log<LOG_INFO>(L"%1% || DetVar variation '%2%' file (section %3%): %4%, POT: %5%") % __func__ % var_name % section_idx % var_filename % var_file.pot;
@@ -1083,7 +1083,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 }
 
                 // MCFile template with placeholders
-                dvXml << "<MCFile treename=\"" << dv_treename << "\" filename=\"__DETVAR_FILENAME__\" scale=\"" << dv_scale << "\" pot=\"__DETVAR_POT__\">\n";
+                dvXml << "<MCFile treename=\"" << dv_treename << "\" filename=\"__DETVAR_FILENAME__\" scale=\"" << dv_scale << "\" pot=\"__DETVAR_POT__\" partial_load_frac=\"__DETVAR_PARTIAL_LOAD_FRAC__\">\n";
 
                 // Serialize friend trees from this DetVarSection
                 tinyxml2::XMLElement *pDVFriend = pDetVar->FirstChildElement("friend");
@@ -2362,6 +2362,12 @@ PROconfig PROconfig::BuildDetVarConfig(size_t file_index) const {
             pot_ss << std::scientific << dvfile.pot;
             xml_str.replace(pos, pot_placeholder.size(), pot_ss.str());
         }
+
+        std::string frac_placeholder = "__DETVAR_PARTIAL_LOAD_FRAC__";
+        pos = xml_str.find(frac_placeholder);
+        if(pos != std::string::npos) {
+            xml_str.replace(pos, frac_placeholder.size(), std::to_string(dvfile.partial_load_frac));
+        }
     }
 
     // Write to temp file and load as PROconfig
@@ -2434,10 +2440,19 @@ BranchVariable::Value ROOTFormula::EvalInstance() {
 }
 
 void ROOTFormula::LoadEvent(unsigned eventno) {
-    (void) eventno; // unused
     if (fs.size() == 0) return;
 
     const TTree *tree = fs[0]->GetTree();
+    if (tree == nullptr) {
+        log<LOG_ERROR>(L"%1% || ERROR: TTreeFormula::GetTree() returned nullptr at eventno=%2%, stored treeNumber=%3%") % __func__ % eventno % treeNumber;
+        log<LOG_ERROR>(L"%1% || This formula has %2% sub-formula(s):") % __func__ % fs.size();
+        for (size_t fi = 0; fi < fs.size(); ++fi) {
+            log<LOG_ERROR>(L"%1% ||   [%2%] expression='%3%'  GetNdim=%4%  GetNcodes=%5%") % __func__ % fi
+                % fs[fi]->GetTitle() % fs[fi]->GetNdim() % fs[fi]->GetNcodes();
+        }
+        log<LOG_ERROR>(L"%1% || ERROR: Maybe the TTreeFormula is using a variable that is not in the file?") % __func__;
+        exit(EXIT_FAILURE);
+    }
 
     int this_tree_number = tree->GetTreeNumber();
 
