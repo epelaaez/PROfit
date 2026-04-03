@@ -231,6 +231,87 @@ public:
     }
 };
 
+// TEST: 2-variable version of PROnumudis. Takes separate "L" and "E" variables from the
+// parameter_map (with variable_index pointing to the L and E variables respectively).
+// H_combined is built on the 2D (L x E) grid, but get_probs computes P(L/E) internally —
+// so the physics is identical to PROnumudis and the two should give identical spectra.
+class PROnumudisTEST : public PROmodel {
+public:
+    PROnumudisTEST(const PROpeller &prop, const std::map<std::string,int> &parameter_map) {
+        prob_types = {0, 1};
+        model_functions.push_back([this]([[maybe_unused]] const Eigen::VectorXf &v, float) {(void)this; return 1.0f;});
+        model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pmumu(v(0),v(1),le);});
+
+        if(parameter_map.find("L") == parameter_map.end()) {
+            log<LOG_ERROR>(L"%1%, %2% || PROnumudisTEST: Missing expected parameter: 'L'.") % __func__ % __LINE__;
+            throw std::runtime_error("Missing parameter: L");
+        }
+        if(parameter_map.find("E") == parameter_map.end()) {
+            log<LOG_ERROR>(L"%1%, %2% || PROnumudisTEST: Missing expected parameter: 'E'.") % __func__ % __LINE__;
+            throw std::runtime_error("Missing parameter: E");
+        }
+        // ivars[0] = L variable index, ivars[1] = E variable index.
+        // build_hists_and_combined will make the flat grid L x E.
+        ivars = {parameter_map.at("L"), parameter_map.at("E")};
+
+        build_hists_and_combined(prop);
+
+        nparams = 2;
+        param_names = {"dmsq", "sinsq2thmm"};
+        pretty_param_names = {"#Deltam^{2}", "sin^{2}2#theta_{#mu#mu}"};
+        pretty_param_units = {"eV^{2}", ""};
+        is_log10 = {true, true};
+        build_param_index();
+        lb = Eigen::VectorXf(2);
+        ub = Eigen::VectorXf(2);
+        default_val = Eigen::VectorXf(2);
+        lb << -2, -std::numeric_limits<float>::infinity();
+        ub << 2, 0;
+        default_val << -10, -10;
+    };
+
+    float Pmumu(float dmsq, float sinsq2thmumu, float le) const {
+        dmsq         = maybe_convert_log("dmsq",       dmsq);
+        sinsq2thmumu = maybe_convert_log("sinsq2thmm", sinsq2thmumu);
+        if(sinsq2thmumu > 1) sinsq2thmumu = 1;
+        if(sinsq2thmumu < 0) sinsq2thmumu = 0;
+        float sinterm = std::sin(1.266932679f * dmsq * le);
+        float prob    = 1.0f - (sinsq2thmumu * sinterm * sinterm);
+        if(prob < 0.0f || prob > 1.0f) {
+            log<LOG_ERROR>(L"%1% || Probability %2% outside [0,1]. dmsq=%3%, sinsq2thmumu=%4%, L/E=%5%")
+                % __func__ % prob % dmsq % sinsq2thmumu % le;
+            exit(EXIT_FAILURE);
+        }
+        return prob;
+    }
+
+    // var_arrs[0] = L values for each flat grid point (length n_L * n_E)
+    // var_arrs[1] = E values for each flat grid point (length n_L * n_E)
+    // Internally computes L/E and evaluates Pmumu — identical physics to PROnumudis.
+    Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<std::vector<float>> &var_arrs) const override {
+        float dmsq         = maybe_convert_log("dmsq",       phys(0));
+        float sinsq2thmumu = maybe_convert_log("sinsq2thmm", phys(1));
+        if(sinsq2thmumu > 1) sinsq2thmumu = 1;
+        if(sinsq2thmumu < 0) sinsq2thmumu = 0;
+
+        float freq = 1.266932679f * dmsq;
+        const size_t n_flat = var_arrs[0].size(); // = n_L * n_E
+        Eigen::MatrixXf probs(n_flat, 2);
+
+        for(size_t i = 0; i < n_flat; ++i) {
+            float L = var_arrs[0][i];
+            float E = var_arrs[1][i];
+            // Guard against zero energy — same convention as L/E variable (out-of-range events
+            // get bin index -1 in PROpeller so they never enter H; but be safe here too).
+            float le = (E > 0.0f) ? L / E : 0.0f;
+            probs(i, 0) = 1.0f;
+            float sinterm = std::sin(freq * le);
+            probs(i, 1) = 1.0f - (sinsq2thmumu * sinterm * sinterm);
+        }
+        return probs;
+    }
+};
+
 class PROnueapp : public PROmodel {
 public:
     PROnueapp(const PROpeller &prop,const std::map<std::string,int> &parameter_map) {
@@ -1787,6 +1868,8 @@ std::unique_ptr<PROmodel> get_model_from_string(const PROconfig& config, const P
 
      if(name == "numudis") {
         return std::unique_ptr<PROmodel>(new PROnumudis(prop,config.m_model_parameter_map));
+    } else if(name == "numudisTEST") {
+        return std::unique_ptr<PROmodel>(new PROnumudisTEST(prop,config.m_model_parameter_map));
     } else if(name == "nueapp") {
         return std::unique_ptr<PROmodel>(new PROnueapp(prop,config.m_model_parameter_map));
     } else if(name == "nuedis") {
