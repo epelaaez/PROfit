@@ -1382,6 +1382,7 @@ int main(int argc, char* argv[])
             if(logx)
                 c.SetLogx();
             c.SetLogz();
+            gStyle->SetPalette(kViridis);
             surf.Draw("colz");
             c.Print((final_output_tag+"_surface.pdf").c_str());
         }
