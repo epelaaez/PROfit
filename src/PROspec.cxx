@@ -19,10 +19,11 @@ PROspec PROspec::PoissonVariation(const PROspec &s, uint32_t seed) {
     for(size_t i = 0; i < s.nbins; i++) {
         float bin_content = s.GetBinContent(i);
         if(bin_content < 0) {
-            log<LOG_ERROR>(L"%1% || Cannot perform Poisson variation: bin %2% has negative content %3%. ") 
+            log<LOG_WARNING>(L"%1% || Cannot perform Poisson variation: bin %2% has negative content %3%. Setting to 0.") 
                 % __func__ % i % bin_content;
-            log<LOG_ERROR>(L"Terminating.");
-            exit(EXIT_FAILURE);
+            newSpec.Fill(i, 0);
+            //log<LOG_ERROR>(L"Terminating.");
+            //exit(EXIT_FAILURE);
         }
         else if(bin_content == 0) {
             newSpec.Fill(i, 0);
