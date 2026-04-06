@@ -7,12 +7,16 @@
 #include "TFile.h"
 #include "TFriendElement.h"
 #include "TChain.h"
+#include "TLeaf.h"
+#include "TBranch.h"
+#include "TTreeFormula.h"
 #include <Eigen/Eigen>
 #include <Eigen/src/Core/Matrix.h>
 #include <algorithm>
 #include <iostream>
 #include <fstream>
 #include <iterator>
+#include <set>
 #include <string>
 namespace PROfit {
 
@@ -683,7 +687,7 @@ namespace PROfit {
             // grab the subchannel index
             int num_branch = inconfig.m_branch_variables[fid].size();
             auto& branches = inconfig.m_branch_variables[fid];
-            std::vector<int> subchannel_index(num_branch, 0); 
+            std::vector<int> subchannel_index(num_branch, 0);
             log<LOG_DEBUG>(L"%1% || This file includes %2% branch/subchannels") % __func__ % num_branch;
             for(int ib = 0; ib != num_branch; ++ib) {
 
@@ -692,8 +696,65 @@ namespace PROfit {
                 log<LOG_DEBUG>(L"%1% || Subchannel: %2% maps to index: %3%") % __func__ % subchannel_name.c_str() % subchannel_index[ib];
             }
 
-            //chains[fid]->SetCacheSize(1000000000); // Set cache size to 10 MB
-            //chains[fid]->AddBranchToCache("*", kTRUE); // Cache all branches
+            // Prune unused branches: disable everything, then re-enable only what our
+            // formulas and eventweight maps actually need.  This prevents loading large
+            // unused friend-tree columns on each GetEntry.
+            {
+                std::set<std::string> needed;
+
+                // Branches referenced by variable and weight formulas
+                for(int ib = 0; ib < num_branch; ib++) {
+                    for(const auto& rf : branches[ib]->branch_variable_formulas)
+                        for(const auto& n : rf->GetNeededBranchNames()) needed.insert(n);
+                    for(const auto& rf : branches[ib]->branch_weight_formulas)
+                        for(const auto& n : rf->GetNeededBranchNames()) needed.insert(n);
+                }
+
+                // Branches referenced by systematic weight formulas
+                for(const auto& f : sys_weight_formula) {
+                    if(!f) continue;
+                    for(int n = 0; n < f->GetNcodes(); n++) {
+                        TLeaf* leaf = f->GetLeaf(n);
+                        if(!leaf) continue;
+                        TBranch* br = leaf->GetBranch();
+                        if(br) {
+                            needed.insert(std::string(br->GetName()));
+                            TBranch* mother = br->GetMother();
+                            if(mother && mother != br) needed.insert(std::string(mother->GetName()));
+                        }
+                    }
+                }
+
+                // Branches referenced by matching-variable formulas
+                for(const auto& f : matching_var_formulas) {
+                    if(!f) continue;
+                    for(int n = 0; n < f->GetNcodes(); n++) {
+                        TLeaf* leaf = f->GetLeaf(n);
+                        if(!leaf) continue;
+                        TBranch* br = leaf->GetBranch();
+                        if(br) {
+                            needed.insert(std::string(br->GetName()));
+                            TBranch* mother = br->GetMother();
+                            if(mother && mother != br) needed.insert(std::string(mother->GetName()));
+                        }
+                    }
+                }
+
+                // Branches bound via SetBranchAddress (eventweight maps)
+                for(const auto& [name, _] : f_event_weights[fid][0]) needed.insert(name);
+                for(const auto& [name, _] : f_knob_vals[fid][0])     needed.insert(name);
+
+                // Disable all, then re-enable needed set
+                chains[fid]->SetBranchStatus("*", 0);
+                for(const auto& name : needed) {
+                    UInt_t found = 0;
+                    chains[fid]->SetBranchStatus(name.c_str(), 1, &found);
+                }
+                log<LOG_INFO>(L"%1% || Branch pruning fid=%2%: keeping %3% branches") % __func__ % fid % needed.size();
+            }
+
+            chains[fid]->SetCacheSize(100000000); // 100 MB read-ahead cache
+            chains[fid]->AddBranchToCache("*", kTRUE); // cache all active branches
             TObjArray* tbranches = chains[fid]->GetListOfBranches();
             for (int i = 0; i < tbranches->GetEntries(); i++) {
                 TBranch* branch = (TBranch*)tbranches->At(i);
