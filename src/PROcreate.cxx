@@ -711,34 +711,12 @@ namespace PROfit {
                 }
 
                 // Branches referenced by systematic weight formulas
-                for(const auto& f : sys_weight_formula) {
-                    if(!f) continue;
-                    for(int n = 0; n < f->GetNcodes(); n++) {
-                        TLeaf* leaf = f->GetLeaf(n);
-                        if(!leaf) continue;
-                        TBranch* br = leaf->GetBranch();
-                        if(br) {
-                            needed.insert(std::string(br->GetName()));
-                            TBranch* mother = br->GetMother();
-                            if(mother && mother != br) needed.insert(std::string(mother->GetName()));
-                        }
-                    }
-                }
+                for(const auto& f : sys_weight_formula)
+                    ROOTFormula::AddFormulaBranches(f.get(), needed);
 
                 // Branches referenced by matching-variable formulas
-                for(const auto& f : matching_var_formulas) {
-                    if(!f) continue;
-                    for(int n = 0; n < f->GetNcodes(); n++) {
-                        TLeaf* leaf = f->GetLeaf(n);
-                        if(!leaf) continue;
-                        TBranch* br = leaf->GetBranch();
-                        if(br) {
-                            needed.insert(std::string(br->GetName()));
-                            TBranch* mother = br->GetMother();
-                            if(mother && mother != br) needed.insert(std::string(mother->GetName()));
-                        }
-                    }
-                }
+                for(const auto& f : matching_var_formulas)
+                    ROOTFormula::AddFormulaBranches(f.get(), needed);
 
                 // Branches bound via SetBranchAddress (eventweight maps)
                 for(const auto& [name, _] : f_event_weights[fid][0]) needed.insert(name);

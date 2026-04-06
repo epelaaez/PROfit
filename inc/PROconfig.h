@@ -177,6 +177,8 @@ namespace PROfit{
         std::string FormulaName() const override;
         // Returns the names of all TBranches referenced by this formula.
         std::set<std::string> GetNeededBranchNames() const;
+        // Adds branches referenced by a single TTreeFormula to an existing set.
+        static void AddFormulaBranches(const TTreeFormula* f, std::set<std::string>& result);
         virtual ~ROOTFormula() {}
 
       private:

@@ -2466,21 +2466,25 @@ void ROOTFormula::LoadEvent(unsigned eventno) {
     }
 }
 
-std::set<std::string> ROOTFormula::GetNeededBranchNames() const {
-    std::set<std::string> result;
-    for (const std::unique_ptr<TTreeFormula>& f : fs) {
-        for (int n = 0; n < f->GetNcodes(); n++) {
-            TLeaf* leaf = f->GetLeaf(n);
-            if (!leaf) continue;
-            TBranch* br = leaf->GetBranch();
-            if (br) {
-                result.insert(std::string(br->GetName()));
-                // Also include top-level (mother) branch so arrays work
-                TBranch* mother = br->GetMother();
-                if (mother && mother != br) result.insert(std::string(mother->GetName()));
-            }
+void ROOTFormula::AddFormulaBranches(const TTreeFormula* f, std::set<std::string>& result) {
+    if (!f) return;
+    for (int n = 0; n < f->GetNcodes(); n++) {
+        TLeaf* leaf = f->GetLeaf(n);
+        if (!leaf) continue;
+        TBranch* br = leaf->GetBranch();
+        if (br) {
+            result.insert(std::string(br->GetName()));
+            // Also include top-level (mother) branch so split objects work
+            TBranch* mother = br->GetMother();
+            if (mother && mother != br) result.insert(std::string(mother->GetName()));
         }
     }
+}
+
+std::set<std::string> ROOTFormula::GetNeededBranchNames() const {
+    std::set<std::string> result;
+    for (const std::unique_ptr<TTreeFormula>& f : fs)
+        AddFormulaBranches(f.get(), result);
     return result;
 }
 
