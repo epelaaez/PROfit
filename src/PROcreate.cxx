@@ -1048,6 +1048,27 @@ namespace PROfit {
                 branch_fullname.push_back(hist_name);
             }
 
+            // Prune unused branches: disable everything, then re-enable only what our
+            // formulas actually need.
+            {
+                std::set<std::string> needed;
+                for(int ib = 0; ib < num_branch; ib++) {
+                    for(const auto& rf : branches[ib]->branch_variable_formulas)
+                        for(const auto& n : rf->GetNeededBranchNames()) needed.insert(n);
+                    for(const auto& rf : branches[ib]->branch_weight_formulas)
+                        for(const auto& n : rf->GetNeededBranchNames()) needed.insert(n);
+                }
+                chains[fid]->SetBranchStatus("*", 0);
+                for(const auto& name : needed) {
+                    UInt_t found = 0;
+                    chains[fid]->SetBranchStatus(name.c_str(), 1, &found);
+                }
+                log<LOG_INFO>(L"%1% || Branch pruning fid=%2%: keeping %3% branches") % __func__ % fid % needed.size();
+            }
+
+            chains[fid]->SetCacheSize(100000000); // 100 MB read-ahead cache
+            chains[fid]->AddBranchToCache("*", kTRUE); // cache all active branches
+
             // loop over all entries
             for(long int i=0; i < nevents; ++i) {
                 if(i%1000==0)	log<LOG_INFO>(L"%1% || -- uni : %2% / %3%") % __func__ % i % nevents;
