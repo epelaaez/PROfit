@@ -18,7 +18,11 @@
 namespace PROfit {
 
     struct fc_out{
-        float chi2_syst, chi2_osc, dmsq, sinsq2tmm;
+        float chi2_syst, chi2_osc;
+        // Raw best-fit physics parameters from the oscillation fit, in the fitter's internal
+        // space (log10 where model->is_log10[i] is true). Length = model->nparams.
+        // Named and converted at output time using model->param_names / model->is_log10.
+        Eigen::VectorXf best_phys_osc;
         Eigen::VectorXf best_fit_syst, best_fit_osc, syst_throw;
     };
 

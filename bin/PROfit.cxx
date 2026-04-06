@@ -2240,23 +2240,28 @@ int main(int argc, char* argv[])
         {
             TFile fout((final_output_tag+"_FC.root").c_str(), "RECREATE");
             fout.cd();
-            float chi2_osc, chi2_syst, best_dmsq, best_sinsq2t;
+            float chi2_osc, chi2_syst;
+            // One float per physics parameter — plain branches named "best_<param_name>".
+            // Vector kept alive for the full lifetime of the TTree.
+            std::vector<float> best_phys_vals(model->nparams, 0.0f);
             std::map<std::string, float> best_systs_osc, best_systs, syst_throw;
             TTree tree("tree", "tree");
-            tree.Branch("chi2_osc", &chi2_osc); 
-            tree.Branch("chi2_syst", &chi2_syst); 
-            tree.Branch("best_dmsq", &best_dmsq); 
-            tree.Branch("best_sinsq2t", &best_sinsq2t); 
-            tree.Branch("best_systs_osc", &best_systs_osc); 
-            tree.Branch("best_systs", &best_systs); 
-            tree.Branch("syst_throw", &syst_throw);
+            tree.Branch("chi2_osc",  &chi2_osc);
+            tree.Branch("chi2_syst", &chi2_syst);
+            for(size_t i = 0; i < model->nparams; ++i)
+                tree.Branch(("best_" + model->param_names[i]).c_str(), &best_phys_vals[i]);
+            tree.Branch("best_systs_osc", &best_systs_osc);
+            tree.Branch("best_systs",     &best_systs);
+            tree.Branch("syst_throw",     &syst_throw);
 
             for(const auto &out: outs) {
                 for(const auto &fco: out) {
-                    chi2_osc = fco.chi2_osc;
+                    chi2_osc  = fco.chi2_osc;
                     chi2_syst = fco.chi2_syst;
-                    best_dmsq = fco.dmsq;
-                    best_sinsq2t = fco.sinsq2tmm;
+                    for(size_t i = 0; i < model->nparams; ++i) {
+                        float raw = fco.best_phys_osc.size() > (Eigen::Index)i ? fco.best_phys_osc(i) : 0.0f;
+                        best_phys_vals[i] = model->is_log10[i] ? std::pow(10.0f, raw) : raw;
+                    }
                     for(size_t i = 0; i < variable_systs[config.i_prime].GetNSplines(); ++i) {
                         if(!gof_pvalue) best_systs_osc[variable_systs[config.i_prime].spline_names[i]] = fco.best_fit_osc(i);
                         best_systs[variable_systs[config.i_prime].spline_names[i]] = fco.best_fit_syst(i);
@@ -2270,18 +2275,23 @@ int main(int argc, char* argv[])
         }
         {
             ofstream fcout(final_output_tag+"_FC.csv");
-            fcout << "chi2_osc,chi2_syst,best_dmsq,best_sinsq2t";
-            for(const std::string &name: variable_systs[config.i_prime].spline_names) {
+            fcout << "chi2_osc,chi2_syst";
+            for(const std::string &name: model->param_names)
+                fcout << ",best_" << name;
+            for(const std::string &name: variable_systs[config.i_prime].spline_names)
                 fcout << ",best_" << name << "_osc,best_" << name << "," << name << "_throw";
-            }
             fcout << "\r\n";
 
             for(const auto &out: outs) {
                 for(const auto &fco: out) {
-                    fcout << fco.chi2_osc << "," << fco.chi2_syst << "," << fco.dmsq << "," << fco.sinsq2tmm;
-                    for(size_t i = 0; i < variable_systs[config.i_prime].GetNSplines(); ++i) {
-                        fcout << (gof_pvalue ? 0 : fco.best_fit_osc(i)) << "," << fco.best_fit_syst(i) << "," << fco.syst_throw(i);
+                    fcout << fco.chi2_osc << "," << fco.chi2_syst;
+                    for(size_t i = 0; i < model->nparams; ++i) {
+                        float raw = fco.best_phys_osc.size() > (Eigen::Index)i ? fco.best_phys_osc(i) : 0.0f;
+                        float val = model->is_log10[i] ? std::pow(10.0f, raw) : raw;
+                        fcout << "," << val;
                     }
+                    for(size_t i = 0; i < variable_systs[config.i_prime].GetNSplines(); ++i)
+                        fcout << "," << (gof_pvalue ? 0 : fco.best_fit_osc(i)) << "," << fco.best_fit_syst(i) << "," << fco.syst_throw(i);
                     fcout << "\r\n";
                 }
             }

@@ -117,11 +117,12 @@ void fc_worker(fc_args args, MultiPROgressBar &progress) {
     Eigen::VectorXf t = Eigen::VectorXf::Map(throws.data(), throws.size());
 
     args.out->push_back({
-            chi2_syst, chi2_osc, 
-            args.gof_mode ? 0 : std::pow(10.0f, fitter_osc.best_fit(0)), 
-            args.gof_mode ? 0 : std::pow(10.0f, fitter_osc.best_fit(1)), 
-            fitter.best_fit.segment(2, nparams - 2) , 
-            args.gof_mode ? Eigen::VectorXf() : fitter_osc.best_fit.segment(2, nparams-2) , t
+            chi2_syst, chi2_osc,
+            // Store raw fitter values (log10 space where applicable) — converted at output time.
+            args.gof_mode ? Eigen::VectorXf::Zero(nphys) : fitter_osc.best_fit.head(nphys),
+            fitter.best_fit.segment(nphys, nparams - nphys),
+            args.gof_mode ? Eigen::VectorXf() : fitter_osc.best_fit.segment(nphys, nparams - nphys),
+            t
             });
 
     progress.increment_bar(args.thread);
