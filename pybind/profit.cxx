@@ -164,7 +164,8 @@ void savePROsurf(const PROfit::PROsurf &surface,
     if(logy) c.SetLogy();
     if(logx) c.SetLogx();
     c.SetLogz();
-    
+
+    gStyle->SetPalette(kViridis);
     surf.Draw("colz");
     c.Print(pdffile.c_str());
   }
