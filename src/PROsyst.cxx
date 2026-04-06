@@ -306,10 +306,8 @@ namespace PROfit {
 
             sum_matrix = Eigen::MatrixXf::Zero(nbins, nbins);
 
-            int ii=0;
             for(auto& p : covmat){
                 sum_matrix += p;
-                ii++;
             }
 
         }else{

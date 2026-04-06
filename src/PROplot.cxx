@@ -10,7 +10,6 @@ namespace PROfit{
 
 
         size_t global_subchannel_index = 0;
-        size_t global_channel_index = 0;
         for(size_t im = 0; im < inconfig.m_num_modes; im++){
             for(size_t id =0; id < inconfig.m_num_detectors; id++){
                 for(size_t ic = 0; ic < inconfig.m_num_channels; ic++){
@@ -30,7 +29,6 @@ namespace PROfit{
                         }
                         ++global_subchannel_index;
                     }//end subchan
-                    ++global_channel_index;
                 }//end chan
             }//end det
         }//end mode
@@ -41,7 +39,6 @@ namespace PROfit{
         std::map<std::string, std::unique_ptr<TH2D>> hists;
 
         size_t global_subchannel_index = 0;
-        size_t global_channel_index = 0;
         for(size_t im = 0; im < inconfig.m_num_modes; im++){
             for(size_t id = 0; id < inconfig.m_num_detectors; id++){
                 for(size_t ic = 0; ic < inconfig.m_num_channels; ic++){
@@ -52,7 +49,6 @@ namespace PROfit{
                         hists[subchannel_name] = std::move(htmp);
                         ++global_subchannel_index;
                     }//end subchan
-                    ++global_channel_index;
                 }//end chan
             }//end det
         }//end mode

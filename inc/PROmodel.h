@@ -749,7 +749,7 @@ public:
         ivar = parameter_map.at("L/E");
 
         //constraints
-        model_constraint = [this](const Eigen::VectorXf &){return 1;};
+        model_constraint = [](const Eigen::VectorXf &){return 1;};
 
 
          size_t nvar = prop.variable_mc_stat_err.size();

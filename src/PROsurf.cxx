@@ -309,7 +309,6 @@ std::vector<profOut> PROfile::PROfilePointHelper(const PROsyst *systs, const PRO
         //log<LOG_INFO>(L"%1% || PLONK which_spline %2% has testpt order %3% ") % __func__ %  which_spline % test_values;
         //and minimize
 
-        int cnt=0;
         Eigen::VectorXf cv_best_fit;
         float last_val = 0;
         for(auto &which_value: test_values){
@@ -344,7 +343,6 @@ std::vector<profOut> PROfile::PROfilePointHelper(const PROsyst *systs, const PRO
             log<LOG_INFO>(L"%1% || Fixed value of spline # %2% is value %3%, has a chi post of : %4% (i %5% nstep %6% ") % __func__ % which_spline % which_value % fx % i % nstep;
             log<LOG_INFO>(L"%1% || at a BF param value of @ %2%") % __func__ %  spec_string.c_str();
 
-            cnt++;
             last_val = which_value;
             if(fitconfig.progress_bar)progressbar.increment_bar(which_spline);
 
