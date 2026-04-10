@@ -10,7 +10,6 @@ namespace PROfit{
 
 
         size_t global_subchannel_index = 0;
-        size_t global_channel_index = 0;
         for(size_t im = 0; im < inconfig.m_num_modes; im++){
             for(size_t id =0; id < inconfig.m_num_detectors; id++){
                 for(size_t ic = 0; ic < inconfig.m_num_channels; ic++){
@@ -30,7 +29,6 @@ namespace PROfit{
                         }
                         ++global_subchannel_index;
                     }//end subchan
-                    ++global_channel_index;
                 }//end chan
             }//end det
         }//end mode
@@ -41,19 +39,16 @@ namespace PROfit{
         std::map<std::string, std::unique_ptr<TH2D>> hists;
 
         size_t global_subchannel_index = 0;
-        size_t global_channel_index = 0;
         for(size_t im = 0; im < inconfig.m_num_modes; im++){
             for(size_t id = 0; id < inconfig.m_num_detectors; id++){
                 for(size_t ic = 0; ic < inconfig.m_num_channels; ic++){
                     for(size_t sc = 0; sc < inconfig.m_num_subchannels[ic]; sc++){
                         const std::string& subchannel_name  = inconfig.m_fullnames[global_subchannel_index];
-                        const std::string& color = inconfig.m_subchannel_colors[ic][sc];
                         std::unique_ptr<TH2D> htmp = std::make_unique<TH2D>(spec.toTH2D(inconfig, global_subchannel_index, other_index));
                         if(scale) htmp->Scale(1,"width");
                         hists[subchannel_name] = std::move(htmp);
                         ++global_subchannel_index;
                     }//end subchan
-                    ++global_channel_index;
                 }//end chan
             }//end det
         }//end mode
@@ -265,9 +260,9 @@ namespace PROfit{
             if(dims == 2){
 
                 double err_sq = 0;
-                for(int by1 = nbinsy*bx+offset; by1 < nbinsy*(bx+1)+offset; by1++){
+                for(int by1 = (int)(nbinsy*bx)+offset; by1 < (int)(nbinsy*(bx+1))+offset; by1++){
                     errband_1d->error_point(bx) += errband.error_point(by1);
-                    for(int by2 = nbinsy*bx+offset; by2 < nbinsy*(bx+1)+offset; by2++){
+                    for(int by2 = (int)(nbinsy*bx)+offset; by2 < (int)(nbinsy*(bx+1))+offset; by2++){
                         err_sq += errband.covariance(by1, by2);
                     }
                 }
@@ -301,7 +296,7 @@ namespace PROfit{
             TH2D &pre_corr, 
             TH2D &post_corr, 
             std::string filename,
-            int var_index)
+            [[maybe_unused]] int var_index)
     {
         log<LOG_DEBUG>(L"%1% || Starting plot_detector_ratios") % __func__;
 
@@ -1206,8 +1201,6 @@ namespace PROfit{
                         }
                     }
 
-                    TGraphAsymmErrors *ratio_err;
-
                     TText* text = NULL;
                     if(texts.size()!=0) {
                         if(texts.size()==1){
@@ -1363,7 +1356,7 @@ namespace PROfit{
 
         // adding 1e-6 to diagonal entries that are zero, to make the matrix invertible when there are zero-uncertainty bins
         // logging a warning in each of these cases.
-        for (size_t i = 0; i < collapsed_diag.rows(); ++i) {
+        for (Eigen::Index i = 0; i < collapsed_diag.rows(); ++i) {
             if (collapsed_diag(i,i) == 0) {
                 log<LOG_WARNING>(L"%1% || WARNING: collapsed_diag(i,i) is zero for bin %2%! Adding 1e-6 to make the matrix invertible.")
                     % __func__ % i;
@@ -1483,10 +1476,10 @@ namespace PROfit{
 			    Eigen::VectorXf diag1d = Eigen::VectorXf::Zero(channel_nbins_x);
 			    Eigen::MatrixXf channel_diag = collapsed_diag(channel_bins, channel_bins);
 
-                            for(int i = 0; i < channel_nbins_x; i++){
-			        for(int j = channel_nbins_y*i; j < channel_nbins_y*(i+1); j++){
+                            for(int i = 0; i < (int)channel_nbins_x; i++){
+			        for(int j = (int)channel_nbins_y*i; j < (int)channel_nbins_y*(i+1); j++){
 				    diag1d(i) += channel_diag(j, j);
-			            for(int k = channel_nbins_y*i; k < channel_nbins_y*(i+1); k++){
+			            for(int k = (int)channel_nbins_y*i; k < (int)channel_nbins_y*(i+1); k++){
 			                VarVec(i) += channel_cov(j, k);
 			            }
 			        }
@@ -1698,7 +1691,7 @@ namespace PROfit{
 
         // adding 1e-6 to diagonal entries that are zero, to make the matrix invertible when there are zero-uncertainty bins
         // logging a warning in each of these cases.
-        for (size_t i = 0; i < collapsed_diag.rows(); ++i) {
+        for (Eigen::Index i = 0; i < collapsed_diag.rows(); ++i) {
             if (collapsed_diag(i,i) == 0) {
                 log<LOG_WARNING>(L"%1% || WARNING: collapsed_diag(i,i) is zero for bin %2%! Adding 1e-6 to make the matrix invertible.")
                     % __func__ % i;
@@ -1826,10 +1819,10 @@ namespace PROfit{
                                     Eigen::MatrixXf rat_full_cov = rat_diag * rat_frac_cov * rat_diag;
                                     Eigen::VectorXf VarVec = Eigen::VectorXf::Zero(channel_nbins_x);
                                     Eigen::VectorXf diag1d = Eigen::VectorXf::Zero(channel_nbins_x);
-                                    for(int i = 0; i < channel_nbins_x; i++){
-                                        for(int j = channel_nbins_y*i; j < channel_nbins_y*(i+1); j++){
+                                    for(int i = 0; i < (int)channel_nbins_x; i++){
+                                        for(int j = (int)channel_nbins_y*i; j < (int)channel_nbins_y*(i+1); j++){
                                             diag1d(i) += rat_diag(j, j);
-                                            for(int k = channel_nbins_y*i; k < channel_nbins_y*(i+1); k++){
+                                            for(int k = (int)channel_nbins_y*i; k < (int)channel_nbins_y*(i+1); k++){
                                                 VarVec(i) += rat_full_cov(j, k);
                                             }
                                         }

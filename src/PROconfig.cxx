@@ -841,7 +841,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                     log<LOG_ERROR>(L"%1% || ERROR: Need at least 1 variable passed in. You passed zero ") % __func__;
                     log<LOG_ERROR>(L"Terminating.");
                     exit(EXIT_FAILURE);
-                }else if(nvar!=m_num_variables){
+                }else if((size_t)nvar!=m_num_variables){
                     log<LOG_ERROR>(L"%1% || ERROR: The number of variables in this MCFile %2%, is not the same as n_num_variables in bookeeping of XML %3%. ") % __func__ % nvar % m_num_variables;
                     log<LOG_ERROR>(L"%1% || ERROR: They need to be the same for now, Sorry. ") % __func__;
                     log<LOG_ERROR>(L"Terminating.");
@@ -1198,6 +1198,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                     log<LOG_INFO>(L"%1% || Systematic '%2%' matches a DetVar variation; skipping weight-branch allowlist.") % __func__ % wt.c_str();
                 }
                 if(prior) m_mcgen_variation_prior[wt] = std::strtof(prior, NULL);
+                if(center) m_mcgen_variation_prior_centers[wt] = std::strtof(center, NULL);
                 if(filename) m_mcgen_variation_external_filename_map[wt] = filename;
                 m_mcgen_variation_plotname_map[wt] = plot_name ? plot_name : wt;
                 if(variation_type && (strcmp(variation_type, "hist1d") == 0 || strcmp(variation_type, "hist2d") == 0)) {

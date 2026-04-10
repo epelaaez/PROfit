@@ -81,7 +81,7 @@ void fc_worker(fc_args args, MultiPROgressBar &progress) {
             std::vector<Eigen::VectorXf> seed_points = {cached_seed_syst, cached_seed_osc};
             metric->setBounds(lb_osc,ub_osc);
             chi2_osc = fitter_osc.Fit(*metric, seed_points); 
-            int nminima = fitter_osc.calcFreqSeedPoints(*metric);
+            fitter_osc.calcFreqSeedPoints(*metric);
             for(size_t i=0; i< fitter_osc.freq_seed_points.size(); i++){
                 float chi_freq = fitter_osc.freq_seed_values.at(i);
                 if(chi_freq<chi2_osc){

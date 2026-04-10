@@ -141,7 +141,7 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
             % __func__ % value % covar_portion % pull % delta % CollapseMatrix(config, result.Spec())
             % data.Spec();
         // collapsed_stat_covariance, print diagonal
-        for (size_t i = 0; i < collapsed_stat_covariance.cols(); ++i) {
+        for (Eigen::Index i = 0; i < collapsed_stat_covariance.cols(); ++i) {
             log<LOG_ERROR>(L"%1% || ERROR: collapsed_stat_covariance(%2%) = %3%") % __func__ % i % collapsed_stat_covariance(i,i);
         }
         throw std::runtime_error("NANs in Chi().");
@@ -350,7 +350,7 @@ float PROchi::getSingleChannelChi(size_t global_channel_index, const PROspec & c
     return value;
 }
 
-void PROchi::print(const Eigen::VectorXf &param){
+void PROchi::print([[maybe_unused]] const Eigen::VectorXf &param){
 
 
 return;

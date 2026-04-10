@@ -888,7 +888,7 @@ int main(int argc, char* argv[])
                 global_ub(i) = variable_systs[config.i_prime].spline_hi[i-N_phys_params];
 
     }
-    if( (fixed_params.size()!=std::accumulate(global_fixed.begin(), global_fixed.end(), 0)) && !systs_only ){
+    if( (fixed_params.size()!=std::accumulate(global_fixed.begin(), global_fixed.end(), (size_t)0)) && !systs_only ){
             log<LOG_ERROR>(L"%1% || ERROR. The fixed parameters you passed, check they exist? the number of fixed params is not the same as input params.") % __func__;
             log<LOG_ERROR>(L"%1% || ERROR. fixed_params %2% ") % __func__ % fixed_params;
             log<LOG_ERROR>(L"%1% || ERROR. global_fixed %2% : sum %3% ") % __func__ % global_fixed % ((int)std::accumulate(global_fixed.begin(), global_fixed.end(), 0)) ;
@@ -1401,7 +1401,8 @@ int main(int argc, char* argv[])
                     throwp(i+N_phys_params) = d(PROseed::global_rng);
                 for(size_t i = 0; i < config.m_num_variable_bins_total[config.i_prime]; i++)
                     throwC(i) = d(PROseed::global_rng);
-                PROspec shifted = FillSpectra(config, prop, metric->GetSysts(), metric->GetModel(), throwp, eventbyevent ? PROmetric::EventByEvent : PROmetric::BinnedChi2);
+                bool binned = (eventbyevent ? PROmetric::EventByEvent : PROmetric::BinnedChi2) != 0;
+                PROspec shifted = FillSpectra(config, prop, metric->GetSysts(), metric->GetModel(), throwp, binned);
                 PROspec newSpec = statonly_brazil ? PROspec::PoissonVariation(collapsed_cv, dseed(myseed.global_rng)) :
                     PROspec::PoissonVariation(PROspec(CollapseMatrix(config, shifted.Spec()) + L * throwC, CollapseMatrix(config, shifted.Error())), dseed(myseed.global_rng));
                 PROdata data(newSpec.Spec(), newSpec.Error());
@@ -2617,7 +2618,7 @@ int main(int argc, char* argv[])
             }
 
             log<LOG_INFO>(L"%1% || Test %2% Parameters:") % __func__ % (test + 1);
-            for(size_t i = 0; i < testParams.size(); ++i) {
+            for(Eigen::Index i = 0; i < testParams.size(); ++i) {
                 log<LOG_INFO>(L"%1% || Test %2% Parameter %3%: %4%") % __func__ % (test + 1) % i % testParams(i);
             }
             
@@ -2646,7 +2647,7 @@ int main(int argc, char* argv[])
         auto end = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double> duration = end - start;
         log<LOG_INFO>(L"%1% || PROtest took %2% seconds total, or %3% per call of FillSpectra; ") % __func__ % duration.count() % float(duration.count()/(double(N)));
-        //***************************** END *********************************
+        // *************************** END *********************************
     }
     */
 
@@ -2665,7 +2666,7 @@ int main(int argc, char* argv[])
         std::chrono::duration<double> duration = end - start;
         log<LOG_INFO>(L"%1% || PROtest took %2% sseconds total, or %3% per call of FillSPectra; ") % __func__ % duration.count() % float(duration.count()/(double(N)));
 
-        //***************************** END *********************************
+        // *************************** END *********************************
     }
     */
 

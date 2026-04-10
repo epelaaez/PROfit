@@ -309,7 +309,6 @@ std::vector<profOut> PROfile::PROfilePointHelper(const PROsyst *systs, const PRO
         //log<LOG_INFO>(L"%1% || PLONK which_spline %2% has testpt order %3% ") % __func__ %  which_spline % test_values;
         //and minimize
 
-        int cnt=0;
         Eigen::VectorXf cv_best_fit;
         float last_val = 0;
         for(auto &which_value: test_values){
@@ -344,7 +343,6 @@ std::vector<profOut> PROfile::PROfilePointHelper(const PROsyst *systs, const PRO
             log<LOG_INFO>(L"%1% || Fixed value of spline # %2% is value %3%, has a chi post of : %4% (i %5% nstep %6% ") % __func__ % which_spline % which_value % fx % i % nstep;
             log<LOG_INFO>(L"%1% || at a BF param value of @ %2%") % __func__ %  spec_string.c_str();
 
-            cnt++;
             last_val = which_value;
             if(fitconfig.progress_bar)progressbar.increment_bar(which_spline);
 
@@ -537,7 +535,7 @@ std::vector<surfOut> PROsurf::FillCurve(const PROfitterConfig &fitconfig, PROsee
 }
 
 
-void PROsurf::PlotCurve(const PROconfig &config, const PROmodel &model, const PROsyst &syst, const std::vector<surfOut> & cpoints, std::string final_output_tag, bool logx, bool logy, size_t xaxis_idx,size_t yaxis_idx, std::vector<float> &A, std::vector<float> &B, size_t n_points){
+void PROsurf::PlotCurve(const PROconfig &config, const PROmodel &model, const PROsyst &syst, const std::vector<surfOut> & cpoints, std::string final_output_tag, bool logx, bool logy, size_t xaxis_idx,size_t yaxis_idx, std::vector<float> &A, std::vector<float> &B, [[maybe_unused]] size_t n_points){
 
     std::vector<float> binedges_x, binedges_y;
     // Edges are stored in model's native space (log if is_log10, linear otherwise)
@@ -703,7 +701,7 @@ std::vector<float> findMinAndBounds(TGraph *g, float val, float lo, float hi) {
 }
 
 
-PROfile::PROfile(const PROconfig &config, const PROsyst &systs, const PROmodel &model, PROmetric &metric, PROseed &proseed, const PROfitterConfig &fitconfig, std::string filename, float minchi, bool with_osc, int nThreads, const std::vector<Eigen::VectorXf> &seed_points, const Eigen::VectorXf & true_params) : metric(metric) {
+PROfile::PROfile(const PROconfig &config, const PROsyst &systs, const PROmodel &model, PROmetric &metric, PROseed &proseed, const PROfitterConfig &fitconfig, [[maybe_unused]] std::string filename, float minchi, bool with_osc, int nThreads, const std::vector<Eigen::VectorXf> &seed_points, [[maybe_unused]] const Eigen::VectorXf & true_params) : metric(metric) {
     LBFGSpp::LBFGSBSolver<float> solver(fitconfig.param);
     int nparams = systs.GetNSplines() + model.nparams*with_osc;
     std::vector<float> physics_params; 
@@ -790,11 +788,9 @@ PROfile::PROfile(const PROconfig &config, const PROsyst &systs, const PROmodel &
         for(size_t u=0; u< out.knob_vals.size(); u++){
             if(out.knob_chis.at(u)<0){
                 float chidiff = fabs(out.knob_chis.at(u));
-                float bfnorm = seed_points.size() ? seed_points.front().norm() : 1;
                 float bfnorm_without_phys = seed_points.size() ? seed_points.front().tail(seed_points.front().size() - model.nparams).norm() : 1;
 
                 Eigen::VectorXf param_diff = seed_points.size() ? out.knob_bfs.at(u)-seed_points.front() : out.knob_bfs.at(u);
-                float norm = param_diff.norm();
                 float norm_without_phys = param_diff.tail(param_diff.size() - model.nparams).norm();
 
                 float relative_tol1 = 1e-3;
@@ -873,7 +869,7 @@ PROfile::PROfile(const PROconfig &config, const PROsyst &systs, const PROmodel &
 
 }
 
-void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel &model, PROmetric &metric, PROseed &proseed, std::string filename, bool with_osc, const Eigen::VectorXf& init_seed, const Eigen::VectorXf & true_params, bool mask_osc) {
+void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel &model, [[maybe_unused]] PROmetric &metric, [[maybe_unused]] PROseed &proseed, std::string filename, bool with_osc, const Eigen::VectorXf& init_seed, const Eigen::VectorXf & true_params, bool mask_osc) {
 
     int nparams = systs.GetNSplines() + model.nparams*with_osc;
     int nBins = nparams;
@@ -1364,7 +1360,7 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
     };
 
     for (int i = 0; i < nBins; ++i) {
-        if(mask_osc && i < model.nparams) continue;
+        if(mask_osc && i < (int)model.nparams) continue;
         // In syst-only mode, init_seed/true_params are full-size but plot indices are spline-only
         int vec_idx = with_osc ? i : (i + model.nparams);
         float x_center = i + 0.5;

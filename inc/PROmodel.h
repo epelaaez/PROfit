@@ -564,8 +564,6 @@ public:
         float Ue4sq = maybe_convert_log("Ue4^2", phys(1));
         float Um4sq = maybe_convert_log("Um4^2", phys(2));
 
-        float freq = 1.266932679f * dmsq;
-
         Eigen::MatrixXf probs(le_arr.size(), model_functions.size());
 
         for(size_t i = 0; i < le_arr.size(); ++i) {
@@ -642,8 +640,8 @@ public:
         default_val << -2, -8, -8;
     };
 
-    int UnitarityConstraint(const Eigen::VectorXf &v){
-        return   1;      
+    int UnitarityConstraint(const Eigen::VectorXf &){
+        return   1;
     }
 
     float Pmue(float dmsq, float sinsq2th14, float sinsqth24, float le) const{
@@ -751,7 +749,7 @@ public:
         ivar = parameter_map.at("L/E");
 
         //constraints
-        model_constraint = [this](const Eigen::VectorXf &v){return 1;};
+        model_constraint = [](const Eigen::VectorXf &){return 1;};
 
 
          size_t nvar = prop.variable_mc_stat_err.size();
@@ -785,7 +783,7 @@ public:
         default_val << -2, -8, -8;
     };
 
-    int UnitarityConstraint(const Eigen::VectorXf &v){
+    int UnitarityConstraint(const Eigen::VectorXf &){
         return   1;
     }
 
@@ -1009,7 +1007,7 @@ public:
     // ---------------------------------------------
     // νμ → νμ disappearance
     // ---------------------------------------------
-    float Pmumu(float dmsq, float sinsq2thmumu, float sinsqth24prime, float le) const {
+    float Pmumu(float dmsq, float sinsq2thmumu, [[maybe_unused]] float sinsqth24prime, float le) const {
         dmsq   = std::pow(10.0f, dmsq);
         sinsq2thmumu = std::pow(10.0f, sinsq2thmumu);
 
@@ -1037,7 +1035,7 @@ public:
         sinsq2thmumu = std::pow(10.0f, sinsq2thmumu);
 
         float sinterm = std::sin(1.266932679f * dmsq * le);
-        float prob    = sB*sinsq2thmumu;
+        float prob    = sB*sinsq2thmumu * sinterm * sinterm;
 
         if (prob < 0.0f || prob > 1.0f) {
             log<LOG_ERROR>(

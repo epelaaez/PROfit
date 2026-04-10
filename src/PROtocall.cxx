@@ -102,7 +102,7 @@ namespace PROfit{
                         int local_channel_index2 = ic;
                         int local_subchannel_index = sc;
 
-                        log<LOG_INFO>(L"%1% || im:id %2%:%3%  %4%  || local_channel_index (%5%,%6%,%7%) global_channel_index (%8%) || local_subchannel_index %9% global (%10%)") % __func__ % im % id % temp_name.c_str() %  local_channel_index1 % local_channel_index2 % local_channel_index3 % global_channel_index % sc % global_subchannel_index1 ;
+                        log<LOG_INFO>(L"%1% || im:id %2%:%3%  %4%  || local_channel_index (%5%,%6%,%7%) global_channel_index (%8%) || local_subchannel_index %9% global (%10%)") % __func__ % im % id % temp_name.c_str() %  local_channel_index1 % local_channel_index2 % local_channel_index3 % global_channel_index % local_subchannel_index % global_subchannel_index1 ;
 
                         for(size_t io = 0; io < inconfig.m_num_variables; ++io) {
 
@@ -124,7 +124,7 @@ namespace PROfit{
     
     Eigen::MatrixXf ComputeSquareRootCovariance(
             const Eigen::MatrixXf& covariance,
-            bool use_ldlt,  float svd_tol  ) {
+            bool use_ldlt,  [[maybe_unused]] float svd_tol  ) {
 
         if (use_ldlt) {
             // --- LDLT decomposition (faster for symmetric matrices) ---
@@ -143,7 +143,6 @@ namespace PROfit{
         Eigen::JacobiSVD<Eigen::MatrixXf> svd(covariance, Eigen::ComputeThinU | Eigen::ComputeThinV);
         const auto& U = svd.matrixU();
         const auto& S = svd.singularValues();
-        int size = covariance.rows();
         Eigen::VectorXf S_sqrt = S.array().sqrt();
 
         //float tol = 1e-8f * S.maxCoeff(); // Some cutoff? is this value impactful on out matricies? need to test

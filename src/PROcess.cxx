@@ -100,7 +100,7 @@ namespace PROfit {
             //auto start_le = std::chrono::high_resolution_clock::now();
             
             std::vector<float> le_arr;
-            for(long int i = 0; i < inconfig.m_num_variable_bins_total[inmodel.ivar]; ++i) {
+            for(size_t i = 0; i < inconfig.m_num_variable_bins_total[inmodel.ivar]; ++i) {
                 le_arr.push_back(inprop.variable_midbin[inmodel.ivar][i]);
             }
 
@@ -206,9 +206,6 @@ namespace PROfit {
 
                 //Put name for ICARUS study here. How to handle more generically?
                 if (name == "nu_ICARUS_numu_numucc") {
-                    int ipmom = 2;
-                    int ipcosth = 3;
-
                     float pmom = 2;//static_cast<float>(inprop.pmom[i]);
                     float pcosth = 3;// static_cast<float>(inprop.pcosth[i]);
                     for (size_t j = 0; j<inweighthists.size(); ++j){
@@ -351,7 +348,6 @@ namespace PROfit {
         static std::mt19937 rng{seed};
         std::normal_distribution<float> d(insyst.spline_centers(spline), insyst.spline_priors(spline));
         float spline_throw = d(rng);
-        int binning = insyst.spline_binnings[spline];
         Eigen::VectorXf params = cvparams;
         params(spline+model.nparams) = spline_throw;
 

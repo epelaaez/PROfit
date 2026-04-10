@@ -442,7 +442,7 @@ int PROfitter::calcFreqSeedPoints(PROmetric &metric) {
 
         if(fitconfig.harmonic_scan_fit){
             try{
-                int niter = solver.minimize(metric, local_candidate, fx, temp_lb, temp_ub);
+                solver.minimize(metric, local_candidate, fx, temp_lb, temp_ub);
             } catch (const std::exception &except) {
                 std::string msg = except.what();
                 exception_string_map[msg]++;
@@ -466,7 +466,7 @@ int PROfitter::calcFreqSeedPoints(PROmetric &metric) {
     //First with DM minima fixed to get BF of pull terms, then fully free to optimize the mass splitting to high precisin
 
 
-    for(int p=0;p<minima.size();p++){
+    for(size_t p=0;p<minima.size();p++){
         log<LOG_INFO>(L"%1% || ##################  ") %__func__;
 
         for(size_t i = 0; i < nphys; ++i) {
@@ -491,7 +491,7 @@ int PROfitter::calcFreqSeedPoints(PROmetric &metric) {
         float fx;
         LBFGSpp::LBFGSBSolver<float> solver(fitconfig.param);
         try{
-            int niter = solver.minimize(metric, test_minima, fx, lb, ub);
+            solver.minimize(metric, test_minima, fx, lb, ub);
         } catch (const std::exception &except) {
             std::string msg = except.what();
             exception_string_map[msg]++;
@@ -506,7 +506,7 @@ int PROfitter::calcFreqSeedPoints(PROmetric &metric) {
         metric.setBounds(lb,ub);
 
         try{
-            int niter = solver.minimize(metric, test_minima, fx, lb, ub);
+            solver.minimize(metric, test_minima, fx, lb, ub);
         } catch (const std::exception &except) {
             std::string msg = except.what();
             exception_string_map[msg]++;
