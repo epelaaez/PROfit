@@ -644,8 +644,10 @@ namespace PROfit {
         log<LOG_INFO>(L"%1% || Start reading the files..") % __func__;
         for(int fid=0; fid < num_files; ++fid) {
             const auto& fn = inconfig.m_mcgen_file_name.at(fid);
-            long int nevents = std::min(inconfig.m_mcgen_maxevents[fid], nentries[fid]);
-            log<LOG_DEBUG>(L"%1% || Start @files: %2% which has %3% events") % __func__ % fn.c_str() % nevents;
+            long int nevents = std::min(inconfig.m_mcgen_maxevents[fid], (long int)(nentries[fid] * inconfig.m_mcgen_partial_load_frac[fid]));
+            log<LOG_DEBUG>(L"%1% || Start @files: %2% which has %3% total events, loading fraction %4% (%5% events)") % __func__ % fn.c_str() % nentries[fid] % inconfig.m_mcgen_partial_load_frac[fid] % nevents;
+            if(inconfig.m_mcgen_partial_load_frac[fid] != 1.0)
+                log<LOG_INFO>(L"%1% || File %2% -- loading %3%%% of events (%4% / %5%)") % __func__ % fid % (inconfig.m_mcgen_partial_load_frac[fid] * 100) % nevents % nentries[fid];
 
 
             // set up systematic weight formula
@@ -770,7 +772,7 @@ namespace PROfit {
                 //branch loop
                 for(int ib = 0; ib != num_branch; ++ib) {
                     const size_t prop_size_before = inprop.NEvent();
-                    process_cafana_event(inconfig, branches[ib], f_event_weights[fid][0], inconfig.m_mcgen_pot[fid], subchannel_index[ib], syst_vector, sys_weight_value, inprop);
+                    process_cafana_event(inconfig, branches[ib], f_event_weights[fid][0], inconfig.m_mcgen_pot[fid] * inconfig.m_mcgen_partial_load_frac[fid], subchannel_index[ib], syst_vector, sys_weight_value, inprop);
                     // Store matching vars only if process_cafana_event actually added an entry
                     // (it skips zero-weight events without pushing to added_weights).
                     if(has_matching_vars && inprop.NEvent() > prop_size_before) {
@@ -916,6 +918,7 @@ namespace PROfit {
                     pot_scale[fid] = spec_pot/inconfig.m_mcgen_pot.at(fid);
                 }
                 pot_scale[fid] *= inconfig.m_mcgen_scale[fid];
+                pot_scale[fid] /= inconfig.m_mcgen_partial_load_frac[fid];
                 log<LOG_INFO>(L"%1% || Branch POT: %2%, additional scale: %3%") % __func__ %  inconfig.m_mcgen_pot.at(fid) % inconfig.m_mcgen_scale[fid];
                 log<LOG_INFO>(L"%1% || POT scale factor: %2%") % __func__ %  pot_scale[fid];
 
@@ -968,8 +971,10 @@ namespace PROfit {
         log<LOG_INFO>(L"%1% || Start reading the files..") % __func__;
         for(int fid=0; fid < num_files; ++fid) {
             const auto& fn = inconfig.m_mcgen_file_name.at(fid);
-            long int nevents = std::min(inconfig.m_mcgen_maxevents[fid], nentries[fid]);
-            log<LOG_DEBUG>(L"%1% || Start @files: %2% which has %3% events") % __func__ % fn.c_str() % nevents;
+            long int nevents = std::min(inconfig.m_mcgen_maxevents[fid], (long int)(nentries[fid] * inconfig.m_mcgen_partial_load_frac[fid]));
+            log<LOG_DEBUG>(L"%1% || Start @files: %2% which has %3% total events, loading fraction %4% (%5% events)") % __func__ % fn.c_str() % nentries[fid] % inconfig.m_mcgen_partial_load_frac[fid] % nevents;
+            if(inconfig.m_mcgen_partial_load_frac[fid] != 1.0)
+                log<LOG_INFO>(L"%1% || File %2% -- loading %3%%% of events (%4% / %5%)") % __func__ % fid % (inconfig.m_mcgen_partial_load_frac[fid] * 100) % nevents % nentries[fid];
 
             // grab the subchannel index
             int num_branch = inconfig.m_branch_variables[fid].size();
