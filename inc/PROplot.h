@@ -131,6 +131,7 @@ namespace PROfit{
         return a = a & b;
     }
 
+    void set_matrix_palette();
 
     void plot_detector_ratios(const PROconfig &config, std::vector<TH1D> data_hists,  std::vector<TH1D> cv_hists, std::optional<PROerrorbar> errband, std::vector<TH1D> bf_hists, std::optional<PROerrorbar> posterrband, TH2D &pre_corr, TH2D &post_corr, std::string filename, int var_index = 0);
 
@@ -164,10 +165,10 @@ namespace PROfit{
             Eigen::VectorXf splines_bf = best_fit.segment(nphys, nspline);
             post_covar = Eigen::MatrixXf::Constant(nspline, nspline, 0);
 	    Eigen::MatrixXf post_hist_covar = Eigen::MatrixXf::Constant(cv_coll.size(), cv_coll.size(), 0);
-            size_t accepted = 0;
+            size_t nsteps = 0;
             std::vector<Eigen::VectorXf> specs;
             const auto action = [&](const Eigen::VectorXf &value) {
-                accepted += 1;
+                nsteps += 1;
                 for(size_t i = 0; i < config.m_num_variable_bins_total_collapsed[var_index]; ++i)
                     throws(i) = nd(PROseed::global_rng);
                 specs.push_back(CollapseMatrix(config, FillSpectra(config, prop, metric.GetSysts(), metric.GetModel(), value, true,var_index).Spec())+L*throws);
@@ -178,15 +179,11 @@ namespace PROfit{
                 Eigen::VectorXf diff_hist = specs.back() - cv_coll;
                 post_covar += diff * diff.transpose();
                 post_hist_covar += diff_hist * diff_hist.transpose();
-                bool print_autocorrelation_values = false;
-                if(print_autocorrelation_values){
-                    log<LOG_INFO>(L"%1% || AUTO  %2% : %3%") % __func__ % accepted % value;
-                }
             };
             met.run(burnin, iterations, action);
-            post_hist_covar /= accepted;
-            post_covar /= accepted;
-            log<LOG_INFO>(L"%1% || Acceptance rate %2%") % __func__ % ((float)accepted / iterations);
+            post_hist_covar /= nsteps;
+            post_covar /= nsteps;
+            log<LOG_INFO>(L"%1% || Acceptance rate %2%") % __func__ % ((float)met.naccept / iterations);
 
             cv = CollapseMatrix(config, cv);
 

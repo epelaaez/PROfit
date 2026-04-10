@@ -3,16 +3,22 @@
 
 #include "PROmetric.h"
 #include <Eigen/Eigen>
-#include <Eigen/src/Cholesky/LLT.h>
-#include <Eigen/src/Core/Matrix.h>
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <numeric>
 #include <random>
 #include <optional>
+
+#include "TStyle.h"
+#include "TVirtualFFT.h"
+
 namespace PROfit {
 
+    // In PROplot.h, but I get a weird error when I include here because of recursive inclusion
+    // Not sure why, that should be taken care of by include guards.
+    void set_matrix_palette();
         
     template<class Target_FN, class Proposal_FN>
         class Metropolis {
@@ -20,15 +26,19 @@ namespace PROfit {
                 std::mt19937 rng;
                 std::uniform_real_distribution<float> uniform;
                 uint32_t seed;
+                bool save_chain;
 
             public:
                 Target_FN target;
                 Proposal_FN proposal;
                 Eigen::VectorXf current;
+                std::vector<Eigen::VectorXf> chain;
+                size_t naccept;
 
-                Metropolis(Target_FN target, Proposal_FN proposal, const Eigen::VectorXf &initial, uint32_t seed) 
-                    : seed(seed), target(target), proposal(proposal), current(initial) {
+                Metropolis(Target_FN target, Proposal_FN proposal, const Eigen::VectorXf &initial, uint32_t seed, bool save_chain = true) 
+                    : seed(seed), target(target), proposal(proposal), current(initial), save_chain(save_chain) {
                         rng.seed(seed);
+                        naccept = 0;
                     }
 
                 bool step() {
@@ -40,6 +50,7 @@ namespace PROfit {
                     if(u <= acceptance) {
                         //                      log<LOG_DEBUG>(L"%1% || APPROVED acc %2%, rng %3% and proposal: %4%  ") % __func__ % acceptance % u %p;
                         current = p;
+                        naccept += 1;
                         return true;
                     }else{
                         //                      log<LOG_DEBUG>(L"%1% || REJECTED acc %2%, rng %3% and proposal: %4%  ") % __func__ % acceptance % u %p;
@@ -58,8 +69,114 @@ namespace PROfit {
                     proposal.tune_mode = false; 
                     for(size_t i = 0; i < steps; i++) {
                         step();
+                        if(save_chain) chain.push_back(current);
                         if(action) (*action)(current);
                     }
+                }
+
+                void plot_autocorrelation(const std::string &filename, const std::vector<std::string> &param_names, size_t max_lag = 1000) const {
+                    if(chain.size() == 0) {
+                        log<LOG_ERROR>(L"%1% || Error: cannot calculate autocorrelation without a saved chain."
+                                       L" Did you forget to run the Metropolis object, or tell the Metropolis"
+                                       L" object to not save the chain?")
+                            % __func__;
+                        log<LOG_ERROR>(L"%1% || Not saving autocorrelations as a result.");
+                        return;
+                    }
+                    long nparam = chain[0].size();
+                    if(param_names.size() < (size_t)nparam) {
+                        log<LOG_ERROR>(L"%1% || Passed in parameter names is not the same size (%2%) "
+                                       L"as the number of parameters in each step of the chain (%3%).")
+                            % __func__ % param_names.size() % nparam;
+                        log<LOG_ERROR>(L"%1% || Not saving autocorrelations as a result.");
+                        return;
+                    }
+                    std::vector<std::pair<TH1D*,TH1D*>> hs;
+                    TH1D zero("z","",max_lag, 0, max_lag);
+                    for(size_t i = 1; i <= max_lag; ++i) zero.SetBinContent(i, 0);
+                    zero.SetLineStyle(kDashed);
+                    TCanvas c;
+                    c.Divide(2);
+                    c.Print((filename + "[").c_str());
+                    for(long i = 0; i < nparam; ++i) {
+                        hs.emplace_back(new TH1D(("hautoc"+std::to_string(i)).c_str(), (param_names[i]+";lag;abs(autocorrelation)").c_str(), max_lag, 0, max_lag), new TH1D(("h2autoc"+std::to_string(i)).c_str(), (param_names[i]+";lag;autocorrelation").c_str(), max_lag, 0, max_lag));
+                        int n = chain.size();
+                        std::vector<double> values;
+                        values.reserve(n);
+                        float mean = 0;
+                        for(const auto &step : chain) {
+                            values.push_back(step(i));
+                            mean += step(i);
+                        }
+                        mean /= n;
+                        for(double &v : values) v -= mean;
+                        TVirtualFFT *fft = TVirtualFFT::FFT(1, &n, "R2C");
+                        fft->SetPoints(values.data());
+                        fft->Transform();
+                        std::vector<double> fft_pts;
+                        std::vector<double> ims(n, 0); // Dummy vector to hold imag value of 0 for each point.
+                        for(int k = 0; k < n; ++k) {
+                            double re, im;
+                            fft->GetPointComplex(k, re, im);
+                            fft_pts.push_back(re*re+im*im);
+                        }
+                        TVirtualFFT *ifft = TVirtualFFT::FFT(1, &n, "C2R");
+                        ifft->SetPointsComplex(fft_pts.data(), ims.data());
+                        ifft->Transform();
+                        double lag0, klag;
+                        lag0 = ifft->GetPointReal(0);
+                        for(int k = 0; k < n && k < max_lag; ++k) {
+                            klag = ifft->GetPointReal(k);
+                            hs.back().first->SetBinContent(k+1, std::abs(klag/lag0));
+                            hs.back().second->SetBinContent(k+1, klag/lag0);
+                        }
+                        log<LOG_INFO>(L"%1% || Lag %2% autocorrelation for parameter %3% is %4%.")
+                            % __func__ % std::min(max_lag, (size_t)n) % param_names[i].c_str() % (klag/lag0);
+                        c.cd(1);
+                        gPad->SetLogy(1);
+                        hs.back().first->Draw("l");
+                        c.cd(2);
+                        gPad->SetLogy(0);
+                        hs.back().second->Draw("l");
+                        zero.Draw("l same");
+                        c.Print(filename.c_str());
+                    }
+                    c.Clear();
+                    gStyle->SetPalette(kCool);
+                    TLegend leg(0.3, 0.6, 0.89, 0.89);
+                    leg.SetNColumns(2);
+                    leg.SetFillStyle(0);
+                    leg.SetLineWidth(0);
+                    int i = 0;
+                    for(auto [h, _] : hs) {
+                        gPad->SetLogy(1);
+                        h->SetTitle(";lag;abs(autocorrelation)");
+                        h->SetMinimum(1e-5);
+                        h->Draw("plclsame");
+                        leg.AddEntry(h, param_names[i++].c_str(), "l");
+                    }
+                    leg.Draw("same");
+                    c.Print(filename.c_str());
+                    gPad->SetLogy(0);
+                    i = 0;
+                    TLegend leg2(0.3, 0.6, 0.89, 0.89);
+                    leg2.SetNColumns(2);
+                    leg2.SetFillStyle(0);
+                    leg2.SetLineWidth(0);
+                    zero.SetTitle(";lag;autocorrelation");
+                    zero.SetMinimum(-0.07);
+                    zero.SetMaximum(1.05);
+                    zero.Draw("l");
+                    for(auto [_, h] : hs) {
+                        gPad->SetLogy(0);
+                        h->SetTitle(";lag;autocorrelation");
+                        h->Draw("plclsame");
+                        leg2.AddEntry(h, param_names[i++].c_str(), "l");
+                    }
+                    leg2.Draw("same");
+                    c.Print(filename.c_str());
+                    c.Print((filename + "]").c_str());
+                    set_matrix_palette();
                 }
 
         };

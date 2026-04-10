@@ -143,7 +143,7 @@ std::wostream *OSTREAM = &wcout;
 std::wofstream LOG_FILE_STREAM;
 bool LOGGING_TO_FILE = false;
 
-void mcmc_worker(std::vector<std::vector<Eigen::VectorXf>> &chains, Eigen::VectorXf initial, PROmetric *metric, uint32_t seed, size_t nchains, size_t burnin, size_t steps);
+void mcmc_worker(std::vector<Metropolis<simple_target, adaptive_proposal>> &mets, Eigen::VectorXf initial, PROmetric *metric, uint32_t seed, size_t nchains, size_t burnin, size_t steps);
 
 int main(int argc, char* argv[])
 {
@@ -313,6 +313,7 @@ int main(int argc, char* argv[])
     proglobal_command->configurable(true);
     profc_command->configurable(true);
     proplot_command->configurable(true);
+    promcmc_command->configurable(true);
 
     //Parse inputs. 
     CLI11_PARSE(app, argc, argv);
@@ -910,30 +911,8 @@ int main(int argc, char* argv[])
         abort();
     }
 
-
-
-    //Covariance colors, move this eslewher
-    const Int_t NCont = 255;
-    const Int_t NRGBs = 9;  // Reduced control points for smoother white stretch
-    Double_t stops[NRGBs] = {
-        0.0,    // -1.0 (dark blue)
-        0.075,    // -0.6 (transition to white)
-        0.3,    // -0.2 (mostly white)
-        0.4,   // -0.04 (almost pure white)
-        0.5,    //  0.0 (pure white)
-        0.6,   // +0.04 (almost pure white)
-        0.7,    // +0.2 (transition to red)
-        0.925,    // +0.6 (strong red)
-        1.0     // +1.0 (dark red)
-    };
-
-    Double_t red[NRGBs]   = {0.00,0.259,0.824, 0.949, 1.0, 0.988, 0.980, 0.918,0.839};
-    Double_t green[NRGBs] = {0.341,0.404,0.890, 0.961, 1.0, 0.933, 0.824, 0.263,0.125};
-    Double_t blue[NRGBs]  = {0.906,0.824,0.989, 0.980, 1.0, 0.929, 0.812, 0.208,0.024};
-
-    TColor::CreateGradientColorTable(NRGBs, stops, red, green, blue, NCont);
-    gStyle->SetNumberContours(NCont);
-
+    // Set color palette for covar and correlation matrices
+    set_matrix_palette();
 
     Eigen::VectorXf global_fit_result, global_fit_result_surf;
     float global_fit_chi2 = -1, global_fit_chi2_surf = -1;
@@ -1039,10 +1018,12 @@ int main(int argc, char* argv[])
         TH2D covhist("ch", "", N_params, 0, N_params, N_params, 0, N_params);
         TH2D physhist;
         if(N_phys_params > 0) physhist = TH2D("ph","", N_params, 0, N_params, N_phys_params, 0, N_phys_params);
+        std::vector<std::string> param_names;
         for(size_t i = 0; i < N_params; ++i) {
             std::string label = i < N_phys_params 
                 ? metric->GetModel().pretty_param_names[i]
                 : config.m_mcgen_variation_plotname_map[metric->GetSysts().spline_names[i-N_phys_params]].c_str();
+            param_names.push_back(label);
             covhist.GetXaxis()->SetBinLabel(i+1, label.c_str());
             covhist.GetYaxis()->SetBinLabel(i+1, label.c_str());
             fraccovhist.GetXaxis()->SetBinLabel(i+1, label.c_str());
@@ -1083,9 +1064,10 @@ int main(int argc, char* argv[])
         c1.Print((final_output_tag+"_postfit_correlation_matrix.pdf").c_str());
         if(N_phys_params > 0) {
             physhist.Draw("colz");
-            c1.Print("phys_cov.pdf");
+            //c1.Print("phys_cov.pdf");
         }
-        log<LOG_INFO>(L"%1% || MCMC acceptance is  %2%. ") % __func__% ((double)count /fitConfig.MCMCiter);
+        log<LOG_INFO>(L"%1% || MCMC acceptance is  %2%. ") % __func__% ((double)mh.naccept /fitConfig.MCMCiter);
+        mh.plot_autocorrelation(final_output_tag+"_PROfile_corrmat_mcmc_autocorraltion.pdf", param_names);
 
         std::string hname = "#chi^{2}/ndf = " + to_string(best_chi2) + "/" + to_string(config.m_num_variable_bins_total_collapsed[config.i_prime]);
         PROspec cv = FillSpectra(config, prop, metric->GetSysts(), metric->GetModel(), CVParams , true,config.i_prime);
@@ -2407,10 +2389,12 @@ int main(int argc, char* argv[])
         TH2D covhist("ch", "", N_params, 0, N_params, N_params, 0, N_params);
         TH2D physhist;
         if(N_phys_params > 0) physhist = TH2D("ph","", N_params, 0, N_params, N_phys_params, 0, N_phys_params);
+        std::vector<std::string> param_names;
         for(size_t i = 0; i < N_params; ++i) {
             std::string label = i < N_phys_params 
                 ? metric->GetModel().pretty_param_names[i]
                 : config.m_mcgen_variation_plotname_map[metric->GetSysts().spline_names[i-N_phys_params]].c_str();
+            param_names.push_back(label);
             covhist.GetXaxis()->SetBinLabel(i+1, label.c_str());
             covhist.GetYaxis()->SetBinLabel(i+1, label.c_str());
             fraccovhist.GetXaxis()->SetBinLabel(i+1, label.c_str());
@@ -2447,9 +2431,11 @@ int main(int argc, char* argv[])
         c1.Print((final_output_tag+"_postfit_correlation_matrix.pdf").c_str());
         if(N_phys_params > 0) {
             physhist.Draw("colz");
-            c1.Print("phys_cov.pdf");
+            //c1.Print("phys_cov.pdf");
         }
-        log<LOG_INFO>(L"%1% || MCMC acceptance is  %2%. ") % __func__% ((double)count /fitConfig.MCMCiter);
+        log<LOG_INFO>(L"%1% || MCMC acceptance is  %2%. ") % __func__% ((double)mh.naccept /fitConfig.MCMCiter);
+
+        mh.plot_autocorrelation(final_output_tag+"_PROglobal_corrmat_mcmc_autocorraltion.pdf", param_names);
 
         std::string hname = "#chi^{2}/ndf = " + to_string(best_chi2) + "/" + to_string(config.m_num_variable_bins_total_collapsed[config.i_prime]);
         PROspec cv = FillSpectra(config, prop, metric->GetSysts(), metric->GetModel(), CVParams , true,config.i_prime);
@@ -2519,16 +2505,16 @@ int main(int argc, char* argv[])
         for(size_t i = 0; i < samples.size(); ++i)
             samples_eigen.push_back(Eigen::VectorXf::Map(samples[i].data(), samples[i].size()));
         size_t mcmc_threads = mcmc_chains >= nthread ? nthread : mcmc_chains;
-        std::vector<std::vector<std::vector<Eigen::VectorXf>>> chains;
-        chains.reserve(mcmc_threads);
+        std::vector<std::vector<Metropolis<simple_target, adaptive_proposal>>> mets;
+        mets.reserve(mcmc_threads);
         std::vector<std::thread> threads;
         size_t chains_per_thread = mcmc_chains / mcmc_threads;
         size_t addone = mcmc_threads - mcmc_chains%mcmc_threads;
         for(size_t i = 0; i < mcmc_threads; ++i) {
-            chains.emplace_back();
+            mets.emplace_back();
             threads.emplace_back(
                     [&, i](){
-                        mcmc_worker(chains[i], samples_eigen[i], metric->Clone(), myseed.getThreadSeeds()->at(i), chains_per_thread + (i >= addone), fitConfig.MCMCburn, fitConfig.MCMCiter);
+                        mcmc_worker(mets[i], samples_eigen[i], metric->Clone(), myseed.getThreadSeeds()->at(i), chains_per_thread + (i >= addone), fitConfig.MCMCburn, fitConfig.MCMCiter);
                     });
         }
         for(auto&& t : threads) {
@@ -2546,14 +2532,17 @@ int main(int argc, char* argv[])
         //oned.push_back(TH1D("one2", ";#Deltam^{2}_{41} [eV^{2}];Posterior PDF", 200, -2, 2));
         TFile fout((final_output_tag+"_PROMCMC_chains.root").c_str(), "RECREATE");
         size_t chain_counter = 0;
-        for(const auto &tchains : chains) {
-            for(const auto &chain : tchains) {
+        for(const auto &tmets : mets) {
+            for(const auto &met : tmets) {
                 chain_counter++;
                 std::string name = "chain"+std::to_string(chain_counter);
                 TTree tree(name.c_str(), name.c_str());
                 Eigen::VectorXf v = Eigen::VectorXf::Zero(nparams);
-                for(size_t i = 0; i < metric->GetModel().nparams; ++i)
+                std::vector<std::string> param_names;
+                for(size_t i = 0; i < metric->GetModel().nparams; ++i) {
                     tree.Branch(metric->GetModel().param_names[i].c_str(), &v(i));
+                    param_names.push_back(metric->GetModel().pretty_param_names[i]);
+                }
                 for(size_t i = metric->GetModel().nparams; i < nparams; ++i) {
                     const std::string &sname = metric->GetSysts().spline_names[i-metric->GetModel().nparams];
                     std::string::size_type l = sname.find(':');
@@ -2565,8 +2554,9 @@ int main(int argc, char* argv[])
                     } else {
                         tree.Branch(sname.c_str(), &v(i));
                     }
+                    param_names.push_back(config.m_mcgen_variation_plotname_map.at(metric->GetSysts().spline_names[i-N_phys_params]));
                 }
-                for(const auto &p : chain) {
+                for(const auto &p : met.chain) {
                 //    twod[0].Fill(p(1), p(0));
                 //    oned[0].Fill(p(1));
                 //    oned[1].Fill(p(0));
@@ -2574,6 +2564,7 @@ int main(int argc, char* argv[])
                     tree.Fill();
                 }
                 tree.Write();
+                met.plot_autocorrelation((final_output_tag+"_PROMCMC_autocorraltion_chain"+std::to_string(chain_counter)+".pdf").c_str(), param_names);
             }
         }
         //TCanvas c;
@@ -2731,17 +2722,14 @@ int main(int argc, char* argv[])
 }
 
 
-void mcmc_worker(std::vector<std::vector<Eigen::VectorXf>> &chains, Eigen::VectorXf initial, PROmetric *metric, uint32_t seed, size_t nchains, size_t burnin, size_t steps) {
+void mcmc_worker(std::vector<Metropolis<simple_target, adaptive_proposal>> &mets, Eigen::VectorXf initial, PROmetric *metric, uint32_t seed, size_t nchains, size_t burnin, size_t steps) {
     std::uniform_int_distribution<uint32_t> dseed(0, std::numeric_limits<uint32_t>::max());
     std::mt19937 rng(seed);
     for(size_t i = 0; i < nchains; ++i) {
-        chains.emplace_back();
-        std::vector<Eigen::VectorXf> &chain = chains.back();
-        auto action = [&chain](const Eigen::VectorXf &pt) { chain.push_back(pt); };
         simple_target target{*metric};
         adaptive_proposal proposal(*metric, dseed(rng));
-        Metropolis mcmc(target, proposal, initial, dseed(rng));
-        mcmc.run(burnin, steps, action);
+        mets.emplace_back(target, proposal, initial, dseed(rng));
+        mets.back().run(burnin, steps);
     }
 }
 
