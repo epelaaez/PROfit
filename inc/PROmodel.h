@@ -1883,9 +1883,11 @@ public:
 // Main interface to different models
 static inline
 std::unique_ptr<PROmodel> get_model_from_string(const PROconfig& config, const PROpeller &prop) {
-     std::string name = config.m_model_tag;
-
-     if(name == "numudis") {
+    std::string name = config.m_model_tag;
+    
+    if(name == "nullmodel") {
+        return std::unique_ptr<PROmodel>(new NullModel(prop));
+    } else if(name == "numudis") {
         return std::unique_ptr<PROmodel>(new PROnumudis(prop,config.m_model_parameter_map));
     } else if(name == "nueapp") {
         return std::unique_ptr<PROmodel>(new PROnueapp(prop,config.m_model_parameter_map));
