@@ -183,6 +183,7 @@ int main(int argc, char* argv[])
     std::vector<std::string> syst_list, systs_excluded;
     bool MCMC_prefit_errors = false;
     bool systs_only = false;
+    bool use_fake_data = false;
 
     float xlo, xhi, ylo, yhi;
     std::array<float, 2> xlims, ylims;
@@ -237,6 +238,7 @@ int main(int argc, char* argv[])
     app.add_option("--syst-list", syst_list, "Override list of systematics to use (note: all systs must be in the xml).");
     app.add_option("--exclude-systs", systs_excluded, "List of systematics to exclude.")->excludes("--syst-list"); 
 
+    app.add_flag("--use-fake-data", use_fake_data, "Ignore any data XML or embedded <data> section and use fake (MC) data instead.");
     app.add_flag("--poisson-throw", poisson_throw, "Do a Poisson stats throw of fake data.");
     app.add_flag("--scale-by-width", binwidth_scale, "Scale histgrams by 1/(bin width).");
     app.add_flag("--data-mc-ratio", data_mc_ratio, "For ratio plots, use data/pre-fit mc instead of data/best-fit mc.");
@@ -643,8 +645,8 @@ int main(int argc, char* argv[])
     //We will load all other variables too, but many are truth level so data won't be as common.
     std::vector<PROdata> variable_data;
     // Support data from either --data flag or embedded <data> section in the XML
-    bool have_data = !data_xml.empty() || config.m_has_data_section;
-    if(have_data){
+    bool use_real_data = (!data_xml.empty() || config.m_has_data_section) && !use_fake_data;
+    if(use_real_data){
         PROconfig dataconfig;
         if(!data_xml.empty()){
             // Explicit --data flag takes precedence
