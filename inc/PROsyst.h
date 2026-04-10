@@ -1,3 +1,16 @@
+/**
+ * @file PROsyst.h
+ * @brief Systematic uncertainty management for the PROfit framework.
+ * @author PROfit Collaboration
+ *
+ * @details Defines PROsyst, which aggregates all systematic uncertainties (spline-based
+ * and covariance-matrix-based) and provides methods to evaluate their effects on predicted
+ * spectra.  Spline systematics are stored as per-bin piecewise-cubic splines whose knots
+ * and coefficients are built from multi-universe Monte Carlo throws.  Covariance systematics
+ * are stored as fractional covariance matrices.
+ *
+ * Also defines helper types SplineSegment and Spline used internally for the spline evaluation.
+ */
 #ifndef PROSYST_H_
 #define PROSYST_H_
 
@@ -20,37 +33,101 @@
 
 namespace PROfit {
 
+    /**
+     * @brief A single knot and its four cubic-spline coefficients for one bin segment.
+     */
     struct SplineSegment {
-        float knot; 
-        std::array<float, 4> coeffs; 
-    };
-    class Spline {
-        public:
-            int bins;
-            int segments_per_bin;
-            std::vector<SplineSegment> segments;
-            // Access: segments[bin * segments_per_bin + seg]
+        float knot;                  ///< Knob value at which this segment begins.
+        std::array<float, 4> coeffs; ///< Cubic polynomial coefficients [c0, c1, c2, c3] for the segment.
     };
 
-    /*Struct: Class that groups all systematics (each with a SystStruct) and manages their formation and effect on PROspecs
-    */
+    /**
+     * @brief Per-systematic piecewise-cubic spline used to evaluate bin-weight shifts.
+     * @details Stores segments_per_bin cubic segments per analysis bin.  To evaluate the
+     * weight shift for bin @p b at nuisance shift @p x, locate the correct segment and
+     * evaluate the polynomial.  Access: segments[bin * segments_per_bin + seg].
+     */
+    class Spline {
+        public:
+            int bins;             ///< Number of analysis bins covered by this spline.
+            int segments_per_bin; ///< Number of cubic segments per bin (equal to number of knot intervals).
+            std::vector<SplineSegment> segments; ///< Flat list of spline segments, ordered bin-major.
+    };
+
+    /**
+     * @brief Aggregator for all systematic uncertainties acting on a PROfit analysis.
+     * @details PROsyst groups both spline-based and covariance-matrix-based systematics.
+     * On construction it processes the input SystStruct vector and:
+     *   - builds piecewise-cubic splines for spline-type systematics,
+     *   - generates or loads fractional covariance matrices for covariance-type systematics,
+     *   - accumulates a total fractional_covariance from all covariance-type systematics.
+     *
+     * During fitting, GetSplineShift() evaluates spline weights and
+     * DecomposeFractionalCovariance() provides the Cholesky decomposition of the total
+     * covariance for correlated throws.
+     */
     class PROsyst {
         public:
 
+            /**
+             * @brief Enumeration of supported systematic types.
+             */
             enum class SystType {
-                Spline, Covariance,  MFA
+                Spline,     ///< Piecewise-cubic spline systematic built from multi-universe MC.
+                Covariance, ///< Fractional covariance matrix (external or generated from multi-universe MC).
+                MFA         ///< Multi-variate Frequentist Analysis covariance type.
             };
 
-            //Empty constructor
+            /** @brief Default constructor — creates an empty PROsyst. */
             PROsyst(){}
 
-            /*Function: Primary constructor from a vector of SystStructs  */
+            /**
+             * @brief Primary constructor that builds all systematics from a list of SystStructs.
+             * @param prop        MC event store (used for spline building).
+             * @param config      Analysis configuration.
+             * @param systs       Vector of SystStruct objects; one per systematic variation.
+             * @param shapeonly   If true, normalise each variation to its CV integral (shape-only).
+             * @param other_index Variable index for which to build systematics (-1 = primary).
+             * @param model       Physics model (used when converting splines to covariance).
+             * @param params      Physics parameter vector for CV spectrum evaluation.
+             */
             PROsyst(const PROpeller &prop, const PROconfig &config, const std::vector<SystStruct>& systs, bool shapeonly=false, int other_index = -1, const PROmodel* model = nullptr, const Eigen::VectorXf* params = nullptr);
 
+            /**
+             * @brief Return a new PROsyst containing only the named systematics.
+             * @param systs  List of systematic names to include.
+             * @return Subset PROsyst.
+             */
             PROsyst subset(const std::vector<std::string> &systs) const;
+
+            /**
+             * @brief Return a new PROsyst with the named systematics removed.
+             * @param systs  List of systematic names to exclude.
+             * @return Complement PROsyst.
+             */
             PROsyst excluding(const std::vector<std::string> &systs) const;
+
+            /**
+             * @brief Convert all spline systematics to covariance matrices and return the result.
+             * @param config  Analysis configuration.
+             * @param prop    MC event store.
+             * @param model   Physics model used for spectrum filling.
+             * @param params  Physics parameter vector for CV evaluation.
+             * @param seed    Random seed for Gaussian throws used in the conversion.
+             * @return A new PROsyst with all splines replaced by equivalent covariance matrices.
+             */
             PROsyst allsplines2cov(const PROconfig &config, const PROpeller &prop,const PROmodel &model, const Eigen::VectorXf &params,  uint32_t seed) const;
 
+            /**
+             * @brief Convert a single spline systematic to a covariance matrix via random throws.
+             * @param spline  0-based index of the spline to convert.
+             * @param config  Analysis configuration.
+             * @param prop    MC event store.
+             * @param model   Physics model.
+             * @param params  Physics parameter vector.
+             * @param seed    Random seed.
+             * @return Fractional covariance matrix for the specified spline.
+             */
             Eigen::MatrixXf spline2cov(int spline, const PROconfig &config, const PROpeller &prop, const PROmodel &model, const Eigen::VectorXf &params, uint32_t seed) const ;
 
             /* Function: given the systematic name, return corresponding fractional covariance matrix */
@@ -63,10 +140,13 @@ namespace PROfit {
             /* Function: given systematic name, return type of systematic */
             SystType GetSystType(const std::string& syst) const;
 
+            /** @brief Return the number of spline systematics in this PROsyst. */
             size_t GetNSplines() const { return splines.size(); }
 
+            /** @brief Return the number of spline systematics (non-const overload). */
             size_t GetNSplines() { return splines.size(); }
 
+            /** @brief Return the number of covariance-matrix systematics in this PROsyst. */
             size_t GetNCovar() const { return n_covar; }
 
             //----- Spline and Covariance matrix related ---
@@ -139,27 +219,27 @@ namespace PROfit {
 
             void PrintSplines();
 
-            /* the fractional covariance that is the sum of all during constructor*/
+            /** @brief Total fractional covariance matrix summed over all covariance-type systematics. */
             Eigen::MatrixXf fractional_covariance;
 
-            /* names of all systs*/
-            std::vector<std::string> spline_names;
-            std::vector<std::string> covar_names;
-            std::vector<float> spline_lo, spline_hi;
-            std::vector<int> spline_binnings;
-            Eigen::VectorXf spline_priors;
-            Eigen::VectorXf spline_centers;
+            std::vector<std::string> spline_names;   ///< Names of all spline systematics in order.
+            std::vector<std::string> covar_names;    ///< Names of all covariance systematics in order.
+            std::vector<float> spline_lo;            ///< Lower nuisance-parameter bound for each spline.
+            std::vector<float> spline_hi;            ///< Upper nuisance-parameter bound for each spline.
+            std::vector<int> spline_binnings;        ///< Binning-scheme index for each spline.
+            Eigen::VectorXf spline_priors;           ///< Prior width (sigma) for each spline nuisance parameter.
+            Eigen::VectorXf spline_centers;          ///< Prior centre for each spline nuisance parameter.
         private:
-            std::map<std::string, std::pair<size_t, SystType>> syst_map;
-            std::vector<Spline> splines;
-            size_t n_splines = 0;
-            size_t n_covar = 0;
-            std::vector<Eigen::MatrixXf> covmat;
-            std::vector<Eigen::MatrixXf> corrmat;
-            int other_index;
-            static bool shape_only;
-            mutable Eigen::VectorXf last_decomp_spec;
-            mutable Eigen::MatrixXf last_decomp_mat;
+            std::map<std::string, std::pair<size_t, SystType>> syst_map; ///< Map from systematic name to (index, type).
+            std::vector<Spline> splines;             ///< Ordered list of spline objects.
+            size_t n_splines = 0;                    ///< Number of spline systematics.
+            size_t n_covar = 0;                      ///< Number of covariance-matrix systematics.
+            std::vector<Eigen::MatrixXf> covmat;     ///< Fractional covariance matrices, one per covariance systematic.
+            std::vector<Eigen::MatrixXf> corrmat;    ///< Correlation matrices, one per covariance systematic.
+            int other_index;                         ///< Variable index for which systematics were built.
+            static bool shape_only;                  ///< If true, variations are normalised to CV integral (shape-only mode).
+            mutable Eigen::VectorXf last_decomp_spec; ///< Cached CV spectrum from last DecomposeFractionalCovariance call.
+            mutable Eigen::MatrixXf last_decomp_mat;  ///< Cached Cholesky factor from last DecomposeFractionalCovariance call.
     };
 
 };

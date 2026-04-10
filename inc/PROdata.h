@@ -1,3 +1,14 @@
+/**
+ * @file PROdata.h
+ * @brief Observed data spectrum container for the PROfit fitting framework.
+ * @author PROfit Collaboration
+ *
+ * @details Defines PROdata, which mirrors PROspec in structure but represents the measured
+ * (observed) event spectrum used as the "data" in chi-squared calculations.  PROdata is
+ * always stored in the collapsed (channel-level) bin space, unlike PROspec which may be
+ * in the full subchannel space.  Arithmetic operations, serialisation, and ROOT histogram
+ * conversion are provided for convenience.
+ */
 #ifndef PRODATA_H_
 #define PRODATA_H_
 
@@ -26,12 +37,18 @@
 
 namespace PROfit{
 
+/**
+ * @brief Observed data spectrum in the collapsed (channel-level) bin space.
+ * @details PROdata is structurally identical to PROspec but semantically represents measured
+ * data rather than a Monte Carlo prediction.  It is always kept in the collapsed bin space
+ * and constructed either directly from vectors or by collapsing a PROspec using PROconfig.
+ * Supports the same arithmetic operations, serialisation, and ROOT histogram conversion as PROspec.
+ */
 class PROdata {
 private:
-    //Base
-    size_t nbins;
-    Eigen::VectorXf spec;
-    Eigen::VectorXf error;
+    size_t nbins;           ///< Number of collapsed bins.
+    Eigen::VectorXf spec;   ///< Observed event counts per bin.
+    Eigen::VectorXf error;  ///< Statistical uncertainty per bin (sqrt of observed counts for Poisson data).
 
 
     //---- private helper function --------
@@ -45,7 +62,9 @@ private:
     Eigen::VectorXf eigenvector_multiplication(const Eigen::VectorXf& a, const Eigen::VectorXf& b) const;
 
 public:
-    uint32_t hash;
+    uint32_t hash; ///< MurmurHash3 of the PROconfig used to create this data; checked during serialisation.
+
+    /** @brief Boost serialisation support — serialises nbins, spec, error, and hash. */
     template<class Archive>
         void serialize(Archive &ar, [[maybe_unused]] const unsigned int version) {
             ar & nbins;
@@ -56,9 +75,22 @@ public:
         }
 
     //Constructors
+    /** @brief Default constructor — creates an empty (zero-bin) data object. */
     PROdata():nbins(0) {}
+    /**
+     * @brief Construct from pre-filled spectrum and error vectors.
+     * @param in_spec   Observed counts per (collapsed) bin.
+     * @param in_error  Per-bin statistical errors.
+     */
     PROdata(const Eigen::VectorXf &in_spec, const Eigen::VectorXf &in_error) : nbins(in_spec.size()), spec(in_spec), error(in_error){}
-    PROdata(const PROconfig &c, const PROspec &s): 
+    /**
+     * @brief Construct a collapsed PROdata from a full-space PROspec.
+     * @details Applies the collapsing matrix from @p c to collapse @p s from subchannel to channel space.
+     * Errors are propagated correctly under the linear collapsing transformation.
+     * @param c  The PROconfig providing the collapsing matrix.
+     * @param s  The full-space PROspec to collapse.
+     */
+    PROdata(const PROconfig &c, const PROspec &s):
       nbins(s.Spec().size()),
       spec(CollapseMatrix(c, s.Spec())),
       error(CollapseMatrix(c, Eigen::VectorXf(s.Error().array().square().matrix())).array().sqrt())
@@ -143,6 +175,12 @@ public:
         log<LOG_INFO>(L"%1% || Serialization load of PRospec from file  %2% took %3% seconds") % __func__ % filename.c_str() %elapsed.count();
     }
 
+    /**
+     * @brief Serialise a vector of PROdata objects to a single binary file.
+     * @param config    The PROconfig whose hash is stored in each element.
+     * @param data      The vector of PROdata objects to serialise.
+     * @param filename  Output file path.
+     */
     static void saveVector(const PROconfig &config, std::vector<PROdata> &data, std::string &filename) {
         for(auto &d: data) 
             d.hash = config.hash;
@@ -155,6 +193,11 @@ public:
         log<LOG_INFO>(L"%1% || Serialization save of PROspec data into file  %2% took %3% seconds") % __func__ % filename.c_str() % elapsed.count();
     }
 
+    /**
+     * @brief Deserialise a vector of PROdata objects from a binary file.
+     * @param data      The vector to fill.
+     * @param filename  Input file path.
+     */
     static void loadVector(std::vector<PROdata> &data, std::string &filename) {
         auto start = std::chrono::high_resolution_clock::now();
         std::ifstream ifs(filename,std::ios::binary);
@@ -165,25 +208,33 @@ public:
         log<LOG_INFO>(L"%1% || Serialization load of PRospec from file  %2% took %3% seconds") % __func__ % filename.c_str() %elapsed.count();
     }
 
-    /* Return true if two PROdata have the same dimension (number of bins */
+    /**
+     * @brief Check whether two PROdata objects have the same number of bins.
+     * @param a  First data object.
+     * @param b  Second data object.
+     * @return True if both have the same bin count.
+     */
     static bool SameDim(const PROdata& a, const PROdata& b);
 
     //----- Arithmetic Operations ---------
-    //addition 
+    /** @brief Element-wise addition of two data spectra (errors added in quadrature). */
     PROdata operator+(const PROdata& b) const;
-    //addition assignment
+    /** @brief In-place element-wise addition (errors added in quadrature). */
     PROdata& operator+=(const PROdata& b);
-    //subtraction
+    /** @brief Element-wise subtraction (errors added in quadrature). */
     PROdata operator-(const PROdata& b) const;
-    //subtraction assignment
+    /** @brief In-place element-wise subtraction (errors added in quadrature). */
     PROdata& operator-=(const PROdata& b);
-    //division
+    /** @brief Element-wise division. */
     PROdata operator/(const PROdata& b) const;
-    //division assignment
+    /** @brief In-place element-wise division. */
     PROdata& operator/=(const PROdata& b);
-    //scaling (multiply with constant)
+    /**
+     * @brief Scale the data by a constant factor.
+     * @param scale  Multiplicative scale factor.
+     */
     PROdata operator*(float scale) const;
-    //scaling assignmnet 
+    /** @brief In-place scalar multiplication. */
     PROdata& operator*=(float scale);
 };
 

@@ -1,3 +1,19 @@
+/**
+ * @file PROmodel.h
+ * @brief Physics oscillation model interface and concrete implementations for PROfit.
+ * @author PROfit Collaboration
+ *
+ * @details Defines the abstract PROmodel base class together with the following
+ * concrete models:
+ *   - NullModel      — no oscillation; all events receive probability 1.
+ *   - PROnumudis     — 3+1 sterile-neutrino nu_mu disappearance in the short-baseline
+ *                      approximation, parameterised by (Delta m^2, sin^2 2theta_mumu).
+ *   - PROnumudisTEST — two-variable (L, E) version of PROnumudis for validation.
+ *
+ * Each model exposes a get_probs() virtual method that returns oscillation
+ * probabilities on the physics grid, and pre-builds H_combined matrices for
+ * fast GEMV-based spectrum filling in FillSpectra.
+ */
 #ifndef PROMODEL_H
 #define PROMODEL_H
 
@@ -18,33 +34,57 @@
 
 namespace PROfit {
 
+/**
+ * @brief Abstract base class representing a physics model for neutrino oscillation probability.
+ * @details A PROmodel encapsulates:
+ *   - the set of physics parameters (names, bounds, defaults),
+ *   - the mapping from analysis variables to a flat physics grid,
+ *   - per-event histogram matrices H_combined used for fast spectrum filling, and
+ *   - the virtual get_probs() interface for computing oscillation probabilities.
+ *
+ * Derived classes implement specific oscillation hypotheses.  After construction,
+ * build_hists_and_combined() must be called to pre-build the internal matrices from
+ * the MC event store (PROpeller).
+ */
 class PROmodel {
 public:
-    size_t nparams;
-    // ivars: indices of the physics variables used by this model (e.g. {L/E_index} for 1-var,
-    // {L_index, E_index} for 2-var). n_phys_bins = product of their bin counts.
+    size_t nparams; ///< Number of physics parameters for this model.
+    /// Indices of the physics (grid) variables used by this model within the PROpeller variable list.
+    /// For a 1-variable model this is e.g. {L/E_index}; for 2-variable {L_index, E_index}.
+    /// n_phys_bins = product of their bin counts.
     std::vector<int> ivars;
-    long int n_phys_bins = 0;
-    std::vector<std::string> param_names;
-    std::vector<std::string> pretty_param_names;
-    std::vector<std::string> pretty_param_units;
-    Eigen::VectorXf lb, ub, default_val;
+    long int n_phys_bins = 0; ///< Total number of flat physics-grid points (product of ivar bin counts).
+    std::vector<std::string> param_names;        ///< Internal parameter names used in the fitter.
+    std::vector<std::string> pretty_param_names; ///< LaTeX-formatted parameter names for plots.
+    std::vector<std::string> pretty_param_units; ///< Unit strings for plots (e.g., "eV^{2}").
+    Eigen::VectorXf lb;          ///< Lower bounds for physics parameters in the fitter's internal space.
+    Eigen::VectorXf ub;          ///< Upper bounds for physics parameters in the fitter's internal space.
+    Eigen::VectorXf default_val; ///< Default (starting) values for physics parameters.
+    /// Per-probability-type functions: model_functions[m](phys, x) returns the oscillation weight
+    /// for physics parameters @p phys and kinematic variable value @p x.
     std::vector<std::function<float(const Eigen::VectorXf&, float)>> model_functions;
-    std::function<int(const Eigen::VectorXf&)> model_constraint;
-    // hists[v][m]: shape (n_reco_v, n_phys_bins) — transposed vs old convention for cache efficiency.
-    // v = reco variable index, m = model_function/prob_type index.
+    std::function<int(const Eigen::VectorXf&)> model_constraint; ///< Optional parameter constraint function.
+    /// Pre-binned histograms: hists[v][m] has shape (n_reco_v, n_phys_bins).
+    /// v = reco variable index, m = probability-type index.  Transposed for cache efficiency.
     std::vector<std::vector<Eigen::MatrixXf>> hists;
-    // H_combined[v]: shape (n_reco_v, n_phys_bins * J) — horizontal concat of hists[v][0..J-1].
-    // Enables a single GEMV in FillSpectra: result = H_combined[v] * probs_flat.
+    /// Combined histograms H_combined[v] = horizontal concatenation of hists[v][0..J-1],
+    /// shape (n_reco_v, n_phys_bins * J).  Enables a single GEMV in FillSpectra.
     std::vector<Eigen::MatrixXf> H_combined;
 
-    std::vector<size_t> prob_types; // Indices of probability types (matches model_functions indices)
+    std::vector<size_t> prob_types; ///< Probability-type indices, matching model_functions indices.
 
-    std::vector<bool> is_log10; // Track whether each physics parameter is stored in log10 space.
+    std::vector<bool> is_log10; ///< True for each parameter stored in log10 space; false for linear.
 
-    // Build hists and H_combined from prop events.
-    // Must be called after ivars and model_functions are set.
-    // filter_by_model_rule=false: all events go into component 0 (use for NullModel).
+    /**
+     * @brief Build hists and H_combined from PROpeller event data.
+     * @details Must be called after ivars and model_functions are set.  Iterates over all
+     * events in @p prop, distributes them onto the flat physics grid, and constructs the
+     * concatenated H_combined matrices used by FillSpectra.
+     * @param prop                 The MC event store.
+     * @param filter_by_model_rule If true (default), each event is placed in the histogram
+     *                             matrix corresponding to its model_rule; if false, all events
+     *                             go into component 0 (appropriate for NullModel).
+     */
     void build_hists_and_combined(const PROpeller &prop, bool filter_by_model_rule = true) {
         // Compute flat physics grid size and per-ivar bin counts
         std::vector<size_t> ivar_sizes(ivars.size());
@@ -89,10 +129,16 @@ public:
         }
     }
 
-    // Compute oscillation probabilities for all physics-grid points and all probability types.
-    // var_arrs[k] contains the value of ivars[k] for each flat grid point (length = n_phys_bins).
-    // Returns probs(flat_phys_index, prob_type_index).
-    // Can be overridden for faster computation.
+    /**
+     * @brief Compute oscillation probabilities for all physics-grid points and all probability types.
+     * @details Default implementation evaluates each model_function independently for every
+     * grid point.  Derived classes may override for a vectorised, faster computation.
+     * @param phys      Physics parameter vector in the fitter's internal space (log10 where applicable).
+     * @param var_arrs  var_arrs[k] contains the value of ivars[k] for each flat grid point
+     *                  (length = n_phys_bins).
+     * @return Matrix of shape (n_phys_bins, n_prob_types) where each element is the oscillation
+     *         weight for that grid point and probability type.
+     */
     virtual Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<std::vector<float>> &var_arrs) const {
         const auto &le_arr = var_arrs[0];
         Eigen::MatrixXf probs(le_arr.size(), prob_types.size());
@@ -104,8 +150,12 @@ public:
         return probs;
     }
 
-    // Fast lookup from parameter name to index
-    std::unordered_map<std::string, size_t> param_name_to_index;
+    std::unordered_map<std::string, size_t> param_name_to_index; ///< Fast lookup: parameter name -> index in param_names.
+
+    /**
+     * @brief Populate param_name_to_index from the current param_names vector.
+     * @details Must be called after param_names is finalised in the derived constructor.
+     */
     inline void build_param_index() {
         param_name_to_index.clear();
         for(size_t i = 0; i < param_names.size(); ++i){
@@ -113,7 +163,12 @@ public:
         }
     }
 
-    // Convert a parameter to linear space if it is stored as log10, using its name.
+    /**
+     * @brief Convert a named parameter from log10 to linear space if required.
+     * @param param_name  The parameter name as listed in param_names.
+     * @param value       The parameter value in the fitter's internal space.
+     * @return The value in linear space: 10^value if is_log10[i] is true, otherwise value unchanged.
+     */
     inline float maybe_convert_log(const std::string &param_name, float value) const {
         auto it = param_name_to_index.find(param_name);
         if(it == param_name_to_index.end()){
@@ -128,8 +183,18 @@ public:
 
 };
 
+/**
+ * @brief Trivial "no oscillation" model — all events receive oscillation probability 1.
+ * @details Used as a central-value baseline and for systematic-only fits where oscillation
+ * is not being tested.  All events are placed into a single histogram component regardless
+ * of their model_rule.
+ */
 class NullModel : public PROmodel {
 public:
+    /**
+     * @brief Construct the NullModel from an MC event store.
+     * @param prop  The PROpeller containing MC events; used only to build hists.
+     */
     NullModel(const PROpeller &prop) {
         nparams = 0;
         ivars = {1};
@@ -141,8 +206,21 @@ public:
     }
 };
 
+/**
+ * @brief 3+1 sterile-neutrino nu_mu disappearance model in the short-baseline approximation.
+ * @details Parameterises the two-flavour-like nu_mu survival probability as:
+ *   P(nu_mu -> nu_mu) = 1 - sin^2(2*theta_mumu) * sin^2(1.267 * Delta m^2 * L/E)
+ * where Delta m^2 is in eV^2 and L/E is in km/GeV.  Both parameters are stored in log10 space.
+ * The model uses a single physics variable (L/E) identified by the "L/E" entry in parameter_map.
+ */
 class PROnumudis : public PROmodel {
 public:
+    /**
+     * @brief Construct the PROnumudis model.
+     * @param prop          MC event store; used to build H_combined.
+     * @param parameter_map Map from physics variable name (e.g., "L/E") to variable index in PROpeller.
+     *                      Must contain the key "L/E".
+     */
     PROnumudis(const PROpeller &prop,const std::map<std::string,int> &parameter_map) {
         prob_types = {0, 1};
 
@@ -174,7 +252,14 @@ public:
 
     };
 
-    /* Function: 3+1 numu->numue disapperance prob in SBL approx */
+    /**
+     * @brief Compute the 3+1 nu_mu survival probability in the short-baseline approximation.
+     * @details P(nu_mu -> nu_mu) = 1 - sin^2(2*theta_mumu) * sin^2(1.267 * Delta m^2 * L/E).
+     * @param dmsq          Mass splitting Delta m^2 in eV^2 (may be in log10 space; converted internally).
+     * @param sinsq2thmumu  sin^2(2 theta_mumu) (may be in log10 space; converted internally).
+     * @param le            L/E ratio in km/GeV.
+     * @return Survival probability in [0, 1].
+     */
     float Pmumu(float dmsq, float sinsq2thmumu, float le) const{
         dmsq = maybe_convert_log("dmsq", dmsq);
         sinsq2thmumu = maybe_convert_log("sinsq2thmm", sinsq2thmumu);
@@ -231,12 +316,21 @@ public:
     }
 };
 
-// TEST: 2-variable version of PROnumudis. Takes separate "L" and "E" variables from the
-// parameter_map (with variable_index pointing to the L and E variables respectively).
-// H_combined is built on the 2D (L x E) grid, but get_probs computes P(L/E) internally —
-// so the physics is identical to PROnumudis and the two should give identical spectra.
+/**
+ * @brief Two-variable test version of PROnumudis operating on separate L and E variables.
+ * @details Takes separate "L" and "E" variables from parameter_map and builds H_combined on the
+ * 2D (L x E) physics grid.  get_probs() computes L/E internally, so the physics is identical
+ * to PROnumudis.  The two models should produce identical spectra and can be used to validate
+ * the multi-variable code path against the standard single L/E variable approach.
+ */
 class PROnumudisTEST : public PROmodel {
 public:
+    /**
+     * @brief Construct the two-variable PROnumudisTEST model.
+     * @param prop          MC event store; used to build H_combined on the (L, E) grid.
+     * @param parameter_map Map from physics variable name to variable index in PROpeller.
+     *                      Must contain both "L" and "E".
+     */
     PROnumudisTEST(const PROpeller &prop, const std::map<std::string,int> &parameter_map) {
         prob_types = {0, 1};
         model_functions.push_back([this]([[maybe_unused]] const Eigen::VectorXf &v, float) {(void)this; return 1.0f;});
@@ -270,6 +364,13 @@ public:
         default_val << -10, -10;
     };
 
+    /**
+     * @brief Compute the 3+1 nu_mu survival probability (identical physics to PROnumudis::Pmumu).
+     * @param dmsq          Mass splitting Delta m^2 in eV^2 (may be in log10 space; converted internally).
+     * @param sinsq2thmumu  sin^2(2 theta_mumu) (may be in log10 space; converted internally).
+     * @param le            L/E ratio in km/GeV, computed internally from var_arrs[0]=L / var_arrs[1]=E.
+     * @return Survival probability in [0, 1].
+     */
     float Pmumu(float dmsq, float sinsq2thmumu, float le) const {
         dmsq         = maybe_convert_log("dmsq",       dmsq);
         sinsq2thmumu = maybe_convert_log("sinsq2thmm", sinsq2thmumu);
@@ -285,9 +386,14 @@ public:
         return prob;
     }
 
-    // var_arrs[0] = L values for each flat grid point (length n_L * n_E)
-    // var_arrs[1] = E values for each flat grid point (length n_L * n_E)
-    // Internally computes L/E and evaluates Pmumu — identical physics to PROnumudis.
+    /**
+     * @brief Compute oscillation probabilities on the 2D (L×E) grid.
+     * @details var_arrs[0] = L values, var_arrs[1] = E values, each of length n_L * n_E (flat row-major order).
+     *          L/E is computed internally for each grid point, so the result is physically identical to PROnumudis::get_probs.
+     * @param phys     Physics parameter vector: (log10(dmsq), log10(sinsq2thmm)).
+     * @param var_arrs 2-element vector: {L array [km], E array [GeV]}, each of size n_phys_bins.
+     * @return Matrix of shape (n_phys_bins, 2): column 0 = 1 (no-osc), column 1 = P(nu_mu -> nu_mu).
+     */
     Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<std::vector<float>> &var_arrs) const override {
         float dmsq         = maybe_convert_log("dmsq",       phys(0));
         float sinsq2thmumu = maybe_convert_log("sinsq2thmm", phys(1));
@@ -312,8 +418,21 @@ public:
     }
 };
 
+/**
+ * @brief 3+1 sterile-neutrino nu_mu → nu_e appearance model in the short-baseline approximation.
+ * @details Parameterises the two-flavour-like nu_e appearance probability as:
+ *   P(nu_mu -> nu_e) = sin^2(2*theta_mue) * sin^2(1.267 * Delta m^2 * L/E)
+ * where Delta m^2 is in eV^2 and L/E is in km/GeV.  Both parameters are stored in log10 space.
+ * The model uses a single physics variable (L/E) identified by the "L/E" entry in parameter_map.
+ */
 class PROnueapp : public PROmodel {
 public:
+    /**
+     * @brief Construct the PROnueapp model.
+     * @param prop          MC event store; used to build H_combined.
+     * @param parameter_map Map from physics variable name (e.g., "L/E") to variable index in PROpeller.
+     *                      Must contain the key "L/E".
+     */
     PROnueapp(const PROpeller &prop,const std::map<std::string,int> &parameter_map) {
         model_functions.push_back([this]([[maybe_unused]] const Eigen::VectorXf &v, float) {(void)this; return 1.0;});
         model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pmue(v(0),v(1),le);});
@@ -346,6 +465,14 @@ public:
 
     };
 
+    /**
+     * @brief Compute the 3+1 nu_mu → nu_e appearance probability in the short-baseline approximation.
+     * @details P(nu_mu -> nu_e) = sin^2(2*theta_mue) * sin^2(1.267 * Delta m^2 * L/E).
+     * @param dmsq         Mass splitting Delta m^2 in eV^2 (may be in log10 space; converted internally).
+     * @param sinsq2thmue  sin^2(2 theta_mue) (may be in log10 space; converted internally).
+     * @param le           L/E ratio in km/GeV.
+     * @return Appearance probability in [0, 1].
+     */
     float Pmue(float dmsq, float sinsq2thmue, float le) const{
         dmsq = maybe_convert_log("dmsq", dmsq);
         sinsq2thmue = maybe_convert_log("sinsq2thme", sinsq2thmue);
@@ -404,8 +531,21 @@ public:
 
 };
 
+/**
+ * @brief 3+1 sterile-neutrino nu_e disappearance model in the short-baseline approximation.
+ * @details Parameterises the two-flavour-like nu_e survival probability as:
+ *   P(nu_e -> nu_e) = 1 - sin^2(2*theta_ee) * sin^2(1.267 * Delta m^2 * L/E)
+ * where Delta m^2 is in eV^2 and L/E is in km/GeV.  Both parameters are stored in log10 space.
+ * The model uses a single physics variable (L/E) identified by the "L/E" entry in parameter_map.
+ */
 class PROnuedis : public PROmodel {
 public:
+    /**
+     * @brief Construct the PROnuedis model.
+     * @param prop          MC event store; used to build H_combined.
+     * @param parameter_map Map from physics variable name (e.g., "L/E") to variable index in PROpeller.
+     *                      Must contain the key "L/E".
+     */
     PROnuedis(const PROpeller &prop,const std::map<std::string,int> &parameter_map) {
         model_functions.push_back([this]([[maybe_unused]] const Eigen::VectorXf &v, float) {(void)this; return 1.0;});
         model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pee(v(0),v(1),le);});
@@ -433,7 +573,14 @@ public:
 
     };
 
-    /* Function: 3+1 nue->nue disapperance prob in SBL approx */
+    /**
+     * @brief Compute the 3+1 nu_e survival probability in the short-baseline approximation.
+     * @details P(nu_e -> nu_e) = 1 - sin^2(2*theta_ee) * sin^2(1.267 * Delta m^2 * L/E).
+     * @param dmsq        Mass splitting Delta m^2 in eV^2 (may be in log10 space; converted internally).
+     * @param sinsq2thee  sin^2(2 theta_ee) (may be in log10 space; converted internally).
+     * @param le          L/E ratio in km/GeV.
+     * @return Survival probability in [0, 1].
+     */
     float Pee(float dmsq, float sinsq2thee, float le) const{
         dmsq = maybe_convert_log("dmsq", dmsq);
         sinsq2thee = maybe_convert_log("sinsq2thee", sinsq2thee);
@@ -493,8 +640,23 @@ public:
 };
 
 
+/**
+ * @brief Full 3+1 sterile-neutrino model parameterised by |U_e4|^2 and |U_mu4|^2.
+ * @details Provides all three oscillation channels in the short-baseline approximation:
+ *   - P(nu_mu -> nu_mu) = 1 - 4*|U_mu4|^2*(1 - |U_mu4|^2) * sin^2(1.267 * Dm^2 * L/E)
+ *   - P(nu_mu -> nu_e)  = 4*|U_e4|^2*|U_mu4|^2          * sin^2(1.267 * Dm^2 * L/E)
+ *   - P(nu_e  -> nu_e)  = 1 - 4*|U_e4|^2*(1 - |U_e4|^2) * sin^2(1.267 * Dm^2 * L/E)
+ * A unitarity constraint |U_e4|^2 + |U_mu4|^2 < 1 is enforced via model_constraint.
+ * All three parameters (dmsq, Ue4^2, Um4^2) are stored in log10 space.
+ */
 class PRO3p1 : public PROmodel {
 public:
+    /**
+     * @brief Construct the PRO3p1 model.
+     * @param prop          MC event store; used to build H_combined.
+     * @param parameter_map Map from physics variable name (e.g., "L/E") to variable index in PROpeller.
+     *                      Must contain the key "L/E".
+     */
     PRO3p1(const PROpeller &prop, const std::map<std::string,int> &parameter_map) {
 
         model_functions.push_back([this]([[maybe_unused]] const Eigen::VectorXf &v, float) {(void)this; return 1.0; });
@@ -530,12 +692,25 @@ public:
         default_val << -2, -8, -8;
     };
 
+    /**
+     * @brief Enforce the unitarity constraint |U_e4|^2 + |U_mu4|^2 < 1.
+     * @param v  Physics parameter vector in log10 space.
+     * @return 1 if the point is physically allowed, 0 otherwise.
+     */
     int UnitarityConstraint(const Eigen::VectorXf &v){
         const float Ue4sq = maybe_convert_log("Ue4^2", v(param_name_to_index.at("Ue4^2")));
         const float Um4sq = maybe_convert_log("Um4^2", v(param_name_to_index.at("Um4^2")));
-        return   ((Ue4sq+Um4sq)<1 ? 1 : 0);      
+        return   ((Ue4sq+Um4sq)<1 ? 1 : 0);
     }
 
+    /**
+     * @brief Compute the 3+1 nu_mu → nu_e appearance probability.
+     * @param dmsq   Mass splitting Delta m^2 in eV^2 (log10 space; converted internally).
+     * @param Ue4sq  |U_e4|^2 (log10 space; converted internally).
+     * @param Um4sq  |U_mu4|^2 (log10 space; converted internally).
+     * @param le     L/E ratio in km/GeV.
+     * @return Appearance probability in [0, 1].
+     */
     float Pmue(float dmsq, float Ue4sq, float Um4sq, float le) const{
         dmsq =  maybe_convert_log("dmsq", dmsq);
         Ue4sq = maybe_convert_log("Ue4^2", Ue4sq);
@@ -576,6 +751,14 @@ public:
         return prob;
     }
 
+    /**
+     * @brief Compute the 3+1 nu_mu survival probability.
+     * @param dmsq   Mass splitting Delta m^2 in eV^2 (log10 space; converted internally).
+     * @param Ue4sq  |U_e4|^2 — unused in this channel.
+     * @param Um4sq  |U_mu4|^2 (log10 space; converted internally).
+     * @param le     L/E ratio in km/GeV.
+     * @return Survival probability in [0, 1].
+     */
     float Pmumu(float dmsq, [[maybe_unused]]float Ue4sq, float Um4sq, float le) const{
         dmsq = maybe_convert_log("dmsq", dmsq);
         Um4sq = maybe_convert_log("Um4^2", Um4sq);
@@ -603,6 +786,14 @@ public:
         return prob;
     }
 
+    /**
+     * @brief Compute the 3+1 nu_e survival probability.
+     * @param dmsq   Mass splitting Delta m^2 in eV^2 (log10 space; converted internally).
+     * @param Ue4sq  |U_e4|^2 (log10 space; converted internally).
+     * @param Um4sq  |U_mu4|^2 — unused in this channel.
+     * @param le     L/E ratio in km/GeV.
+     * @return Survival probability in [0, 1].
+     */
     float Pee(float dmsq, float Ue4sq, [[maybe_unused]]float Um4sq, float le) const{
         dmsq = maybe_convert_log("dmsq", dmsq);
         Ue4sq = maybe_convert_log("Ue4^2", Ue4sq);
@@ -630,6 +821,12 @@ public:
         return prob;
     }
 
+    /**
+     * @brief Compute all oscillation probabilities for the PRO3p1 model at each L/E grid point.
+     * @param phys     Physics vector: (log10(dmsq), log10(Ue4sq), log10(Um4sq)).
+     * @param var_arrs 1-element vector containing the L/E array [km/GeV] of length n_phys_bins.
+     * @return Matrix (n_phys_bins, 4): columns = {1, P_mumu, P_mue, P_ee}.
+     */
     Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<std::vector<float>> &var_arrs) const override {
         const auto &le_arr = var_arrs[0];
         //log<LOG_ERROR>(L"%1% || Using unified, optimized get_probs function for model") % __func__;
@@ -642,7 +839,7 @@ public:
         Eigen::MatrixXf probs(le_arr.size(), model_functions.size());
 
         for(size_t i = 0; i < le_arr.size(); ++i) {
-            
+
             float sinterm = std::sin(1.266932679f*dmsq*(le_arr[i]));
 
             // no oscillation
@@ -665,8 +862,20 @@ public:
 };
 
 
+/**
+ * @brief 3+1 sterile-neutrino model parameterised by mixing angles sin^2(2*theta_14) and sin^2(theta_24).
+ * @details An alternative to PRO3p1 that uses the angle parameterisation instead of |U|^2 elements directly.
+ * Provides nu_mu disappearance, nu_mu → nu_e appearance, and nu_e disappearance channels.
+ * All parameters (dmsq, sinsq2th14, sinsqth24) are stored in log10 space.
+ */
 class PRO3p1_angles : public PROmodel {
 public:
+    /**
+     * @brief Construct the PRO3p1_angles model.
+     * @param prop          MC event store; used to build H_combined.
+     * @param parameter_map Map from physics variable name (e.g., "L/E") to variable index in PROpeller.
+     *                      Must contain the key "L/E".
+     */
     PRO3p1_angles(const PROpeller &prop, const std::map<std::string,int> &parameter_map) {
 
         model_functions.push_back([this]([[maybe_unused]] const Eigen::VectorXf &v, float) {(void)this; return 1.0; });
@@ -796,8 +1005,20 @@ public:
     }
 };
 
+/**
+ * @brief 3+1 model variant 3A: parameterised by sin^2(2*theta_ee) and sin^2(theta_24).
+ * @details This variant expresses all three channels — nu_mu disappearance, nu_mu → nu_e appearance,
+ * and nu_e disappearance — in terms of the nue-sector mixing angle sin^2(2*theta_ee) = 4*|U_e4|^2*(1-|U_e4|^2)
+ * and the muon-sector angle sin^2(theta_24).  Parameters (dmsq, sinsq2thee, sinsqth24) are in log10 space.
+ */
 class PRO3p1_3A : public PROmodel {
 public:
+    /**
+     * @brief Construct the PRO3p1_3A model.
+     * @param prop          MC event store; used to build H_combined.
+     * @param parameter_map Map from physics variable name (e.g., "L/E") to variable index in PROpeller.
+     *                      Must contain the key "L/E".
+     */
     PRO3p1_3A(const PROpeller &prop, const std::map<std::string,int> &parameter_map) {
 
         model_functions.push_back([this]([[maybe_unused]] const Eigen::VectorXf &v, float) {(void)this; return 1.0; });
@@ -937,8 +1158,23 @@ public:
 
 };
 
+/**
+ * @brief 3+1 model variant 3B: parameterised by sin^2(2*theta_mumu) and an asymmetry ratio sB.
+ * @details Variant B uses the nu_mu disappearance amplitude directly (sin^2(2*theta_mumu)) together
+ * with a ratio parameter sB that controls how much of the nu_mu mixing leaks into the nu_e sector.
+ * The nu_e sector mixing is derived as Ue4^2 = sB * (1 - Um4^2) where
+ * Um4^2 = (1 - sqrt(1 - sin^2(2*theta_mumu))) / 2.
+ * A unitarity constraint is enforced via model_constraint.
+ * Parameters (dmsq, sinsq2thmumu, sB) are all in log10 space.
+ */
 class PRO3p1_3B : public PROmodel {
 public:
+    /**
+     * @brief Construct the PRO3p1_3B model.
+     * @param prop          MC event store; used to build H_combined.
+     * @param parameter_map Map from physics variable name (e.g., "L/E") to variable index in PROpeller.
+     *                      Must contain the key "L/E".
+     */
     PRO3p1_3B(const PROpeller &prop,
               const std::map<std::string,int> &parameter_map) {
 
@@ -1145,8 +1381,23 @@ public:
 };
 
 
+/**
+ * @brief 3+1 model variant 3C: parameterised by sin^2(2*theta_mue) and an asymmetry angle xi.
+ * @details Variant C uses the appearance amplitude sin^2(2*theta_mue) directly together with a
+ * hyperbolic asymmetry parameter xi that sets the relative size of the nu_e and nu_mu mixing elements:
+ *   U_mu4 = exp(-xi) * sqrt(sin^2(2*theta_mue)) / 2
+ *   U_e4  = exp(+xi) * sqrt(sin^2(2*theta_mue)) / 2
+ * A unitarity constraint |U_e4| * cosh(xi) < 1 is enforced via model_constraint.
+ * dmsq and sinsq2thmue are in log10 space; xi is linear.
+ */
 class PRO3p1_3C : public PROmodel {
 public:
+    /**
+     * @brief Construct the PRO3p1_3C model.
+     * @param prop          MC event store; used to build H_combined.
+     * @param parameter_map Map from physics variable name (e.g., "L/E") to variable index in PROpeller.
+     *                      Must contain the key "L/E".
+     */
     PRO3p1_3C(const PROpeller &prop, const std::map<std::string,int> &parameter_map) {
 
         model_functions.push_back([this]([[maybe_unused]] const Eigen::VectorXf &v, float) {(void)this; return 1.0; });
@@ -1295,8 +1546,23 @@ public:
 };
 
 
+/**
+ * @brief 3+1 sterile-neutrino model with invisible decay of the heavy mass eigenstate.
+ * @details Extends the standard 3+1 picture by allowing the fourth mass eigenstate to decay into
+ * invisible (non-interacting) particles with coupling strength g^2.  The oscillation probability
+ * is modified by an exponential damping factor exp(-g^2 * Delta / (8 pi)) where
+ * Delta = 1.267 * dmsq * L/E.  See arxiv:2204.00612 (IceCube) and PRD 110, 075002 for derivation.
+ * Parameters: dmsq [log10], |U_e4|^2 [log10], |U_mu4|^2 [log10], g^2 [linear, >= 0].
+ * A combined unitarity + positivity constraint is enforced via model_constraint.
+ */
 class PRO3p1_decay_invis : public PROmodel {
 public:
+    /**
+     * @brief Construct the PRO3p1_decay_invis model.
+     * @param prop          MC event store; used to build H_combined.
+     * @param parameter_map Map from physics variable name (e.g., "L/E") to variable index in PROpeller.
+     *                      Must contain the key "L/E".
+     */
     PRO3p1_decay_invis(const PROpeller &prop, const std::map<std::string,int> &parameter_map) {
         // 3+1+decay to invisible particles, example from IceCube: https://arxiv.org/pdf/2204.00612
         // (invisible means no active or sterile-oscillating-to-active neutrinos after the decay)
@@ -1516,8 +1782,22 @@ public:
     
 };
 
+/**
+ * @brief 3+2 sterile-neutrino model with two independent heavy mass eigenstates.
+ * @details Provides nu_mu disappearance, nu_mu → nu_e appearance, and nu_e disappearance channels
+ * driven by two mass splittings Delta m^2_41 and Delta m^2_51 and four mixing elements
+ * |U_e4|^2, |U_mu4|^2, |U_e5|^2, |U_mu5|^2 plus an inter-sterile CP phase phi_54.
+ * Seven parameters total: dmsq41, dmsq51 [log10], Ue4sq, Um4sq, Ue5sq, Um5sq [log10], phi54 [linear, rad].
+ * Unitarity constraints |U_ea|^2 sum < 1 and |U_mua|^2 sum < 1 are enforced via model_constraint.
+ */
 class PRO3p2 : public PROmodel {
 public:
+    /**
+     * @brief Construct the PRO3p2 model.
+     * @param prop          MC event store; used to build H_combined.
+     * @param parameter_map Map from physics variable name (e.g., "L/E") to variable index in PROpeller.
+     *                      Must contain the key "L/E".
+     */
     PRO3p2(const PROpeller &prop, const std::map<std::string,int> &parameter_map) {
 
         // model functions: 0 = null, 1 = numu->numu, 2 = numu->nue, 3 = nue->nue
@@ -1736,11 +2016,25 @@ public:
 
 };
 
+/**
+ * @brief Standard three-flavour long-baseline oscillation model including matter effects.
+ * @details Wraps the NuFastLBL library to compute the full 3x3 oscillation probability matrix in matter,
+ * assuming a baseline of 1300 km (DUNE), Earth matter density 3 g/cc, and electron fraction Ye = 0.5.
+ * All nine active-flavour transitions (nu_e, nu_mu, nu_tau → nu_e, nu_mu, nu_tau) are provided.
+ * Parameters: dmsq_21, dmsq_31 [eV^2, linear], sin^2(theta_12), sin^2(theta_13), sin^2(theta_23) [linear],
+ * delta_CP [rad, linear].  None of the six parameters are stored in log10 space.
+ */
 class PROLBL : public PROmodel {
 public:
-    static constexpr float rho_earth = 3; // g/cc
-	static constexpr float Ye_earth = 0.5;
+    static constexpr float rho_earth = 3; ///< Earth average matter density in g/cc used for MSW potential.
+    static constexpr float Ye_earth = 0.5; ///< Electron fraction of the Earth matter.
 
+    /**
+     * @brief Construct the PROLBL model.
+     * @param prop          MC event store; used to build H_combined.
+     * @param parameter_map Map from physics variable name (e.g., "L/E") to variable index in PROpeller.
+     *                      Must contain the key "L/E".
+     */
     PROLBL(const PROpeller &prop, const std::map<std::string,int> &parameter_map) {
 
         model_functions.push_back([this](const Eigen::VectorXf &v, float) {(void)this;(void)v; return 1.0; });
@@ -1781,13 +2075,15 @@ public:
         default_val << 1e-5, 1e-3, 0, 0, 0, 0;
     }
 
+    /// @brief nu_e → nu_e survival probability via NuFastLBL. @param params Physics vector (6 params). @param le L/E [km/GeV]. @return P(nu_e→nu_e).
     float Pee(const Eigen::VectorXf &params, float le) {
         float probs_returned[3][3];
-        NuFastLBL::Probability_Matter_LBL(params(2), params(3), params(4), params(5), 
+        NuFastLBL::Probability_Matter_LBL(params(2), params(3), params(4), params(5),
                   params(0), params(1), 1300, le, rho_earth, Ye_earth, 0, &probs_returned);
         return probs_returned[0][0];
     }
-    
+
+    /// @brief nu_e → nu_mu appearance probability via NuFastLBL. @param params Physics vector (6 params). @param le L/E [km/GeV]. @return P(nu_e→nu_mu).
     float Pemu(const Eigen::VectorXf &params, float le) {
         float probs_returned[3][3];
         NuFastLBL::Probability_Matter_LBL(params(2), params(3), params(4), params(5), 
@@ -1795,51 +2091,58 @@ public:
         return probs_returned[0][1];
     }
     
+    /// @brief nu_e → nu_tau appearance probability via NuFastLBL. @param params Physics vector. @param le L/E [km/GeV]. @return P(nu_e→nu_tau).
     float Petau(const Eigen::VectorXf &params, float le) {
         float probs_returned[3][3];
-        NuFastLBL::Probability_Matter_LBL(params(2), params(3), params(4), params(5), 
+        NuFastLBL::Probability_Matter_LBL(params(2), params(3), params(4), params(5),
                   params(0), params(1), 1300, le, rho_earth, Ye_earth, 0, &probs_returned);
         return probs_returned[0][2];
     }
-    
+
+    /// @brief nu_mu → nu_e appearance probability via NuFastLBL. @param params Physics vector. @param le L/E [km/GeV]. @return P(nu_mu→nu_e).
     float Pmue(const Eigen::VectorXf &params, float le) {
         float probs_returned[3][3];
-        NuFastLBL::Probability_Matter_LBL(params(2), params(3), params(4), params(5), 
+        NuFastLBL::Probability_Matter_LBL(params(2), params(3), params(4), params(5),
                   params(0), params(1), 1300, le, rho_earth, Ye_earth, 0, &probs_returned);
         return probs_returned[1][0];
     }
-    
+
+    /// @brief nu_mu → nu_mu survival probability via NuFastLBL. @param params Physics vector. @param le L/E [km/GeV]. @return P(nu_mu→nu_mu).
     float Pmumu(const Eigen::VectorXf &params, float le) {
         float probs_returned[3][3];
-        NuFastLBL::Probability_Matter_LBL(params(2), params(3), params(4), params(5), 
+        NuFastLBL::Probability_Matter_LBL(params(2), params(3), params(4), params(5),
                   params(0), params(1), 1300, le, rho_earth, Ye_earth, 0, &probs_returned);
         return probs_returned[1][1];
     }
-    
+
+    /// @brief nu_mu → nu_tau appearance probability via NuFastLBL. @param params Physics vector. @param le L/E [km/GeV]. @return P(nu_mu→nu_tau).
     float Pmutau(const Eigen::VectorXf &params, float le) {
         float probs_returned[3][3];
-        NuFastLBL::Probability_Matter_LBL(params(2), params(3), params(4), params(5), 
+        NuFastLBL::Probability_Matter_LBL(params(2), params(3), params(4), params(5),
                   params(0), params(1), 1300, le, rho_earth, Ye_earth, 0, &probs_returned);
         return probs_returned[1][2];
     }
-    
+
+    /// @brief nu_tau → nu_e appearance probability via NuFastLBL. @param params Physics vector. @param le L/E [km/GeV]. @return P(nu_tau→nu_e).
     float Ptaue(const Eigen::VectorXf &params, float le) {
         float probs_returned[3][3];
-        NuFastLBL::Probability_Matter_LBL(params(2), params(3), params(4), params(5), 
+        NuFastLBL::Probability_Matter_LBL(params(2), params(3), params(4), params(5),
                   params(0), params(1), 1300, le, rho_earth, Ye_earth, 0, &probs_returned);
         return probs_returned[2][0];
     }
-    
+
+    /// @brief nu_tau → nu_mu appearance probability via NuFastLBL. @param params Physics vector. @param le L/E [km/GeV]. @return P(nu_tau→nu_mu).
     float Ptaumu(const Eigen::VectorXf &params, float le) {
         float probs_returned[3][3];
-        NuFastLBL::Probability_Matter_LBL(params(2), params(3), params(4), params(5), 
+        NuFastLBL::Probability_Matter_LBL(params(2), params(3), params(4), params(5),
                   params(0), params(1), 1300, le, rho_earth, Ye_earth, 0, &probs_returned);
         return probs_returned[2][1];
     }
-    
+
+    /// @brief nu_tau → nu_tau survival probability via NuFastLBL. @param params Physics vector. @param le L/E [km/GeV]. @return P(nu_tau→nu_tau).
     float Ptautau(const Eigen::VectorXf &params, float le) {
         float probs_returned[3][3];
-        NuFastLBL::Probability_Matter_LBL(params(2), params(3), params(4), params(5), 
+        NuFastLBL::Probability_Matter_LBL(params(2), params(3), params(4), params(5),
                   params(0), params(1), 1300, le, rho_earth, Ye_earth, 0, &probs_returned);
         return probs_returned[2][2];
     }
@@ -1859,7 +2162,17 @@ public:
     }
 };
 
-// Main interface to different models
+/**
+ * @brief Factory function: construct a PROmodel subclass by name.
+ * @details Reads `config.m_model_tag` to select the appropriate model and passes
+ * `config.m_model_parameter_map` for variable-index lookup.
+ * Supported names: "nullmodel", "numudis", "numudisTEST", "nueapp", "nuedis",
+ * "3+1", "3+1_angles", "3+1_3A", "3+1_3B", "3+1_3C", "3+1_decay_invis", "3+2", "LBL".
+ * Terminates with LOG_ERROR if the name is unrecognised.
+ * @param config  Parsed configuration; provides the model tag and parameter map.
+ * @param prop    MC event store used to build H_combined histograms.
+ * @return        Owning pointer to the constructed PROmodel.
+ */
 static inline
 std::unique_ptr<PROmodel> get_model_from_string(const PROconfig& config, const PROpeller &prop) {
     std::string name = config.m_model_tag;

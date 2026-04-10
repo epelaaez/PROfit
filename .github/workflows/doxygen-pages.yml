@@ -1,0 +1,57 @@
+name: Doxygen GitHub Pages
+
+on:
+  push:
+    branches: [ "project-SBN-dev" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Only one Pages deployment at a time
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build-docs:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Doxygen and Graphviz
+        run: sudo apt-get update && sudo apt-get install -y doxygen graphviz
+
+      - name: Download Doxygen Awesome CSS (optional theme)
+        # Provides a clean modern theme; if the download fails the build still succeeds.
+        run: |
+          curl -fsSL \
+            https://raw.githubusercontent.com/jothepro/doxygen-awesome-css/main/doxygen-awesome.css \
+            -o docs/doxygen-awesome.css || true
+
+      - name: Run Doxygen
+        run: doxygen docs/Doxyfile
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/doxygen/html
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build-docs
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

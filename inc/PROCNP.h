@@ -1,3 +1,14 @@
+/**
+ * @file PROCNP.h
+ * @brief Combined Neyman-Pearson (CNP) chi-squared metric for PROfit.
+ * @author PROfit Collaboration
+ *
+ * @details Defines PROCNP, which implements the Combined Neyman-Pearson chi-squared statistic
+ * that uses a mixed covariance matrix combining Pearson (MC-predicted) and Neyman (data-driven)
+ * error terms.  This is the recommended chi-squared for neutrino counting experiments where
+ * data statistical uncertainty follows Poisson statistics but the predicted spectrum has
+ * finite Monte Carlo statistics.  Inherits from PROmetric.
+ */
 #ifndef PROCNP_H_
 #define PROCNP_H_
 
@@ -18,30 +29,36 @@
 
 namespace PROfit{
 
+    /**
+     * @brief Combined Neyman-Pearson chi-squared metric.
+     * @details Implements the CNP statistic in which the diagonal error for each bin is
+     * (1/3)(1/n_data + 2/n_pred), approximating the hybrid Poisson regime where neither pure
+     * Pearson nor pure Neyman chi-squared is optimal.  Systematic nuisance parameters are
+     * treated identically to PROchi.
+     * @note Unlike PROchi, PROCNP owns copies of the config, propeller, model, and data
+     * objects rather than holding references, to facilitate thread-safe FC pseudo-experiments.
+     */
     class PROCNP : public PROmetric
     {
-        // TODO: How much of this should be in PROmetric instead?
         private:
-            std::string model_tag;
+            std::string model_tag;  ///< String tag identifying the oscillation model in use.
 
-            const PROconfig config;
-            const PROpeller peller;
-            const PROsyst *syst; 
-            const PROmodel model;
-            const PROdata data;
-            EvalStrategy strat;
-            bool shape_only;
-            std::vector<float> physics_param_fixed;
-                        //Do we want to fix any param?
-            int fixed_index;
-            float fixed_val;
+            const PROconfig config; ///< Analysis configuration (owned copy).
+            const PROpeller peller; ///< MC event store (owned copy).
+            const PROsyst *syst;    ///< Systematic object (non-owning pointer).
+            const PROmodel model;   ///< Physics model (owned copy).
+            const PROdata data;     ///< Observed data spectrum (owned copy).
+            EvalStrategy strat;     ///< Evaluation strategy.
+            bool shape_only;        ///< If true, compute chi-squared on area-normalised spectra.
+            std::vector<float> physics_param_fixed; ///< Fixed-physics-parameter values (empty = none fixed).
+            int fixed_index;  ///< Index of the parameter fixed during a scan (-1 = none).
+            float fixed_val;  ///< Value at which the fixed parameter is held.
 
-            //Save last values for gradient calculation
-            Eigen::VectorXf last_param;
-            float last_value;
+            Eigen::VectorXf last_param; ///< Parameter vector from the most recent evaluation.
+            float last_value;           ///< Chi-squared from the most recent evaluation.
 
-            bool correlated_systematics;
-            Eigen::MatrixXf prior_covariance;
+            bool correlated_systematics;      ///< If true, use correlated (off-diagonal) pull covariance.
+            Eigen::MatrixXf prior_covariance; ///< Prior covariance matrix for nuisance parameters.
 
         public:
 
@@ -52,34 +69,60 @@ namespace PROfit{
             virtual float operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient);
             virtual float operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient, bool nograd);
 
+            /** @brief Return a heap-allocated copy of this PROCNP. */
             PROmetric *Clone() const {
                 return new PROCNP(model_tag, config, peller, syst, model, data, strat, shape_only, physics_param_fixed);
             }
 
+            /** @brief Return a const reference to the oscillation model. */
             virtual const PROmodel &GetModel() const {
                 return model;
             }
 
+            /** @brief Return a const reference to the systematic object. */
             virtual const PROsyst &GetSysts() const {
                 return *syst;
             }
 
+            /** @brief Reset cached state and clear any fixed-parameter list. */
             void reset() {
                 physics_param_fixed.clear();
                 last_value = 0;
                 last_param = Eigen::VectorXf::Constant(last_param.size(), 0);
             }
 
+            /** @brief Replace the internal systematic pointer with @p new_syst. */
             void override_systs(const PROsyst &new_syst) {
                 syst = &new_syst;
             }
 
+            /**
+             * @brief Compute the Gaussian pull penalty for the spline nuisance parameters.
+             * @param systs  Spline nuisance parameter values.
+             * @return Scalar chi-squared penalty from Gaussian priors.
+             */
             virtual float Pull(const Eigen::VectorXf &systs);
 
+            /**
+             * @brief Compute the CNP chi-squared contribution from a single analysis channel.
+             * @param global_channel_index  Global channel index.
+             * @param cv                    Predicted spectrum.
+             * @param var_index             Variable index.
+             * @return CNP chi-squared for that channel.
+             */
             float getSingleChannelChi(size_t global_channel_index, const PROspec &cv, size_t var_index);
 
+            /**
+             * @brief Fix a spline nuisance parameter at a given value.
+             * @param fix    0-based spline index.
+             * @param valin  Value to fix the spline at.
+             */
             void fixSpline(int fix, float valin);
 
+            /**
+             * @brief Print a breakdown of the CNP chi-squared contributions at @p param.
+             * @param param  Full parameter vector (physics + splines).
+             */
             void print(const Eigen::VectorXf &param);
     };
 

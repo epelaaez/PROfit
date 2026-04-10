@@ -1,3 +1,18 @@
+/**
+ * @file PROplot.h
+ * @brief Plotting utilities for PROfit spectra, covariance matrices, error bands, and MCMC posteriors.
+ * @author PROfit Collaboration
+ *
+ * @details Provides functions and helper types for producing publication-quality ROOT-based
+ * plots from PROfit analysis outputs.  Key capabilities include:
+ *   - Stacked subchannel spectra with pre- and post-fit error bands (plot_channels),
+ *   - Detector-ratio comparison plots (plot_detector_ratios),
+ *   - Fractional systematic breakdown bar charts,
+ *   - MCMC-derived posterior error bands (getMCMCErrorBand),
+ *   - Spline graphs and covariance/correlation matrix heatmaps.
+ *
+ * Also defines PlotBounds (axis range control) and PlotOptions (bitmask flags for plot style).
+ */
 #ifndef PROPLOT_H
 #define PROPLOT_H
 
@@ -35,13 +50,18 @@
 #include "TLine.h"
 namespace PROfit{
 
+    /**
+     * @brief Axis range control for PROfit plots.
+     * @details Default value of -9999 for any field means "let ROOT auto-range that axis".
+     * Use Load() to populate from a named key-value map (e.g. from command-line options).
+     */
     struct PlotBounds {
-        float xmin = -9999;
-        float xmax = -9999;
-        float ymin = -9999;
-        float ymax = -9999;
-        float ratmin = -9999;
-        float ratmax = -9999;
+        float xmin   = -9999; ///< Minimum x-axis value (-9999 = auto).
+        float xmax   = -9999; ///< Maximum x-axis value (-9999 = auto).
+        float ymin   = -9999; ///< Minimum y-axis value (-9999 = auto).
+        float ymax   = -9999; ///< Maximum y-axis value (-9999 = auto).
+        float ratmin = -9999; ///< Minimum ratio-panel y value (-9999 = auto).
+        float ratmax = -9999; ///< Maximum ratio-panel y value (-9999 = auto).
 
         int Load(std::map<std::string, float> bound_list){
             log<LOG_INFO>(L"%1% || Loading Bounds for plot_channels ") % __func__;
@@ -106,13 +126,20 @@ namespace PROfit{
         };
     };
     
+    /**
+     * @brief Bitmask flags controlling the style and content of plot_channels() output.
+     * @details Flags can be combined with operator|.  Example:
+     * @code
+     *   plot_channels(..., PlotOptions::BinWidthScaled | PlotOptions::DataMCRatio);
+     * @endcode
+     */
     enum class PlotOptions {
-        Default = 0,
-        CVasStack = 1 << 0,
-        AreaNormalized = 1 << 1,
-        BinWidthScaled = 1 << 2,
-        DataMCRatio = 1 << 3,
-        DataPostfitRatio = 1 << 4,
+        Default          = 0,       ///< Standard stacked histogram with no special options.
+        CVasStack        = 1 << 0,  ///< Draw the CV prediction as a stacked (filled) histogram.
+        AreaNormalized   = 1 << 1,  ///< Normalise all histograms to unit area before plotting.
+        BinWidthScaled   = 1 << 2,  ///< Divide bin contents by bin width (events/unit).
+        DataMCRatio      = 1 << 3,  ///< Show a data/MC ratio panel below the main plot.
+        DataPostfitRatio = 1 << 4,  ///< Show a data/post-fit ratio panel below the main plot.
     };
 
     inline PlotOptions operator|(PlotOptions a, PlotOptions b) {
@@ -131,22 +158,136 @@ namespace PROfit{
         return a = a & b;
     }
 
+    /** @brief Set a custom colour palette for 2D matrix plots (correlation/covariance). */
     void set_matrix_palette();
 
+    /**
+     * @brief Produce a multi-panel detector ratio comparison plot.
+     * @param config       Analysis configuration.
+     * @param data_hists   Data histograms, one per channel.
+     * @param cv_hists     CV prediction histograms, one per channel.
+     * @param errband      Optional pre-fit error band.
+     * @param bf_hists     Best-fit prediction histograms, one per channel.
+     * @param posterrband  Optional post-fit error band.
+     * @param pre_corr     Pre-fit correlation matrix (TH2D) for labelling.
+     * @param post_corr    Post-fit correlation matrix (TH2D) for labelling.
+     * @param filename     Output PDF filename.
+     * @param var_index    Variable index (default 0).
+     */
     void plot_detector_ratios(const PROconfig &config, std::vector<TH1D> data_hists,  std::vector<TH1D> cv_hists, std::optional<PROerrorbar> errband, std::vector<TH1D> bf_hists, std::optional<PROerrorbar> posterrband, TH2D &pre_corr, TH2D &post_corr, std::string filename, int var_index = 0);
 
+    /**
+     * @brief Produce a stacked spectrum plot for all channels.
+     * @param filename     Output filename (ROOT or PDF).
+     * @param config       Analysis configuration.
+     * @param cv           Optional CV prediction spectrum.
+     * @param best_fit     Optional best-fit prediction spectrum.
+     * @param data         Optional observed data spectrum.
+     * @param errband      Optional pre-fit error band.
+     * @param posterrband  Optional post-fit error band.
+     * @param texts        Vector of TPaveText annotation boxes to overlay.
+     * @param bounds       Axis range settings.
+     * @param opt          Bitmask of PlotOptions flags.
+     * @param var_index    Variable index (default 0).
+     * @param ratio_bool   If true, add a ratio panel.
+     */
     void plot_channels(const std::string &filename, const PROconfig &config, std::optional<PROspec> cv, std::optional<PROspec> best_fit, std::optional<PROdata> data, std::optional<PROerrorbar> errband, std::optional<PROerrorbar> posterrband, std::vector<TPaveText> &texts, PlotBounds &bounds, PlotOptions opt = PlotOptions::Default, int var_index = 0, bool ratio_bool = false);
 
-    //some helper functions for PROplot
+    /**
+     * @brief Return a map of subchannel-name to 1D ROOT histogram from a PROspec.
+     * @param spec       Input spectrum.
+     * @param inconfig   Analysis configuration.
+     * @param scale      If true, divide by bin width.
+     * @param var_index  Variable index.
+     * @return Map from subchannel full name to unique TH1D.
+     */
     std::map<std::string, std::unique_ptr<TH1D>> getCV1DHists(const PROspec & spec, const PROconfig& inconfig, bool scale = false, int var_index = 0);
+
+    /**
+     * @brief Return a map of subchannel-name to 2D ROOT histogram from a PROspec.
+     * @param spec       Input spectrum.
+     * @param inconfig   Analysis configuration.
+     * @param scale      If true, divide by bin area.
+     * @param var_index  Variable index.
+     * @return Map from subchannel full name to unique TH2D.
+     */
     std::map<std::string, std::unique_ptr<TH2D>> getCV2DHists(const PROspec & spec, const PROconfig& inconfig, bool scale = false, int var_index = 0);
+
+    /**
+     * @brief Return per-systematic covariance and correlation matrix TH2D histograms.
+     * @param syst    The PROsyst containing all systematics.
+     * @param config  Analysis configuration.
+     * @param cv      CV spectrum used to convert fractional to absolute covariance.
+     * @return Map from systematic name to unique TH2D.
+     */
     std::map<std::string, std::unique_ptr<TH2D>> covarianceTH2D(const PROsyst &syst, const PROconfig &config, const PROspec &cv);
+
+    /**
+     * @brief Return TGraph pairs (CV ± 1 sigma) for all spline systematics.
+     * @param systs   The PROsyst containing all splines.
+     * @param config  Analysis configuration.
+     * @return Map from spline name to a vector of (down, up) TGraph pairs per bin.
+     */
     std::map<std::string, std::vector<std::pair<std::unique_ptr<TGraph>,std::unique_ptr<TGraph>>>> getSplineGraphs(const PROsyst &systs, const PROconfig &config);
+
+    /**
+     * @brief Compute a pre-fit error band from systematic throws.
+     * @param config      Analysis configuration.
+     * @param prop        MC event store.
+     * @param syst        Systematic object.
+     * @param model       Physics model.
+     * @param cv_spec     CV predicted spectrum.
+     * @param cvparams    CV physics parameter vector.
+     * @param scale       If true, divide errors by bin width.
+     * @param other_index Variable index.
+     * @return PROerrorbar with asymmetric per-bin uncertainties.
+     */
     PROerrorbar getErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const PROspec &cv_spec, const Eigen::VectorXf &cvparams,bool scale=false, int other_index=0);
 
+    /**
+     * @brief Produce a bar chart showing fractional prior uncertainty per systematic.
+     * @param config       Analysis configuration.
+     * @param spec         CV spectrum used for fractional normalisation.
+     * @param allsplinesyst PROsyst containing all spline systematics.
+     * @param filename     Output filename.
+     * @param var_index    Variable index (default 0).
+     * @return 0 on success.
+     */
     int plotPriorFractionalSystematicBreakdown(const PROconfig &config, const PROspec &spec, const PROsyst &allsplinesyst, std::string filename, int var_index = 0);
+
+    /**
+     * @brief Produce a ratio plot of prior fractional uncertainties across systematics.
+     * @param config       Analysis configuration.
+     * @param spec         CV spectrum.
+     * @param allsplinesyst PROsyst containing all spline systematics.
+     * @param filename     Output filename.
+     * @param other_index  Variable index.
+     * @return 0 on success.
+     */
     int plotPriorFractionalSystematicRatios(const PROconfig &config, const PROspec &spec, const PROsyst &allsplinesyst, std::string filename, int other_index);
 
+    /**
+     * @brief Compute a posterior error band using Markov Chain Monte Carlo sampling.
+     * @details Runs the Metropolis algorithm for @p burnin + @p iterations steps.  At each
+     * accepted step after burn-in, the corresponding spectrum is computed and accumulated;
+     * asymmetric 1-sigma error bars are derived from the 16th and 84th percentiles of the
+     * per-bin sample distributions.  Posterior distributions for each spline parameter and
+     * the per-bin histogram covariance are also accumulated.
+     * @tparam T  Metropolis proposal distribution type.
+     * @tparam P  Metropolis target density type.
+     * @param met        Metropolis sampler object.
+     * @param burnin     Number of burn-in steps to discard.
+     * @param iterations Number of post-burn-in steps to keep.
+     * @param config     Analysis configuration.
+     * @param prop       MC event store.
+     * @param metric     The PROmetric providing access to model and systematics.
+     * @param best_fit   Best-fit parameter vector (used as the starting point and as reference).
+     * @param posteriors Output vector of TH1D histograms for each spline nuisance parameter.
+     * @param post_covar Output post-fit parameter covariance matrix (splines only).
+     * @param scale      If true, divide error bars by bin width.
+     * @param var_index  Variable index (default 0).
+     * @return PROerrorbar with per-bin asymmetric uncertainties and the histogram covariance.
+     */
     template<class T, class P>
         PROerrorbar getMCMCErrorBand(Metropolis<T, P> met, size_t burnin, size_t iterations, const PROconfig &config, const PROpeller &prop, PROmetric &metric, const Eigen::VectorXf &best_fit, std::vector<TH1D> &posteriors, Eigen::MatrixXf &post_covar,  bool scale = false,int var_index=0) {
             for(size_t i = 0; i < metric.GetSysts().GetNSplines(); ++i)
