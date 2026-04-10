@@ -21,32 +21,86 @@ namespace PROfit {
 class PROmodel {
 public:
     size_t nparams;
-    int ivar; //TODO, this should be a string like "true" and then in config we have a map to that variable. error if not found. 
+    // ivars: indices of the physics variables used by this model (e.g. {L/E_index} for 1-var,
+    // {L_index, E_index} for 2-var). n_phys_bins = product of their bin counts.
+    std::vector<int> ivars;
+    long int n_phys_bins = 0;
     std::vector<std::string> param_names;
     std::vector<std::string> pretty_param_names;
     std::vector<std::string> pretty_param_units;
     Eigen::VectorXf lb, ub, default_val;
     std::vector<std::function<float(const Eigen::VectorXf&, float)>> model_functions;
     std::function<int(const Eigen::VectorXf&)> model_constraint;
-    std::vector<std::vector<Eigen::MatrixXf>> hists; //2D hists for binned oscilattion, one for each model function, and the N-variables 
-                                        //Todo: make this a vector of length n_variables, and fill them all. For now 1 is "special". 
+    // hists[v][m]: shape (n_reco_v, n_phys_bins) — transposed vs old convention for cache efficiency.
+    // v = reco variable index, m = model_function/prob_type index.
+    std::vector<std::vector<Eigen::MatrixXf>> hists;
+    // H_combined[v]: shape (n_reco_v, n_phys_bins * J) — horizontal concat of hists[v][0..J-1].
+    // Enables a single GEMV in FillSpectra: result = H_combined[v] * probs_flat.
+    std::vector<Eigen::MatrixXf> H_combined;
 
     std::vector<size_t> prob_types; // Indices of probability types (matches model_functions indices)
 
     std::vector<bool> is_log10; // Track whether each physics parameter is stored in log10 space.
 
-    // Compute oscillation probabilities for all L/E values and all probability types
-    // Returns probs(le_index, prob_type_index) as an Eigen::MatrixXf for cache-friendly access
-    // Can be overridden for faster computation, computing multiple types of probabilities at multiple L/E values together
-    virtual Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<float> &le_arr) const {
-        //log<LOG_ERROR>(L"%1% || Using non-unified get_probs function for model") % __func__;
+    // Build hists and H_combined from prop events.
+    // Must be called after ivars and model_functions are set.
+    // filter_by_model_rule=false: all events go into component 0 (use for NullModel).
+    void build_hists_and_combined(const PROpeller &prop, bool filter_by_model_rule = true) {
+        // Compute flat physics grid size and per-ivar bin counts
+        std::vector<size_t> ivar_sizes(ivars.size());
+        n_phys_bins = 1;
+        for(size_t k = 0; k < ivars.size(); ++k) {
+            ivar_sizes[k] = prop.variable_midbin[ivars[k]].size();
+            n_phys_bins *= (long int)ivar_sizes[k];
+        }
+
+        size_t nvar = prop.variable_mc_stat_err.size();
+        size_t J    = model_functions.size();
+        hists.resize(nvar);
+        H_combined.resize(nvar);
+
+        for(size_t v = 0; v < nvar; ++v) {
+            size_t n_reco_v = prop.variable_mc_stat_err[v].size();
+            hists[v].clear();
+            for(size_t m = 0; m < J; ++m) {
+                hists[v].emplace_back(Eigen::MatrixXf::Zero(n_reco_v, n_phys_bins));
+                Eigen::MatrixXf &h = hists[v].back();
+                for(size_t i = 0; i < prop.NEvent(); ++i) {
+                    if(filter_by_model_rule && prop.model_rule[i] != (int)m) continue;
+                    // Compute row-major flat index over ivars
+                    long int flat_phys = 0;
+                    bool valid = true;
+                    for(size_t k = 0; k < ivars.size(); ++k) {
+                        int tbin = prop.VariableBinIndex(ivars[k], i);
+                        if(tbin < 0) { valid = false; break; }
+                        flat_phys = flat_phys * (long int)ivar_sizes[k] + tbin;
+                    }
+                    if(!valid) continue;
+                    int rbin = prop.VariableBinIndex(v, i);
+                    if(rbin < 0) continue;
+                    h(rbin, flat_phys) += prop.added_weights[i];
+                }
+            }
+            // Build H_combined[v] = [hists[v][0] | hists[v][1] | ... | hists[v][J-1]]
+            // shape: (n_reco_v, n_phys_bins * J)
+            H_combined[v].resize(n_reco_v, n_phys_bins * J);
+            for(size_t m = 0; m < J; ++m)
+                H_combined[v].block(0, m * n_phys_bins, n_reco_v, n_phys_bins) = hists[v][m];
+        }
+    }
+
+    // Compute oscillation probabilities for all physics-grid points and all probability types.
+    // var_arrs[k] contains the value of ivars[k] for each flat grid point (length = n_phys_bins).
+    // Returns probs(flat_phys_index, prob_type_index).
+    // Can be overridden for faster computation.
+    virtual Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<std::vector<float>> &var_arrs) const {
+        const auto &le_arr = var_arrs[0];
         Eigen::MatrixXf probs(le_arr.size(), prob_types.size());
         for(size_t i = 0; i < le_arr.size(); ++i) {
             for(size_t j = 0; j < prob_types.size(); ++j) {
                 probs(i, j) = model_functions[j](phys, le_arr[i]);
             }
         }
-
         return probs;
     }
 
@@ -78,23 +132,11 @@ class NullModel : public PROmodel {
 public:
     NullModel(const PROpeller &prop) {
         nparams = 0;
-        ivar = 1;
+        ivars = {1};
         model_functions.push_back([](const Eigen::VectorXf &, float){ return 1.0f; });
         prob_types = {0};
        
-        size_t nvar = prop.variable_mc_stat_err.size();
-        hists.resize(nvar);
-        for(size_t v = 0; v <nvar ;v++){
-            for(size_t m = 0; m < model_functions.size(); ++m) {
-                hists.at(v).emplace_back(Eigen::MatrixXf::Constant(prop.variable_hist_storage(ivar,v).rows(), prop.variable_hist_storage(ivar,v).cols(),0.0));
-                Eigen::MatrixXf &h = hists.at(v).back();
-                for(size_t i = 0; i < prop.NEvent(); ++i) {
-                    int tbin = prop.VariableBinIndex(ivar, i), rbin = prop.VariableBinIndex(v, i);
-                    if(tbin<0 || rbin<0)continue;
-                    h(tbin, rbin) += prop.added_weights[i];
-                }
-            }
-        }
+        build_hists_and_combined(prop, /*filter_by_model_rule=*/false);
         is_log10.clear();
     }
 };
@@ -114,22 +156,9 @@ public:
             log<LOG_ERROR>(L"%1%, %2% || Missing expected parameter: 'L/E'.Make sure its in your model section of XML. ") % __func__ % __LINE__;
             throw std::runtime_error("Missing parameter: L/E");
         }
-        ivar = parameter_map.at("L/E");
+        ivars = {parameter_map.at("L/E")};
 
-        size_t nvar = prop.variable_mc_stat_err.size();
-        hists.resize(nvar);
-        for(size_t v = 0; v <nvar ;v++){
-            for(size_t m = 0; m < model_functions.size(); ++m) {
-                hists.at(v).emplace_back(Eigen::MatrixXf::Constant(prop.variable_hist_storage(ivar,v).rows(), prop.variable_hist_storage(ivar,v).cols(),0.0));
-                Eigen::MatrixXf &h = hists.at(v).back();
-                for(size_t i = 0; i < prop.NEvent(); ++i) {
-                    if(prop.model_rule[i] != (int)m) continue;
-                    int tbin = prop.VariableBinIndex(ivar, i), rbin = prop.VariableBinIndex(v, i);
-                    if(tbin<0 || rbin<0) continue;
-                    h(tbin, rbin) += prop.added_weights[i];
-                }
-            }
-        }
+        build_hists_and_combined(prop);
         nparams = 2;
         param_names = {"dmsq", "sinsq2thmm"}; 
         pretty_param_names = {"#Deltam^{2}", "sin^{2}2#theta_{#mu#mu}"}; 
@@ -174,7 +203,8 @@ public:
         return prob;
     }
 
-    Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<float> &le_arr) const override {
+    Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<std::vector<float>> &var_arrs) const override {
+        const auto &le_arr = var_arrs[0];
         //log<LOG_ERROR>(L"%1% || Using unified, optimized get_probs function for model") % __func__;
         // Precompute physics parameters once
         float dmsq = maybe_convert_log("dmsq", phys(0));
@@ -201,6 +231,87 @@ public:
     }
 };
 
+// TEST: 2-variable version of PROnumudis. Takes separate "L" and "E" variables from the
+// parameter_map (with variable_index pointing to the L and E variables respectively).
+// H_combined is built on the 2D (L x E) grid, but get_probs computes P(L/E) internally —
+// so the physics is identical to PROnumudis and the two should give identical spectra.
+class PROnumudisTEST : public PROmodel {
+public:
+    PROnumudisTEST(const PROpeller &prop, const std::map<std::string,int> &parameter_map) {
+        prob_types = {0, 1};
+        model_functions.push_back([this]([[maybe_unused]] const Eigen::VectorXf &v, float) {(void)this; return 1.0f;});
+        model_functions.push_back([this](const Eigen::VectorXf &v, float le) {return this->Pmumu(v(0),v(1),le);});
+
+        if(parameter_map.find("L") == parameter_map.end()) {
+            log<LOG_ERROR>(L"%1%, %2% || PROnumudisTEST: Missing expected parameter: 'L'.") % __func__ % __LINE__;
+            throw std::runtime_error("Missing parameter: L");
+        }
+        if(parameter_map.find("E") == parameter_map.end()) {
+            log<LOG_ERROR>(L"%1%, %2% || PROnumudisTEST: Missing expected parameter: 'E'.") % __func__ % __LINE__;
+            throw std::runtime_error("Missing parameter: E");
+        }
+        // ivars[0] = L variable index, ivars[1] = E variable index.
+        // build_hists_and_combined will make the flat grid L x E.
+        ivars = {parameter_map.at("L"), parameter_map.at("E")};
+
+        build_hists_and_combined(prop);
+
+        nparams = 2;
+        param_names = {"dmsq", "sinsq2thmm"};
+        pretty_param_names = {"#Deltam^{2}", "sin^{2}2#theta_{#mu#mu}"};
+        pretty_param_units = {"eV^{2}", ""};
+        is_log10 = {true, true};
+        build_param_index();
+        lb = Eigen::VectorXf(2);
+        ub = Eigen::VectorXf(2);
+        default_val = Eigen::VectorXf(2);
+        lb << -2, -std::numeric_limits<float>::infinity();
+        ub << 2, 0;
+        default_val << -10, -10;
+    };
+
+    float Pmumu(float dmsq, float sinsq2thmumu, float le) const {
+        dmsq         = maybe_convert_log("dmsq",       dmsq);
+        sinsq2thmumu = maybe_convert_log("sinsq2thmm", sinsq2thmumu);
+        if(sinsq2thmumu > 1) sinsq2thmumu = 1;
+        if(sinsq2thmumu < 0) sinsq2thmumu = 0;
+        float sinterm = std::sin(1.266932679f * dmsq * le);
+        float prob    = 1.0f - (sinsq2thmumu * sinterm * sinterm);
+        if(prob < 0.0f || prob > 1.0f) {
+            log<LOG_ERROR>(L"%1% || Probability %2% outside [0,1]. dmsq=%3%, sinsq2thmumu=%4%, L/E=%5%")
+                % __func__ % prob % dmsq % sinsq2thmumu % le;
+            exit(EXIT_FAILURE);
+        }
+        return prob;
+    }
+
+    // var_arrs[0] = L values for each flat grid point (length n_L * n_E)
+    // var_arrs[1] = E values for each flat grid point (length n_L * n_E)
+    // Internally computes L/E and evaluates Pmumu — identical physics to PROnumudis.
+    Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<std::vector<float>> &var_arrs) const override {
+        float dmsq         = maybe_convert_log("dmsq",       phys(0));
+        float sinsq2thmumu = maybe_convert_log("sinsq2thmm", phys(1));
+        if(sinsq2thmumu > 1) sinsq2thmumu = 1;
+        if(sinsq2thmumu < 0) sinsq2thmumu = 0;
+
+        float freq = 1.266932679f * dmsq;
+        const size_t n_flat = var_arrs[0].size(); // = n_L * n_E
+        Eigen::MatrixXf probs(n_flat, 2);
+
+        for(size_t i = 0; i < n_flat; ++i) {
+            float L = var_arrs[0][i];
+            float E = var_arrs[1][i];
+            // Guard against zero energy — same convention as L/E variable (out-of-range events
+            // get bin index -1 in PROpeller so they never enter H; but be safe here too).
+            float le = (E > 0.0f) ? L / E : 0.0f;
+            probs(i, 0) = 1.0f;
+            float sinterm = std::sin(freq * le);
+            probs(i, 1) = 1.0f - (sinsq2thmumu * sinterm * sinterm);
+        }
+        return probs;
+    }
+};
+
 class PROnueapp : public PROmodel {
 public:
     PROnueapp(const PROpeller &prop,const std::map<std::string,int> &parameter_map) {
@@ -211,22 +322,9 @@ public:
             log<LOG_ERROR>(L"%1%, %2% || Missing expected parameter: 'L/E'. Make sure its in your model section of XML.") % __func__ % __LINE__;
             throw std::runtime_error("Missing parameter: L/E");
         }
-        ivar = parameter_map.at("L/E");
+        ivars = {parameter_map.at("L/E")};
 
-        size_t nvar = prop.variable_mc_stat_err.size();
-        hists.resize(nvar);
-        for(size_t v = 0; v <nvar ;v++){
-            for(size_t m = 0; m < model_functions.size(); ++m) {
-                hists.at(v).emplace_back(Eigen::MatrixXf::Constant(prop.variable_hist_storage(ivar,v).rows(), prop.variable_hist_storage(ivar,v).cols(),0.0));
-                Eigen::MatrixXf &h = hists.at(v).back();
-                for(size_t i = 0; i < prop.NEvent(); ++i) {
-                    if(prop.model_rule[i] != (int)m) continue;
-                    int tbin = prop.VariableBinIndex(ivar, i), rbin = prop.VariableBinIndex(v, i);
-                    if(tbin<0 || rbin<0)continue;
-                    h(tbin, rbin) += prop.added_weights[i];
-                }
-            }
-        }
+        build_hists_and_combined(prop);
          nparams = 2;
         param_names = {"dmsq", "sinsq2thme"}; 
         pretty_param_names = {"#Deltam^{2}", "sin^{2}2#theta_{#mue}"}; 
@@ -276,7 +374,8 @@ public:
         return prob;
     }
 
-    Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<float> &le_arr) const override {
+    Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<std::vector<float>> &var_arrs) const override {
+        const auto &le_arr = var_arrs[0];
         //log<LOG_ERROR>(L"%1% || Using unified, optimized get_probs function for model") % __func__;
         // Precompute physics parameters once
         float dmsq = maybe_convert_log("dmsq", phys(0));
@@ -316,22 +415,9 @@ public:
             log<LOG_ERROR>(L"%1%, %2% || Missing expected parameter: 'L/E'.Make sure its in your model section of XML. ") % __func__ % __LINE__;
             throw std::runtime_error("Missing parameter: L/E");
         }
-        ivar = parameter_map.at("L/E");
+        ivars = {parameter_map.at("L/E")};
 
-        size_t nvar = prop.variable_mc_stat_err.size();
-        hists.resize(nvar);
-        for(size_t v = 0; v <nvar ;v++){
-            for(size_t m = 0; m < model_functions.size(); ++m) {
-                hists.at(v).emplace_back(Eigen::MatrixXf::Constant(prop.variable_hist_storage(ivar,v).rows(), prop.variable_hist_storage(ivar,v).cols(),0.0));
-                Eigen::MatrixXf &h = hists.at(v).back();
-                for(size_t i = 0; i < prop.NEvent(); ++i) {
-                    if(prop.model_rule[i] != (int)m) continue;
-                    int tbin = prop.VariableBinIndex(ivar, i), rbin = prop.VariableBinIndex(v, i);
-                    if(tbin<0 || rbin<0) continue;
-                    h(tbin, rbin) += prop.added_weights[i];
-                }
-            }
-        }
+        build_hists_and_combined(prop);
         nparams = 2;
         param_names = {"dmsq", "sinsq2thee"}; 
         pretty_param_names = {"#Deltam^{2}", "sin^{2}2#theta_{ee}"}; 
@@ -376,7 +462,8 @@ public:
         return prob;
     }
 
-    Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<float> &le_arr) const override {
+    Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<std::vector<float>> &var_arrs) const override {
+        const auto &le_arr = var_arrs[0];
         //log<LOG_ERROR>(L"%1% || Using unified, optimized get_probs function for model") % __func__;
         // Precompute physics parameters once
         float dmsq = maybe_convert_log("dmsq", phys(0));
@@ -419,26 +506,13 @@ public:
             log<LOG_ERROR>(L"%1%, %2% || Missing expected parameter: 'L/E'. Make sure its in your model section of XML.") % __func__ % __LINE__;
             throw std::runtime_error("Missing parameter: L/E");
         }
-        ivar = parameter_map.at("L/E");
+        ivars = {parameter_map.at("L/E")};
 
         //constraints
         model_constraint = [this](const Eigen::VectorXf &v){return this->UnitarityConstraint(v);};
 
 
-        size_t nvar = prop.variable_mc_stat_err.size();
-        hists.resize(nvar);
-        for(size_t v = 0; v <nvar ;v++){
-            for(size_t m = 0; m < model_functions.size(); ++m) {
-                hists.at(v).emplace_back(Eigen::MatrixXf::Constant(prop.variable_hist_storage(ivar,v).rows(), prop.variable_hist_storage(ivar,v).cols(),0.0));
-                Eigen::MatrixXf &h = hists.at(v).back();
-                for(size_t i = 0; i < prop.NEvent(); ++i) {
-                    if(prop.model_rule[i] != (int)m) continue;
-                    int tbin = prop.VariableBinIndex(ivar, i), rbin = prop.VariableBinIndex(v, i);
-                    if(tbin<0 || rbin<0)continue;
-                    h(tbin, rbin) += prop.added_weights[i];
-                }
-            }
-        }
+        build_hists_and_combined(prop);
 
 
         nparams = 3;
@@ -556,7 +630,8 @@ public:
         return prob;
     }
 
-    Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<float> &le_arr) const override {
+    Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<std::vector<float>> &var_arrs) const override {
+        const auto &le_arr = var_arrs[0];
         //log<LOG_ERROR>(L"%1% || Using unified, optimized get_probs function for model") % __func__;
 
         // Precompute physics parameters once
@@ -603,26 +678,13 @@ public:
             log<LOG_ERROR>(L"%1%, %2% || Missing expected parameter: 'L/E'. Make sure its in your model section of XML.") % __func__ % __LINE__;
             throw std::runtime_error("Missing parameter: L/E");
         }
-        ivar = parameter_map.at("L/E");
+        ivars = {parameter_map.at("L/E")};
 
         //constraints
         model_constraint = [this](const Eigen::VectorXf &v){return this->UnitarityConstraint(v);};
 
 
-        size_t nvar = prop.variable_mc_stat_err.size();
-        hists.resize(nvar);
-        for(size_t v = 0; v <nvar ;v++){
-            for(size_t m = 0; m < model_functions.size(); ++m) {
-                hists.at(v).emplace_back(Eigen::MatrixXf::Constant(prop.variable_hist_storage(ivar,v).rows(), prop.variable_hist_storage(ivar,v).cols(),0.0));
-                Eigen::MatrixXf &h = hists.at(v).back();
-                for(size_t i = 0; i < prop.NEvent(); ++i) {
-                    if(prop.model_rule[i] != (int)m) continue;
-                    int tbin = prop.VariableBinIndex(ivar, i), rbin = prop.VariableBinIndex(v, i);
-                    if(tbin<0 || rbin<0)continue;
-                    h(tbin, rbin) += prop.added_weights[i];
-                }
-            }
-        }
+        build_hists_and_combined(prop);
 
 
         nparams = 3;
@@ -700,7 +762,8 @@ public:
         return prob;
     }
 
-    Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<float> &le_arr) const override {
+    Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<std::vector<float>> &var_arrs) const override {
+        const auto &le_arr = var_arrs[0];
         //log<LOG_ERROR>(L"%1% || Using unified, optimized get_probs function for model") % __func__;
 
         // Precompute physics parameters once
@@ -746,26 +809,13 @@ public:
             log<LOG_ERROR>(L"%1%, %2% || Missing expected parameter: 'L/E'. Make sure its in your model section of XML.") % __func__ % __LINE__;
             throw std::runtime_error("Missing parameter: L/E");
         }
-        ivar = parameter_map.at("L/E");
+        ivars = {parameter_map.at("L/E")};
 
         //constraints
         model_constraint = [](const Eigen::VectorXf &){return 1;};
 
 
-         size_t nvar = prop.variable_mc_stat_err.size();
-        hists.resize(nvar);
-        for(size_t v = 0; v <nvar ;v++){
-            for(size_t m = 0; m < model_functions.size(); ++m) {
-                hists.at(v).emplace_back(Eigen::MatrixXf::Constant(prop.variable_hist_storage(ivar,v).rows(), prop.variable_hist_storage(ivar,v).cols(),0.0));
-                Eigen::MatrixXf &h = hists.at(v).back();
-                for(size_t i = 0; i < prop.NEvent(); ++i) {
-                    if(prop.model_rule[i] != (int)m) continue;
-                    int tbin = prop.VariableBinIndex(ivar, i), rbin = prop.VariableBinIndex(v, i);
-                    if(tbin<0 || rbin<0)continue;
-                    h(tbin, rbin) += prop.added_weights[i];
-                }
-            }
-        }
+         build_hists_and_combined(prop);
 
 
         nparams = 3;
@@ -850,7 +900,8 @@ public:
         return prob;
     }
 
-    Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<float> &le_arr) const override {
+    Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<std::vector<float>> &var_arrs) const override {
+        const auto &le_arr = var_arrs[0];
         //log<LOG_ERROR>(L"%1% || Using unified, optimized get_probs function for model") % __func__;
 
         // Precompute physics parameters once
@@ -931,32 +982,12 @@ public:
             ) % __func__ % __LINE__;
             throw std::runtime_error("Missing parameter: L/E");
         }
-        ivar = parameter_map.at("L/E");
+        ivars = {parameter_map.at("L/E")};
 
         // -----------------------------------------
         // 3) Build histograms for each model component
         // -----------------------------------------
-        size_t nvar = prop.variable_mc_stat_err.size();
-        hists.resize(nvar);
-        for (size_t v = 0; v < nvar; ++v) {
-            for (size_t m = 0; m < model_functions.size(); ++m) {
-                hists.at(v).emplace_back(
-                    Eigen::MatrixXf::Constant(
-                        prop.variable_hist_storage(ivar, v).rows(),
-                        prop.variable_hist_storage(ivar, v).cols(),
-                        0.0f
-                    )
-                );
-                Eigen::MatrixXf &h = hists.at(v).back();
-                for (size_t i = 0; i < prop.NEvent(); ++i) {
-                    if (prop.model_rule[i] != static_cast<int>(m)) continue;
-                    int tbin = prop.VariableBinIndex(ivar, i);
-                    int rbin = prop.VariableBinIndex(v, i);
-                    if (tbin < 0 || rbin < 0) continue;
-                    h(tbin, rbin) += prop.added_weights[i];
-                }
-            }
-        }
+        build_hists_and_combined(prop);
 
         // -----------------------------------------
         // 4) Parameters and bounds
@@ -1076,7 +1107,8 @@ public:
         return prob;
     }
     
-    Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<float> &le_arr) const override {
+    Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<std::vector<float>> &var_arrs) const override {
+        const auto &le_arr = var_arrs[0];
         //log<LOG_ERROR>(L"%1% || Using unified, optimized get_probs function for model") % __func__;
 
         // Precompute physics parameters once
@@ -1126,26 +1158,13 @@ public:
             log<LOG_ERROR>(L"%1%, %2% || Missing expected parameter: 'L/E'. Make sure its in your model section of XML.") % __func__ % __LINE__;
             throw std::runtime_error("Missing parameter: L/E");
         }
-        ivar = parameter_map.at("L/E");
+        ivars = {parameter_map.at("L/E")};
 
         //constraints
         model_constraint = [this](const Eigen::VectorXf &v){return this->UnitarityConstraint(v);};
 
 
-        size_t nvar = prop.variable_mc_stat_err.size();
-        hists.resize(nvar);
-        for(size_t v = 0; v <nvar ;v++){
-            for(size_t m = 0; m < model_functions.size(); ++m) {
-                hists.at(v).emplace_back(Eigen::MatrixXf::Constant(prop.variable_hist_storage(ivar,v).rows(), prop.variable_hist_storage(ivar,v).cols(),0.0));
-                Eigen::MatrixXf &h = hists.at(v).back();
-                for(size_t i = 0; i < prop.NEvent(); ++i) {
-                    if(prop.model_rule[i] != (int)m) continue;
-                    int tbin = prop.VariableBinIndex(ivar, i), rbin = prop.VariableBinIndex(v, i);
-                    if(tbin<0 || rbin<0)continue;
-                    h(tbin, rbin) += prop.added_weights[i];
-                }
-            }
-        }
+        build_hists_and_combined(prop);
 
 
         nparams = 3;
@@ -1234,7 +1253,8 @@ public:
         return prob;
     }
     
-    Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<float> &le_arr) const override {
+    Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<std::vector<float>> &var_arrs) const override {
+        const auto &le_arr = var_arrs[0];
         //log<LOG_ERROR>(L"%1% || Using unified, optimized get_probs function for model") % __func__;
 
         // Precompute physics parameters once
@@ -1293,24 +1313,11 @@ public:
             log<LOG_ERROR>(L"%1%, %2% || Missing expected parameter: 'L/E'. Make sure its in your model section of XML.") % __func__ % __LINE__;
             throw std::runtime_error("Missing parameter: L/E");
         }
-        ivar = parameter_map.at("L/E");
+        ivars = {parameter_map.at("L/E")};
 
         model_constraint = [this](const Eigen::VectorXf &v){return this->UnitarityConstraint(v);};
 
-        size_t nvar = prop.variable_mc_stat_err.size();
-        hists.resize(nvar);
-        for(size_t v = 0; v <nvar ;v++){
-            for(size_t m = 0; m < model_functions.size(); ++m) {
-                hists.at(v).emplace_back(Eigen::MatrixXf::Constant(prop.variable_hist_storage(ivar,v).rows(), prop.variable_hist_storage(ivar,v).cols(),0.0));
-                Eigen::MatrixXf &h = hists.at(v).back();
-                for(size_t i = 0; i < prop.NEvent(); ++i) {
-                    if(prop.model_rule[i] != (int)m) continue;
-                    int tbin = prop.VariableBinIndex(ivar, i), rbin = prop.VariableBinIndex(v, i);
-                    if(tbin<0 || rbin<0)continue;
-                    h(tbin, rbin) += prop.added_weights[i];
-                }
-            }
-        }
+        build_hists_and_combined(prop);
 
         nparams = 4;
         param_names = {"dmsq", "Ue4^2", "Um4^2", "g2"}; 
@@ -1466,7 +1473,8 @@ public:
         return prob;
     }
 
-    Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<float> &le_arr) const override {
+    Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<std::vector<float>> &var_arrs) const override {
+        const auto &le_arr = var_arrs[0];
         //log<LOG_ERROR>(L"%1% || Using unified, optimized get_probs function for model") % __func__;
 
         // Precompute physics parameters once
@@ -1528,30 +1536,13 @@ public:
                 % __func__ % __LINE__;
             throw std::runtime_error("Missing parameter: L/E");
         }
-        ivar = parameter_map.at("L/E");
+        ivars = {parameter_map.at("L/E")};
 
         // Unitarity constraints for e and mu rows
         model_constraint = [this](const Eigen::VectorXf &v){ return this->UnitarityConstraint(v); };
 
         // build histograms as in other models
-        size_t nvar = prop.variable_mc_stat_err.size();
-        hists.resize(nvar);
-        for(size_t v = 0; v < nvar; ++v) {
-            for(size_t m = 0; m < model_functions.size(); ++m) {
-                hists.at(v).emplace_back(
-                    Eigen::MatrixXf::Constant(
-                        prop.variable_hist_storage(ivar, v).rows(),
-                        prop.variable_hist_storage(ivar, v).cols(), 0.0));
-                Eigen::MatrixXf &h = hists.at(v).back();
-                for(size_t i = 0; i < prop.NEvent(); ++i) {
-                    if(prop.model_rule[i] != (int)m) continue;
-                    int tbin = prop.VariableBinIndex(ivar, i);
-                    int rbin = prop.VariableBinIndex(v, i);
-                    if(tbin < 0 || rbin < 0) continue;
-                    h(tbin, rbin) += prop.added_weights[i];
-                }
-            }
-        }
+        build_hists_and_combined(prop);
 
         // parameters: dmsq41, dmsq51, log10(Ue4^2), log10(Um4^2), log10(Ue5^2), log10(Um5^2), phi54
         nparams = 7;
@@ -1770,22 +1761,9 @@ public:
             throw std::runtime_error("Missing parameter: L/E");
         }
 
-        ivar = parameter_map.at("L/E");
+        ivars = {parameter_map.at("L/E")};
 
-        size_t nvar = prop.variable_mc_stat_err.size();
-        hists.resize(nvar);
-        for(size_t v = 0; v <nvar ;v++){
-            for(size_t m = 0; m < model_functions.size(); ++m) {
-                hists.at(v).emplace_back(Eigen::MatrixXf::Constant(prop.variable_hist_storage(ivar,v).rows(), prop.variable_hist_storage(ivar,v).cols(),0.0));
-                Eigen::MatrixXf &h = hists.at(v).back();
-                for(size_t i = 0; i < prop.NEvent(); ++i) {
-                    if(prop.model_rule[i] != (int)m) continue;
-                    int tbin = prop.VariableBinIndex(ivar, i), rbin = prop.VariableBinIndex(v, i);
-                    if(tbin<0 || rbin<0) continue;
-                    h(tbin, rbin) += prop.added_weights[i];
-                }
-            }
-        }
+        build_hists_and_combined(prop);
 
 
         nparams = 6;
@@ -1866,7 +1844,8 @@ public:
         return probs_returned[2][2];
     }
 
-    Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<float> &le_arr) const override {
+    Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<std::vector<float>> &var_arrs) const override {
+        const auto &le_arr = var_arrs[0];
         // Eigen matrices are column major by default so we want this layout to get a 
         // contiguous probs array from each column, then transpose before returning.
         Eigen::MatrixXf probs(model_functions.size(), le_arr.size());
@@ -1889,6 +1868,8 @@ std::unique_ptr<PROmodel> get_model_from_string(const PROconfig& config, const P
         return std::unique_ptr<PROmodel>(new NullModel(prop));
     } else if(name == "numudis") {
         return std::unique_ptr<PROmodel>(new PROnumudis(prop,config.m_model_parameter_map));
+    } else if(name == "numudisTEST") {
+        return std::unique_ptr<PROmodel>(new PROnumudisTEST(prop,config.m_model_parameter_map));
     } else if(name == "nueapp") {
         return std::unique_ptr<PROmodel>(new PROnueapp(prop,config.m_model_parameter_map));
     } else if(name == "nuedis") {

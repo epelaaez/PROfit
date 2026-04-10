@@ -99,70 +99,44 @@ namespace PROfit {
             //log<LOG_INFO>(L"%1% || Starting le_arr building %2%") % __func__ % var_index;
             //auto start_le = std::chrono::high_resolution_clock::now();
             
-            std::vector<float> le_arr;
-            for(size_t i = 0; i < inconfig.m_num_variable_bins_total[inmodel.ivar]; ++i) {
-                le_arr.push_back(inprop.variable_midbin[inmodel.ivar][i]);
-            }
+            // Build var_arrs: one entry per ivar, each of length n_phys_bins (flat grid).
+            // For 1-var: var_arrs[0] = midbin values of that var (n_phys_bins = n_ivar_bins).
+            // For N-var: row-major product grid — var_arrs[k][flat] = midbin of ivar[k] at flat index.
+            const size_t N_ivars = inmodel.ivars.size();
+            std::vector<size_t> ivar_sizes(N_ivars);
+            for(size_t k = 0; k < N_ivars; ++k)
+                ivar_sizes[k] = inprop.variable_midbin[inmodel.ivars[k]].size();
 
-            //auto end_le = std::chrono::high_resolution_clock::now();
-            //std::chrono::duration<double> duration_le = end_le - start_le;
-            //log<LOG_INFO>(L"%1% || le_arr building took %2% seconds") % __func__ % duration_le.count();
-
-            //log<LOG_INFO>(L"%1% || Starting prob calculation %2%") % __func__ % var_index;
-            //auto start = std::chrono::high_resolution_clock::now();
-
-            auto probs = inmodel.get_probs(phys, le_arr);
-
-            //auto end = std::chrono::high_resolution_clock::now();
-            //std::chrono::duration<double> duration = end - start;
-            //log<LOG_INFO>(L"%1% || L/E loop took %2% seconds") % __func__ % duration.count();
-
-            //log<LOG_INFO>(L"%1% || Starting null matrix check  %2%") % __func__ % var_index;
-            //auto start2 = std::chrono::high_resolution_clock::now();
-
-            for(size_t j = 0; j < inmodel.prob_types.size(); ++j) {
-                if (inmodel.hists[var_index][j].data() == nullptr) {
-                    log<LOG_ERROR>(L"Null matrix at var_index=%1%, j=%2%") % var_index % j;
-                    continue;
+            std::vector<std::vector<float>> var_arrs(N_ivars, std::vector<float>(inmodel.n_phys_bins));
+            for(long int flat = 0; flat < inmodel.n_phys_bins; ++flat) {
+                long int rem = flat;
+                for(int k = (int)N_ivars - 1; k >= 0; --k) {
+                    var_arrs[k][flat] = inprop.variable_midbin[inmodel.ivars[k]][rem % ivar_sizes[k]];
+                    rem /= (long int)ivar_sizes[k];
                 }
             }
 
-            //auto end2 = std::chrono::high_resolution_clock::now();
-            //std::chrono::duration<double> duration2 = end2 - start2;
-            //log<LOG_INFO>(L"%1% || null matrix check took %2% seconds") % __func__ % duration2.count();
+            auto probs = inmodel.get_probs(phys, var_arrs);
 
-            //log<LOG_INFO>(L"%1% || Starting filling %2%") % __func__ % var_index;
-            //auto start3 = std::chrono::high_resolution_clock::now();
+            // Single GEMV: H_combined[var_index] has shape (n_reco, n_phys*J).
+            // probs is (n_phys, J) in column-major, so probs.data() = [col0 | col1 | ...] = probs_flat.
+            Eigen::Map<const Eigen::VectorXf> probs_flat(probs.data(), probs.size());
+            Eigen::VectorXf result = inmodel.H_combined[var_index] * probs_flat;
 
-            // Use matrix-vector multiplication instead of triple nested loop
-            // Original: spec[k] = Σᵢⱼ systw[k] * probs(i,j) * hists[j](i,k)
-            // Rewritten: spec = systw ⊙ Σⱼ (hists[j]ᵀ × probs.col(j))
-            Eigen::VectorXf result = Eigen::VectorXf::Zero(myspectrum.GetNbins());
-            
-            for(size_t j = 0; j < inmodel.prob_types.size(); ++j) {
-                // hists[var_index][j] has shape (le_arr.size(), nbins)
-                // probs.col(j) has shape (le_arr.size(),)
-                // Result: (nbins, le_arr.size()) × (le_arr.size(),) = (nbins,)
-                result.noalias() += inmodel.hists[var_index][j].transpose() * probs.col(j);
-            }
-            
             // Apply systematic weights and create spectrum
             Eigen::VectorXf final_spec = systw.cwiseProduct(result);
             Eigen::VectorXf final_error = final_spec.array().abs().sqrt();
             myspectrum = PROspec(final_spec, final_error);
 
-            //auto end3 = std::chrono::high_resolution_clock::now();
-            //std::chrono::duration<double> duration3 = end3 - start3;
-            //log<LOG_INFO>(L"%1% || filling took %2% seconds") % __func__ % duration3.count();
-
         } else {
 
-            std::vector<float> le_arr;
-            for(size_t i = 0; i < inprop.NEvent(); ++i) {
-                le_arr.push_back(inprop.VariableValue(inmodel.ivar, i));
-            }
+            // Unbinned path: per-event var values, one vector per ivar.
+            std::vector<std::vector<float>> var_arrs(inmodel.ivars.size(), std::vector<float>(inprop.NEvent()));
+            for(size_t k = 0; k < inmodel.ivars.size(); ++k)
+                for(size_t i = 0; i < inprop.NEvent(); ++i)
+                    var_arrs[k][i] = inprop.VariableValue(inmodel.ivars[k], i);
 
-            auto probs = inmodel.get_probs(phys, le_arr);
+            auto probs = inmodel.get_probs(phys, var_arrs);
 
             for(size_t i = 0; i < inprop.NEvent(); ++i) {
                 float oscw = probs(i, inprop.model_rule[i]);
@@ -219,20 +193,17 @@ namespace PROfit {
                 le_arr.push_back(le);
             }
 
-            auto probs = inmodel.get_probs(phys, le_arr);
+            auto probs = inmodel.get_probs(phys, {le_arr});
 
-            // Use matrix-vector multiplication instead of triple nested loop
-            // Convert hist_w_arr to Eigen vector for element-wise operations
+            // Weight each column of probs by hist_w, flatten, then single GEMV.
             Eigen::Map<const Eigen::VectorXf> hist_w_vec(hist_w_arr.data(), hist_w_arr.size());
-            
-            Eigen::VectorXf result = Eigen::VectorXf::Zero(myspectrum.GetNbins());
-            
-            for(size_t j = 0; j < inmodel.prob_types.size(); ++j) {
-                // Weight probs by hist_w, then do matrix-vector multiply
-                Eigen::VectorXf weighted_probs = hist_w_vec.cwiseProduct(probs.col(j));
-                result.noalias() += inmodel.hists[inconfig.i_prime][j].transpose() * weighted_probs;
-            }
-            
+            const long int n_phys = inmodel.n_phys_bins;
+            const size_t   J      = inmodel.prob_types.size();
+            Eigen::VectorXf probs_flat(n_phys * J);
+            for(size_t j = 0; j < J; ++j)
+                probs_flat.segment(j * n_phys, n_phys) = hist_w_vec.cwiseProduct(probs.col(j));
+
+            Eigen::VectorXf result = inmodel.H_combined[inconfig.i_prime] * probs_flat;
             Eigen::VectorXf final_error = result.array().abs().sqrt();
             myspectrum = PROspec(result, final_error);
 
@@ -241,7 +212,7 @@ namespace PROfit {
             std::vector<float> hist_w_arr;
             std::vector<float> add_w_arr;
             for(size_t i = 0; i < inprop.NEvent(); ++i) {
-                le_arr.push_back(inprop.VariableValue(inmodel.ivar, i));
+                le_arr.push_back(inprop.VariableValue(inmodel.ivars[0], i));
                 add_w_arr.push_back(inprop.added_weights[i]);
 
                 float hist_w = 1.0;
@@ -265,7 +236,7 @@ namespace PROfit {
                 hist_w_arr.push_back(hist_w);
             }
 
-            auto probs = inmodel.get_probs(phys, le_arr);
+            auto probs = inmodel.get_probs(phys, {le_arr});
 
             for(size_t i = 0; i < inprop.NEvent(); ++i) {
                 float oscw = phys.size() != 0 ? probs(i, inprop.model_rule[i]) : 1.0f;

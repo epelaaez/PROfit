@@ -10,3 +10,5 @@ __pycache__
 *.png
 *.txt
 compile_commands.json
+inc/PROversion.h
+plotting_routines/.ipynb_checkpoints/
