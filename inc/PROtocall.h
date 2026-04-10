@@ -1,3 +1,15 @@
+/**
+ * @file PROtocall.h
+ * @brief Utility functions for bin-finding, matrix collapsing, and miscellaneous helpers.
+ * @author PROfit Collaboration
+ *
+ * @details Provides the lower-level utility functions used throughout PROfit for:
+ *   - mapping continuous variable values to global or local bin indices,
+ *   - collapsing full (mode×detector×channel×subchannel) matrices and vectors into
+ *     channel-level representations using the collapsing matrix from PROconfig,
+ *   - computing square-root (Cholesky or SVD) factorisations of covariance matrices, and
+ *   - printing debug information about the variable/binning layout.
+ */
 #ifndef PRO_TO_CALL_H
 #define PRO_TO_CALL_H
 
@@ -38,24 +50,62 @@ namespace PROfit{
      */
     int FindSubchannelIndexFromVariableGlobalBin(const PROconfig &inconfig, int global_bin, int var_index=0);
 
-    /* Function: given a full matrix, collapse the matrix */
+    /**
+     * @brief Collapse a full mode×detector×channel×subchannel covariance matrix to the channel level.
+     * @details Uses the primary collapsing matrix (variable index i_prime) from @p inconfig.
+     * The collapsed matrix M' = T^T M T where T is the collapsing matrix.
+     * @param inconfig    Analysis configuration providing the collapsing matrix.
+     * @param full_matrix Full covariance matrix (size m_num_variable_bins_total × same).
+     * @return Collapsed covariance matrix.
+     */
     Eigen::MatrixXf CollapseMatrix(const PROconfig &inconfig, const Eigen::MatrixXf& full_matrix);
 
-    /* Function: given a full vector (that contains reco), collapse the vector */
+    /**
+     * @brief Collapse a full spectrum vector to the channel level using the primary variable.
+     * @param inconfig    Analysis configuration providing the collapsing matrix.
+     * @param full_vector Full spectrum vector (size m_num_variable_bins_total for primary variable).
+     * @return Collapsed spectrum vector.
+     */
     Eigen::VectorXf CollapseMatrix(const PROconfig &inconfig, const Eigen::VectorXf& full_vector);
 
-    /* Function: given a full matrix, collapse the matrix */
+    /**
+     * @brief Collapse a full covariance matrix to the channel level for a specified variable.
+     * @param inconfig    Analysis configuration.
+     * @param full_matrix Full covariance matrix.
+     * @param other_index Variable index selecting which collapsing matrix to use.
+     * @return Collapsed covariance matrix.
+     */
     Eigen::MatrixXf CollapseMatrix(const PROconfig &inconfig, const Eigen::MatrixXf& full_matrix, int other_index);
 
-    /* Function: given a full vector (that contains reco), collapse the vector */
+    /**
+     * @brief Collapse a full spectrum vector for a specified analysis variable.
+     * @param inconfig    Analysis configuration.
+     * @param full_vector Full spectrum vector for the given variable.
+     * @param other_index Variable index.
+     * @return Collapsed spectrum vector.
+     */
     Eigen::VectorXf CollapseMatrix(const PROconfig &inconfig, const Eigen::VectorXf& full_vector, int other_index);
 
+    /**
+     * @brief Return the PROfit ASCII-art icon string.
+     * @return Icon string for display at programme startup.
+     */
     std::string getIcon();
-    
-    /* Mostly a debug function to print all information from PROconfig on variables and the binning above. */
+
+    /**
+     * @brief Print a debug summary of all variables and their binning from PROconfig.
+     * @param inconfig  Analysis configuration to inspect.
+     */
     void PrintVariableInfo(const PROconfig &inconfig);
 
 
+    /**
+     * @brief Convert a numeric value to a fixed-precision string.
+     * @tparam T  Arithmetic type.
+     * @param a_value  Value to format.
+     * @param n        Number of decimal places (default 6).
+     * @return Fixed-precision string representation.
+     */
     template <typename T>
     std::string to_string_prec(const T a_value, const int n = 6)    {
       std::ostringstream out;
@@ -63,6 +113,15 @@ namespace PROfit{
       return out.str();
     }
 
+    /**
+     * @brief Compute the square-root (Cholesky or SVD) factor of a covariance matrix.
+     * @details Returns L such that L * L^T ≈ covariance.  Uses LDLT decomposition by default;
+     * falls back to SVD when the matrix is not positive definite or when @p svd_tol >= 0.
+     * @param covariance  Input symmetric positive-semi-definite covariance matrix.
+     * @param use_ldlt    If true (default), attempt LDLT factorisation first.
+     * @param svd_tol     Singular-value tolerance for the SVD fallback; negative means do not use SVD.
+     * @return Lower-triangular square-root factor L.
+     */
     Eigen::MatrixXf ComputeSquareRootCovariance(const Eigen::MatrixXf& covariance, bool use_ldlt = true, float svd_tol = -1.0);
 
 };

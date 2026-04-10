@@ -1,3 +1,14 @@
+/**
+ * @file PROcreate.h
+ * @brief MC event-processing functions and systematic-structure definitions for PROfit.
+ * @author PROfit Collaboration
+ *
+ * @details Defines SystStruct (the per-systematic container holding CV and variation spectra)
+ * and CAFweightHelper (a flat-array helper for reading SBNcode/CAFAna weight branches).
+ * Declares the top-level MC loading function PROcess_CAFAna() and supporting utilities for
+ * creating PROdata objects, processing per-event weights, and saving/loading DetVar
+ * PROpeller maps.
+ */
 #ifndef PROCREATE_H_
 #define PROCREATE_H_
 
@@ -37,38 +48,40 @@
 
 namespace PROfit{
 
-    /*Struct: Core systeatics object, one per systematics, handels both 1D splines, Covariances and MFA
-     *Notes:
-     * 
+    /**
+     * @brief Per-systematic container holding the CV spectrum and all variation (multi-universe) spectra.
+     * @details SystStruct is the fundamental unit of systematic information.  One SystStruct is created
+     * per systematic variation defined in the XML.  During MC processing (PROcess_CAFAna) it is filled
+     * event-by-event; afterwards PROsyst reads it to build splines or covariance matrices.
+     *
+     * Supported modes (stored in the `mode` field): "multisim", "minmax", "covar", "spline",
+     * "external", "flat", "norm", "hist1d", "hist2d", "spline_to_covariance".
      */
     struct SystStruct {
 
-        //members
-        std::string systname;
-        int n_univ;
-        std::string mode;  //covar, spline, external...
-        std::string weight_formula;
-        std::string external_filename;
+        std::string systname;         ///< Name of this systematic (must match the XML tag).
+        int n_univ;                   ///< Number of universes (weight variations) for this systematic.
+        std::string mode;             ///< Type string: "covar", "spline", "external", "multisim", etc.
+        std::string weight_formula;   ///< Formula string (or "1" if weight is taken directly from the branch).
+        std::string external_filename;///< Path to an external covariance matrix file (for "external" mode).
 
-        std::vector<eweight_type> knobval;
-        std::vector<eweight_type> knob_index;
+        std::vector<eweight_type> knobval;   ///< Knob values (sigma shifts) associated with each universe.
+        std::vector<eweight_type> knob_index;///< Universe index for each knob value.
 
-        int index;
-        uint32_t hash;
-        std::vector<std::vector<std::array<float, 4>>> spline_coeffs;
+        int index;    ///< Index of this systematic within the PROsyst ordering.
+        uint32_t hash;///< MurmurHash3 of the originating PROconfig.
+        std::vector<std::vector<std::array<float, 4>>> spline_coeffs; ///< Pre-computed spline coefficients (bin × segment × 4 coefficients).
 
-        //std::vector<PROspec> m_multi_spec;
-
-        // pointer to cv spectrum and multi-universe spectrum from systematic variation
+        /// Binning-scheme index (-1 = use default binning).
         int binning = -1;
-        std::shared_ptr<PROspec> p_cv;	
-        std::vector<std::shared_ptr<PROspec>> p_multi_spec;
+        std::shared_ptr<PROspec> p_cv;   ///< Shared pointer to the central-value spectrum.
+        std::vector<std::shared_ptr<PROspec>> p_multi_spec; ///< Shared pointers to per-universe variation spectra.
 
-        std::vector<int> norm_bins;
-        float norm_value;
-        bool force_0_cv = false; // if true, normalize spline shifts by shift at knob=0
-        std::vector<int> include_only_weights; // 1-based indices of which weights to include in spline universes; empty = all
-        float scale = 1.0f; // scale factor to apply to weights (e.g., 0.001 for weights stored as x1000)
+        std::vector<int> norm_bins; ///< Bin indices used for shape-normalisation (empty = normalise all bins).
+        float norm_value;           ///< Normalisation target integral (used in shape-only mode).
+        bool force_0_cv = false;    ///< If true, normalise spline shifts by the shift at knob=0.
+        std::vector<int> include_only_weights; ///< 1-based indices of weight universes to include; empty = all.
+        float scale = 1.0f;         ///< Scale factor applied to all weights (e.g. 0.001 for weights stored as x1000).
 
         //boost serialization
         template<class Archive>
@@ -174,23 +187,24 @@ namespace PROfit{
 
 
 
-    /*Struct: manage flat CAF file index matching. 
-     *Notes:
-     *  
-     *Todo:
-     *  Remove hardcoded int values!!
+    /**
+     * @brief Flat-array helper for reading SBNcode/CAFAna weight branches from a TTree.
+     * @details Manages the flat C-array buffers needed to read the variable-length
+     * weight universe arrays stored in the SBNcode StandardRecord format.
+     * @note Array sizes are currently hardcoded; removing hardcoded limits is a known
+     * improvement item.
+     * @todo Remove hardcoded int array sizes.
      */
-
     struct CAFweightHelper{
-        int i_wgt_univ_size ; //rec.mc.nu.wgt.univ..totarraysize
-        int i_wgt_size ; //rec.slc..length
-        int i_wgt_totsize ; //rec.mc.nu.wgt..totalarraysize
+        int i_wgt_univ_size;   ///< Total size of the flattened universe weight array (rec.mc.nu.wgt.univ..totarraysize).
+        int i_wgt_size;        ///< Number of weight objects (rec.slc..length).
+        int i_wgt_totsize;     ///< Total size of the weight array (rec.mc.nu.wgt..totalarraysize).
 
-        float v_wgt_univ[100000];
-        int v_wgt_univ_idx[50000];
-        int v_wgt_idx[5000];
-        int v_wgt_univ_length[5000];
-        int v_truth_index[100] ;
+        float v_wgt_univ[100000];      ///< Flattened universe weight values.
+        int v_wgt_univ_idx[50000];     ///< Start index of each systematic's universe weights.
+        int v_wgt_idx[5000];           ///< Start index of each slice's weight list.
+        int v_wgt_univ_length[5000];   ///< Number of universes for each weight object.
+        int v_truth_index[100];        ///< Truth-level neutrino index for each slice.
 
         CAFweightHelper(){
             i_wgt_univ_size=0;
@@ -209,7 +223,13 @@ namespace PROfit{
             return 0;
         };
 
-        /* Given neutrino idnex, systematic index and the LOCAL universe index (for given systematic), return corresponding weight */
+        /**
+         * @brief Return the universe weight for a given neutrino, systematic, and local universe index.
+         * @param nu_index    Neutrino truth index within this event.
+         * @param syst_index  Systematic index within the weight list.
+         * @param uni_index   Local universe index (0-based) within this systematic.
+         * @return Weight value.
+         */
         float GetUniverseWeight(int nu_index, int syst_index , int uni_index){
             size_t index = v_wgt_univ_idx[v_wgt_idx[nu_index] + syst_index] + uni_index;
             if(index > 100000)
@@ -225,12 +245,25 @@ namespace PROfit{
     /*----------One per FILE-tyle being loaded---------------*/
 
 
-    /* Function: Process spline weights and covariance matrices from uboone CAFAna output trees
-    */
+    /**
+     * @brief Main MC loading function: processes CAFAna output trees into PROpeller and SystStruct vectors.
+     * @details Reads all MC files listed in @p inconfig, evaluates branch variables and weight formulas,
+     * fills the PROpeller event store, and populates per-universe variation spectra in @p syst_vector.
+     * Supports both XRootD and local file access.
+     * @param inconfig    Analysis configuration specifying files, branches, and systematics.
+     * @param syst_vector Output vector of SystStruct vectors (one inner vector per file); filled in-place.
+     * @param inprop      Output PROpeller; filled in-place with per-event data.
+     * @param noxrootd    If true, disable XRootD URL rewriting and use local paths directly.
+     * @return 0 on success; non-zero on failure.
+     */
     int PROcess_CAFAna(const PROconfig &inconfig, std::vector<std::vector<SystStruct>> &syst_vector, PROpeller &inprop, bool noxrootd = false);
 
 
-
+    /**
+     * @brief Create a vector of PROdata objects (one per channel) from the embedded data section.
+     * @param configin  Analysis configuration containing the embedded <data> section.
+     * @return Vector of collapsed PROdata objects, one per channel defined in the XML.
+     */
     std::vector<PROdata> CreatePROdata(const PROconfig& configin);
 
 
@@ -247,11 +280,29 @@ namespace PROfit{
 
     void process_cafana_event(const PROconfig &inconfig, const std::shared_ptr<BranchVariable>& branch, const std::map<std::string, std::vector<eweight_type>*>& eventweight_map, float mcpot, int subchannel_index, std::vector<std::vector<SystStruct>> &syst_vector, const std::vector<float>& syst_additional_weight, PROpeller& inprop);
 
+    /**
+     * @brief Convert a local or EOS file path to an XRootD URL.
+     * @param fname_orig  Original file path.
+     * @return XRootD-prefixed URL string suitable for use with TFile::Open().
+     */
     std::string convertToXRootD(std::string fname_orig);
 
-    // Save/load a map of name -> PROpeller for all DetVar files in one combined binary.
-    // The detvar_hash is stored inside the binary and checked on load.
+    /**
+     * @brief Serialise a map of DetVar PROpeller objects to a single binary file.
+     * @details The detvar_hash is stored in the file header and checked on load to detect
+     * configuration mismatches.
+     * @param props        Map from DetVar variation name to PROpeller (CV and all variations).
+     * @param detvar_hash  Hash of the DetVar section of the analysis configuration.
+     * @param filename     Output file path.
+     */
     void saveDetVarProps(const std::map<std::string, PROpeller>& props, uint32_t detvar_hash, const std::string& filename);
+
+    /**
+     * @brief Deserialise a map of DetVar PROpeller objects from a binary file.
+     * @param props    Output map to fill.
+     * @param filename Input file path.
+     * @return The detvar_hash stored in the file (for validation against the current config).
+     */
     uint32_t loadDetVarProps(std::map<std::string, PROpeller>& props, const std::string& filename);
 
 

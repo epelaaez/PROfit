@@ -1,3 +1,20 @@
+/**
+ * @file PROlog.h
+ * @brief Logging infrastructure for the PROfit framework.
+ * @author PROfit Collaboration
+ *
+ * @details Provides a lightweight, Boost.Format-based logging system with separate
+ * verbosity levels for console output and optional file logging.  Messages are
+ * automatically suppressed after 1000 repeated occurrences to avoid log flooding.
+ *
+ * Usage:
+ * @code
+ *   log<LOG_INFO>(L"%1% || Hello from %2%") % __func__ % "PROfit";
+ * @endcode
+ *
+ * Verbosity levels (in increasing detail): LOG_CRITICAL, LOG_ERROR, LOG_WARNING,
+ * LOG_INFO, LOG_DEBUG.
+ */
 #ifndef PROLOG_H_
 #define PROLOG_H_
 
@@ -14,27 +31,31 @@
 
 using namespace std;
 
-/*
- * Logging for PROfit contained in this quick wrapper for easy command line or global set verbosity
+/**
+ * @brief Log severity levels; higher numeric value = more verbose.
  */
 enum log_level_t {
-    LOG_CRITICAL = 0,
-    LOG_ERROR = 1,
-    LOG_WARNING = 2,
-    LOG_INFO = 3,
-    LOG_DEBUG = 4
+    LOG_CRITICAL = 0, ///< Critical errors that will cause abnormal programme termination.
+    LOG_ERROR    = 1, ///< Non-fatal errors that indicate incorrect behaviour.
+    LOG_WARNING  = 2, ///< Warnings about potentially incorrect configuration or behaviour.
+    LOG_INFO     = 3, ///< Informational messages describing normal operation.
+    LOG_DEBUG    = 4  ///< Detailed debugging output.
 };
 
-// Separate verbosity levels for console and file
-extern log_level_t GLOBAL_LEVEL;        // Console verbosity
-extern log_level_t FILE_LEVEL;          // File verbosity (defaults to same as GLOBAL_LEVEL)
-extern std::wostream *OSTREAM;
+extern log_level_t GLOBAL_LEVEL; ///< Global console verbosity level; messages at or below this level are printed.
+extern log_level_t FILE_LEVEL;   ///< File verbosity level; messages at or below this level are written to the log file.
+extern std::wostream *OSTREAM;   ///< Wide output stream for console logging (default: std::wcout).
 
-extern std::wofstream LOG_FILE_STREAM;
-extern bool LOGGING_TO_FILE;
+extern std::wofstream LOG_FILE_STREAM; ///< Wide file stream for file logging.
+extern bool LOGGING_TO_FILE;           ///< True when file logging is active.
 
 namespace log_impl {
 
+    /**
+     * @brief Enable logging to a file in addition to console output.
+     * @param filename        Path of the log file to create or overwrite.
+     * @param file_verbosity  Verbosity for file output; if unset, inherits GLOBAL_LEVEL.
+     */
     inline void EnableFileLogging(const std::string& filename, log_level_t file_verbosity = static_cast<log_level_t>(-1)) {
         if(LOG_FILE_STREAM.is_open()) {
             LOG_FILE_STREAM.close();
@@ -58,16 +79,29 @@ namespace log_impl {
         }
     }
 
-    // New function to set file verbosity independently
+    /**
+     * @brief Set the file verbosity level independently of the console level.
+     * @param level  New file verbosity level.
+     */
     inline void SetFileVerbosity(log_level_t level) {
         FILE_LEVEL = level;
     }
 
-    // New function to set console verbosity
+    /**
+     * @brief Set the console verbosity level.
+     * @param level  New console verbosity level.
+     */
     inline void SetConsoleVerbosity(log_level_t level) {
         GLOBAL_LEVEL = level;
     }
 
+    /**
+     * @brief Internal helper class that formats and emits a log message.
+     * @details Constructed by the log<LEVEL>() helper and destroyed at the end of the
+     * log statement, at which point the formatted message is written to the active stream(s).
+     * Supports operator% for Boost.Format-style argument substitution, including specialisations
+     * for std::vector<T> and Eigen matrix/vector types.
+     */
     class formatted_log_t {
         public:
             formatted_log_t( log_level_t level, const wchar_t* msg ) : level(level), fmt(msg) {}
@@ -170,7 +204,14 @@ namespace log_impl {
         }
 }//namespace log_impl
 
-// Helper function. Class formatted_log_t will not be used directly.
+/**
+ * @brief Construct a log message at the given severity level.
+ * @tparam level  Log severity (e.g. LOG_INFO, LOG_ERROR).
+ * @param msg     Wide-character Boost.Format format string.
+ * @return A formatted_log_t object; use operator% to substitute arguments.
+ * @details The message is emitted when the returned object is destroyed (end of statement).
+ * Example: log<LOG_INFO>(L"%1% || value = %2%") % __func__ % myValue;
+ */
 template <log_level_t level>
 log_impl::formatted_log_t log(const wchar_t* msg) {
     return log_impl::formatted_log_t( level, msg );

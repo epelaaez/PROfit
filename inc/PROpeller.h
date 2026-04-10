@@ -1,3 +1,14 @@
+/**
+ * @file PROpeller.h
+ * @brief MC event store for oscillation-weight computation in the PROfit framework.
+ * @author PROfit Collaboration
+ *
+ * @details Defines PROpeller, the per-event Monte Carlo container that drives
+ * oscillation weight calculations in PROfit (hence "propeller").  Each MC event
+ * carries a central-value weight, a model-rule tag (mapping it to an oscillation
+ * probability type), and per-variable values and bin indices.  Pre-binned 2D
+ * histograms (PROhistStorage) are kept for fast spectrum filling.
+ */
 #ifndef PROPELLER_H_
 #define PROPELLER_H_
 
@@ -9,12 +20,19 @@
 #include <vector>
 #include <chrono>
 namespace PROfit{
+    /**
+     * @brief Compact upper-triangular storage for per-variable 2D histogram pairs.
+     * @details Stores an n×n collection of (n_reco × n_phys) Eigen matrices indexed by
+     * two variable indices (i, j).  Only the upper triangle (i ≤ j) is stored explicitly;
+     * accessing (i, j) with i > j returns the transpose of (j, i).  This saves memory for
+     * multi-variable analyses while preserving symmetric access semantics.
+     */
     class PROhistStorage {
         private:
-            size_t n_vars = 0;
-            std::vector<Eigen::MatrixXf> data;
+            size_t n_vars = 0;             ///< Number of analysis variables.
+            std::vector<Eigen::MatrixXf> data; ///< Flattened upper-triangle storage.
 
-            // Only stores when i <= j
+            /// Compute flat storage index for pair (i, j) with i ≤ j.
             size_t compute_index(size_t i, size_t j) const {
                 return (i * n_vars) - (i * (i - 1)) / 2 + (j - i);
             }
@@ -41,13 +59,27 @@ namespace PROfit{
                     }
                 }
         public:
-            PROhistStorage() {}  
+            /** @brief Default constructor — creates empty storage. */
+            PROhistStorage() {}
+            /**
+             * @brief Construct storage for @p n variables.
+             * @param n Number of analysis variables; allocates n*(n+1)/2 matrices.
+             */
             PROhistStorage(size_t n) {init(n);}
 
+            /**
+             * @brief Initialise storage for @p n variables.
+             * @param n Number of analysis variables.
+             */
             void init(size_t n) { n_vars = n;data.resize(n * (n + 1) / 2);}
 
 
-            //Grab whole matrix
+            /**
+             * @brief Read-only access to the 2D histogram matrix for variable pair (i, j).
+             * @param i  Row variable index.
+             * @param j  Column variable index.
+             * @return Const reference (or transposed view) of the stored matrix.
+             */
             Eigen::Ref<const Eigen::MatrixXf> operator()(size_t i, size_t j) const {
                 if (i <= j) {
                     return data[compute_index(i, j)]; 
@@ -56,7 +88,14 @@ namespace PROfit{
                 }
             }
 
-            //element
+            /**
+             * @brief Read-only element access for bin (l, m) in the matrix for variable pair (rowvar, colvar).
+             * @param rowvar  Row variable index.
+             * @param colvar  Column variable index.
+             * @param l       Row bin index within the matrix.
+             * @param m       Column bin index within the matrix.
+             * @return Element value as a float.
+             */
             float operator()(size_t rowvar, size_t colvar, size_t l, size_t m) const {
                 if (rowvar <= colvar) {
                     return data[compute_index(rowvar, colvar)](l, m);
@@ -66,7 +105,13 @@ namespace PROfit{
             }
 
 
-            // Direct access for setting (must use i <= j)
+            /**
+             * @brief Mutable access to the matrix for variable pair (i, j) for filling.
+             * @param i  Row variable index; must satisfy i ≤ j.
+             * @param j  Column variable index.
+             * @return Mutable reference to the stored matrix.
+             * @warning Calling with i > j is a fatal error; the upper-triangle convention must be respected.
+             */
             Eigen::MatrixXf& set(size_t i, size_t j) {
                 if (i > j){
                     log<LOG_ERROR>(L"%1% || If your seeing this, something went wrong. dont access PROhistStorage out of order.") % __func__;
@@ -76,11 +121,22 @@ namespace PROfit{
             }
 
 
+            /** @brief Return the number of variables for which storage was initialised. */
             size_t size() const { return n_vars; }
     };
 
-    /*Class: The PROpeller, which moves the analysis forward. A class to keep all MC events for oscllation event-by-event.
-    */
+    /**
+     * @brief Per-event Monte Carlo container that drives oscillation weight calculations.
+     * @details PROpeller (the "propeller" that moves the analysis forward) stores one entry
+     * per simulated neutrino event.  It holds:
+     *   - central-value event weights (`added_weights`),
+     *   - a model-rule index per event mapping it to an oscillation probability type,
+     *   - per-variable values and pre-computed bin indices for fast histogram filling,
+     *   - pre-binned 2D histogram matrices (PROhistStorage) used by FillSpectra, and
+     *   - optional per-event matching variable values for detector-variation alignment.
+     *
+     * The object is serialisable via Boost.Serialization and supports POT-scaling via scale().
+     */
     class PROpeller {
 
         private:
@@ -107,7 +163,7 @@ namespace PROfit{
 
         public:
 
-            //Empty Constructor
+            /** @brief Default constructor — creates an empty PROpeller with invalid hash. */
             PROpeller(){
                 variable_values.clear();
                 added_weights.clear();
@@ -122,26 +178,34 @@ namespace PROfit{
 
             /* the Core MC is saved in these vectors.*/
 
-            std::vector<float> added_weights;
-            std::vector<int>   model_rule;
-            // Per-event matching var values for DetVar CV/variation alignment.
-            // Outer index: matching variable; inner index: event.
-            // Only populated when m_detvar_matching_vars is set on the mini-config.
+            std::vector<float> added_weights;  ///< Per-event central-value weights (product of all CV weights and POT normalisation).
+            std::vector<int>   model_rule;     ///< Per-event index mapping each event to an oscillation probability type (e.g., 0=NC, 1=CC).
+            /// True when per-event matching variables are populated for detector-variation alignment.
             bool has_matching_vars = false;
+            /// Per-event matching variable values; outer index = variable, inner index = event.
+            /// Only populated when `m_detvar_matching_vars` is set on the mini-config.
             std::vector<std::vector<float>> matching_var_values;
-            // Vector of variable values and bin indices.
-            // Outer vector is per-variable, inner vector is per-event 
+            /// Per-event bin indices for each analysis variable; outer = variable, inner = event.
             std::vector<std::vector<int>> variable_bin_indices;
+            /// Per-event values for each analysis variable; outer = variable, inner = event.
             std::vector<std::vector<float>> variable_values;
+            /// Per-variable MC statistical error vectors (sqrt of summed-weight-squared per bin).
             std::vector<Eigen::VectorXf> variable_mc_stat_err;
+            /// Per-variable bin centre value vectors.
             std::vector<Eigen::VectorXf> variable_midbin;
+            /// Pre-binned 2D histogram storage for all (variable, variable) pairs.
             PROhistStorage variable_hist_storage;
 
-            uint32_t           hash;
+            uint32_t hash; ///< MurmurHash3 of the PROconfig used to create this PROpeller; checked during serialisation.
 
-            // Helper functions to access variable values + bin indices.
-            // The user can equally directly access the values, the function 
-            // is here to make it explicit how values are ordered in the vector
+            /**
+             * @brief Return the value of a given analysis variable for a given event.
+             * @details Provided for clarity; direct access to variable_values[][] is equally valid.
+             * @param i_variable  0-based variable index.
+             * @param i_event     0-based event index.
+             * @return Variable value as a float.
+             * @throws std::runtime_error if @p i_variable is out of bounds.
+             */
             float VariableValue(size_t i_variable, size_t i_event) const {
                 if(i_variable >= variable_values.size()) {
                     log<LOG_ERROR>(L"%1% || Variable index %2% is out of bounds. "
@@ -152,6 +216,13 @@ namespace PROfit{
                 }
                 return variable_values[i_variable][i_event];
             }
+            /**
+             * @brief Return the pre-computed bin index of a given analysis variable for a given event.
+             * @param i_variable  0-based variable index.
+             * @param i_event     0-based event index.
+             * @return Global bin index; -1 indicates the event is out of the defined range.
+             * @throws std::runtime_error if @p i_variable is out of bounds.
+             */
             int VariableBinIndex(size_t i_variable, size_t i_event) const {
                 if(i_variable >= variable_bin_indices.size()) {
                     log<LOG_ERROR>(L"%1% || Variable index %2% is out of bounds. "
@@ -163,11 +234,16 @@ namespace PROfit{
                 return variable_bin_indices[i_variable][i_event];
             }
 
+            /** @brief Return the number of analysis variables stored in this PROpeller. */
             size_t NVariable() const {return variable_values.size();}
+            /** @brief Return the number of MC events stored in this PROpeller. */
             size_t NEvent() const {return added_weights.size();}
 
 
-            // boost serialize save to file
+            /**
+             * @brief Serialise this PROpeller to a binary file using Boost.Serialization.
+             * @param filename  Output file path.
+             */
             void save(const std::string& filename) const {
                 auto start = std::chrono::high_resolution_clock::now();
                 std::ofstream ofs(filename, std::ios::binary);
@@ -178,7 +254,10 @@ namespace PROfit{
                 log<LOG_INFO>(L"%1% || Serialization save of PROpeller into file  %2% took %3% seconds") % __func__ % filename.c_str() % elapsed.count();
             }
 
-            // Load from file
+            /**
+             * @brief Deserialise this PROpeller from a binary file using Boost.Serialization.
+             * @param filename  Input file path.
+             */
             void load(const std::string& filename) {
                 auto start = std::chrono::high_resolution_clock::now();
                 std::ifstream ifs(filename,std::ios::binary);
@@ -189,7 +268,16 @@ namespace PROfit{
                 log<LOG_INFO>(L"%1% || Serialization load of PROpeller from file  %2% took %3% seconds") % __func__ % filename.c_str() %elapsed.count();
             }
 
-            // Scale detector weights for POT studies
+            /**
+             * @brief Scale per-event weights and pre-binned histograms for POT-normalisation studies.
+             * @details For each detector/subchannel name pattern found in @p scaling_map, all
+             * matching events in `added_weights` and all matching bins in `variable_hist_storage`
+             * are multiplied by the corresponding scale factor.  Useful for comparing different
+             * POT exposures without re-running the full event loop.
+             * @param inconfig      The PROconfig describing channel/subchannel names.
+             * @param scaling_map   Map from subchannel name pattern (wildcard substring) to scale factor.
+             * @note Scale factors must be strictly positive; a value ≤ 0 is a fatal error.
+             */
             void scale(const PROconfig &inconfig, std::map<std::string, float> scaling_map){
                 for (const auto& [detector, value] : scaling_map) {
 

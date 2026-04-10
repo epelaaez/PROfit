@@ -1,3 +1,19 @@
+/**
+ * @file PROmodel.h
+ * @brief Physics oscillation model interface and concrete implementations for PROfit.
+ * @author PROfit Collaboration
+ *
+ * @details Defines the abstract PROmodel base class together with the following
+ * concrete models:
+ *   - NullModel      — no oscillation; all events receive probability 1.
+ *   - PROnumudis     — 3+1 sterile-neutrino nu_mu disappearance in the short-baseline
+ *                      approximation, parameterised by (Delta m^2, sin^2 2theta_mumu).
+ *   - PROnumudisTEST — two-variable (L, E) version of PROnumudis for validation.
+ *
+ * Each model exposes a get_probs() virtual method that returns oscillation
+ * probabilities on the physics grid, and pre-builds H_combined matrices for
+ * fast GEMV-based spectrum filling in FillSpectra.
+ */
 #ifndef PROMODEL_H
 #define PROMODEL_H
 
@@ -18,33 +34,57 @@
 
 namespace PROfit {
 
+/**
+ * @brief Abstract base class representing a physics model for neutrino oscillation probability.
+ * @details A PROmodel encapsulates:
+ *   - the set of physics parameters (names, bounds, defaults),
+ *   - the mapping from analysis variables to a flat physics grid,
+ *   - per-event histogram matrices H_combined used for fast spectrum filling, and
+ *   - the virtual get_probs() interface for computing oscillation probabilities.
+ *
+ * Derived classes implement specific oscillation hypotheses.  After construction,
+ * build_hists_and_combined() must be called to pre-build the internal matrices from
+ * the MC event store (PROpeller).
+ */
 class PROmodel {
 public:
-    size_t nparams;
-    // ivars: indices of the physics variables used by this model (e.g. {L/E_index} for 1-var,
-    // {L_index, E_index} for 2-var). n_phys_bins = product of their bin counts.
+    size_t nparams; ///< Number of physics parameters for this model.
+    /// Indices of the physics (grid) variables used by this model within the PROpeller variable list.
+    /// For a 1-variable model this is e.g. {L/E_index}; for 2-variable {L_index, E_index}.
+    /// n_phys_bins = product of their bin counts.
     std::vector<int> ivars;
-    long int n_phys_bins = 0;
-    std::vector<std::string> param_names;
-    std::vector<std::string> pretty_param_names;
-    std::vector<std::string> pretty_param_units;
-    Eigen::VectorXf lb, ub, default_val;
+    long int n_phys_bins = 0; ///< Total number of flat physics-grid points (product of ivar bin counts).
+    std::vector<std::string> param_names;        ///< Internal parameter names used in the fitter.
+    std::vector<std::string> pretty_param_names; ///< LaTeX-formatted parameter names for plots.
+    std::vector<std::string> pretty_param_units; ///< Unit strings for plots (e.g., "eV^{2}").
+    Eigen::VectorXf lb;          ///< Lower bounds for physics parameters in the fitter's internal space.
+    Eigen::VectorXf ub;          ///< Upper bounds for physics parameters in the fitter's internal space.
+    Eigen::VectorXf default_val; ///< Default (starting) values for physics parameters.
+    /// Per-probability-type functions: model_functions[m](phys, x) returns the oscillation weight
+    /// for physics parameters @p phys and kinematic variable value @p x.
     std::vector<std::function<float(const Eigen::VectorXf&, float)>> model_functions;
-    std::function<int(const Eigen::VectorXf&)> model_constraint;
-    // hists[v][m]: shape (n_reco_v, n_phys_bins) — transposed vs old convention for cache efficiency.
-    // v = reco variable index, m = model_function/prob_type index.
+    std::function<int(const Eigen::VectorXf&)> model_constraint; ///< Optional parameter constraint function.
+    /// Pre-binned histograms: hists[v][m] has shape (n_reco_v, n_phys_bins).
+    /// v = reco variable index, m = probability-type index.  Transposed for cache efficiency.
     std::vector<std::vector<Eigen::MatrixXf>> hists;
-    // H_combined[v]: shape (n_reco_v, n_phys_bins * J) — horizontal concat of hists[v][0..J-1].
-    // Enables a single GEMV in FillSpectra: result = H_combined[v] * probs_flat.
+    /// Combined histograms H_combined[v] = horizontal concatenation of hists[v][0..J-1],
+    /// shape (n_reco_v, n_phys_bins * J).  Enables a single GEMV in FillSpectra.
     std::vector<Eigen::MatrixXf> H_combined;
 
-    std::vector<size_t> prob_types; // Indices of probability types (matches model_functions indices)
+    std::vector<size_t> prob_types; ///< Probability-type indices, matching model_functions indices.
 
-    std::vector<bool> is_log10; // Track whether each physics parameter is stored in log10 space.
+    std::vector<bool> is_log10; ///< True for each parameter stored in log10 space; false for linear.
 
-    // Build hists and H_combined from prop events.
-    // Must be called after ivars and model_functions are set.
-    // filter_by_model_rule=false: all events go into component 0 (use for NullModel).
+    /**
+     * @brief Build hists and H_combined from PROpeller event data.
+     * @details Must be called after ivars and model_functions are set.  Iterates over all
+     * events in @p prop, distributes them onto the flat physics grid, and constructs the
+     * concatenated H_combined matrices used by FillSpectra.
+     * @param prop                 The MC event store.
+     * @param filter_by_model_rule If true (default), each event is placed in the histogram
+     *                             matrix corresponding to its model_rule; if false, all events
+     *                             go into component 0 (appropriate for NullModel).
+     */
     void build_hists_and_combined(const PROpeller &prop, bool filter_by_model_rule = true) {
         // Compute flat physics grid size and per-ivar bin counts
         std::vector<size_t> ivar_sizes(ivars.size());
@@ -89,10 +129,16 @@ public:
         }
     }
 
-    // Compute oscillation probabilities for all physics-grid points and all probability types.
-    // var_arrs[k] contains the value of ivars[k] for each flat grid point (length = n_phys_bins).
-    // Returns probs(flat_phys_index, prob_type_index).
-    // Can be overridden for faster computation.
+    /**
+     * @brief Compute oscillation probabilities for all physics-grid points and all probability types.
+     * @details Default implementation evaluates each model_function independently for every
+     * grid point.  Derived classes may override for a vectorised, faster computation.
+     * @param phys      Physics parameter vector in the fitter's internal space (log10 where applicable).
+     * @param var_arrs  var_arrs[k] contains the value of ivars[k] for each flat grid point
+     *                  (length = n_phys_bins).
+     * @return Matrix of shape (n_phys_bins, n_prob_types) where each element is the oscillation
+     *         weight for that grid point and probability type.
+     */
     virtual Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<std::vector<float>> &var_arrs) const {
         const auto &le_arr = var_arrs[0];
         Eigen::MatrixXf probs(le_arr.size(), prob_types.size());
@@ -104,8 +150,12 @@ public:
         return probs;
     }
 
-    // Fast lookup from parameter name to index
-    std::unordered_map<std::string, size_t> param_name_to_index;
+    std::unordered_map<std::string, size_t> param_name_to_index; ///< Fast lookup: parameter name -> index in param_names.
+
+    /**
+     * @brief Populate param_name_to_index from the current param_names vector.
+     * @details Must be called after param_names is finalised in the derived constructor.
+     */
     inline void build_param_index() {
         param_name_to_index.clear();
         for(size_t i = 0; i < param_names.size(); ++i){
@@ -113,7 +163,12 @@ public:
         }
     }
 
-    // Convert a parameter to linear space if it is stored as log10, using its name.
+    /**
+     * @brief Convert a named parameter from log10 to linear space if required.
+     * @param param_name  The parameter name as listed in param_names.
+     * @param value       The parameter value in the fitter's internal space.
+     * @return The value in linear space: 10^value if is_log10[i] is true, otherwise value unchanged.
+     */
     inline float maybe_convert_log(const std::string &param_name, float value) const {
         auto it = param_name_to_index.find(param_name);
         if(it == param_name_to_index.end()){
@@ -128,8 +183,18 @@ public:
 
 };
 
+/**
+ * @brief Trivial "no oscillation" model — all events receive oscillation probability 1.
+ * @details Used as a central-value baseline and for systematic-only fits where oscillation
+ * is not being tested.  All events are placed into a single histogram component regardless
+ * of their model_rule.
+ */
 class NullModel : public PROmodel {
 public:
+    /**
+     * @brief Construct the NullModel from an MC event store.
+     * @param prop  The PROpeller containing MC events; used only to build hists.
+     */
     NullModel(const PROpeller &prop) {
         nparams = 0;
         ivars = {1};
@@ -141,8 +206,21 @@ public:
     }
 };
 
+/**
+ * @brief 3+1 sterile-neutrino nu_mu disappearance model in the short-baseline approximation.
+ * @details Parameterises the two-flavour-like nu_mu survival probability as:
+ *   P(nu_mu -> nu_mu) = 1 - sin^2(2*theta_mumu) * sin^2(1.267 * Delta m^2 * L/E)
+ * where Delta m^2 is in eV^2 and L/E is in km/GeV.  Both parameters are stored in log10 space.
+ * The model uses a single physics variable (L/E) identified by the "L/E" entry in parameter_map.
+ */
 class PROnumudis : public PROmodel {
 public:
+    /**
+     * @brief Construct the PROnumudis model.
+     * @param prop          MC event store; used to build H_combined.
+     * @param parameter_map Map from physics variable name (e.g., "L/E") to variable index in PROpeller.
+     *                      Must contain the key "L/E".
+     */
     PROnumudis(const PROpeller &prop,const std::map<std::string,int> &parameter_map) {
         prob_types = {0, 1};
 
@@ -174,7 +252,14 @@ public:
 
     };
 
-    /* Function: 3+1 numu->numue disapperance prob in SBL approx */
+    /**
+     * @brief Compute the 3+1 nu_mu survival probability in the short-baseline approximation.
+     * @details P(nu_mu -> nu_mu) = 1 - sin^2(2*theta_mumu) * sin^2(1.267 * Delta m^2 * L/E).
+     * @param dmsq          Mass splitting Delta m^2 in eV^2 (may be in log10 space; converted internally).
+     * @param sinsq2thmumu  sin^2(2 theta_mumu) (may be in log10 space; converted internally).
+     * @param le            L/E ratio in km/GeV.
+     * @return Survival probability in [0, 1].
+     */
     float Pmumu(float dmsq, float sinsq2thmumu, float le) const{
         dmsq = maybe_convert_log("dmsq", dmsq);
         sinsq2thmumu = maybe_convert_log("sinsq2thmm", sinsq2thmumu);
@@ -231,12 +316,21 @@ public:
     }
 };
 
-// TEST: 2-variable version of PROnumudis. Takes separate "L" and "E" variables from the
-// parameter_map (with variable_index pointing to the L and E variables respectively).
-// H_combined is built on the 2D (L x E) grid, but get_probs computes P(L/E) internally —
-// so the physics is identical to PROnumudis and the two should give identical spectra.
+/**
+ * @brief Two-variable test version of PROnumudis operating on separate L and E variables.
+ * @details Takes separate "L" and "E" variables from parameter_map and builds H_combined on the
+ * 2D (L x E) physics grid.  get_probs() computes L/E internally, so the physics is identical
+ * to PROnumudis.  The two models should produce identical spectra and can be used to validate
+ * the multi-variable code path against the standard single L/E variable approach.
+ */
 class PROnumudisTEST : public PROmodel {
 public:
+    /**
+     * @brief Construct the two-variable PROnumudisTEST model.
+     * @param prop          MC event store; used to build H_combined on the (L, E) grid.
+     * @param parameter_map Map from physics variable name to variable index in PROpeller.
+     *                      Must contain both "L" and "E".
+     */
     PROnumudisTEST(const PROpeller &prop, const std::map<std::string,int> &parameter_map) {
         prob_types = {0, 1};
         model_functions.push_back([this]([[maybe_unused]] const Eigen::VectorXf &v, float) {(void)this; return 1.0f;});

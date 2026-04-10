@@ -1,3 +1,17 @@
+/**
+ * @file PROconfig.h
+ * @brief Central configuration class for the PROfit neutrino oscillation analysis framework.
+ * @author PROfit Collaboration
+ *
+ * @details PROconfig is the master booking class that parses the analysis XML file and stores
+ * all information about the mode/detector/channel/subchannel hierarchy, binning definitions,
+ * collapsing matrices, MC file lists, systematic variation definitions, and detector-variation
+ * (DetVar) file management.  It is constructed once per executable and then passed by
+ * (const) reference to all downstream PROfit objects.
+ *
+ * Also defines the supporting types BranchVariable (a per-subchannel ROOT/flat-file variable
+ * reader) and ROOTFormula (a TTreeFormula-based concrete implementation of BranchVariable::Formula).
+ */
 #ifndef PROCONFIG_H_
 #define PROCONFIG_H_
 
@@ -46,21 +60,29 @@ typedef double eweight_type;
 
 namespace PROfit{
 
-    /*typedef the base "eventweight_class" branch that reweightable systematics are stored in in uboonestyle systematics 
-    */
+    /**
+     * @brief Typedef for the event-weight map used by MicroBooNE-style (uboonestyle) systematics.
+     * @details Each entry maps a systematic name to a vector of per-universe event weights.
+     */
     typedef std::map<std::string, std::vector<eweight_type>> eweight_map;
 
 
-    /* Struct: Branch variable is a SBNfit era class to load using TTReeFormula a givem variable (or function of variables) 
-     * Note: was originally split between float/int, but moved to TTreeFormula
+    /**
+     * @brief Per-subchannel variable reader backed by TTreeFormula or another source.
+     * @details BranchVariable encapsulates all information needed to read one set of analysis
+     * variables and event weights from an input file for a given subchannel.  Originally split
+     * between float/int branches, it was unified around TTreeFormula evaluation.  It owns a
+     * list of weight formulas and a list of variable formulas.
      */
-
     struct BranchVariable{
-      std::string associated_hist;
-      std::string associated_systematic;
-      bool central_value;
+      std::string associated_hist;       ///< Name of the histogram/subchannel this branch fills.
+      std::string associated_systematic; ///< Name of the associated systematic (if any).
+      bool central_value;                ///< True if this branch provides the CV spectrum.
 
-      // Return type from a BranchVariable. Can be a single number or a list
+      /**
+       * @brief Return value from a BranchVariable formula evaluation.
+       * @details May contain a single float or a list of floats (e.g. for multi-particle events).
+       */
       struct Value {
           std::vector<float> v;
 
@@ -73,9 +95,11 @@ namespace PROfit{
           size_t size() {return v.size();}
       };
 
-      // Interface for loading data from an input. 
-      // Define this as abstract so we can load data from different inputs 
-      // in the future
+      /**
+       * @brief Abstract interface for loading event data from an input source.
+       * @details Defined as an abstract class so future input backends (e.g., flat ROOT files,
+       * HDF5, or direct arrays) can be added without modifying BranchVariable.
+       */
       class Formula {
         public:
           virtual Value EvalInstance() = 0;
@@ -85,15 +109,15 @@ namespace PROfit{
           virtual ~Formula() {}
       };
 
-      std::vector<std::shared_ptr<Formula>> branch_weight_formulas;
-      std::vector<std::shared_ptr<Formula>> branch_variable_formulas;
+      std::vector<std::shared_ptr<Formula>> branch_weight_formulas;   ///< Ordered list of weight formulas; product gives the total event weight.
+      std::vector<std::shared_ptr<Formula>> branch_variable_formulas; ///< Ordered list of analysis variable formulas.
 
-      int model_rule;
-      int include_systematics;
+      int model_rule;          ///< Maps this subchannel's events to a physics probability type (-9 = unset).
+      int include_systematics; ///< Flag controlling whether systematics are applied to this subchannel (1 = yes).
 
-      std::vector<std::string> variable_names;
+      std::vector<std::string> variable_names; ///< Names of the analysis variables read by this branch.
 
-      bool hist_reweight;
+      bool hist_reweight; ///< If true, apply per-event weights from a 2D histogram instead of the formula.
 
       //constructor
       BranchVariable(std::string a) : associated_hist(a), central_value(false), model_rule(-9), include_systematics(1), hist_reweight(false){}
@@ -168,7 +192,11 @@ namespace PROfit{
     };
 
 
-    // Implementation of Formula interface for ROOT TTree, TTreeFormula based input
+    /**
+     * @brief Concrete BranchVariable::Formula implementation backed by ROOT TTreeFormula.
+     * @details Reads one or more TTreeFormula expressions from a TTree.  A single ROOTFormula
+     * may wrap multiple TTreeFormula objects to support comma-separated multi-variable expressions.
+     */
     class ROOTFormula: public BranchVariable::Formula {
       public:
         ROOTFormula(const std::string &name, const std::string &formula, TTree *t);
@@ -187,11 +215,19 @@ namespace PROfit{
     };
  
 
-    /* 
-     * Class: Primary booking class for loading in info from XML and saving all information on mode_detector_channel_subchannel information.
-     * Note:
-     *  PROconfig to be created once and only once per PROfit executable and then passed by reference to various more complex functions, and ignored when not needed. 
-     *  Contains information and collapsing matricies for collapsing subchannels->channels also. Filled once, on construction and then used by later classes when needed.
+    /**
+     * @brief Primary configuration class: parses the analysis XML and stores the full
+     *        mode/detector/channel/subchannel hierarchy, binning, and collapsing matrices.
+     * @details PROconfig must be created once and only once per PROfit executable and then
+     * passed by const reference to all downstream objects.  It reads the XML file via TinyXML2
+     * and populates all internal members including:
+     *   - mode/detector/channel/subchannel names and booleans,
+     *   - multi-dimensional binning objects (Binning),
+     *   - collapsing matrices (summing subchannels into channels),
+     *   - MC file lists, tree names, and branch variables,
+     *   - systematic variation parameters, knob definitions, and covariance settings, and
+     *   - optional embedded data and detector-variation (DetVar) sections.
+     * All members are set during construction and must not be modified afterwards.
      */
 
 
@@ -259,7 +295,12 @@ namespace PROfit{
 
             static bool SameChannels(const PROconfig &one, const PROconfig &two);
 
-            // Helper object. Represents a general binning in N dimensions
+            /**
+             * @brief N-dimensional binning descriptor.
+             * @details Stores bin-edge vectors for each dimension.  1D binning is the common
+             * case; 2D binning is used for multi-variable analyses.  Provides projection utilities
+             * to reduce N-D spectra to 1D and to bin input values.
+             */
             struct Binning {
               std::vector<std::vector<float>> bin_edges;
               Binning() {}
@@ -291,18 +332,18 @@ namespace PROfit{
               std::vector<float> Widths(unsigned dim = 0) const;
             };
 
-            std::string m_xmlname;	
-            std::vector<double> m_det_pot;
-            std::vector<std::string> m_fullnames;
+            std::string m_xmlname;             ///< Path to the XML configuration file.
+            std::vector<double> m_det_pot;     ///< Proton-on-target exposure per detector.
+            std::vector<std::string> m_fullnames; ///< Fully-qualified subchannel names (mode_detector_channel_subchannel).
 
-            size_t m_num_detectors;
-            size_t m_num_channels;
-            size_t m_num_modes;
-            size_t m_num_variables;
+            size_t m_num_detectors; ///< Number of active detectors.
+            size_t m_num_channels;  ///< Number of active analysis channels.
+            size_t m_num_modes;     ///< Number of beam/run modes.
+            size_t m_num_variables; ///< Number of analysis variables defined in the XML.
 
-            std::vector<size_t> m_num_subchannels; 
+            std::vector<size_t> m_num_subchannels; ///< Number of subchannels per channel.
 
-            size_t i_prime;// The main fitting variable, will move to be xml config soon
+            size_t i_prime; ///< Index of the primary fitting variable (used by GetCollapsingMatrix() default overload).
 
             // New
             std::vector<bool> m_channel_variable_plot_bool;

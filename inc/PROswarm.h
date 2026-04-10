@@ -1,3 +1,14 @@
+/**
+ * @file PROswarm.h
+ * @brief Particle Swarm Optimisation (PSO) for multi-modal chi-squared landscapes.
+ * @author PROfit Collaboration
+ *
+ * @details Defines the PROswarm class, which implements a velocity-inertia PSO with
+ * linearly decaying inertia weight, cognitive (personal-best) and social (global-best)
+ * velocity components, and velocity clamping.  PROswarm is used as the intermediate
+ * global search stage between Latin hypercube seeding and L-BFGS-B local refinement
+ * within the PROfitter pipeline.
+ */
 #ifndef PROSWARM_H_
 #define PROSWARM_H_
 
@@ -28,8 +39,25 @@
 
 namespace PROfit{
 
+    /**
+     * @brief Particle Swarm Optimiser for navigating multi-modal chi-squared surfaces.
+     * @details Maintains a swarm of particles whose positions represent candidate parameter
+     * vectors.  At each iteration, particle velocities are updated using inertia (linearly
+     * decayed from swarm_inertia_start to swarm_inertia_end), cognitive (personal-best), and
+     * social (global-best) terms.  Velocities are clamped to vmax = 0.1*(ub - lb) and
+     * positions reflected off bounds.  Stagnation stopping and convergence checking are applied.
+     */
     class PROswarm {
         public:
+            /**
+             * @brief Construct and initialise the swarm from Latin hypercube starting points.
+             * @param metric          The PROmetric to minimise.
+             * @param gen             Random number generator.
+             * @param latin_starts    Starting parameter vectors (one per particle), typically from LHS.
+             * @param ilb             Lower bounds for each parameter.
+             * @param iub             Upper bounds for each parameter.
+             * @param max_iterations  Maximum number of swarm iterations.
+             */
             PROswarm(PROmetric &metric, std::mt19937 &gen, const std::vector<std::vector<float>> &latin_starts, const Eigen::VectorXf& ilb, const Eigen::VectorXf& iub ,size_t max_iterations ) : max_iterations(max_iterations), lb(ilb),ub(iub) {
 
                 num_particles = latin_starts.size();
@@ -68,6 +96,13 @@ namespace PROfit{
                 }//
             }
 
+            /**
+             * @brief Execute the PSO main loop.
+             * @param metric     The PROmetric to minimise.
+             * @param gen        Random number generator.
+             * @param fitconfig  Fitter configuration supplying PSO hyperparameters.
+             * @param pin        Optional progress bar pointer (null = no bar).
+             */
             void runSwarm(PROmetric &metric,std::mt19937 &gen,  PROfitterConfig &fitconfig, MultiPROgressBar * pin = NULL) {
 
                 const float inertia_w_start = fitconfig.swarm_inertia_start; 
@@ -161,34 +196,53 @@ namespace PROfit{
 
             }
 
+            /**
+             * @brief Return the parameter vector corresponding to the global best chi-squared.
+             * @return Best-found parameter vector.
+             */
             Eigen::VectorXf getGlobalBestPosition() const {
                 return global_best_position;
             }
 
+            /**
+             * @brief Return the global best (minimum) chi-squared value found by the swarm.
+             * @return Minimum chi-squared.
+             */
             float getGlobalBestScore() const {
                 return global_best_chi;
             }
 
+            /**
+             * @brief Return the total number of metric evaluations performed by the swarm.
+             * @return Function call count.
+             */
             size_t getFunctionCalls() const {
                 return function_calls;
             }
         private:
 
-            size_t num_particles;
-            size_t npar;
-            size_t max_iterations;
-            Eigen::VectorXf lb;
-            Eigen::VectorXf ub;
-            Eigen::VectorXf grad;
-            Eigen::VectorXf fixed;
-            std::vector<Eigen::VectorXf> particles;
-            std::vector<Eigen::VectorXf> velocities;
-            std::vector<Eigen::VectorXf> personal_best_positions;
-            std::vector<float> personal_best_chis;
-            Eigen::VectorXf global_best_position;
-            float global_best_chi;
-            size_t function_calls = 0;
+            size_t num_particles;    ///< Number of particles in the swarm.
+            size_t npar;             ///< Dimensionality of the parameter space.
+            size_t max_iterations;   ///< Maximum number of PSO iterations.
+            Eigen::VectorXf lb;      ///< Lower bounds for each parameter.
+            Eigen::VectorXf ub;      ///< Upper bounds for each parameter.
+            Eigen::VectorXf grad;    ///< Temporary gradient buffer (unused in velocity update).
+            Eigen::VectorXf fixed;   ///< Per-parameter flag: 1 if parameter is fixed (zero range), 0 otherwise.
+            std::vector<Eigen::VectorXf> particles;             ///< Current particle positions.
+            std::vector<Eigen::VectorXf> velocities;            ///< Current particle velocities.
+            std::vector<Eigen::VectorXf> personal_best_positions; ///< Personal-best positions for each particle.
+            std::vector<float> personal_best_chis;              ///< Personal-best chi-squared for each particle.
+            Eigen::VectorXf global_best_position; ///< Global best position across all particles and iterations.
+            float global_best_chi;                ///< Global best chi-squared.
+            size_t function_calls = 0;            ///< Total number of metric evaluations.
 
+            /**
+             * @brief Draw a uniform random float in [min, max].
+             * @param gen  Mersenne Twister RNG.
+             * @param min  Lower bound.
+             * @param max  Upper bound.
+             * @return Random float in [min, max].
+             */
             float randomFloat(std::mt19937 &gen, float min, float max) {
                 std::uniform_real_distribution<float> dist(min, max);
                 return dist(gen);

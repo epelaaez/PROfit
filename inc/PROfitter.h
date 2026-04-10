@@ -1,3 +1,18 @@
+/**
+ * @file PROfitter.h
+ * @brief Multi-start global optimiser and configuration for PROfit chi-squared minimisation.
+ * @author PROfit Collaboration
+ *
+ * @details Defines PROfitterConfig (parameter struct for the fitting strategy) and PROfitter
+ * (the optimiser class).  The fitting pipeline is:
+ *  1. Latin hypercube sampling to seed the parameter space broadly.
+ *  2. Particle Swarm Optimisation (PSO) starting from the best LHS points.
+ *  3. Multiple L-BFGS-B local refinements from the best PSO result(s) and any
+ *     frequency-domain harmonic seed points.
+ *
+ * The L-BFGS-B solver is provided by the LBFGSpp library.  All solver and
+ * PROfit-specific hyperparameters are collected in PROfitterConfig.
+ */
 #ifndef PROFITTER_H
 #define PROFITTER_H
 
@@ -11,53 +26,62 @@
 
 namespace PROfit {
 
+    /**
+     * @brief Configuration parameters for the PROfitter multi-start optimisation pipeline.
+     * @details Collects all tuning knobs for the three-stage optimiser:
+     * Latin hypercube sampling, Particle Swarm Optimisation, and L-BFGS-B local refinement.
+     * Also includes MCMC and harmonic seed-search parameters.  Parameters can be set via
+     * a named map (e.g. from command-line options) or by selecting a named preset
+     * ("fast", "good", "overkill", "sensitivity").
+     */
     struct PROfitterConfig {
-        
-        //Parameters from LBFGSB only
+
+        /// L-BFGS-B solver parameters (convergence tolerances, maximum iterations, line-search settings).
         LBFGSpp::LBFGSBParam<float> param;
-        
+
         /***PROfit fitter parameters**/
-    
-        //Number of latin hypercube points to sample across ALL parameters, physics and otherwise
-        int n_latin_points = 1500;
-        float latin_diversity_factor =0.5;
 
-        //Number of partile swarm particels, and how many iterations. 
-        //taken from best (aka lowest chi, with iverse greedy seleciton) hypercube points
-        int n_swarm_particles = 1;
-        int n_swarm_iterations=1;
-        int n_swarm_max_stagnent_iterations=50;
-        float swarm_inertia_start = 0.9; 
-        float swarm_inertia_end= 0.6; 
-        float swarm_cognitive_score= 2.0; 
-        float swarm_social_score = 2.0; 
-        float swarm_convergence_theshold = 1e-4;
+        int n_latin_points = 1500;         ///< Number of Latin hypercube points sampled across all parameters.
+        float latin_diversity_factor = 0.5; ///< Distance-weighting factor for LHS: 0 = no weighting, 1 = maximally diverse.
 
-        //Total number of LBFGSB fits to do after PSO.
-        int n_localfit=10;
-        //Now many times to retry if LBFBSG has exception. Currently not really worth it until we cod ebetter logic for "changing" things after a fail. 
-        size_t n_max_local_retries = 1;
+        int n_swarm_particles = 1;                   ///< Number of PSO particles initialised from the best LHS points.
+        int n_swarm_iterations = 1;                  ///< Maximum number of PSO iterations.
+        int n_swarm_max_stagnent_iterations = 50;    ///< PSO early-stopping: halt after this many iterations without improvement.
+        float swarm_inertia_start = 0.9;             ///< Initial PSO inertia weight (linearly decreased to swarm_inertia_end).
+        float swarm_inertia_end = 0.6;               ///< Final PSO inertia weight.
+        float swarm_cognitive_score = 2.0;           ///< PSO cognitive (personal-best) weight.
+        float swarm_social_score = 2.0;              ///< PSO social (global-best) weight.
+        float swarm_convergence_theshold = 1e-4;     ///< PSO convergence threshold: stop if improvement < this value.
 
-        //MCMC parameters
-        size_t MCMCiter = 20'000;
-        size_t MCMCburn = 25'000;
+        int n_localfit = 10;                         ///< Number of L-BFGS-B local refinement fits run after PSO.
+        size_t n_max_local_retries = 1;              ///< Maximum retries if an L-BFGS-B fit throws an exception.
 
-        //Parameters in frequency based harmonic seed search
-        size_t harmonic_min_num_seeds = 2;//4
-        size_t harmonic_max_num_seeds = 4;//15
-        size_t harmonic_num_test_points = 125;
-        size_t harmonic_raw_max_tests = 60;
-        float harmonic_prominence_threshold = 0.5;
-        float harmonic_prominence_threshold_shift = 0.2;
-        float harmonic_min_spacing_log = 0.025;
-        float harmonic_prominence_threshold_minimum = 1e-5;
-        float harmonic_seed_norm_tolerance = 1e-4;  
-        float harmonic_seed_chi_tolerence = 1e-6;   
-        bool harmonic_scan_fit  = false; 
+        size_t MCMCiter = 20'000;  ///< Number of MCMC iterations (after burn-in) for posterior sampling.
+        size_t MCMCburn = 25'000;  ///< Number of MCMC burn-in iterations discarded before sampling.
 
-        bool progress_bar = false;
+        size_t harmonic_min_num_seeds = 2;               ///< Minimum number of seed points from the harmonic frequency search.
+        size_t harmonic_max_num_seeds = 4;               ///< Maximum number of seed points from the harmonic frequency search.
+        size_t harmonic_num_test_points = 125;           ///< Number of test points in physics-parameter frequency space.
+        size_t harmonic_raw_max_tests = 60;              ///< Maximum iterations to find significant minima in the harmonic scan.
+        float harmonic_prominence_threshold = 0.5;       ///< Peak prominence threshold for peak selection in the harmonic scan.
+        float harmonic_prominence_threshold_shift = 0.2; ///< Shift applied to the prominence threshold between harmonic search rounds.
+        float harmonic_min_spacing_log = 0.025;          ///< Minimum log-space separation between selected harmonic seed peaks.
+        float harmonic_prominence_threshold_minimum = 1e-5; ///< Absolute minimum prominence threshold (floor).
+        float harmonic_seed_norm_tolerance = 1e-4;       ///< Tolerance for seed-point norm convergence in the harmonic search.
+        float harmonic_seed_chi_tolerence = 1e-6;        ///< Tolerance for chi-squared convergence in the harmonic seed search.
+        bool harmonic_scan_fit = false;                  ///< If true, run a local fit at each harmonic scan point; if false, hold at best fit.
 
+        bool progress_bar = false; ///< If true, display a progress bar during fitting.
+
+        /** @brief Default constructor — leaves all parameters at their default values. */
         PROfitterConfig(){};
+
+        /**
+         * @brief Construct from a named preset and an optional map of overrides.
+         * @param input_fit_options  Map of parameter-name to value overrides applied after the preset.
+         * @param fit_preset         Preset name: "fast", "good", "overkill", or "sensitivity".
+         * @param isScan             If true, apply reduced settings appropriate for a parameter scan.
+         */
         PROfitterConfig(std::map<std::string, float> input_fit_options, std::string fit_preset, bool isScan){
 
             if(fit_preset == "good"){
@@ -408,50 +432,125 @@ namespace PROfit {
         }
     };
 
+    /**
+     * @brief Multi-start global optimiser for PROfit chi-squared minimisation.
+     * @details Implements the three-stage pipeline: Latin hypercube sampling,
+     * Particle Swarm Optimisation, and L-BFGS-B local refinement.  The Fit() method
+     * executes the full pipeline and stores the best-fit parameter vector in best_fit.
+     * After fitting, the approximate Hessian and inverse Hessian (parameter covariance)
+     * are accessible via the L-BFGS-B solver.
+     */
     class PROfitter {
         public:
-            Eigen::VectorXf ub, lb, best_fit;
-            PROfitterConfig fitconfig;
-            LBFGSpp::LBFGSBSolver<float> solver;
-            uint32_t seed;
-            std::map<std::string,size_t> exception_string_map;
-            MultiPROgressBar * progress;
-            bool run_progress;
+            Eigen::VectorXf ub;       ///< Upper bounds for all parameters (physics + splines).
+            Eigen::VectorXf lb;       ///< Lower bounds for all parameters.
+            Eigen::VectorXf best_fit; ///< Best-fit parameter vector found by the optimiser.
+            PROfitterConfig fitconfig;              ///< Configuration struct controlling the optimisation pipeline.
+            LBFGSpp::LBFGSBSolver<float> solver;   ///< Underlying L-BFGS-B solver instance.
+            uint32_t seed;                         ///< Random seed for reproducible LHS and PSO initialisations.
+            std::map<std::string,size_t> exception_string_map; ///< Counts of L-BFGS-B exception messages for diagnostics.
+            MultiPROgressBar * progress;           ///< Pointer to progress bar (non-owning); null when not used.
+            bool run_progress;                     ///< True if a progress bar should be updated during fitting.
 
+            std::vector<Eigen::VectorXf> freq_seed_points; ///< Seed points found by the harmonic frequency scan.
+            std::vector<float> freq_seed_values;           ///< Chi-squared values at the harmonic seed points.
 
-            std::vector<Eigen::VectorXf> freq_seed_points;
-            std::vector<float> freq_seed_values;
-
+            /**
+             * @brief Construct a PROfitter with given bounds and configuration.
+             * @param ub        Upper bounds for all parameters.
+             * @param lb        Lower bounds for all parameters.
+             * @param fitconfig_ Fitting configuration (default-constructed if not supplied).
+             * @param inseed    Random seed (default 0).
+             */
             PROfitter(const Eigen::VectorXf ub, const Eigen::VectorXf lb, PROfitterConfig fitconfig_ = {}, uint32_t inseed = 0)
                 : ub(ub), lb(lb), fitconfig(fitconfig_), solver(fitconfig.param), seed(inseed) {run_progress=false;}
 
+            /**
+             * @brief Run the full multi-start optimisation pipeline and return the minimum chi-squared.
+             * @param metric   The PROmetric to minimise (provides chi-squared and gradient).
+             * @param seed_pt  Optional single seed point; if empty, LHS is used for seeding.
+             * @return Minimum chi-squared value found.
+             */
             float Fit(PROmetric &metric, const Eigen::VectorXf &seed_pt = Eigen::VectorXf());
+
+            /**
+             * @brief Run the optimisation pipeline from a provided list of seed points.
+             * @param metric       The PROmetric to minimise.
+             * @param seed_points  List of starting parameter vectors; augments or replaces LHS seeding.
+             * @return Minimum chi-squared value found.
+             */
             float Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed_points );
 
+            /**
+             * @brief Compute harmonic frequency-domain seed points for the physics parameter space.
+             * @details Scans chi-squared as a function of physics parameters in frequency space,
+             * identifies peaks, and stores the corresponding parameter-space seeds in freq_seed_points.
+             * @param metric  The PROmetric used for evaluation.
+             * @return Number of seed points found.
+             */
             int calcFreqSeedPoints(PROmetric &metric);
+
+            /**
+             * @brief Identify significant local minima in a 1D scan (x, y) profile.
+             * @param x_values        Vector of x values (parameter values or frequencies).
+             * @param y_values        Vector of corresponding y values (chi-squared or amplitude).
+             * @param use_log_spacing If true, apply log-space peak-finding logic.
+             * @return Vector of (x, y) pairs for each identified significant minimum.
+             */
             std::vector<std::pair<float, float>> findSignificantMinima(  const std::vector<float>& x_values,const std::vector<float>& y_values, bool use_log_spacing = true);
             
 
+            /**
+             * @brief Register a progress bar to be updated during fitting.
+             * @param pin  Non-owning pointer to a MultiPROgressBar instance.
+             */
             void setProgressBar(MultiPROgressBar* pin){
                     run_progress = true;
                     progress = pin;
                     return;
             }
+            /** @brief Return the gradient vector at the final L-BFGS-B solution. */
             Eigen::VectorXf FinalGradient() const {return solver.final_grad();}
+            /** @brief Return the L2 norm of the gradient at the final solution. */
             float FinalGradientNorm() const {return solver.final_grad_norm();}
+            /** @brief Return the approximate Hessian matrix at the final solution (from L-BFGS-B). */
             Eigen::MatrixXf Hessian() const {return solver.final_approx_hessian();}
+            /** @brief Return the approximate inverse Hessian (parameter covariance) at the final solution. */
             Eigen::MatrixXf InverseHessian() const {return solver.final_approx_inverse_hessian();}
+            /** @brief Return the parameter covariance matrix (alias for InverseHessian()). */
             Eigen::MatrixXf Covariance() const {return InverseHessian();}
+            /** @brief Return the best-fit parameter vector. */
             Eigen::VectorXf BestFit() const {return best_fit;}
 
-            // If you don't belive the uncertainties on the parameters, you can use the final fit value to estimate the variance
+            /**
+             * @brief Return a covariance matrix rescaled by the goodness-of-fit chi-squared.
+             * @details Useful when the L-BFGS-B Hessian-based uncertainties are not trusted;
+             * scales the covariance by chi2 / (n_datapoint - nparams) (reduced chi-squared).
+             * @param chi2        Best-fit chi-squared value.
+             * @param n_datapoint Number of data bins used in the fit.
+             * @return Rescaled parameter covariance matrix.
+             */
             Eigen::MatrixXf ScaledCovariance(float chi2, int n_datapoint) const {return Covariance()*chi2/float(n_datapoint-best_fit.size());}
 
 
     };
     
+    /**
+     * @brief Generate a Latin hypercube sample in the unit hypercube.
+     * @param num_samples  Number of sample points to generate.
+     * @param dimensions   Dimensionality of the parameter space.
+     * @param dis          Uniform real distribution used for randomisation.
+     * @param gen          Mersenne Twister random number generator.
+     * @return A vector of @p num_samples points, each a vector of @p dimensions values in [0, 1].
+     */
     std::vector<std::vector<float>> latin_hypercube_sampling(size_t num_samples, size_t dimensions, std::uniform_real_distribution<float>&dis, std::mt19937 &gen);
 
+    /**
+     * @brief Rescale unit-hypercube Latin hypercube samples to the physical parameter bounds.
+     * @param samples  The samples to rescale in-place (each element is one sample point).
+     * @param ub       Upper bounds for each dimension.
+     * @param lb       Lower bounds for each dimension.
+     */
     void recenter_latin_samples(std::vector<std::vector<float>> &samples, const Eigen::VectorXf &ub, const Eigen::VectorXf &lb);
 
 }
