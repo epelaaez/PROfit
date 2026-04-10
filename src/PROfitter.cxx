@@ -395,6 +395,11 @@ int PROfitter::calcFreqSeedPoints(PROmetric &metric) {
     size_t nparams = metric.GetModel().nparams + metric.GetSysts().GetNSplines();
     size_t nphys = metric.GetModel().nparams;
 
+    if(nphys == 0){
+        log<LOG_INFO>(L"%1% || No physics parameters in model, skipping frequency seed point calculation.") % __func__;
+        return 0;
+    }
+
     Eigen::VectorXf lb = Eigen::VectorXf::Constant(nparams, -3.0);
     Eigen::VectorXf ub = Eigen::VectorXf::Constant(nparams, 3.0);
 
