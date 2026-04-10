@@ -81,6 +81,7 @@ namespace PROfit{
           virtual Value EvalInstance() = 0;
           virtual void LoadEvent(unsigned evtno) = 0;
           virtual std::string FormulaName() const = 0;
+          virtual std::set<std::string> GetNeededBranchNames() const { return {}; }
           virtual ~Formula() {}
       };
 
@@ -174,6 +175,10 @@ namespace PROfit{
         BranchVariable::Value EvalInstance() override;
         void LoadEvent(unsigned eventno) override;
         std::string FormulaName() const override;
+        // Returns the names of all TBranches referenced by this formula.
+        std::set<std::string> GetNeededBranchNames() const;
+        // Adds branches referenced by a single TTreeFormula to an existing set.
+        static void AddFormulaBranches(const TTreeFormula* f, std::set<std::string>& result);
         virtual ~ROOTFormula() {}
 
       private:

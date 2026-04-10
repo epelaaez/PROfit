@@ -2467,6 +2467,71 @@ void ROOTFormula::LoadEvent(unsigned eventno) {
     }
 }
 
+void ROOTFormula::AddFormulaBranches(const TTreeFormula* f, std::set<std::string>& result) {
+    if (!f) return;
+
+    // Standard path: scalar branches registered via GetNcodes() / GetLeaf().
+    for (int n = 0; n < f->GetNcodes(); n++) {
+        TLeaf* leaf = f->GetLeaf(n);
+        if (!leaf) continue;
+        TBranch* br = leaf->GetBranch();
+        if (br) {
+            result.insert(std::string(br->GetName()));
+            // Also include top-level (mother) branch so split objects work
+            TBranch* mother = br->GetMother();
+            if (mother && mother != br) result.insert(std::string(mother->GetName()));
+        }
+    }
+
+    // Supplemental path: extract every C-identifier token from the formula expression
+    // string and add it to the candidate set.  This captures std::vector<T> branches
+    // (where GetLeaf() returns nullptr) and branches inside Sum$(), Min$(), Max$() whose
+    // sub-expressions are not reachable via the public TTreeFormula API.
+    // Known ROOT/C keywords that can never be branch names are filtered out so that
+    // SetBranchStatus does not emit spurious "not found" warnings for them.
+    static const std::set<std::string> kSkipTokens = {
+        // ROOT aggregate functions used before '$'
+        "Sum", "Min", "Max", "Alt", "Count", "Iteration",
+        "MinIf", "MaxIf", "SumIf",
+        // C standard math functions
+        "abs", "fabs", "sqrt", "sin", "cos", "tan",
+        "asin", "acos", "atan", "atan2",
+        "sinh", "cosh", "tanh",
+        "exp", "log", "log10", "pow",
+        "ceil", "floor", "round", "fmod",
+        // ROOT math namespace
+        "TMath",
+        // ROOT boolean constants
+        "kTRUE", "kFALSE",
+        // C++ keywords / built-in types
+        "true", "false",
+        "int", "float", "double", "bool", "void",
+        "if", "else", "for", "while", "do", "return",
+    };
+    const char* title = f->GetTitle();
+    if (title) {
+        const char* p = title;
+        while (*p) {
+            if (isalpha(*p) || *p == '_') {
+                const char* start = p;
+                while (isalnum(*p) || *p == '_') p++;
+                std::string token(start, p);
+                if (kSkipTokens.find(token) == kSkipTokens.end())
+                    result.insert(std::move(token));
+            } else {
+                p++;
+            }
+        }
+    }
+}
+
+std::set<std::string> ROOTFormula::GetNeededBranchNames() const {
+    std::set<std::string> result;
+    for (const std::unique_ptr<TTreeFormula>& f : fs)
+        AddFormulaBranches(f.get(), result);
+    return result;
+}
+
 std::string ROOTFormula::FormulaName() const {
     std::string ret;
     bool delim = false;
