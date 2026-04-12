@@ -1025,8 +1025,26 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
     // Summary bar chart - scales from 1 to dozens of parameters
     log<LOG_DEBUG>(L"%1% || Are all lines the same : %2% %3% %4% %5% %6%") % __func__ % nBins % barvalues.size() % bfvalues.size() % values1_down.size() % values1_up.size() ;
 
-    float minVal = *std::min_element(values1_down.begin(), values1_down.end());
-    float maxVal = *std::max_element(values1_up.begin(), values1_up.end());
+    // Y-axis range: include everything within ±5σ (band + markers), nothing beyond.
+    // Clamp band extremes to ±5σ so the axis never extends past that.
+    float minVal = std::max(*std::min_element(values1_down.begin(), values1_down.end()), -5.0f);
+    float maxVal = std::min(*std::max_element(values1_up.begin(),   values1_up.end()),    5.0f);
+    for(int i = 0; i < nBins; ++i) {
+        if(mask_osc && i < (int)model.nparams) continue;
+        int vec_idx = with_osc ? i : (i + model.nparams);
+        // Collect all marker values for this bin
+        std::vector<float> markers;
+        if(i        < (int)bfvalues.size())    markers.push_back(bfvalues[i]);
+        if(vec_idx  < (int)init_seed.size())   markers.push_back((float)init_seed[vec_idx]);
+        if(vec_idx  < (int)true_params.size()) markers.push_back((float)true_params[vec_idx]);
+        // Expand range to include each marker, but only if it's within ±5σ
+        for(float v : markers) {
+            if(v >= -5.0f && v <= 5.0f) {
+                minVal = std::min(minVal, v);
+                maxVal = std::max(maxVal, v);
+            }
+        }
+    }
 
     { // _1sigma_detailed.pdf scope
     // 50px/bin keeps the aspect ratio reasonable for large parameter counts;
@@ -1143,20 +1161,22 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
     log<LOG_INFO>(L"%1% || _1sigma plot y-axis range: min=%2%, max=%3%") % __func__ % y_axis_min % y_axis_max;
 
     auto drawMarkerWithArrow2 = [&](float x, float y, int color, int marker_style, float msize) {
-        bool below_range = y < y_axis_min;
-        bool above_range = y > y_axis_max;
-        float draw_y = below_range ? y_axis_min + arrow_margin : (above_range ? y_axis_max - arrow_margin : y);
+        bool clamp_below = y < -5.0f;
+        bool clamp_above = y > 5.0f;
+        if(!clamp_below && !clamp_above && (y < y_axis_min || y > y_axis_max)) return;
+
+        float draw_y = clamp_below ? y_axis_min + arrow_margin : (clamp_above ? y_axis_max - arrow_margin : y);
 
         TMarker* marker = new TMarker(x, draw_y, marker_style);
         marker->SetMarkerSize(msize);
         marker->SetMarkerColor(color);
         marker->Draw();
 
-        if(below_range) {
+        if(clamp_below) {
             TArrow* arr = new TArrow(x, draw_y - arrow_length * 0.3f, x, y_axis_min + arrow_length * 0.2f, 0.008, "|>");
             arr->SetLineColor(color); arr->SetFillColor(color); arr->SetLineWidth(1);
             arr->Draw();
-        } else if(above_range) {
+        } else if(clamp_above) {
             TArrow* arr = new TArrow(x, draw_y + arrow_length * 0.3f, x, y_axis_max - arrow_length * 0.2f, 0.008, "|>");
             arr->SetLineColor(color); arr->SetFillColor(color); arr->SetLineWidth(1);
             arr->Draw();
@@ -1328,29 +1348,24 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
 
     // Helper lambda to draw a marker with out-of-range arrow handling
     auto drawMarkerWithArrow = [&](float x, float y, int color, float marker_size) {
-        bool below_range = y < y_axis_min;
-        bool above_range = y > y_axis_max;
+        bool clamp_below = y < -5.0f;
+        bool clamp_above = y > 5.0f;
+        if(!clamp_below && !clamp_above && (y < y_axis_min || y > y_axis_max)) return;
 
-        float draw_y = y;
-        if (below_range) {
-            draw_y = y_axis_min + arrow_margin;
-        } else if (above_range) {
-            draw_y = y_axis_max - arrow_margin;
-        }
+        float draw_y = clamp_below ? y_axis_min + arrow_margin : (clamp_above ? y_axis_max - arrow_margin : y);
 
         TMarker* marker = new TMarker(x, draw_y, 29);
         marker->SetMarkerSize(marker_size);
         marker->SetMarkerColor(color);
         marker->Draw();
 
-        // Draw arrow if out of range
-        if (below_range) {
+        if(clamp_below) {
             TArrow* arr = new TArrow(x, draw_y - arrow_length * 0.3, x, y_axis_min + arrow_length * 0.2, 0.008, "|>");
             arr->SetLineColor(color);
             arr->SetFillColor(color);
             arr->SetLineWidth(1);
             arr->Draw();
-        } else if (above_range) {
+        } else if(clamp_above) {
             TArrow* arr = new TArrow(x, draw_y + arrow_length * 0.3, x, y_axis_max - arrow_length * 0.2, 0.008, "|>");
             arr->SetLineColor(color);
             arr->SetFillColor(color);
