@@ -1800,7 +1800,7 @@ public:
      */
     PRO3p2(const PROpeller &prop, const std::map<std::string,int> &parameter_map) {
 
-        // model functions: 0 = null, 1 = numu->numu, 2 = numu->nue, 3 = nue->nue
+        // model functions: 0 = null, 1 = numu->numu, 2 = numu->nue, 3 = nue->nue, 4 = antinumu->antinue
         model_functions.push_back(
             [this]([[maybe_unused]] const Eigen::VectorXf &v, float) { (void)this; return 1.0f; });
         model_functions.push_back(
@@ -1809,7 +1809,9 @@ public:
             [this](const Eigen::VectorXf &v, float le) { return this->Pmue(v, le); });
         model_functions.push_back(
             [this](const Eigen::VectorXf &v, float le) { return this->Pee(v, le); });
-        prob_types = {0, 1, 2, 3};
+        model_functions.push_back(
+            [this](const Eigen::VectorXf &v, float le) { return this->Pmue_anti(v, le); });
+        prob_types = {0, 1, 2, 3, 4};
 
         if(parameter_map.find("L/E") == parameter_map.end()) {
             log<LOG_ERROR>(L"%1%, %2% || Missing expected parameter: 'L/E'. Make sure its in your model section of XML.")
@@ -1918,6 +1920,46 @@ public:
         return prob;
     }
 
+
+    // ---------- Appearance: anti-νμ → anti-νe (CP-conjugate, phi54 flipped) ----------
+    float Pmue_anti(const Eigen::VectorXf &v, float le) const {
+
+    float dm41  = std::pow(10.0f, v(0));
+    float dm51  = std::pow(10.0f, v(1));
+    float Ue4sq = std::pow(10.0f, v(2));
+    float Um4sq = std::pow(10.0f, v(3));
+    float Ue5sq = std::pow(10.0f, v(4));
+    float Um5sq = std::pow(10.0f, v(5));
+    float phi54 = v(6);
+
+    float x41 = 1.266932679f * dm41 * le;
+    float x51 = 1.266932679f * dm51 * le;
+    float x54 = 1.266932679f * (dm51 - dm41) * le;
+
+    // Standard 3+2 appearance terms (anti-nu: +phi54 instead of -phi54)
+    float term1 = 4.0f * Um4sq * Ue4sq * std::sin(x41) * std::sin(x41);
+    float term2 = 4.0f * Um5sq * Ue5sq * std::sin(x51) * std::sin(x51);
+    float term3 = 8.0f * std::sqrt(Um4sq * Ue4sq * Um5sq * Ue5sq)
+                        * std::sin(x41) * std::sin(x51)
+                        * std::cos(x54 + phi54);
+
+    float prob = term1 + term2 + term3;
+
+    const float eps = 1e-6f;
+
+    if (prob < 0.0f && prob > -eps) prob = 0.0f;
+
+    if (prob > 1.0f && prob < 1.0f + eps) prob = 1.0f;
+
+    if(prob < 0.0f || prob > 1.0f || std::isnan(prob)) {
+        log<LOG_ERROR>(L"%1% || Bad Pmue_anti = %2%  (le=%3%)"
+            L"\ndm41=%4% dm51=%5%  Ue4sq=%6% Um4sq=%7%  Ue5sq=%8% Um5sq=%9%  phi54=%10% term1=%11% term2=%12% term3=%13%"
+             ) % __func__ % prob % le
+             % dm41 % dm51 % Ue4sq % Um4sq % Ue5sq % Um5sq % phi54 % term1 % term2 % term3;
+            exit(EXIT_FAILURE);
+        }
+        return prob;
+    }
 
     // ---------- Disappearance: νμ → νμ (α=μ) ----------
    float Pmumu(const Eigen::VectorXf &v, float le) const {
