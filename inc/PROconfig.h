@@ -525,6 +525,7 @@ namespace PROfit{
             //---- Detector Variation (DetVar) support ----
             struct DetVarFile {
                 std::string filename;
+                std::string treename;
                 std::string name;  // "cv" / "cv_N" or variation name like "Recomb2"
                 float pot;
                 float partial_load_frac = 1.0f;
