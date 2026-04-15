@@ -871,7 +871,7 @@ PROfile::PROfile(const PROconfig &config, const PROsyst &systs, const PROmodel &
 
 }
 
-void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel &model, [[maybe_unused]] PROmetric &metric, [[maybe_unused]] PROseed &proseed, std::string filename, bool with_osc, const Eigen::VectorXf& init_seed, const Eigen::VectorXf & true_params, bool mask_osc) {
+void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel &model, [[maybe_unused]] PROmetric &metric, [[maybe_unused]] PROseed &proseed, std::string filename, bool with_osc, const Eigen::VectorXf& init_seed, const Eigen::VectorXf & true_params, const Eigen::MatrixXf& spline_covariance, bool mask_osc) {
 
     int nparams = systs.GetNSplines() + model.nparams*with_osc;
     int nBins = nparams;
@@ -1102,11 +1102,27 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
     prior_band->SetLineWidth(1);
     prior_band->Draw("same");
 
-    // Post-fit ±1σ bars: blue; half-width shrinks for many bins
+    // Post-fit ±1σ bars (blue): centered on the global best-fit, width from the MCMC
+    // posterior covariance diagonal (Gaussian approximation).  For oscillation physics
+    // parameters (which have no entry in spline_covariance), fall back to the profile interval.
     TGraphAsymmErrors todraw = onesig;
     for(int i = 0; i < nBins; ++i) {
-        todraw.SetPointError(i, bar_halfwidth, bar_halfwidth,
-                             todraw.GetErrorYlow(i), todraw.GetErrorYhigh(i));
+        int vec_idx = with_osc ? i : (i + (int)model.nparams);
+        float center = (vec_idx < (int)init_seed.size()) ? (float)init_seed[vec_idx] : bfvalues[i];
+        // syst_idx indexes into spline_covariance (syst-only, no physics params)
+        int syst_idx = with_osc ? (i - (int)model.nparams) : i;
+        bool is_syst = !with_osc || (i >= (int)model.nparams);
+        float err_lo, err_hi;
+        if(is_syst && syst_idx >= 0 && syst_idx < (int)spline_covariance.rows()) {
+            float sigma = std::sqrt(std::abs(spline_covariance(syst_idx, syst_idx)));
+            err_lo = sigma;
+            err_hi = sigma;
+        } else {
+            err_lo = todraw.GetErrorYlow(i);
+            err_hi = todraw.GetErrorYhigh(i);
+        }
+        todraw.SetPoint(i, todraw.GetPointX(i), center);
+        todraw.SetPointError(i, bar_halfwidth, bar_halfwidth, err_lo, err_hi);
     }
     if(mask_osc) {
         for(size_t i = 0; i < model.nparams; ++i) {
@@ -1226,7 +1242,7 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
     leg->SetBorderSize(1);
     leg->SetTextSize(std::max(0.022f, std::min(0.030f, axis_label_size * 0.85f)));
     leg->AddEntry(prior_band,   "Pre-fit #pm1#sigma (prior)", "f");
-    leg->AddEntry(&todraw,      "Post-fit #pm1#sigma",        "f");
+    leg->AddEntry(&todraw,      "Post-fit #pm1#sigma (MCMC)", "f");
     leg->AddEntry(&profile_pts, "Profile scan #pm1#sigma", "pe");
     TGraph *leg_global = new TGraph(1);
     leg_global->SetPoint(0, 0, 0);
