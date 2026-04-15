@@ -45,6 +45,7 @@
 //Boost
 #include <boost/archive/binary_oarchive.hpp>
 #include <boost/archive/binary_iarchive.hpp>
+#include <boost/serialization/version.hpp>
 
 namespace PROfit{
 
@@ -88,7 +89,7 @@ namespace PROfit{
 
         //boost serialization
         template<class Archive>
-        void serialize(Archive &ar, [[maybe_unused]] const unsigned int version) {
+        void serialize(Archive &ar, const unsigned int version) {
             ar & systname;
             ar & n_univ;
             ar & mode;
@@ -100,16 +101,18 @@ namespace PROfit{
             ar & spline_coeffs;
             ar & binning;
             ar & p_cv;
-            ar & p_multi_spec;  
+            ar & p_multi_spec;
             ar & hash;
             ar & norm_bins;
             ar & norm_value;
             ar & force_0_cv;
             ar & include_only_weights;
             ar & scale;
-            ar & has_restrict;
-            ar & restrict_lo;
-            ar & restrict_hi;
+            if (version >= 1) {
+                ar & has_restrict;
+                ar & restrict_lo;
+                ar & restrict_hi;
+            }
         }
 
 
@@ -313,4 +316,7 @@ namespace PROfit{
 
 
 };
+
+BOOST_CLASS_VERSION(PROfit::SystStruct, 1)
+
 #endif

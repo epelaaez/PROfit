@@ -641,9 +641,6 @@ namespace PROfit {
         const Spline& spline = splines[spline_num];
         if (bin < 0 || bin >= spline.bins) return -1;
 
-        if (spline_has_restrict[spline_num])
-            shift = std::clamp(shift, spline_restrict_lo[spline_num], spline_restrict_hi[spline_num]);
-
         // Find the right segment with egments are sorted by knob value
         int offset = bin * spline.segments_per_bin;
         const SplineSegment* segs = &spline.segments[offset];
