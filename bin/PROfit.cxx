@@ -486,6 +486,7 @@ int main(int argc, char* argv[])
                 PROconfig dvconfig = config.BuildDetVarConfig(idv);
                 NullModel dvmodel(dvprop);
                 Eigen::VectorXf dvparams = Eigen::VectorXf::Constant(dvmodel.nparams, 0);
+                PROspec cvSpec = FillSpectra(cvconfig, cvprop, emptySyst, cvmodel, cvparams, true, binningIndex);
                 PROspec varSpec = FillSpectra(dvconfig, dvprop, emptySyst, dvmodel, dvparams, true, binningIndex);
 
                 // Attempt to build matched specs using only common (run,subrun,event) events.
@@ -520,7 +521,8 @@ int main(int argc, char* argv[])
                     ss.p_multi_spec[0] = std::make_shared<PROspec>(matchedCvSpec);
                     ss.p_multi_spec[1] = std::make_shared<PROspec>(matchedVarSpec);
                     ss.SetHash(config.hash);
-                    systsstructs[binningIndex].push_back(std::move(ss));
+                    //systsstructs[binningIndex].push_back(std::move(ss));
+                    for(auto &ssv : systsstructs) ssv.push_back(ss);
                 }
                 log<LOG_INFO>(L"%1% || Added DetVar SystStruct '%2%' (section %3%, binning=%4%, mode=%5%)") % __func__ % varName.c_str() % isec % binningIndex % systType.c_str();
             }
