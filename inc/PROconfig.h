@@ -437,6 +437,7 @@ namespace PROfit{
             std::map<std::string, float> m_mcgen_variation_prior_centers;
             std::map<std::string, bool> m_mcgen_variation_force_0_cv; //map of systematics with force_0_cv=true (normalize shifts by shift at knob=0)
             std::map<std::string, std::vector<int>> m_mcgen_variation_include_only_weights; //map of systematics with include_only_weights (1-based indices of which weights to include in spline universes)
+            std::map<std::string, std::pair<float,float>> m_mcgen_variation_restrict; //map of systematics with restrict="lo, hi" (clamp knob value during evaluation and fitting)
             std::map<std::string, float> m_mcgen_variation_scale; //map of systematics with scale factor to apply to weights (e.g., 0.001 for weights stored as x1000)
       
             //FIX skepic

@@ -225,8 +225,9 @@ std::vector<profOut> PROfile::PROfilePointHelper(const PROsyst *systs, const PRO
         }
         //upper lower bounds for splines
         for(int j = nphys; j < nparams; ++j) {
-            lb(j) = systs->spline_lo[j-nphys];
-            ub(j) = systs->spline_hi[j-nphys];
+            size_t si = j - nphys;
+            lb(j) = systs->spline_has_restrict[si] ? systs->spline_restrict_lo[si] : systs->spline_lo[si];
+            ub(j) = systs->spline_has_restrict[si] ? systs->spline_restrict_hi[si] : systs->spline_hi[si];
         }
     } else {
         // Syst-only mode: create full-size bounds but fix physics params at seed values
@@ -241,8 +242,9 @@ std::vector<profOut> PROfile::PROfilePointHelper(const PROsyst *systs, const PRO
         }
         // Spline bounds as normal
         for(int j = nphys; j < nparams; ++j) {
-            lb(j) = systs->spline_lo[j-nphys];
-            ub(j) = systs->spline_hi[j-nphys];
+            size_t si = j - nphys;
+            lb(j) = systs->spline_has_restrict[si] ? systs->spline_restrict_lo[si] : systs->spline_lo[si];
+            ub(j) = systs->spline_has_restrict[si] ? systs->spline_restrict_hi[si] : systs->spline_hi[si];
         }
     }
 

@@ -1168,7 +1168,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 }
 
                 //check for known attributes
-                const std::vector<std::string> expected_attrs = {"name", "type", "plotname", "binning", "knobvals", "tag", "prior", "center", "force_0_cv", "include_only_weights", "scale","filename", "xvar", "yvar"};
+                const std::vector<std::string> expected_attrs = {"name", "type", "plotname", "binning", "knobvals", "tag", "prior", "center", "force_0_cv", "include_only_weights", "scale","filename", "xvar", "yvar", "restrict"};
                 for (const tinyxml2::XMLAttribute* attr = pAllowList->FirstAttribute(); attr; attr = attr->Next()) {
                     std::string name = attr->Name();
                     if (std::find(expected_attrs.begin(), expected_attrs.end(), name) == expected_attrs.end()) {
@@ -1187,6 +1187,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 const char *center = pAllowList->Attribute("center");
                 const char *force_0_cv = pAllowList->Attribute("force_0_cv");
                 const char *include_only_weights_str = pAllowList->Attribute("include_only_weights");
+                const char *restrict_str = pAllowList->Attribute("restrict");
                 const char *scale = pAllowList->Attribute("scale");
                 const char *filename = pAllowList->Attribute("filename");
                 const char *xvar = pAllowList->Attribute("xvar");
@@ -1302,6 +1303,16 @@ int PROconfig::LoadFromXML(const std::string &filename){
                     if(begin) iow_vec.push_back(atoi(begin));
                     m_mcgen_variation_include_only_weights[wt] = iow_vec;
                     log<LOG_INFO>(L"%1% || Parsed include_only_weights for systematic %2%: %3% entries") % __func__ % wt.c_str() % iow_vec.size();
+                }
+                if(restrict_str) {
+                    char *end;
+                    float rlo = std::strtof(restrict_str, &end);
+                    if(end == restrict_str)
+                        throw std::invalid_argument(std::string("restrict attribute for systematic '") + wt + "' must be two numbers, e.g. restrict=\"-1, 1\"");
+                    while(*end == ' ' || *end == ',') ++end;
+                    float rhi = std::strtof(end, nullptr);
+                    m_mcgen_variation_restrict[wt] = {rlo, rhi};
+                    log<LOG_INFO>(L"%1% || Parsed restrict=[%2%, %3%] for systematic %4%") % __func__ % rlo % rhi % wt.c_str();
                 }
                 if(scale) {
                     m_mcgen_variation_scale[wt] = std::strtof(scale, NULL);
