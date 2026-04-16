@@ -995,6 +995,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
             cv_file.name = (section_idx == 0) ? "cv" : ("cv_" + std::to_string(section_idx));
             cv_file.pot = strtod(cv_pot_str, &end);
             cv_file.is_cv = true;
+            cv_file.renorm = false;
             cv_file.section_index = section_idx;
             { const char* frac = pCV->Attribute("partial_load_frac");
               cv_file.partial_load_frac = frac ? (float)strtod(frac, nullptr) : 1.0f; }
@@ -1020,12 +1021,16 @@ int PROconfig::LoadFromXML(const std::string &filename){
                     log<LOG_ERROR>(L"%1% || ERROR: Require a treename in either the DetVarSection or variation elements.") % __func__;
                     exit(EXIT_FAILURE);
                 }
+                const char *renorm = pVar->Attribute("renorm");
+                const char *knobval = pVar->Attribute("knobval");
                 DetVarFile var_file;
                 var_file.filename = dv_filename;
                 var_file.treename = dv_treename;
                 var_file.name = var_name;
                 var_file.pot = strtod(var_pot_str, &end);
                 var_file.is_cv = false;
+                var_file.knobval = knobval ? strtod(knobval, &end) : 1;
+                var_file.renorm = !renorm || (strcmp(renorm, "0") && strcmp(renorm, "false") && strcmp(renorm, "no"));
                 var_file.section_index = section_idx;
                 { const char* frac = pVar->Attribute("partial_load_frac");
                   var_file.partial_load_frac = frac ? (float)strtod(frac, nullptr) : 1.0f; }
