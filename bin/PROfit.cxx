@@ -1568,7 +1568,7 @@ int main(int argc, char* argv[])
         for(size_t io = 0; io < config.m_num_variables; ++io) {
             other_hists.push_back(getCV1DHists(variable_cvs[io], config, binwidth_scale, io));
         }
-/* TODO: DetVar Plotting
+        
         // DetVar plotting (uses combined DetVar propellers binary)
         if(config.m_has_detvar_section) {
             log<LOG_INFO>(L"%1% || Plotting detector variations...") % __func__;
@@ -1579,7 +1579,7 @@ int main(int argc, char* argv[])
             std::vector<std::string> detvar_names;
             std::vector<int> detvar_binning;
             // Matched pairs for _DetVarOverlapping PDF (var file index -> matched cv+var specs)
-            struct MatchedPair { PROspec cv; PROspec var; };
+            struct MatchedPair { PROspec cv; std::map<int, PROspec> vars; };
             std::map<size_t, MatchedPair> matched_pairs;
 
             if(!std::filesystem::exists(dvAllPropsBin)) {
@@ -1597,30 +1597,49 @@ int main(int argc, char* argv[])
                         plot_cv_idx_by_section[config.m_detvar_files[idv].section_index] = idv;
                 }
 
+                std::vector<size_t> skip;
                 for(size_t idv = 0; idv < config.GetNumDetVarFiles(); ++idv) {
+                    if(skip.size() && std::find(skip.begin(), skip.end(), idv) != skip.end()) continue;
                     const std::string& name = config.m_detvar_files[idv].name;
                     const std::string key = DetVarKey(config, idv);
                     if(plot_dvprops.count(key) == 0) {
                         log<LOG_ERROR>(L"%1% || DetVar entry '%2%' not found in combined binary. Run 'process' first.") % __func__ % name.c_str();
                         break;
                     }
-
-                    PROconfig dvconfig = config.BuildDetVarConfig(idv);
-                    PROpeller& dvprop = plot_dvprops.at(key);
-
-                    std::unique_ptr<PROmodel> dv_model = std::make_unique<NullModel>(dvprop);
-                    PROsyst dvsysts;
-                    Eigen::VectorXf dvparams = Eigen::VectorXf::Constant(dv_model->nparams, 0);
+                    std::map<int, size_t> syst_files;
+                    auto find_fn = [&name](const PROconfig::DetVarFile &dvf) { return dvf.name == name; };
+                    auto it = config.m_detvar_files.begin() + idv;
+                    while((it = std::find_if(it, config.m_detvar_files.end(), find_fn))
+                            != std::end(config.m_detvar_files)) {
+                        size_t i = std::distance(config.m_detvar_files.begin(), it);
+                        syst_files[it->knobval] = i;
+                        skip.push_back(i);
+                        it++;
+                    }
 
                     int binningIndex = config.m_mcgen_variation_binning_map.count(name) ? config.m_mcgen_variation_binning_map.at(name) : config.i_prime;
                     if(binningIndex < 0 || binningIndex >= (int)config.m_num_variables)
                         binningIndex = config.i_prime;
 
-                    // Always use full spec for _DetVarFull PDF
-                    PROspec full_spec = FillSpectra(dvconfig, dvprop, dvsysts, *dv_model, dvparams, !eventbyevent, binningIndex);
-                    detvar_specs.push_back(full_spec);
-                    detvar_names.push_back(name);
-                    detvar_binning.push_back(binningIndex);
+                    std::map<int, const PROpeller*> props;
+                    MatchedPair mp;
+                    for(auto &[kv, f] : syst_files) {
+                        PROconfig dvconfig = config.BuildDetVarConfig(f);
+                        const std::string key = DetVarKey(config, f);
+                        PROpeller& dvprop = plot_dvprops.at(key);
+
+                        std::unique_ptr<PROmodel> dv_model = std::make_unique<NullModel>(dvprop);
+                        PROsyst dvsysts;
+                        Eigen::VectorXf dvparams = Eigen::VectorXf::Constant(dv_model->nparams, 0);
+
+                        // Always use full spec for _DetVarFull PDF
+                        PROspec full_spec = FillSpectra(dvconfig, dvprop, dvsysts, *dv_model, dvparams, !eventbyevent, binningIndex);
+                        mp.vars[kv] = full_spec;
+                        props[kv] = &dvprop;
+                        detvar_specs.push_back(full_spec);
+                        detvar_names.push_back(name);
+                        detvar_binning.push_back(binningIndex);
+                    }
 
                     // For variation files, build matched pair for _DetVarOverlapping PDF
                     if(!config.m_detvar_files[idv].is_cv) {
@@ -1628,10 +1647,13 @@ int main(int argc, char* argv[])
                         auto cv_it = plot_cv_idx_by_section.find(sec);
                         if(cv_it != plot_cv_idx_by_section.end()) {
                             PROpeller& cvprop_plot = plot_dvprops.at(DetVarKey(config, cv_it->second));
-                            MatchedPair mp;
-                            if(BuildDetVarMatchedSpecs(cvprop_plot, dvprop, binningIndex,
+                            PROconfig cvconfig = config.BuildDetVarConfig(cv_it->second);
+                            std::unique_ptr<PROmodel> cv_model = std::make_unique<NullModel>(cvprop_plot);
+                            Eigen::VectorXf cvparams = Eigen::VectorXf::Constant(cv_model->nparams, 0);
+                            mp.cv = FillSpectra(cvconfig, cvprop_plot, PROsyst(), *cv_model, cvparams, !eventbyevent, binningIndex);
+                            if(BuildDetVarMatchedSpecs(cvprop_plot, props, binningIndex,
                                                        (int)config.m_num_variable_bins_total[binningIndex],
-                                                       mp.cv, mp.var)) {
+                                                       mp.cv, mp.vars)) {
                                 matched_pairs[idv] = std::move(mp);
                                 log<LOG_INFO>(L"%1% || DetVar plot '%2%': matched pair built for Overlapping PDF") % __func__ % name.c_str();
                             }
@@ -1773,10 +1795,12 @@ int main(int argc, char* argv[])
 
                                         const MatchedPair& mp = mp_it->second;
                                         std::map<std::string, std::unique_ptr<TH1D>> cv_hists_ov = getCV1DHists(mp.cv, config, binwidth_scale, detvar_binning[idv]);
-                                        std::map<std::string, std::unique_ptr<TH1D>> var_hists_ov = getCV1DHists(mp.var, config, binwidth_scale, detvar_binning[idv]);
+                                        std::map<int, std::map<std::string, std::unique_ptr<TH1D>>> var_hists_ov;
+                                        for(auto &[kv, vspec] : mp.vars)
+                                            var_hists_ov[kv] = getCV1DHists(vspec, config, binwidth_scale, detvar_binning[idv]);
 
                                         TH1D* cv_total_ov = nullptr;
-                                        TH1D* var_total_ov = nullptr;
+                                        std::map<int, TH1D*> var_total_ov;
                                         for(size_t sc = 0; sc < config.m_num_subchannels[ic]; sc++) {
                                             const std::string& subchannel_name = config.m_fullnames[ov_global_subchannel_index + sc];
                                             auto cv_hit = cv_hists_ov.find(subchannel_name);
@@ -1784,47 +1808,59 @@ int main(int argc, char* argv[])
                                                 if(!cv_total_ov) cv_total_ov = (TH1D*)cv_hit->second->Clone("cv_matched_ov_total");
                                                 else cv_total_ov->Add(&*(cv_hit->second));
                                             }
-                                            auto var_hit = var_hists_ov.find(subchannel_name);
-                                            if(var_hit != var_hists_ov.end()) {
-                                                if(!var_total_ov) var_total_ov = (TH1D*)var_hit->second->Clone("var_matched_ov_total");
-                                                else var_total_ov->Add(&*(var_hit->second));
+                                            for(auto &[kv, specs] : var_hists_ov) {
+                                                auto var_hit = specs.find(subchannel_name);
+                                                if(var_hit != specs.end()) {
+                                                    if(var_total_ov.count(kv) == 0) 
+                                                        var_total_ov[kv] 
+                                                            = (TH1D*)var_hit->second->Clone("var_matched_ov_total");
+                                                    else 
+                                                        var_total_ov[kv]->Add(&*(var_hit->second));
+                                                }
                                             }
                                         }
 
-                                        if(cv_total_ov && var_total_ov) {
+                                        if(cv_total_ov && var_total_ov.size()) {
                                             cv_total_ov->SetLineColor(kBlack);
                                             cv_total_ov->SetLineWidth(3);
                                             cv_total_ov->SetFillColor(kWhite);
                                             cv_total_ov->SetFillStyle(0);
-                                            var_total_ov->SetLineColor(kRed);
-                                            var_total_ov->SetLineWidth(2);
-                                            var_total_ov->SetFillColor(kWhite);
-                                            var_total_ov->SetFillStyle(0);
+                                            std::vector<double> maxs;
+                                            for(auto &[kv, h] : var_total_ov) {
+                                                h->SetLineWidth(2);
+                                                h->SetFillColor(kWhite);
+                                                h->SetFillStyle(0);
+                                                maxs.push_back(h->GetMaximum());
+                                            }
 
-                                            float ymax_ov = std::max(cv_total_ov->GetMaximum(), var_total_ov->GetMaximum());
+                                            float ymax_ov = std::max(cv_total_ov->GetMaximum(), *std::max_element(maxs.begin(), maxs.end()));
                                             cv_total_ov->SetMaximum(ymax_ov * 1.15);
                                             std::string ov_title = config.m_mode_names[im] + " " + config.m_detector_names[id] + " " + config.m_channel_names[ic] + " " + detvar_names[idv] + " (Matched)";
                                             cv_total_ov->SetTitle(ov_title.c_str());
                                             if(binwidth_scale) cv_total_ov->GetYaxis()->SetTitle("Events/GeV");
                                             else cv_total_ov->GetYaxis()->SetTitle("Events");
 
-                                            cv_total_ov->Draw("hist");
-                                            var_total_ov->Draw("hist same");
-
                                             std::unique_ptr<TLegend> ov_leg = std::make_unique<TLegend>(0.55, 0.75, 0.89, 0.89);
                                             ov_leg->SetFillStyle(0);
                                             ov_leg->SetLineWidth(0);
+
+                                            gStyle->SetPalette(kCandy);
+                                            cv_total_ov->Draw("hist");
                                             ov_leg->AddEntry(cv_total_ov, "Matched CV", "l");
-                                            ov_leg->AddEntry(var_total_ov, detvar_names[idv].c_str(), "l");
+                                            for(auto &[kv, h] : var_total_ov) {
+                                                h->Draw("hist same plc");
+                                                ov_leg->AddEntry(h, (detvar_names[idv]+" "+std::to_string(kv)).c_str(), "l");
+                                            }
+
                                             ov_leg->Draw("same");
 
                                             ov_canvas.Print(ov_pdf.c_str(), "pdf");
 
                                             delete cv_total_ov;
-                                            delete var_total_ov;
+                                            //delete var_total_ov;
                                         } else {
                                             if(cv_total_ov) delete cv_total_ov;
-                                            if(var_total_ov) delete var_total_ov;
+                                            //if(var_total_ov) delete var_total_ov;
                                         }
                                     }
                                     ov_global_subchannel_index += config.m_num_subchannels[ic];
@@ -1833,11 +1869,12 @@ int main(int argc, char* argv[])
                         }
                         ov_canvas.Print((ov_pdf + "]").c_str(), "pdf");
                         log<LOG_INFO>(L"%1% || DetVar overlapping plots saved to %2%") % __func__ % ov_pdf.c_str();
+                        set_matrix_palette();
                     }
                 }
             }
         }
-*/
+
         TCanvas c;
         if(fake_data_osc_params.size()) {
 
