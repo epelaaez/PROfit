@@ -69,7 +69,7 @@ static std::vector<int> DetVarMatchingKey(const PROpeller& prop, size_t i_event)
 static bool BuildDetVarMatchedSpecs(
         const PROpeller& cvprop, const std::map<int, const PROpeller*> &varprop,
         int var_idx, int spec_size,
-        PROspec& out_cv, std::map<int, PROspec> &out_var, bool renorm = true) {
+        PROspec& out_cv, std::map<int, PROspec> &out_var) {
 
     if(!cvprop.has_matching_vars || 
             !std::all_of(varprop.begin(), varprop.end(), [](const auto &p){ return p.second->has_matching_vars;})) 
@@ -123,7 +123,6 @@ static bool BuildDetVarMatchedSpecs(
     }
 
     // Step 4: fill matched var spec
-    const float cv_matched_total = matched_cv.Spec().sum();
     std::map<int, PROspec> matched_var;
     Eigen::VectorXf n_var_prop_matched = Eigen::VectorXf::Zero(varprop.size());
     Eigen::VectorXf n_var_evt = Eigen::VectorXf::Zero(varprop.size());
@@ -136,16 +135,6 @@ static bool BuildDetVarMatchedSpecs(
             n_var_prop_matched(prop_i) += 1;
             int bin = prop->variable_bin_indices[var_idx][j];
             if(bin >= 0) matched_var[kv].QuickFill(bin, prop->added_weights[j]);
-        }
-        if(renorm){
-            // Renormalize matched_var to the matched_cv total so the comparison is purely
-            // shape/efficiency: removes the effect of different statistics between CV and var files.
-            const float var_matched_total = matched_var[kv].Spec().sum();
-            if(var_matched_total > 0.0f && cv_matched_total > 0.0f) {
-                const float renorm = cv_matched_total / var_matched_total;
-                matched_var[kv] = PROspec(matched_var[kv].Spec() * renorm, matched_var[kv].Error() * renorm);
-                log<LOG_INFO>(L"DetVar matching: renorm factor (CV_matched/var_matched) = %1%") % renorm;
-            }
         }
         prop_i++;
     }
@@ -497,7 +486,6 @@ int main(int argc, char* argv[])
                 if(config.m_detvar_files[idv].is_cv) continue;
 
                 const std::string& varName = config.m_detvar_files[idv].name;
-                bool renorm = config.m_detvar_files[idv].renorm;
 
                 if(config.m_mcgen_variation_type_map.count(varName) == 0) {
                     log<LOG_INFO>(L"%1% || Skipping DetVar '%2%' — no matching entry in <systematics> section.") % __func__ % varName.c_str();
@@ -536,7 +524,7 @@ int main(int argc, char* argv[])
                 PROspec matchedCvSpec = cvSpec;
                 const bool matched = BuildDetVarMatchedSpecs(
                     cvprop, props, binningIndex, (int)config.m_num_variable_bins_total[binningIndex],
-                    matchedCvSpec, specs, renorm);
+                    matchedCvSpec, specs);
                 if(matched) {
                     log<LOG_INFO>(L"%1% || DetVar '%2%': using event-matched spectra for spline building") % __func__ % varName.c_str();
                 } else {
@@ -568,7 +556,6 @@ int main(int argc, char* argv[])
                         ss.p_multi_spec[idx] = std::make_shared<PROspec>(specs[kv]);
                     }
                     ss.SetHash(config.hash);
-                    //systsstructs[binningIndex].push_back(std::move(ss));
                     for(auto &ssv : systsstructs) ssv.push_back(ss);
                 }
                 log<LOG_INFO>(L"%1% || Added DetVar SystStruct '%2%' (section %3%, binning=%4%, mode=%5%)") % __func__ % varName.c_str() % isec % binningIndex % systType.c_str();
