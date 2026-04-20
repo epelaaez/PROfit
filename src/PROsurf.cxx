@@ -871,7 +871,7 @@ PROfile::PROfile(const PROconfig &config, const PROsyst &systs, const PROmodel &
 
 }
 
-void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel &model, [[maybe_unused]] PROmetric &metric, [[maybe_unused]] PROseed &proseed, std::string filename, bool with_osc, const Eigen::VectorXf& init_seed, const Eigen::VectorXf & true_params, const Eigen::MatrixXf& spline_covariance, bool mask_osc) {
+void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel &model, [[maybe_unused]] PROmetric &metric, [[maybe_unused]] PROseed &proseed, std::string filename, bool with_osc, const Eigen::VectorXf& init_seed, const Eigen::VectorXf & true_params, const Eigen::MatrixXf& spline_covariance, const Eigen::VectorXf& param_err_lo, const Eigen::VectorXf& param_err_hi, bool mask_osc) {
 
     int nparams = systs.GetNSplines() + model.nparams*with_osc;
     int nBins = nparams;
@@ -1102,21 +1102,19 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
     prior_band->SetLineWidth(1);
     prior_band->Draw("same");
 
-    // Post-fit ±1σ bars (blue): centered on the global best-fit, width from the MCMC
-    // posterior covariance diagonal (Gaussian approximation).  For oscillation physics
-    // parameters (which have no entry in spline_covariance), fall back to the profile interval.
+    // Post-fit ±1σ bars (blue): centered on the global best-fit, width from MCMC
+    // 16th/84th percentile quantiles.  For oscillation physics parameters (no entry
+    // in param_err_lo/hi), fall back to the profile interval.
     TGraphAsymmErrors todraw = onesig;
     for(int i = 0; i < nBins; ++i) {
         int vec_idx = with_osc ? i : (i + (int)model.nparams);
         float center = (vec_idx < (int)init_seed.size()) ? (float)init_seed[vec_idx] : bfvalues[i];
-        // syst_idx indexes into spline_covariance (syst-only, no physics params)
         int syst_idx = with_osc ? (i - (int)model.nparams) : i;
         bool is_syst = !with_osc || (i >= (int)model.nparams);
         float err_lo, err_hi;
-        if(is_syst && syst_idx >= 0 && syst_idx < (int)spline_covariance.rows()) {
-            float sigma = std::sqrt(std::abs(spline_covariance(syst_idx, syst_idx)));
-            err_lo = sigma;
-            err_hi = sigma;
+        if(is_syst && syst_idx >= 0 && syst_idx < param_err_lo.size() && syst_idx < param_err_hi.size()) {
+            err_lo = param_err_lo(syst_idx);
+            err_hi = param_err_hi(syst_idx);
         } else {
             err_lo = todraw.GetErrorYlow(i);
             err_hi = todraw.GetErrorYhigh(i);
