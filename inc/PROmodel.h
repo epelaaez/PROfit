@@ -1604,7 +1604,7 @@ public:
         const float Ue4sq = maybe_convert_log("Ue4^2", v(param_name_to_index.at("Ue4^2")));
         const float Um4sq = maybe_convert_log("Um4^2", v(param_name_to_index.at("Um4^2")));
         const float g2 = maybe_convert_log("g2", v(param_name_to_index.at("g2")));
-        return   ((Ue4sq+Um4sq)<1 && g2>0 ? 1 : 0);
+        return   ((Ue4sq+Um4sq)<1 && g2>0 ? 1 : 0);      
     }
 
     // Equations from Jesse Mendez, slide 5 bottom https://microboone-docdb.fnal.gov/cgi-bin/sso/RetrieveFile?docid=45475&filename=2025-10-31-mendez-sterile-deacy.pdf&version=1

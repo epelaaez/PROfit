@@ -98,7 +98,7 @@ namespace PROfit {
 
             //log<LOG_INFO>(L"%1% || Starting le_arr building %2%") % __func__ % var_index;
             //auto start_le = std::chrono::high_resolution_clock::now();
-
+            
             // Build var_arrs: one entry per ivar, each of length n_phys_bins (flat grid).
             // For 1-var: var_arrs[0] = midbin values of that var (n_phys_bins = n_ivar_bins).
             // For N-var: row-major product grid — var_arrs[k][flat] = midbin of ivar[k] at flat index.
