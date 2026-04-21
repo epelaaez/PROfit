@@ -104,11 +104,16 @@ static bool BuildDetVarMatchedSpecs(
             common_keys.insert(cv_key.first);
     }
 
-    const size_t n_cv_only      = cv_key_map.size() - common_keys.size();
-    const size_t n_var_only     = var_key_set.size() - common_keys.size();
+    const size_t n_cv_unique    = cv_key_map.size();
     const size_t n_overlapping  = common_keys.size();
-    log<LOG_INFO>(L"DetVar matching: total CV: %1%, total var: %2%")
-        % cv_key_map.size() % var_key_set.size();
+    const size_t n_cv_only      = n_cv_unique - n_overlapping;
+    // Count total unique keys across all variations
+    std::set<std::vector<int>> all_var_keys;
+    for(const auto &[kv, ks] : var_key_set) all_var_keys.insert(ks.begin(), ks.end());
+    const size_t n_var_unique   = all_var_keys.size();
+    const size_t n_var_only     = n_var_unique > n_overlapping ? n_var_unique - n_overlapping : 0;
+    log<LOG_INFO>(L"DetVar matching: total CV unique keys: %1%, total var unique keys: %2%")
+        % n_cv_unique % n_var_unique;
     log<LOG_INFO>(L"DetVar matching: num CV only: %1%, num var only: %2%, num overlapping: %3%")
         % n_cv_only % n_var_only % n_overlapping;
 
@@ -527,10 +532,29 @@ int main(int argc, char* argv[])
                     matchedCvSpec, specs);
                 if(matched) {
                     log<LOG_INFO>(L"%1% || DetVar '%2%': using event-matched spectra for spline building") % __func__ % varName.c_str();
+                    // When cv_variation_matching_vars is used, undo the POT scaling that was
+                    // applied during propeller filling so both CV and variation matched spectra
+                    // are in raw event-weight units. The spline ratio then reflects only detector
+                    // shape/efficiency effects, not any POT normalization artifact.
+                    const double det_pot = config.m_det_pot[0];
+                    const double cv_pot_dv = config.m_detvar_files[cv_idx].pot;
+                    if(det_pot > 0.0 && cv_pot_dv > 0.0) {
+                        const float cv_unscale = (float)(cv_pot_dv / det_pot);
+                        matchedCvSpec.Spec() *= cv_unscale;
+                        matchedCvSpec.Error() *= cv_unscale;
+                        for(const auto &[kv, var_file_idx] : syst_files) {
+                            const double var_pot_dv = config.m_detvar_files[var_file_idx].pot;
+                            if(var_pot_dv > 0.0) {
+                                const float var_unscale = (float)(var_pot_dv / det_pot);
+                                specs[kv].Spec() *= var_unscale;
+                                specs[kv].Error() *= var_unscale;
+                            }
+                        }
+                    }
                 } else {
                     log<LOG_INFO>(L"%1% || DetVar '%2%': no matching vars stored, using full spectra") % __func__ % varName.c_str();
                 }
-                
+
                 {
                     // Zero out bins where CV is 0 to avoid division by zero when constructing splines
                     Eigen::ArrayXf mask = (matchedCvSpec.Spec().array() != 0.0f).cast<float>();
@@ -539,7 +563,6 @@ int main(int argc, char* argv[])
                         spec.Error() = spec.Error().array() * mask;
                     }
                 }
-
 
                 {
                     std::vector<eweight_type> knobvals;
@@ -1641,6 +1664,23 @@ int main(int argc, char* argv[])
                             if(BuildDetVarMatchedSpecs(cvprop_plot, props, binningIndex,
                                                        (int)config.m_num_variable_bins_total[binningIndex],
                                                        mp.cv, mp.vars)) {
+                                // Undo POT scaling from both CV and variation matched spectra so
+                                // the overlapping plot shows raw event-weight units (no POT scaling)
+                                const double det_pot_ov = config.m_det_pot[0];
+                                const double cv_pot_ov = config.m_detvar_files[cv_it->second].pot;
+                                if(det_pot_ov > 0.0 && cv_pot_ov > 0.0) {
+                                    const float cv_unscale_ov = (float)(cv_pot_ov / det_pot_ov);
+                                    mp.cv.Spec() *= cv_unscale_ov;
+                                    mp.cv.Error() *= cv_unscale_ov;
+                                    for(auto &[kv_plot, var_file_idx_plot] : syst_files) {
+                                        const double var_pot_ov = config.m_detvar_files[var_file_idx_plot].pot;
+                                        if(var_pot_ov > 0.0) {
+                                            const float var_unscale_ov = (float)(var_pot_ov / det_pot_ov);
+                                            mp.vars[kv_plot].Spec() *= var_unscale_ov;
+                                            mp.vars[kv_plot].Error() *= var_unscale_ov;
+                                        }
+                                    }
+                                }
                                 matched_pairs[idv] = std::move(mp);
                                 log<LOG_INFO>(L"%1% || DetVar plot '%2%': matched pair built for Overlapping PDF") % __func__ % name.c_str();
                             }
@@ -1831,11 +1871,15 @@ int main(int argc, char* argv[])
                                             ov_leg->SetFillStyle(0);
                                             ov_leg->SetLineWidth(0);
 
-                                            gStyle->SetPalette(kCandy);
+                                            int ov_var_colors[] = {kRed, kBlue, kGreen+2, kMagenta, kCyan+1, kOrange+1, kViolet+1, kTeal+1};
+                                            int n_ov_var_colors = sizeof(ov_var_colors)/sizeof(ov_var_colors[0]);
+                                            int ov_color_idx = 0;
                                             cv_total_ov->Draw("hist");
                                             ov_leg->AddEntry(cv_total_ov, "Matched CV", "l");
                                             for(auto &[kv, h] : var_total_ov) {
-                                                h->Draw("hist same plc");
+                                                h->SetLineColor(ov_var_colors[ov_color_idx % n_ov_var_colors]);
+                                                ++ov_color_idx;
+                                                h->Draw("hist same");
                                                 ov_leg->AddEntry(h, (detvar_names[idv]+" "+std::to_string(kv)).c_str(), "l");
                                             }
 
