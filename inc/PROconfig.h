@@ -207,6 +207,9 @@ namespace PROfit{
         std::set<std::string> GetNeededBranchNames() const;
         // Adds branches referenced by a single TTreeFormula to an existing set.
         static void AddFormulaBranches(const TTreeFormula* f, std::set<std::string>& result);
+        // Extracts identifier tokens from a formula expression string, skipping
+        // known ROOT/C keywords that can never be branch names.
+        static void ExtractExprTokens(const std::string& expr, std::set<std::string>& result);
         virtual ~ROOTFormula() {}
 
       private:
