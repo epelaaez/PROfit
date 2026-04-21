@@ -48,6 +48,8 @@ namespace PROfit {
         Eigen::VectorXf shifts = params.segment(inmodel.nparams, params.size() - inmodel.nparams);
 
         if(binned) {
+            //log<LOG_INFO>(L"%1% || Starting systw calculation %2%") % __func__ % var_index;
+            //auto start_systw = std::chrono::high_resolution_clock::now();
 
             const size_t nbins_var = inconfig.m_num_variable_bins_total[var_index];
             Eigen::VectorXf systw = Eigen::VectorXf::Constant(nbins_var, 1);
@@ -89,6 +91,13 @@ namespace PROfit {
                     }
                 }
             }
+
+            //auto end_systw = std::chrono::high_resolution_clock::now();
+            //std::chrono::duration<double> duration_systw = end_systw - start_systw;
+            //log<LOG_INFO>(L"%1% || systw calculation took %2% ms") % __func__ % (duration_systw.count() * 1000.);
+
+            //log<LOG_INFO>(L"%1% || Starting le_arr building %2%") % __func__ % var_index;
+            //auto start_le = std::chrono::high_resolution_clock::now();
 
             // Build var_arrs: one entry per ivar, each of length n_phys_bins (flat grid).
             // For 1-var: var_arrs[0] = midbin values of that var (n_phys_bins = n_ivar_bins).

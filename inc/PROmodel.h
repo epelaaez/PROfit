@@ -1567,6 +1567,7 @@ public:
         // 3+1+decay to invisible particles, example from IceCube: https://arxiv.org/pdf/2204.00612
         // (invisible means no active or sterile-oscillating-to-active neutrinos after the decay)
 
+        prob_types = {0, 1, 2, 3};
         // model_functions is the non-unified version, these are optional
         // these get combined into one get_probs function in the constructor, but we can override this for faster computation
         model_functions.push_back([this]([[maybe_unused]] const Eigen::VectorXf &v, float) {(void)this; return 1.0; });
@@ -1603,7 +1604,7 @@ public:
         const float Ue4sq = maybe_convert_log("Ue4^2", v(param_name_to_index.at("Ue4^2")));
         const float Um4sq = maybe_convert_log("Um4^2", v(param_name_to_index.at("Um4^2")));
         const float g2 = maybe_convert_log("g2", v(param_name_to_index.at("g2")));
-        return   ((Ue4sq+Um4sq)<1 && g2>=0 ? 1 : 0);      
+        return   ((Ue4sq+Um4sq)<1 && g2>0 ? 1 : 0);
     }
 
     // Equations from Jesse Mendez, slide 5 bottom https://microboone-docdb.fnal.gov/cgi-bin/sso/RetrieveFile?docid=45475&filename=2025-10-31-mendez-sterile-deacy.pdf&version=1
