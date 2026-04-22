@@ -70,6 +70,14 @@ public:
     /// Combined histograms H_combined[v] = horizontal concatenation of hists[v][0..J-1],
     /// shape (n_reco_v, n_phys_bins * J).  Enables a single GEMV in FillSpectra.
     std::vector<Eigen::MatrixXf> H_combined;
+    /// Truth-level MC populations: N_truth(flat, j) = total added_weight of model_rule-j events
+    /// at physics bin flat, regardless of reco.  shape (n_phys_bins, J).
+    /// N_truth is needed for non-local models with energy smearing (3+1+visible decay), since you need 
+    // to consider the number of high-energy events without considering selection efficiency 
+    // in order to get the number of low-energy decayed events.
+    Eigen::MatrixXf N_truth;
+    /// Per-ivar bin counts; phys_grid_sizes[k] = number of bins for ivars[k].
+    std::vector<size_t> phys_grid_sizes;
 
     std::vector<size_t> prob_types; ///< Probability-type indices, matching model_functions indices.
 
@@ -95,7 +103,7 @@ public:
         }
 
         size_t nvar = prop.variable_mc_stat_err.size();
-        size_t J    = model_functions.size();
+        size_t J    = model_functions.empty() ? prob_types.size() : model_functions.size();
         hists.resize(nvar);
         H_combined.resize(nvar);
 
@@ -127,6 +135,29 @@ public:
             for(size_t m = 0; m < J; ++m)
                 H_combined[v].block(0, m * n_phys_bins, n_reco_v, n_phys_bins) = hists[v][m];
         }
+
+        // Store per-ivar bin counts for downstream use (e.g. decay redistribution).
+        phys_grid_sizes.assign(ivar_sizes.begin(), ivar_sizes.end());
+
+        // Compute N_truth: truth-level MC populations, without reco cuts.
+        N_truth = Eigen::MatrixXf::Zero(n_phys_bins, J);
+        // Looping over events
+        for(size_t i = 0; i < prop.NEvent(); ++i) {
+            // model-rule j
+            int j = filter_by_model_rule ? prop.model_rule[i] : 0;
+            if(j < 0 || (size_t)j >= J) continue;
+            // truth physics bin flat_phys, for example L/E bin, or flatted 2D (L, E) bin
+            long int flat_phys = 0;
+            bool valid = true;
+            for(size_t k = 0; k < ivars.size(); ++k) {
+                int tbin = prop.VariableBinIndex(ivars[k], i);
+                if(tbin < 0) { valid = false; break; }
+                flat_phys = flat_phys * (long int)ivar_sizes[k] + tbin;
+            }
+            if(!valid) continue;
+            N_truth(flat_phys, j) += prop.added_weights[i];
+        }
+
     }
 
     /**
@@ -148,6 +179,22 @@ public:
             }
         }
         return probs;
+    }
+
+    /**
+     * @brief Compute oscillated event counts for all physics-grid points and probability types.
+     * @details Default implementation returns get_probs() element-wise multiplied by N_truth.
+     *   Models with non-local effects (e.g. visible decay energy redistribution) should override
+     *   this instead of get_probs().  FillSpectra converts counts back to effective probabilities
+     *   via counts / N_truth before the H_combined multiplication.
+     * @param phys      Physics parameter vector in the fitter's internal space.
+     * @param var_arrs  var_arrs[k] contains the value of ivars[k] for each flat grid point.
+     * @return Matrix of shape (n_phys_bins, J) of oscillated event counts.
+     */
+    /// Only called when uses_get_counts() returns true (3+1+visible decay for example),
+    /// those models must override this.
+    virtual Eigen::MatrixXf get_counts(const Eigen::VectorXf &, const std::vector<std::vector<float>> &) const {
+        return {};
     }
 
     std::unordered_map<std::string, size_t> param_name_to_index; ///< Fast lookup: parameter name -> index in param_names.
@@ -1790,23 +1837,25 @@ class PRO3p1_decay_vis_model1 : public PROmodel {
             // model 1 from https://journals.aps.org/prd/abstract/10.1103/PhysRevD.110.075002
 
             if(parameter_map.find("L") == parameter_map.end()) {
-                log<LOG_ERROR>(L"%1%, %2% || Missing expected parameter: 'L'. Make sure its in your model section of XML.") % __func__ % __LINE__;
+                log<LOG_ERROR>(L"%1%, %2% || Missing expected parameter: 'L'. Make sure it's in the model section of XML.") % __func__ % __LINE__;
                 throw std::runtime_error("Missing parameter: L");
             }
             if(parameter_map.find("E") == parameter_map.end()) {
-                log<LOG_ERROR>(L"%1%, %2% || Missing expected parameter: 'E'. Make sure its in your model section of XML.") % __func__ % __LINE__;
+                log<LOG_ERROR>(L"%1%, %2% || Missing expected parameter: 'E'. Make sure it's in the model section of XML.") % __func__ % __LINE__;
                 throw std::runtime_error("Missing parameter: E");
             }
             ivars = {parameter_map.at("L"), parameter_map.at("E")};
 
+            prob_types = {0, 1, 2, 3};
+
             model_constraint = [this](const Eigen::VectorXf &v){return this->UnitarityConstraint(v);};
 
-            build_hists_and_combined(prop);
-    
+            build_hists_and_combined(prop); // also fills N_truth and phys_grid_sizes
+
             nparams = 4;
-            param_names = {"dmsq", "Ue4^2", "Um4^2", "g_phi"}; 
-            pretty_param_names = {"#Deltam^{2}", "|U_{e4}|^{2}", "|U_{#mu4}|^{2}", "g_{#phi}"}; 
-            pretty_param_units = {"eV^{2}", "", "", ""}; 
+            param_names = {"dmsq", "Ue4^2", "Um4^2", "g_phi"};
+            pretty_param_names = {"#Deltam^{2}", "|U_{e4}|^{2}", "|U_{#mu4}|^{2}", "g_{#phi}"};
+            pretty_param_units = {"eV^{2}", "", "", ""};
             is_log10 = {true, true, true, false};
             build_param_index();
             lb = Eigen::VectorXf(4);
@@ -1816,100 +1865,78 @@ class PRO3p1_decay_vis_model1 : public PROmodel {
             ub << 2, -1e-4, -1e-4, 10;
             default_val << -2, -8, -8, 0;
         };
-    
+
         int UnitarityConstraint(const Eigen::VectorXf &v){
-            // ensures positive g2 in addition to the usual unitarity constraints
             const float Ue4sq = maybe_convert_log("Ue4^2", v(param_name_to_index.at("Ue4^2")));
             const float Um4sq = maybe_convert_log("Um4^2", v(param_name_to_index.at("Um4^2")));
             const float g_phi = maybe_convert_log("g_phi", v(param_name_to_index.at("g_phi")));
-            return   ((Ue4sq+Um4sq)<1 && g_phi>=0 ? 1 : 0);      
+            return ((Ue4sq+Um4sq)<1 && g_phi>=0 ? 1 : 0);
         }
-    
-        // This function has to be totally different from get_probs used for the other models: This is a nonlocal function of the (L, E) histogram counts.
-        // We do all the oscillation/decay calculations in separate L bins
-        std::vector<float> get_3d_flavor_l_e_hist_counts(const Eigen::VectorXf &phys, const std::vector<float> &noosc_3d_flavor_l_e_hist_counts) {
-    
-            // Precompute physics parameters once
-            float dmsq = maybe_convert_log("dmsq", phys(0));
-            float Ue4sq = maybe_convert_log("Ue4^2", phys(1));
-            float Um4sq = maybe_convert_log("Um4^2", phys(2));
-            float g_phi = maybe_convert_log("g_phi", phys(3));
 
+        Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<std::vector<float>> &var_arrs) const override {
+            // For this model, we calculate get_counts, which is more intuitive with energy smearing
+            // (it's not exactly a probability for a single neutrino event when it depends on the behavior
+            // of higher energy events), but it can be re-framed as a probability for consistency.
+            // Note that this means probabilities greater than one are possible with large down-smearing!
+            auto counts = get_counts(phys, var_arrs);
+            auto N_arr = N_truth.array();
+            return (N_arr > 0.0f).select(counts.array() / N_arr, 0.0f);
+        }
+
+        Eigen::MatrixXf get_counts(const Eigen::VectorXf &phys, const std::vector<std::vector<float>> &var_arrs) const override {
+            float dmsq  = maybe_convert_log("dmsq",  phys(param_name_to_index.at("dmsq")));
+            float Ue4sq = maybe_convert_log("Ue4^2", phys(param_name_to_index.at("Ue4^2")));
+            float Um4sq = maybe_convert_log("Um4^2", phys(param_name_to_index.at("Um4^2")));
+            float g_phi = maybe_convert_log("g_phi", phys(param_name_to_index.at("g_phi")));
             float Us4sq = 1.0f - Ue4sq - Um4sq; // assuming no tau mixing (small effect on NC events)
+            float sum_active = Ue4sq + Um4sq;
+
             float freq = 1.266932679f * dmsq;
+            const auto &L_arr = var_arrs[0];
+            const auto &E_arr = var_arrs[1];
+            size_t n_flat = L_arr.size();
+            size_t n_E    = phys_grid_sizes[1];
 
-            // Make sure that these match how noosc_3d_flavor_l_e_hist_counts is created!
-            int num_flavor_bins = 3;
-            int num_l_bins = 30;
-            float l_min = 0.0f; 
-            float l_max = 100.0f; 
-            float l_bin_width = (l_max - l_min) / num_l_bins;
-            int num_e_bins = 30;
-            float e_min = 0.01f;
-            float e_max = 5.0f;
-            float e_bin_width = (e_max - e_min) / num_e_bins;
-            int num_l_e_bins = num_l_bins * num_e_bins;
-    
-            std::vector<float> osc_3d_flavor_l_e_hist_counts(noosc_3d_flavor_l_e_hist_counts.size());
-    
-            for(size_t curr_l_e_bin = 0; curr_l_e_bin < num_l_e_bins; ++curr_l_e_bin) {
+            Eigen::MatrixXf counts(n_flat, 4);
+            // looping over flattened (L, E) bins
+            for(size_t flat_dst = 0; flat_dst < n_flat; ++flat_dst) {
+                float E_dst = E_arr[flat_dst];
+                float delta = freq * L_arr[flat_dst] / E_dst;
+                float expterm = std::exp(-g_phi * delta / (8.0f * 3.14159f));
+                float cos_mult_exp = std::cos(2.0f * delta) * expterm;
+                float osc_term = 1.0f - 2.0f*cos_mult_exp + expterm*expterm;
 
-                int l_bin = curr_l_e_bin % num_l_bins;
-                int e_bin = curr_l_e_bin / num_e_bins;
+                // Oscillation contribution: probability times truth-level count at destination bin
+                // no-osc
+                counts(flat_dst, 0) = N_truth(flat_dst, 0);
+                // P_mu_mu osc
+                counts(flat_dst, 1) = (1.0f - 2.0f*Um4sq*(1.0f - cos_mult_exp) + Um4sq*Um4sq*osc_term) * N_truth(flat_dst, 1);
+                // P_mu_e osc
+                counts(flat_dst, 2) = Ue4sq * Um4sq * osc_term * N_truth(flat_dst, 2);
+                // P_e_e osc
+                counts(flat_dst, 3) = (1.0f - 2.0f*Ue4sq*(1.0f - cos_mult_exp) + Ue4sq*Ue4sq*osc_term) * N_truth(flat_dst, 3);
 
-                float l = l_min + l_bin * l_bin_width;
-                float e = e_min + e_bin * e_bin_width;
-                float le = l / e;
-
-                float noosc_numu_count = noosc_3d_flavor_l_e_hist_counts[curr_l_e_bin];
-                float noosc_fullosc_count = noosc_3d_flavor_l_e_hist_counts[num_l_e_bins + curr_l_e_bin];
-                float noosc_nue_count = noosc_3d_flavor_l_e_hist_counts[2*num_l_e_bins + curr_l_e_bin];
-
-                float delta = freq*le;
-                float costerm = std::cos(2.0f*delta);
-                float expterm = std::exp(-g_phi*delta/(8.0f*3.14159f));
-                float cos_mult_exp_term = costerm*expterm;
-                float osc_term =(1.0f-2.0f*cos_mult_exp_term + expterm*expterm);
-
-                float p_osc_mumu = 1.0f - 2.0f*Um4sq*(1.0f-cos_mult_exp_term) + Um4sq*Um4sq*osc_term;
-                float p_osc_mue = Ue4sq*Um4sq*osc_term;
-                float p_osc_ee = 1.0f - 2.0f*Ue4sq*(1.0f-cos_mult_exp_term) + Ue4sq*Ue4sq*osc_term;
-
-                // oscillation part of the probability:
-                osc_3d_flavor_l_e_hist_counts[curr_l_e_bin] = p_osc_mumu * noosc_numu_count;
-                osc_3d_flavor_l_e_hist_counts[num_l_e_bins + curr_l_e_bin] = p_osc_mue * noosc_fullosc_count;
-                osc_3d_flavor_l_e_hist_counts[2*num_l_e_bins + curr_l_e_bin] = p_osc_ee * noosc_nue_count;
-    
-                // decay part of the probability:
-                
+                // Decay redistribution: add counts migrated from same-L higher-E source bins.
+                // p_dec factors computed at destination.
                 float one_minus_expterm_sq = 1.0f - expterm*expterm;
-                float one_minus_expterm_sq_over_one_minus_Us4sq = one_minus_expterm_sq / (1.0f - Us4sq);
 
-                float s_mu_proj_including_exp_term = Us4sq * Um4sq*Um4sq * one_minus_expterm_sq_over_one_minus_Us4sq;
-                float s_e_proj_including_exp_term = Us4sq * Ue4sq*Ue4sq * one_minus_expterm_sq_over_one_minus_Us4sq;
+                float p_dec_mumu = Um4sq * Um4sq * Um4sq * Us4sq * one_minus_expterm_sq / sum_active;
+                float p_dec_mue  = Ue4sq * Um4sq * Um4sq * Us4sq * one_minus_expterm_sq / sum_active;
+                float p_dec_ee   = Ue4sq * Ue4sq * Ue4sq * Us4sq * one_minus_expterm_sq / sum_active;
 
-                float p_dec_mumu = Um4sq * s_mu_proj_including_exp_term;
-                float p_dec_mue = Ue4sq * s_mu_proj_including_exp_term;
-                float p_dec_ee = Ue4sq * s_e_proj_including_exp_term;
-
-                // looping over all the larger energy bins in this same L bin (these could have decayed to this L, E value)
-                for (int initial_e_bin = e_bin; initial_e_bin < num_e_bins; ++initial_e_bin) {
-
-                    float initial_e_value = e_min + initial_e_bin * e_bin_width;
-                    float s_dec = 2.0f * e / (initial_e_value*initial_e_value);
-
-                    int initial_2d_l_e_bin = l_bin * num_e_bins + initial_e_bin;
-
-                    float initial_noosc_numu_count = noosc_3d_flavor_l_e_hist_counts[initial_2d_l_e_bin];
-                    float initial_noosc_fullosc_count = noosc_3d_flavor_l_e_hist_counts[num_l_e_bins + initial_2d_l_e_bin];
-                    float initial_noosc_nue_count = noosc_3d_flavor_l_e_hist_counts[2*num_l_e_bins + initial_2d_l_e_bin];
-
-                    osc_3d_flavor_l_e_hist_counts[curr_l_e_bin] += p_dec_mumu * s_dec * initial_noosc_numu_count;
-                    osc_3d_flavor_l_e_hist_counts[num_l_e_bins + curr_l_e_bin] += p_dec_mue * s_dec * initial_noosc_fullosc_count;
-                    osc_3d_flavor_l_e_hist_counts[2*num_l_e_bins + curr_l_e_bin] += p_dec_ee * s_dec * initial_noosc_nue_count;
+                size_t l_idx    = flat_dst / n_E;
+                size_t e_dst_idx = flat_dst % n_E;
+                // looping over larger neutrino that could have possibly smeared down to this bin's energy in this L bin
+                for(size_t e_src_idx = e_dst_idx + 1; e_src_idx < n_E; ++e_src_idx) {
+                    size_t flat_src = l_idx * n_E + e_src_idx;
+                    float E_src = E_arr[flat_src];
+                    float s_dec = 2.0f * E_dst / (E_src * E_src);
+                    counts(flat_dst, 1) += p_dec_mumu * s_dec * N_truth(flat_src, 1);
+                    counts(flat_dst, 2) += p_dec_mue  * s_dec * N_truth(flat_src, 2);
+                    counts(flat_dst, 3) += p_dec_ee   * s_dec * N_truth(flat_src, 3);
                 }
             }
-            return osc_3d_flavor_l_e_hist_counts;
+            return counts;
         }
     };
 
@@ -1919,34 +1946,27 @@ class PRO3p1_decay_vis_model2 : public PROmodel {
         PRO3p1_decay_vis_model2(const PROpeller &prop, const std::map<std::string,int> &parameter_map) {
             // 3+1+decay to lower energy neutrinos
             // model 2 from https://journals.aps.org/prd/abstract/10.1103/PhysRevD.110.075002
-    
-            if(parameter_map.find("flavor_L_E_counts") == parameter_map.end()) {
-                log<LOG_ERROR>(L"%1%, %2% || Missing expected parameter: 'flavor_L_E_counts'. Make sure its in your model section of XML.") % __func__ % __LINE__;
-                throw std::runtime_error("Missing parameter: flavor_L_E_counts");
+
+            if(parameter_map.find("L") == parameter_map.end()) {
+                log<LOG_ERROR>(L"%1%, %2% || Missing expected parameter: 'L'. Make sure it's in the model section of XML.") % __func__ % __LINE__;
+                throw std::runtime_error("Missing parameter: L");
             }
-            ivar = parameter_map.at("flavor_L_E_counts");
-    
+            if(parameter_map.find("E") == parameter_map.end()) {
+                log<LOG_ERROR>(L"%1%, %2% || Missing expected parameter: 'E'. Make sure it's in the model section of XML.") % __func__ % __LINE__;
+                throw std::runtime_error("Missing parameter: E");
+            }
+            ivars = {parameter_map.at("L"), parameter_map.at("E")};
+
+            prob_types = {0, 1, 2, 3};
+
             model_constraint = [this](const Eigen::VectorXf &v){return this->UnitarityConstraint(v);};
-    
-            size_t nvar = prop.variable_mc_stat_err.size();
-            hists.resize(nvar);
-            for(size_t v = 0; v <nvar ;v++){
-                for(size_t m = 0; m < model_functions.size(); ++m) {
-                    hists.at(v).emplace_back(Eigen::MatrixXf::Constant(prop.variable_hist_storage(ivar,v).rows(), prop.variable_hist_storage(ivar,v).cols(),0.0));
-                    Eigen::MatrixXf &h = hists.at(v).back();
-                    for(size_t i = 0; i < prop.NEvent(); ++i) {
-                        if(prop.model_rule[i] != (int)m) continue;
-                        int tbin = prop.VariableBinIndex(ivar, i), rbin = prop.VariableBinIndex(v, i);
-                        if(tbin<0 || rbin<0)continue;
-                        h(tbin, rbin) += prop.added_weights[i];
-                    }
-                }
-            }
-    
+
+            build_hists_and_combined(prop); // also fills N_truth and phys_grid_sizes
+
             nparams = 4;
-            param_names = {"dmsq", "Ue4^2", "Um4^2", "g_e"}; 
-            pretty_param_names = {"#Deltam^{2}", "|U_{e4}|^{2}", "|U_{#mu4}|^{2}", "g_{e}"}; 
-            pretty_param_units = {"eV^{2}", "", "", ""}; 
+            param_names = {"dmsq", "Ue4^2", "Um4^2", "g_e"};
+            pretty_param_names = {"#Deltam^{2}", "|U_{e4}|^{2}", "|U_{#mu4}|^{2}", "g_{e}"};
+            pretty_param_units = {"eV^{2}", "", "", ""};
             is_log10 = {true, true, true, false};
             build_param_index();
             lb = Eigen::VectorXf(4);
@@ -1956,95 +1976,70 @@ class PRO3p1_decay_vis_model2 : public PROmodel {
             ub << 2, -1e-4, -1e-4, 10;
             default_val << -2, -8, -8, 0;
         };
-    
+
         int UnitarityConstraint(const Eigen::VectorXf &v){
-            // ensures positive g2 in addition to the usual unitarity constraints
             const float Ue4sq = maybe_convert_log("Ue4^2", v(param_name_to_index.at("Ue4^2")));
             const float Um4sq = maybe_convert_log("Um4^2", v(param_name_to_index.at("Um4^2")));
             const float g_e = maybe_convert_log("g_e", v(param_name_to_index.at("g_e")));
-            return   ((Ue4sq+Um4sq)<1 && g_e>=0 ? 1 : 0);      
+            return ((Ue4sq+Um4sq)<1 && g_e>=0 ? 1 : 0);
         }
-    
-        // This function has to be totally different from get_probs used for the other models: This is a nonlocal function of the (L, E) histogram counts.
-        // We do all the oscillation/decay calculations in separate L bins
-        std::vector<float> get_3d_flavor_l_e_hist_counts(const Eigen::VectorXf &phys, const std::vector<float> &noosc_3d_flavor_l_e_hist_counts) {
-    
-            // Precompute physics parameters once
-            float dmsq = maybe_convert_log("dmsq", phys(0));
-            float Ue4sq = maybe_convert_log("Ue4^2", phys(1));
-            float Um4sq = maybe_convert_log("Um4^2", phys(2));
-            float g_e = maybe_convert_log("g_e", phys(3));
 
-            float Us4sq = 1.0f - Ue4sq - Um4sq; // assuming no tau mixing (small effect on NC events)
+        Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<std::vector<float>> &var_arrs) const override {
+            auto counts = get_counts(phys, var_arrs);
+            auto N_arr = N_truth.array();
+            return (N_arr > 0.0f).select(counts.array() / N_arr, 0.0f);
+        }
+
+        Eigen::MatrixXf get_counts(const Eigen::VectorXf &phys, const std::vector<std::vector<float>> &var_arrs) const override {
+            float dmsq  = maybe_convert_log("dmsq",  phys(param_name_to_index.at("dmsq")));
+            float Ue4sq = maybe_convert_log("Ue4^2", phys(param_name_to_index.at("Ue4^2")));
+            float Um4sq = maybe_convert_log("Um4^2", phys(param_name_to_index.at("Um4^2")));
+            float g_e   = maybe_convert_log("g_e",   phys(param_name_to_index.at("g_e")));
+
             float freq = 1.266932679f * dmsq;
+            const auto &L_arr = var_arrs[0];
+            const auto &E_arr = var_arrs[1];
+            size_t n_flat = L_arr.size();
+            size_t n_E    = phys_grid_sizes[1];
 
-            // Make sure that these match how noosc_3d_flavor_l_e_hist_counts is created!
-            int num_flavor_bins = 3;
-            int num_l_bins = 30;
-            float l_min = 0.0f; 
-            float l_max = 100.0f; 
-            float l_bin_width = (l_max - l_min) / num_l_bins;
-            int num_e_bins = 30;
-            float e_min = 0.01f;
-            float e_max = 5.0f;
-            float e_bin_width = (e_max - e_min) / num_e_bins;
-            int num_l_e_bins = num_l_bins * num_e_bins;
-    
-            std::vector<float> osc_3d_flavor_l_e_hist_counts(noosc_3d_flavor_l_e_hist_counts.size());
-    
-            for(size_t curr_l_e_bin = 0; curr_l_e_bin < num_l_e_bins; ++curr_l_e_bin) {
+            Eigen::MatrixXf counts(n_flat, 4);
+            for(size_t flat_dst = 0; flat_dst < n_flat; ++flat_dst) {
+                float E_dst = E_arr[flat_dst];
+                float delta = freq * L_arr[flat_dst] / E_dst;
+                float expterm = std::exp(-g_e * delta / (8.0f * 3.14159f));
+                float cos_mult_exp = std::cos(2.0f * delta) * expterm;
+                float osc_term = 1.0f - 2.0f*cos_mult_exp + expterm*expterm;
 
-                int l_bin = curr_l_e_bin % num_l_bins;
-                int e_bin = curr_l_e_bin / num_e_bins;
+                // Oscillation counts at destination bin (same as model1, g_e drives the damping)
+                // no-osc
+                counts(flat_dst, 0) = N_truth(flat_dst, 0);
+                // P_mu_mu_osc
+                counts(flat_dst, 1) = (1.0f - 2.0f*Um4sq*(1.0f - cos_mult_exp) + Um4sq*Um4sq*osc_term) * N_truth(flat_dst, 1);
+                // P_mu_e_osc
+                counts(flat_dst, 2) = Ue4sq * Um4sq * osc_term * N_truth(flat_dst, 2);
+                // P_e_e osc
+                counts(flat_dst, 3) = (1.0f - 2.0f*Ue4sq*(1.0f - cos_mult_exp) + Ue4sq*Ue4sq*osc_term) * N_truth(flat_dst, 3);
 
-                float l = l_min + l_bin * l_bin_width;
-                float e = e_min + e_bin * e_bin_width;
-                float le = l / e;
-
-                float noosc_numu_count = noosc_3d_flavor_l_e_hist_counts[curr_l_e_bin];
-                float noosc_fullosc_count = noosc_3d_flavor_l_e_hist_counts[num_l_e_bins + curr_l_e_bin];
-                float noosc_nue_count = noosc_3d_flavor_l_e_hist_counts[2*num_l_e_bins + curr_l_e_bin];
-
-                float delta = freq*le;
-                float costerm = std::cos(2.0f*delta);
-                float expterm = std::exp(-g_e*delta/(8.0f*3.14159f));
-                float cos_mult_exp_term = costerm*expterm;
-                float osc_term =(1.0f-2.0f*cos_mult_exp_term + expterm*expterm);
-
-                float p_osc_mumu = 1.0f - 2.0f*Um4sq*(1.0f-cos_mult_exp_term) + Um4sq*Um4sq*osc_term;
-                float p_osc_mue = Ue4sq*Um4sq*osc_term;
-                float p_osc_ee = 1.0f - 2.0f*Ue4sq*(1.0f-cos_mult_exp_term) + Ue4sq*Ue4sq*osc_term;
-
-                // oscillation part of the probability:
-                osc_3d_flavor_l_e_hist_counts[curr_l_e_bin] = p_osc_mumu * noosc_numu_count;
-                osc_3d_flavor_l_e_hist_counts[num_l_e_bins + curr_l_e_bin] = p_osc_mue * noosc_fullosc_count;
-                osc_3d_flavor_l_e_hist_counts[2*num_l_e_bins + curr_l_e_bin] = p_osc_ee * noosc_nue_count;
-    
-                // decay part of the probability:
-                
+                // Decay redistribution: in model2 (g_e coupling) only fullosc and nue are affected;
+                // numu disappearance (j=1) sees no decay contribution.
                 float one_minus_expterm_sq = 1.0f - expterm*expterm;
-
-                float p_dec_mumu = Um4sq * one_minus_expterm_sq;
                 float p_dec_mue = Ue4sq * one_minus_expterm_sq;
-                float p_dec_ee = Ue4sq * one_minus_expterm_sq;
+                float p_dec_ee  = Ue4sq * one_minus_expterm_sq;
 
-                // looping over all the larger energy bins in this same L bin (these could have decayed to this L, E value)
-                // In model 2, all the decays are to nues (does not affect numu disappearance channel)
-                for (int initial_e_bin = e_bin; initial_e_bin < num_e_bins; ++initial_e_bin) {
-
-                    float initial_e_value = e_min + initial_e_bin * e_bin_width;
-                    float s_dec = 2.0f * e / (initial_e_value*initial_e_value);
-
-                    int initial_2d_l_e_bin = l_bin * num_e_bins + initial_e_bin;
-
-                    float initial_noosc_fullosc_count = noosc_3d_flavor_l_e_hist_counts[num_l_e_bins + initial_2d_l_e_bin];
-                    float initial_noosc_nue_count = noosc_3d_flavor_l_e_hist_counts[2*num_l_e_bins + initial_2d_l_e_bin];
-
-                    osc_3d_flavor_l_e_hist_counts[num_l_e_bins + curr_l_e_bin] += p_dec_mue * s_dec * initial_noosc_fullosc_count;
-                    osc_3d_flavor_l_e_hist_counts[2*num_l_e_bins + curr_l_e_bin] += p_dec_ee * s_dec * initial_noosc_nue_count;
+                size_t l_idx     = flat_dst / n_E;
+                size_t e_dst_idx = flat_dst % n_E;
+                // looping over larger neutrino that could have possibly smeared down to this bin's energy in this L bin
+                for(size_t e_src_idx = e_dst_idx + 1; e_src_idx < n_E; ++e_src_idx) {
+                    size_t flat_src = l_idx * n_E + e_src_idx;
+                    float E_src = E_arr[flat_src];
+                    float s_dec = 2.0f * E_dst / (E_src * E_src);
+                    
+                    // no change to the no-osc or P_mu_mu calculations from decay to nu_e in this model
+                    counts(flat_dst, 2) += p_dec_mue * s_dec * N_truth(flat_src, 2);
+                    counts(flat_dst, 3) += p_dec_ee  * s_dec * N_truth(flat_src, 3);
                 }
             }
-            return osc_3d_flavor_l_e_hist_counts;
+            return counts;
         }
     };
 
@@ -2475,7 +2470,7 @@ public:
  * @details Reads `config.m_model_tag` to select the appropriate model and passes
  * `config.m_model_parameter_map` for variable-index lookup.
  * Supported names: "nullmodel", "numudis", "numudisTEST", "nueapp", "nuedis",
- * "3+1", "3+1_angles", "3+1_3A", "3+1_3B", "3+1_3C", "3+1_decay_invis", "3+2", "LBL".
+ * "3+1", "3+1_angles", "3+1_3A", "3+1_3B", "3+1_3C", "3+1_decay_invis", "3+1_decay_vis_model1", "3+1_decay_vis_model2", "3+2", "LBL".
  * Terminates with LOG_ERROR if the name is unrecognised.
  * @param config  Parsed configuration; provides the model tag and parameter map.
  * @param prop    MC event store used to build H_combined histograms.
@@ -2507,6 +2502,10 @@ std::unique_ptr<PROmodel> get_model_from_string(const PROconfig& config, const P
         return std::unique_ptr<PROmodel>(new PRO3p1_3C(prop,config.m_model_parameter_map));
     } else if(name == "3+1_decay_invis") {
         return std::unique_ptr<PROmodel>(new PRO3p1_decay_invis(prop,config.m_model_parameter_map));
+    } else if(name == "3+1_decay_vis_model1") {
+        return std::unique_ptr<PROmodel>(new PRO3p1_decay_vis_model1(prop,config.m_model_parameter_map));
+    } else if(name == "3+1_decay_vis_model2") {
+        return std::unique_ptr<PROmodel>(new PRO3p1_decay_vis_model2(prop,config.m_model_parameter_map));
     } else if(name == "3+2") {
         return std::unique_ptr<PROmodel>(new PRO3p2(prop, config.m_model_parameter_map));
     } else if(name == "LBL") {
