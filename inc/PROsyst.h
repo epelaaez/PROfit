@@ -91,7 +91,10 @@ namespace PROfit {
              * @param model       Physics model (used when converting splines to covariance).
              * @param params      Physics parameter vector for CV spectrum evaluation.
              */
-            PROsyst(const PROpeller &prop, const PROconfig &config, const std::vector<SystStruct>& systs, bool shapeonly=false, int other_index = -1, const PROmodel* model = nullptr, const Eigen::VectorXf* params = nullptr);
+            PROsyst(const PROpeller &prop, const PROconfig &config,
+                const std::vector<SystStruct>& systs,
+                bool shapeonly=false, int other_index = -1,
+                const PROmodel* model = nullptr, const Eigen::VectorXf* params = nullptr);
 
             /**
              * @brief Return a new PROsyst containing only the named systematics.
@@ -229,6 +232,11 @@ namespace PROfit {
             std::vector<int> spline_binnings;        ///< Binning-scheme index for each spline.
             Eigen::VectorXf spline_priors;           ///< Prior width (sigma) for each spline nuisance parameter.
             Eigen::VectorXf spline_centers;          ///< Prior centre for each spline nuisance parameter.
+
+            /// True for each spline that acts on the parent neutrino's truth-E (beam flux systematics).
+            /// These are applied before the decay energy migration for 3+1+visible decay in FillSpectra.
+            std::vector<bool> spline_is_pre_migration;
+
         private:
             std::map<std::string, std::pair<size_t, SystType>> syst_map; ///< Map from systematic name to (index, type).
             std::vector<Spline> splines;             ///< Ordered list of spline objects.

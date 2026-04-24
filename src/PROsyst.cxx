@@ -18,6 +18,10 @@ namespace PROfit {
             log<LOG_DEBUG>(L"%1% || syst mode: %2%") % __func__ % syst.mode.c_str();
             if(syst.mode == "spline" || syst.mode == "norm" || syst.mode == "hist1d" || syst.mode == "hist2d") {
                 FillSpline(syst);
+                bool is_flux = config.has_flux_tag(syst.systname);
+                spline_is_pre_migration.push_back(is_flux);
+                log<LOG_DEBUG>(L"%1% || Spline '%2%' classified as %3%") % __func__ % syst.systname.c_str()
+                    % (is_flux ? "pre-migration (flux)" : "post-migration");
                 ++n_splines;
             } else if(syst.mode == "spline_to_covariance") {
                 if(model == nullptr){
@@ -89,8 +93,8 @@ namespace PROfit {
                 covar_names.push_back(syst.systname);
                 ++n_covar;
             }else if(syst.mode == "flat"){
-                this->CreateFlatMatrix(config, syst); 
-                covar_names.push_back(syst.systname); 
+                this->CreateFlatMatrix(config, syst);
+                covar_names.push_back(syst.systname);
                 ++n_covar;
             }else if(syst.mode == "external_covariance"){
                 if(other_index == syst.binning){

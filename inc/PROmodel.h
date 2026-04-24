@@ -70,12 +70,6 @@ public:
     /// Combined histograms H_combined[v] = horizontal concatenation of hists[v][0..J-1],
     /// shape (n_reco_v, n_phys_bins * J).  Enables a single GEMV in FillSpectra.
     std::vector<Eigen::MatrixXf> H_combined;
-    /// Truth-level MC populations: N_truth(flat, j) = total added_weight of model_rule-j events
-    /// at physics bin flat, regardless of reco.  shape (n_phys_bins, J).
-    /// N_truth is needed for non-local models with energy smearing (3+1+visible decay), since you need 
-    // to consider the number of high-energy events without considering selection efficiency 
-    // in order to get the number of low-energy decayed events.
-    Eigen::MatrixXf N_truth;
     /// Per-ivar bin counts; phys_grid_sizes[k] = number of bins for ivars[k].
     std::vector<size_t> phys_grid_sizes;
 
@@ -138,15 +132,27 @@ public:
 
         // Store per-ivar bin counts for downstream use (e.g. decay redistribution).
         phys_grid_sizes.assign(ivar_sizes.begin(), ivar_sizes.end());
+    }
 
-        // Compute N_truth: truth-level MC populations, without reco cuts.
-        N_truth = Eigen::MatrixXf::Zero(n_phys_bins, J);
-        // Looping over events
+    /**
+     * @brief Compute the truth-level MC population matrix N_truth(flat, j) = total added_weight
+     *   of model_rule-j events at physics bin flat, regardless of reco.  Shape (n_phys_bins, J).
+     * @details Only visible-decay models need this (their migration sum reads truth-level
+     *   counts at bins other than the destination), so it is not built by default. Decay
+     *   model constructors call this explicitly and store the result on their own N_truth
+     *   member. Must be called after ivars, prob_types/model_functions, and
+     *   build_hists_and_combined have been set up.
+     */
+    Eigen::MatrixXf compute_N_truth(const PROpeller &prop, bool filter_by_model_rule = true) const {
+        size_t J = model_functions.empty() ? prob_types.size() : model_functions.size();
+        std::vector<size_t> ivar_sizes(ivars.size());
+        for(size_t k = 0; k < ivars.size(); ++k)
+            ivar_sizes[k] = prop.variable_midbin[ivars[k]].size();
+
+        Eigen::MatrixXf N = Eigen::MatrixXf::Zero(n_phys_bins, J);
         for(size_t i = 0; i < prop.NEvent(); ++i) {
-            // model-rule j
             int j = filter_by_model_rule ? prop.model_rule[i] : 0;
             if(j < 0 || (size_t)j >= J) continue;
-            // truth physics bin flat_phys, for example L/E bin, or flatted 2D (L, E) bin
             long int flat_phys = 0;
             bool valid = true;
             for(size_t k = 0; k < ivars.size(); ++k) {
@@ -155,9 +161,9 @@ public:
                 flat_phys = flat_phys * (long int)ivar_sizes[k] + tbin;
             }
             if(!valid) continue;
-            N_truth(flat_phys, j) += prop.added_weights[i];
+            N(flat_phys, j) += prop.added_weights[i];
         }
-
+        return N;
     }
 
     /**
@@ -183,18 +189,39 @@ public:
 
     /**
      * @brief Compute oscillated event counts for all physics-grid points and probability types.
-     * @details Default implementation returns get_probs() element-wise multiplied by N_truth.
-     *   Models with non-local effects (e.g. visible decay energy redistribution) should override
-     *   this instead of get_probs().  FillSpectra converts counts back to effective probabilities
-     *   via counts / N_truth before the H_combined multiplication.
-     * @param phys      Physics parameter vector in the fitter's internal space.
-     * @param var_arrs  var_arrs[k] contains the value of ivars[k] for each flat grid point.
+     * @details For models with non-local effects (e.g. visible decay energy redistribution),
+     *   this is the authoritative output; FillSpectra converts counts back to effective
+     *   probabilities via counts / N_truth before the H_combined multiplication.
+     * @param phys          Physics parameter vector in the fitter's internal space.
+     * @param var_arrs      var_arrs[k] contains the value of ivars[k] for each flat grid point.
+     * @param N_truth_vals  Truth-level event counts matrix of shape (n_phys_bins, J) to use
+     *                      in the calculation. Callers pass either the model's own N_truth
+     *                      member (for the baseline spectrum) or a pre-reweighted copy
+     *                      (for pre-migration flux systematics: multiply each row by the
+     *                      per-truth-E flux weight). Keeping this as an explicit argument —
+     *                      rather than always reading this->N_truth — lets FillSpectra apply
+     *                      a flux reweight at the parent energy before migration, without
+     *                      threading the weight through every override in the class hierarchy.
      * @return Matrix of shape (n_phys_bins, J) of oscillated event counts.
+     * Only called when uses_get_counts() returns true (the visible-decay models).
      */
-    /// Only called when uses_get_counts() returns true (3+1+visible decay for example),
-    /// those models must override this.
-    virtual Eigen::MatrixXf get_counts(const Eigen::VectorXf &, const std::vector<std::vector<float>> &) const {
+    virtual Eigen::MatrixXf get_counts(const Eigen::VectorXf &, const std::vector<std::vector<float>> &,
+                                       const Eigen::MatrixXf & /*N_truth_vals*/) const {
         return {};
+    }
+
+    /** @brief Whether FillSpectra should use get_counts() (with an explicit N_truth argument)
+     *  rather than get_probs() to compute the spectrum. Returns true only for visible-decay
+     *  models, where the flat-physics-grid N_truth enters non-locally via the migration sum. */
+    virtual bool uses_get_counts() const { return false; }
+
+    /** @brief Returns the truth-level event count matrix N_truth(flat, j), required by decay
+     *  models for the migration sum and its counts -> probs normalization.
+     *  Default: empty (non-decay models do not store N_truth). Decay models override to
+     *  return their own stored matrix. Only meaningful when uses_get_counts() is true. */
+    virtual const Eigen::MatrixXf& get_N_truth() const {
+        static const Eigen::MatrixXf empty;
+        return empty;
     }
 
     std::unordered_map<std::string, size_t> param_name_to_index; ///< Fast lookup: parameter name -> index in param_names.
@@ -1832,6 +1859,11 @@ public:
 
 class PRO3p1_decay_vis_model1 : public PROmodel {
     public:
+        /// Truth-level MC populations at each flat-physics bin and model rule.  Only the
+        /// visible-decay models need this: their migration sum reads truth counts at bins
+        /// other than the destination (see get_counts).  Non-decay models don't build it.
+        Eigen::MatrixXf N_truth;
+
         PRO3p1_decay_vis_model1(const PROpeller &prop, const std::map<std::string,int> &parameter_map) {
             // 3+1+decay to lower energy neutrinos
             // model 1 from https://journals.aps.org/prd/abstract/10.1103/PhysRevD.110.075002
@@ -1850,7 +1882,8 @@ class PRO3p1_decay_vis_model1 : public PROmodel {
 
             model_constraint = [this](const Eigen::VectorXf &v){return this->UnitarityConstraint(v);};
 
-            build_hists_and_combined(prop); // also fills N_truth and phys_grid_sizes
+            build_hists_and_combined(prop); // fills hists, H_combined, phys_grid_sizes
+            N_truth = compute_N_truth(prop); // save N_truth, so it can be modified by flux-weighting in PROcess.cxx
 
             nparams = 4;
             param_names = {"dmsq", "Ue4^2", "Um4^2", "g_phi"};
@@ -1866,6 +1899,8 @@ class PRO3p1_decay_vis_model1 : public PROmodel {
             default_val << -2, -8, -8, 0;
         };
 
+        const Eigen::MatrixXf& get_N_truth() const override { return N_truth; }
+
         int UnitarityConstraint(const Eigen::VectorXf &v){
             const float Ue4sq = maybe_convert_log("Ue4^2", v(param_name_to_index.at("Ue4^2")));
             const float Um4sq = maybe_convert_log("Um4^2", v(param_name_to_index.at("Um4^2")));
@@ -1873,17 +1908,24 @@ class PRO3p1_decay_vis_model1 : public PROmodel {
             return ((Ue4sq+Um4sq)<1 && g_phi>=0 ? 1 : 0);
         }
 
+        bool uses_get_counts() const override { return true; }
+
         Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<std::vector<float>> &var_arrs) const override {
             // For this model, we calculate get_counts, which is more intuitive with energy smearing
             // (it's not exactly a probability for a single neutrino event when it depends on the behavior
             // of higher energy events), but it can be re-framed as a probability for consistency.
             // Note that this means probabilities greater than one are possible with large down-smearing!
-            auto counts = get_counts(phys, var_arrs);
+            auto counts = get_counts(phys, var_arrs, N_truth);
             auto N_arr = N_truth.array();
             return (N_arr > 0.0f).select(counts.array() / N_arr, 0.0f);
         }
 
-        Eigen::MatrixXf get_counts(const Eigen::VectorXf &phys, const std::vector<std::vector<float>> &var_arrs) const override {
+        // get_counts reads truth-level event counts from N_truth_vals (passed explicitly by the
+        // caller) rather than this->N_truth.  Callers pass either this->N_truth for the baseline
+        // spectrum, or a pre-reweighted copy (rows scaled by the per-truth-E flux weight) when
+        // evaluating pre-migration flux systematics.
+        Eigen::MatrixXf get_counts(const Eigen::VectorXf &phys, const std::vector<std::vector<float>> &var_arrs,
+                                   const Eigen::MatrixXf &N_truth_vals) const override {
             float dmsq  = maybe_convert_log("dmsq",  phys(param_name_to_index.at("dmsq")));
             float Ue4sq = maybe_convert_log("Ue4^2", phys(param_name_to_index.at("Ue4^2")));
             float Um4sq = maybe_convert_log("Um4^2", phys(param_name_to_index.at("Um4^2")));
@@ -1908,13 +1950,13 @@ class PRO3p1_decay_vis_model1 : public PROmodel {
 
                 // Oscillation contribution: probability times truth-level count at destination bin
                 // no-osc
-                counts(flat_dst, 0) = N_truth(flat_dst, 0);
+                counts(flat_dst, 0) = N_truth_vals(flat_dst, 0);
                 // P_mu_mu osc
-                counts(flat_dst, 1) = (1.0f - 2.0f*Um4sq*(1.0f - cos_mult_exp) + Um4sq*Um4sq*osc_term) * N_truth(flat_dst, 1);
+                counts(flat_dst, 1) = (1.0f - 2.0f*Um4sq*(1.0f - cos_mult_exp) + Um4sq*Um4sq*osc_term) * N_truth_vals(flat_dst, 1);
                 // P_mu_e osc
-                counts(flat_dst, 2) = Ue4sq * Um4sq * osc_term * N_truth(flat_dst, 2);
+                counts(flat_dst, 2) = Ue4sq * Um4sq * osc_term * N_truth_vals(flat_dst, 2);
                 // P_e_e osc
-                counts(flat_dst, 3) = (1.0f - 2.0f*Ue4sq*(1.0f - cos_mult_exp) + Ue4sq*Ue4sq*osc_term) * N_truth(flat_dst, 3);
+                counts(flat_dst, 3) = (1.0f - 2.0f*Ue4sq*(1.0f - cos_mult_exp) + Ue4sq*Ue4sq*osc_term) * N_truth_vals(flat_dst, 3);
 
                 // Decay redistribution: add counts migrated from same-L higher-E source bins.
                 // p_dec factors computed at destination.
@@ -1931,9 +1973,9 @@ class PRO3p1_decay_vis_model1 : public PROmodel {
                     size_t flat_src = l_idx * n_E + e_src_idx;
                     float E_src = E_arr[flat_src];
                     float s_dec = 2.0f * E_dst / (E_src * E_src);
-                    counts(flat_dst, 1) += p_dec_mumu * s_dec * N_truth(flat_src, 1);
-                    counts(flat_dst, 2) += p_dec_mue  * s_dec * N_truth(flat_src, 2);
-                    counts(flat_dst, 3) += p_dec_ee   * s_dec * N_truth(flat_src, 3);
+                    counts(flat_dst, 1) += p_dec_mumu * s_dec * N_truth_vals(flat_src, 1);
+                    counts(flat_dst, 2) += p_dec_mue  * s_dec * N_truth_vals(flat_src, 2);
+                    counts(flat_dst, 3) += p_dec_ee   * s_dec * N_truth_vals(flat_src, 3);
                 }
             }
             return counts;
@@ -1943,6 +1985,9 @@ class PRO3p1_decay_vis_model1 : public PROmodel {
 
 class PRO3p1_decay_vis_model2 : public PROmodel {
     public:
+        /// Truth-level MC populations; see PRO3p1_decay_vis_model1::N_truth for details.
+        Eigen::MatrixXf N_truth;
+
         PRO3p1_decay_vis_model2(const PROpeller &prop, const std::map<std::string,int> &parameter_map) {
             // 3+1+decay to lower energy neutrinos
             // model 2 from https://journals.aps.org/prd/abstract/10.1103/PhysRevD.110.075002
@@ -1961,7 +2006,8 @@ class PRO3p1_decay_vis_model2 : public PROmodel {
 
             model_constraint = [this](const Eigen::VectorXf &v){return this->UnitarityConstraint(v);};
 
-            build_hists_and_combined(prop); // also fills N_truth and phys_grid_sizes
+            build_hists_and_combined(prop); // fills hists, H_combined, phys_grid_sizes
+            N_truth = compute_N_truth(prop); // save N_truth, so it can be modified by flux-weighting in PROcess.cxx
 
             nparams = 4;
             param_names = {"dmsq", "Ue4^2", "Um4^2", "g_e"};
@@ -1977,6 +2023,8 @@ class PRO3p1_decay_vis_model2 : public PROmodel {
             default_val << -2, -8, -8, 0;
         };
 
+        const Eigen::MatrixXf& get_N_truth() const override { return N_truth; }
+
         int UnitarityConstraint(const Eigen::VectorXf &v){
             const float Ue4sq = maybe_convert_log("Ue4^2", v(param_name_to_index.at("Ue4^2")));
             const float Um4sq = maybe_convert_log("Um4^2", v(param_name_to_index.at("Um4^2")));
@@ -1984,13 +2032,16 @@ class PRO3p1_decay_vis_model2 : public PROmodel {
             return ((Ue4sq+Um4sq)<1 && g_e>=0 ? 1 : 0);
         }
 
+        bool uses_get_counts() const override { return true; }
+
         Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<std::vector<float>> &var_arrs) const override {
-            auto counts = get_counts(phys, var_arrs);
+            auto counts = get_counts(phys, var_arrs, N_truth);
             auto N_arr = N_truth.array();
             return (N_arr > 0.0f).select(counts.array() / N_arr, 0.0f);
         }
 
-        Eigen::MatrixXf get_counts(const Eigen::VectorXf &phys, const std::vector<std::vector<float>> &var_arrs) const override {
+        Eigen::MatrixXf get_counts(const Eigen::VectorXf &phys, const std::vector<std::vector<float>> &var_arrs,
+                                   const Eigen::MatrixXf &N_truth_vals) const override {
             float dmsq  = maybe_convert_log("dmsq",  phys(param_name_to_index.at("dmsq")));
             float Ue4sq = maybe_convert_log("Ue4^2", phys(param_name_to_index.at("Ue4^2")));
             float Um4sq = maybe_convert_log("Um4^2", phys(param_name_to_index.at("Um4^2")));
@@ -2012,13 +2063,13 @@ class PRO3p1_decay_vis_model2 : public PROmodel {
 
                 // Oscillation counts at destination bin (same as model1, g_e drives the damping)
                 // no-osc
-                counts(flat_dst, 0) = N_truth(flat_dst, 0);
+                counts(flat_dst, 0) = N_truth_vals(flat_dst, 0);
                 // P_mu_mu_osc
-                counts(flat_dst, 1) = (1.0f - 2.0f*Um4sq*(1.0f - cos_mult_exp) + Um4sq*Um4sq*osc_term) * N_truth(flat_dst, 1);
+                counts(flat_dst, 1) = (1.0f - 2.0f*Um4sq*(1.0f - cos_mult_exp) + Um4sq*Um4sq*osc_term) * N_truth_vals(flat_dst, 1);
                 // P_mu_e_osc
-                counts(flat_dst, 2) = Ue4sq * Um4sq * osc_term * N_truth(flat_dst, 2);
+                counts(flat_dst, 2) = Ue4sq * Um4sq * osc_term * N_truth_vals(flat_dst, 2);
                 // P_e_e osc
-                counts(flat_dst, 3) = (1.0f - 2.0f*Ue4sq*(1.0f - cos_mult_exp) + Ue4sq*Ue4sq*osc_term) * N_truth(flat_dst, 3);
+                counts(flat_dst, 3) = (1.0f - 2.0f*Ue4sq*(1.0f - cos_mult_exp) + Ue4sq*Ue4sq*osc_term) * N_truth_vals(flat_dst, 3);
 
                 // Decay redistribution: in model2 (g_e coupling) only fullosc and nue are affected;
                 // numu disappearance (j=1) sees no decay contribution.
@@ -2033,10 +2084,10 @@ class PRO3p1_decay_vis_model2 : public PROmodel {
                     size_t flat_src = l_idx * n_E + e_src_idx;
                     float E_src = E_arr[flat_src];
                     float s_dec = 2.0f * E_dst / (E_src * E_src);
-                    
+
                     // no change to the no-osc or P_mu_mu calculations from decay to nu_e in this model
-                    counts(flat_dst, 2) += p_dec_mue * s_dec * N_truth(flat_src, 2);
-                    counts(flat_dst, 3) += p_dec_ee  * s_dec * N_truth(flat_src, 3);
+                    counts(flat_dst, 2) += p_dec_mue * s_dec * N_truth_vals(flat_src, 2);
+                    counts(flat_dst, 3) += p_dec_ee  * s_dec * N_truth_vals(flat_src, 3);
                 }
             }
             return counts;
@@ -2511,7 +2562,7 @@ std::unique_ptr<PROmodel> get_model_from_string(const PROconfig& config, const P
     } else if(name == "LBL") {
         return std::unique_ptr<PROmodel>(new PROLBL(prop, config.m_model_parameter_map));
     }
-    log<LOG_ERROR>(L"%1% || Unrecognized model name %2%. Try numudis, nueapp, nuedis, 3+1, 3+1_angles, 3+1_3(A,B,C) and 3+1_decay_invis, 3+2. for now. Terminating.") % __func__ % name.c_str();
+    log<LOG_ERROR>(L"%1% || Unrecognized model name %2%. Try numudis, nueapp, nuedis, 3+1, 3+1_angles, 3+1_3(A,B,C), 3+1_decay_invis, 3+1_decay_vis, 3+2. for now. Terminating.") % __func__ % name.c_str();
     exit(EXIT_FAILURE);
 }
 
