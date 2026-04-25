@@ -239,12 +239,10 @@ namespace PROfit {
                 } // End friend initialization
             } // End chain filling
 
-            for (size_t fid = 0; fid < (size_t)num_files; fid++) {
-                if (inconfig.m_mcgen_numfriends[fid] > 0) {
-                    for (size_t k = 0; k < friendChains[fid].size(); k++) {
-                        log<LOG_DEBUG>(L"%1% || Adding friend chain %2% to main chain %3%") % __func__ % k % fid;
-                        chains[fid]->AddFriend(friendChains[fid][k]);
-                    }
+            if (inconfig.m_mcgen_numfriends[fid] > 0) {
+                for (size_t k = 0; k < friendChains[fid].size(); k++) {
+                    log<LOG_DEBUG>(L"%1% || Adding friend chain %2% to main chain %3%") % __func__ % k % fid;
+                    chains[fid]->AddFriend(friendChains[fid][k]);
                 }
             }
 
@@ -696,33 +694,42 @@ namespace PROfit {
                 log<LOG_DEBUG>(L"%1% || Subchannel: %2% maps to index: %3%") % __func__ % subchannel_name.c_str() % subchannel_index[ib];
             }
 
+
             // Prune unused branches: disable everything, then re-enable only what our
             // formulas and eventweight maps actually need.  This prevents loading large
             // unused friend-tree columns on each GetEntry.
+            //
+            // NOTE: We extract branch names from the formula expression strings directly
+            // rather than via TTreeFormula::GetNcodes()/GetLeaf(), because the TTreeFormula
+            // objects created in the first file-setup loop may have stale internal state
+            // (ROOT can close/remap files when processing multiple TChains, invalidating
+            // leaf pointers stored inside those objects).
             {
                 std::set<std::string> needed;
 
-                // Branches referenced by variable and weight formulas
+                // Extract branch-name tokens from all formula expression strings.
+                // Uses ROOTFormula::ExtractExprTokens (the canonical skip-list lives there)
+                // rather than probing TTreeFormula objects, which may have stale internal
+                // state from ROOT closing/remapping files across multiple TChains.
+                log<LOG_DEBUG>(L"%1% || Branch pruning fid=%2%: extracting tokens from formula strings") % __func__ % fid;
                 for(int ib = 0; ib < num_branch; ib++) {
-                    for(const auto& rf : branches[ib]->branch_variable_formulas)
-                        for(const auto& n : rf->GetNeededBranchNames()) needed.insert(n);
-                    for(const auto& rf : branches[ib]->branch_weight_formulas)
-                        for(const auto& n : rf->GetNeededBranchNames()) needed.insert(n);
+                    for(const auto& expr : branches[ib]->variable_names)
+                        ROOTFormula::ExtractExprTokens(expr, needed);
+                    for(const auto& wname : inconfig.m_mcgen_weight_names[fid][ib])
+                        ROOTFormula::ExtractExprTokens(wname, needed);
                 }
-
-                // Branches referenced by systematic weight formulas
-                for(const auto& f : sys_weight_formula)
-                    ROOTFormula::AddFormulaBranches(f.get(), needed);
-
-                // Branches referenced by matching-variable formulas
-                for(const auto& f : matching_var_formulas)
-                    ROOTFormula::AddFormulaBranches(f.get(), needed);
+                for(const auto& sv : syst_vector)
+                    for(const auto& s : sv)
+                        if(s.HasWeightFormula())
+                            ROOTFormula::ExtractExprTokens(s.GetWeightFormula(), needed);
+                for(const auto& vname : inconfig.m_detvar_matching_vars)
+                    ROOTFormula::ExtractExprTokens(vname, needed);
 
                 // Branches bound via SetBranchAddress (eventweight maps)
                 for(const auto& [name, _] : f_event_weights[fid][0]) needed.insert(name);
                 for(const auto& [name, _] : f_knob_vals[fid][0])     needed.insert(name);
 
-                // Disable all, then re-enable needed set
+                log<LOG_DEBUG>(L"%1% || Branch pruning fid=%2%: needed set has %3% entries, calling SetBranchStatus(*,0)") % __func__ % fid % needed.size();
                 chains[fid]->SetBranchStatus("*", 0);
                 for(const auto& name : needed) {
                     UInt_t found = 0;
@@ -733,13 +740,6 @@ namespace PROfit {
 
             chains[fid]->SetCacheSize(100000000); // 100 MB read-ahead cache
             chains[fid]->AddBranchToCache("*", kTRUE); // cache all active branches
-            TObjArray* tbranches = chains[fid]->GetListOfBranches();
-            for (int i = 0; i < tbranches->GetEntries(); i++) {
-                TBranch* branch = (TBranch*)tbranches->At(i);
-                const char* branchName = branch->GetName();
-                bool isActive = chains[fid]->GetBranchStatus(branchName);
-                log<LOG_DEBUG>(L"%1% || BRANCH %2% is %3%") % __func__ % branchName % (isActive ? "active" : "inactive");
-            }
 
             // loop over all entries
             size_t to_print = nevents > 5 ? nevents / 5 : 1;
@@ -1028,14 +1028,22 @@ namespace PROfit {
 
             // Prune unused branches: disable everything, then re-enable only what our
             // formulas actually need.
+            //
+            // NOTE: extract tokens from formula strings directly rather than via
+            // TTreeFormula::GetNcodes()/GetLeaf(), because TTreeFormula objects created
+            // during the first fid loop may have stale internal state (ROOT can
+            // close/remap files when processing multiple TChains, invalidating leaf
+            // pointers stored inside those objects).
             {
                 std::set<std::string> needed;
+                log<LOG_DEBUG>(L"%1% || Branch pruning fid=%2%: extracting tokens from formula strings") % __func__ % fid;
                 for(int ib = 0; ib < num_branch; ib++) {
-                    for(const auto& rf : branches[ib]->branch_variable_formulas)
-                        for(const auto& n : rf->GetNeededBranchNames()) needed.insert(n);
-                    for(const auto& rf : branches[ib]->branch_weight_formulas)
-                        for(const auto& n : rf->GetNeededBranchNames()) needed.insert(n);
+                    for(const auto& expr : branches[ib]->variable_names)
+                        ROOTFormula::ExtractExprTokens(expr, needed);
+                    for(const auto& wname : inconfig.m_mcgen_weight_names[fid][ib])
+                        ROOTFormula::ExtractExprTokens(wname, needed);
                 }
+                log<LOG_DEBUG>(L"%1% || Branch pruning fid=%2%: needed set has %3% entries, calling SetBranchStatus(*,0)") % __func__ % fid % needed.size();
                 chains[fid]->SetBranchStatus("*", 0);
                 for(const auto& name : needed) {
                     UInt_t found = 0;

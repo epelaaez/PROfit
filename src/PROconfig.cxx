@@ -2467,6 +2467,37 @@ void ROOTFormula::LoadEvent(unsigned eventno) {
     }
 }
 
+void ROOTFormula::ExtractExprTokens(const std::string& expr, std::set<std::string>& result) {
+    // Canonical skip-list: ROOT aggregate functions, C math functions, ROOT constants,
+    // and C++ keywords that can never be branch names.
+    static const std::set<std::string> kSkipTokens = {
+        "Sum", "Min", "Max", "Alt", "Count", "Iteration",
+        "MinIf", "MaxIf", "SumIf",
+        "abs", "fabs", "sqrt", "sin", "cos", "tan",
+        "asin", "acos", "atan", "atan2",
+        "sinh", "cosh", "tanh",
+        "exp", "log", "log10", "pow",
+        "ceil", "floor", "round", "fmod",
+        "TMath",
+        "kTRUE", "kFALSE",
+        "true", "false",
+        "int", "float", "double", "bool", "void",
+        "if", "else", "for", "while", "do", "return",
+    };
+    const char* p = expr.c_str();
+    while (*p) {
+        if (isalpha((unsigned char)*p) || *p == '_') {
+            const char* start = p;
+            while (isalnum((unsigned char)*p) || *p == '_') p++;
+            std::string token(start, p);
+            if (kSkipTokens.find(token) == kSkipTokens.end())
+                result.insert(std::move(token));
+        } else {
+            ++p;
+        }
+    }
+}
+
 void ROOTFormula::AddFormulaBranches(const TTreeFormula* f, std::set<std::string>& result) {
     if (!f) return;
 
@@ -2477,52 +2508,15 @@ void ROOTFormula::AddFormulaBranches(const TTreeFormula* f, std::set<std::string
         TBranch* br = leaf->GetBranch();
         if (br) {
             result.insert(std::string(br->GetName()));
-            // Also include top-level (mother) branch so split objects work
             TBranch* mother = br->GetMother();
             if (mother && mother != br) result.insert(std::string(mother->GetName()));
         }
     }
 
-    // Supplemental path: extract every C-identifier token from the formula expression
-    // string and add it to the candidate set.  This captures std::vector<T> branches
-    // (where GetLeaf() returns nullptr) and branches inside Sum$(), Min$(), Max$() whose
-    // sub-expressions are not reachable via the public TTreeFormula API.
-    // Known ROOT/C keywords that can never be branch names are filtered out so that
-    // SetBranchStatus does not emit spurious "not found" warnings for them.
-    static const std::set<std::string> kSkipTokens = {
-        // ROOT aggregate functions used before '$'
-        "Sum", "Min", "Max", "Alt", "Count", "Iteration",
-        "MinIf", "MaxIf", "SumIf",
-        // C standard math functions
-        "abs", "fabs", "sqrt", "sin", "cos", "tan",
-        "asin", "acos", "atan", "atan2",
-        "sinh", "cosh", "tanh",
-        "exp", "log", "log10", "pow",
-        "ceil", "floor", "round", "fmod",
-        // ROOT math namespace
-        "TMath",
-        // ROOT boolean constants
-        "kTRUE", "kFALSE",
-        // C++ keywords / built-in types
-        "true", "false",
-        "int", "float", "double", "bool", "void",
-        "if", "else", "for", "while", "do", "return",
-    };
+    // Supplemental path: token-extract the expression string to catch vector branches
+    // and Sum$()/Min$()/Max$() sub-expressions not reachable via GetLeaf().
     const char* title = f->GetTitle();
-    if (title) {
-        const char* p = title;
-        while (*p) {
-            if (isalpha(*p) || *p == '_') {
-                const char* start = p;
-                while (isalnum(*p) || *p == '_') p++;
-                std::string token(start, p);
-                if (kSkipTokens.find(token) == kSkipTokens.end())
-                    result.insert(std::move(token));
-            } else {
-                p++;
-            }
-        }
-    }
+    if (title) ExtractExprTokens(std::string(title), result);
 }
 
 std::set<std::string> ROOTFormula::GetNeededBranchNames() const {
