@@ -75,6 +75,12 @@ public:
 
     std::vector<bool> is_log10; ///< True for each parameter stored in log10 space; false for linear.
 
+    /// Trivial models (e.g., NullModel) have no physics dependence: probabilities are identically 1.
+    /// When true, FillSpectra skips var_arrs / get_probs / GEMV and reads the spectrum directly from
+    /// H_combined. Also implies an empty `ivars` so events are binned per reco variable independently
+    /// (no cross-variable validity coupling through a placeholder physics-grid variable).
+    bool is_trivial = false;
+
     /**
      * @brief Build hists and H_combined from PROpeller event data.
      * @details Must be called after ivars and model_functions are set.  Iterates over all
@@ -197,10 +203,13 @@ public:
      */
     NullModel(const PROpeller &prop) {
         nparams = 0;
-        ivars = {1};
+        // Empty ivars: no placeholder physics-grid variable. Each reco variable is binned
+        // independently, so events out-of-range in one variable don't get dropped from another.
+        ivars = {};
+        is_trivial = true;
         model_functions.push_back([](const Eigen::VectorXf &, float){ return 1.0f; });
         prob_types = {0};
-       
+
         build_hists_and_combined(prop, /*filter_by_model_rule=*/false);
         is_log10.clear();
     }

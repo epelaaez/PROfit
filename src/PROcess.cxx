@@ -98,30 +98,37 @@ namespace PROfit {
 
             //log<LOG_INFO>(L"%1% || Starting le_arr building %2%") % __func__ % var_index;
             //auto start_le = std::chrono::high_resolution_clock::now();
-            
-            // Build var_arrs: one entry per ivar, each of length n_phys_bins (flat grid).
-            // For 1-var: var_arrs[0] = midbin values of that var (n_phys_bins = n_ivar_bins).
-            // For N-var: row-major product grid — var_arrs[k][flat] = midbin of ivar[k] at flat index.
-            const size_t N_ivars = inmodel.ivars.size();
-            std::vector<size_t> ivar_sizes(N_ivars);
-            for(size_t k = 0; k < N_ivars; ++k)
-                ivar_sizes[k] = inprop.variable_midbin[inmodel.ivars[k]].size();
 
-            std::vector<std::vector<float>> var_arrs(N_ivars, std::vector<float>(inmodel.n_phys_bins));
-            for(long int flat = 0; flat < inmodel.n_phys_bins; ++flat) {
-                long int rem = flat;
-                for(int k = (int)N_ivars - 1; k >= 0; --k) {
-                    var_arrs[k][flat] = inprop.variable_midbin[inmodel.ivars[k]][rem % ivar_sizes[k]];
-                    rem /= (long int)ivar_sizes[k];
+            Eigen::VectorXf result;
+            if(inmodel.is_trivial) {
+                // Trivial model: probs ≡ 1. H_combined[var_index] has shape (n_reco, 1) and column 0
+                // already contains the per-reco-bin event-weight sum, with no physics-grid coupling.
+                result = inmodel.H_combined[var_index].col(0);
+            } else {
+                // Build var_arrs: one entry per ivar, each of length n_phys_bins (flat grid).
+                // For 1-var: var_arrs[0] = midbin values of that var (n_phys_bins = n_ivar_bins).
+                // For N-var: row-major product grid — var_arrs[k][flat] = midbin of ivar[k] at flat index.
+                const size_t N_ivars = inmodel.ivars.size();
+                std::vector<size_t> ivar_sizes(N_ivars);
+                for(size_t k = 0; k < N_ivars; ++k)
+                    ivar_sizes[k] = inprop.variable_midbin[inmodel.ivars[k]].size();
+
+                std::vector<std::vector<float>> var_arrs(N_ivars, std::vector<float>(inmodel.n_phys_bins));
+                for(long int flat = 0; flat < inmodel.n_phys_bins; ++flat) {
+                    long int rem = flat;
+                    for(int k = (int)N_ivars - 1; k >= 0; --k) {
+                        var_arrs[k][flat] = inprop.variable_midbin[inmodel.ivars[k]][rem % ivar_sizes[k]];
+                        rem /= (long int)ivar_sizes[k];
+                    }
                 }
+
+                auto probs = inmodel.get_probs(phys, var_arrs);
+
+                // Single GEMV: H_combined[var_index] has shape (n_reco, n_phys*J).
+                // probs is (n_phys, J) in column-major, so probs.data() = [col0 | col1 | ...] = probs_flat.
+                Eigen::Map<const Eigen::VectorXf> probs_flat(probs.data(), probs.size());
+                result = inmodel.H_combined[var_index] * probs_flat;
             }
-
-            auto probs = inmodel.get_probs(phys, var_arrs);
-
-            // Single GEMV: H_combined[var_index] has shape (n_reco, n_phys*J).
-            // probs is (n_phys, J) in column-major, so probs.data() = [col0 | col1 | ...] = probs_flat.
-            Eigen::Map<const Eigen::VectorXf> probs_flat(probs.data(), probs.size());
-            Eigen::VectorXf result = inmodel.H_combined[var_index] * probs_flat;
 
             // Apply systematic weights and create spectrum
             Eigen::VectorXf final_spec = systw.cwiseProduct(result);
@@ -131,16 +138,20 @@ namespace PROfit {
         } else {
 
             // Unbinned path: per-event var values, one vector per ivar.
-            std::vector<std::vector<float>> var_arrs(inmodel.ivars.size(), std::vector<float>(inprop.NEvent()));
-            for(size_t k = 0; k < inmodel.ivars.size(); ++k)
-                for(size_t i = 0; i < inprop.NEvent(); ++i)
-                    var_arrs[k][i] = inprop.VariableValue(inmodel.ivars[k], i);
+            // For trivial models (empty ivars), skip var_arrs / get_probs entirely and use oscw = 1.
+            Eigen::MatrixXf probs;
+            if(!inmodel.is_trivial) {
+                std::vector<std::vector<float>> var_arrs(inmodel.ivars.size(), std::vector<float>(inprop.NEvent()));
+                for(size_t k = 0; k < inmodel.ivars.size(); ++k)
+                    for(size_t i = 0; i < inprop.NEvent(); ++i)
+                        var_arrs[k][i] = inprop.VariableValue(inmodel.ivars[k], i);
 
-            auto probs = inmodel.get_probs(phys, var_arrs);
+                probs = inmodel.get_probs(phys, var_arrs);
+            }
 
             for(size_t i = 0; i < inprop.NEvent(); ++i) {
-                float oscw = probs(i, inprop.model_rule[i]);
-                float add_w = inprop.added_weights[i]; 
+                float oscw = inmodel.is_trivial ? 1.0f : probs(i, inprop.model_rule[i]);
+                float add_w = inprop.added_weights[i];
                 const int reco_bin = inprop.VariableBinIndex(var_index, i);
 
                 float systw = 1;
