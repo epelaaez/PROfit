@@ -23,6 +23,8 @@
 
 #include <Eigen/Eigen>
 
+#include <atomic>
+
 #include "TGraphAsymmErrors.h"
 #include "TMarker.h"
 #include "TMultiGraph.h"
@@ -41,9 +43,24 @@ namespace PROfit {
     };
 
     /**
+     * @brief One unit of profile-scan work for the dynamic dispatcher.
+     * @details A "task" is "scan parameter `param_idx` over the sub-range
+     * [sub_lb, sub_ub]". Most parameters produce a single task spanning the full
+     * range. Physics parameters can be split into multiple chunked tasks via
+     * --probe-chunks so that several threads can work on the same physics
+     * parameter in parallel; chunked task results are merged by param_idx.
+     */
+    struct ScanTask {
+        int   param_idx;   ///< Index in the full (model + splines) parameter vector.
+        float sub_lb;      ///< Lower edge of this task's scan range for the scanned parameter.
+        float sub_ub;      ///< Upper edge of this task's scan range for the scanned parameter.
+    };
+
+    /**
      * @brief Output record for a 1D profile likelihood scan.
      */
     struct profOut{
+        int param_idx = -1; ///< Index of the scanned parameter in the full (model + splines) vector. Set by the worker; used by the dispatcher to merge results.
         std::vector<float> knob_vals; ///< Parameter values at each scan point.
         std::vector<float> knob_chis; ///< Profile chi-squared at each scan point.
         std::vector<Eigen::VectorXf> knob_bfs; ///< Best-fit parameter vectors at each scan point.
@@ -93,11 +110,11 @@ namespace PROfit {
             float newglob;                  ///< Updated global minimum chi-squared found during the scan.
             Eigen::VectorXf newglob_param;  ///< Full parameter vector at the updated global minimum.
 
-            PROfile(const PROconfig &config, const PROsyst &systs, const PROmodel &model, PROmetric &metric, PROseed &proseed, const PROfitterConfig &fitconfig, std::string filename, float minchi = 0, bool with_osc = false, int nThreads = 1, const std::vector<Eigen::VectorXf> &seed_points = {}, const Eigen::VectorXf& true_params = Eigen::VectorXf() ) ;
+            PROfile(const PROconfig &config, const PROsyst &systs, const PROmodel &model, PROmetric &metric, PROseed &proseed, const PROfitterConfig &fitconfig, std::string filename, float minchi = 0, bool with_osc = false, int nThreads = 1, const std::vector<Eigen::VectorXf> &seed_points = {}, const Eigen::VectorXf& true_params = Eigen::VectorXf(), bool use_probe = false, int n_physics_chunks = 1 ) ;
 
             void Plot(const PROconfig &config, const PROsyst &systs, const PROmodel &model, PROmetric &metric, PROseed &proseed, std::string filename, bool with_osc = false, const Eigen::VectorXf& init_seed = Eigen::VectorXf(), const Eigen::VectorXf& true_params = Eigen::VectorXf(), bool mask_osc = false) ;
 
-            std::vector<profOut> PROfilePointHelper(const PROsyst *systs, const PROfitterConfig &fitconfig, int offset, int stride, float minchi, bool with_osc, MultiPROgressBar& progressbar, const std::vector<Eigen::VectorXf> &seed_points = {}, uint32_t seed=0);
+            std::vector<profOut> PROfilePointHelper(const PROsyst *systs, const PROfitterConfig &fitconfig, std::atomic<int> *task_counter, const std::vector<ScanTask> *tasks, float minchi, bool with_osc, MultiPROgressBar& progressbar, const std::vector<Eigen::VectorXf> &seed_points = {}, uint32_t seed=0, bool use_probe = false, std::atomic<int>* tasks_remaining = nullptr, int bar_index_offset = 0);
     };
 
     /**
@@ -142,7 +159,7 @@ namespace PROfit {
 
             PROsurf(PROmetric &metric, size_t x_idx, size_t y_idx, size_t nbinsx, LogLin llx, float x_lo, float x_hi, size_t nbinsy, LogLin lly, float y_lo, float y_hi);
 
-            std::vector<surfOut> PointHelper(const PROfitterConfig &fitconfig, std::vector<surfOut> multi_physics_params, int start, int end, uint32_t seed);
+            std::vector<surfOut> PointHelper(const PROfitterConfig &fitconfig, std::vector<surfOut> multi_physics_params, std::atomic<int> *point_counter, uint32_t seed, MultiPROgressBar* progressbar = nullptr);
 
             void FillSurfaceStat(const PROconfig &config, const PROfitterConfig &fitconfig, std::string filename, const Eigen::VectorXf &cv_params, uint32_t seed);
             void FillSurface(const PROfitterConfig &fitconfig, std::string filename, PROseed & proseed, int nthreads = 1);

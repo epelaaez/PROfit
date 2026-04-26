@@ -1,6 +1,7 @@
 #include "PROsurf.h"
 #include "PROfitter.h"
 #include "PROlog.h"
+#include "PRObe.h"
 
 #include <Eigen/Eigen>
 
@@ -202,7 +203,7 @@ void PROsurf::FillSurfaceStat(const PROconfig &config, const PROfitterConfig &fi
     delete local_metric;
 }
 
-std::vector<profOut> PROfile::PROfilePointHelper(const PROsyst *systs, const PROfitterConfig &fitconfig, int offset, int stride, float minchi, bool with_osc, MultiPROgressBar& progressbar, const std::vector<Eigen::VectorXf> &seed_points, uint32_t seed) {
+std::vector<profOut> PROfile::PROfilePointHelper(const PROsyst *systs, const PROfitterConfig &fitconfig, std::atomic<int> *task_counter, const std::vector<ScanTask> *tasks, float minchi, bool with_osc, MultiPROgressBar& progressbar, const std::vector<Eigen::VectorXf> &seed_points, uint32_t seed, bool use_probe, std::atomic<int>* tasks_remaining, int bar_index_offset) {
 
 
     std::vector<profOut> outs;
@@ -246,24 +247,122 @@ std::vector<profOut> PROfile::PROfilePointHelper(const PROsyst *systs, const PRO
         }
     }
 
-    // In syst-only mode, start loop at first spline index (nphys), not 0
-    int loop_start = with_osc ? 0 : (int)local_metric->GetModel().nparams;
+    // Dynamic dispatch: pull the next available task from the shared atomic counter.
+    // Each task represents "scan parameter task.param_idx over [task.sub_lb, task.sub_ub]".
+    // Most parameters generate a single task spanning their full range; physics
+    // parameters may be split into multiple chunked tasks via --probe-chunks. Each task
+    // runs atomically (Phase 0..4 of PRObe, or the legacy 18-uniform scan) on whichever
+    // thread grabs it.
+    while (true) {
+        int t_idx = task_counter->fetch_add(1);
+        if (t_idx >= (int)tasks->size()) break;
+        const ScanTask &task = (*tasks)[t_idx];
+        int i = task.param_idx;
 
-    //loop over this threads todo list
-    for(int i=loop_start+offset; i<nparams;i+=stride) {
         tlb = lb;
         tub = ub;
+        // Override the scanned parameter's range with this task's sub-range. Other
+        // parameters retain their full lb/ub (so the fit's free axes are unchanged).
+        tlb(i) = task.sub_lb;
+        tub(i) = task.sub_ub;
 
         local_metric->reset();
 
         size_t which_spline = i;
         bool isphys = which_spline < local_metric->GetModel().nparams;
         profOut output;
+        output.param_idx = i;
 
-        log<LOG_INFO>(L"%1% || THREADS %2% in this batch if ( %3%,%4% )") % __func__ %  i % offset % stride;
+        log<LOG_INFO>(L"%1% || Worker picked task #%2%: param %3% on [%4%, %5%]")
+            % __func__ % t_idx % i % task.sub_lb % task.sub_ub;
 
 
         Eigen::VectorXf last_bf;
+
+        // ---- PRObe path: adaptive importance sampling for the Δχ²=1 band ----
+        // Default off; enabled per-call via use_probe. Produces the same profOut
+        // shape as the legacy 18-uniform scan so all downstream plotting works.
+        if(use_probe){
+            PRObe::CrossingOpts opts;
+            // Detect whether this task represents a chunk (sub-range < full range
+            // for the scanned param). Spike detection stays ON for all physics
+            // tasks (chunked or not) — narrow basins can hide anywhere — but in
+            // chunked mode we lower per-chunk anchor and coarse counts since
+            // multiple chunks cumulatively cover the param. Per-chunk density is
+            // still higher than the unchunked equivalent because each chunk
+            // covers only 1/N of the range.
+            // NOTE: GetModel().lb/ub are physics-only (size = nphys); guard the
+            // access so we don't read out of range when which_spline indexes a
+            // nuisance. Splines are never chunked so task_is_chunk = false for them.
+            bool task_is_chunk = false;
+            if (isphys) {
+                float full_lb_cmp = local_metric->GetModel().lb(which_spline);
+                float full_ub_cmp = local_metric->GetModel().ub(which_spline);
+                if (std::isinf(full_lb_cmp)) full_lb_cmp = -3.0f;
+                if (std::isinf(full_ub_cmp)) full_ub_cmp =  3.0f;
+                task_is_chunk = (task.sub_lb > full_lb_cmp + 1e-4f) ||
+                                (task.sub_ub < full_ub_cmp - 1e-4f);
+            }
+            opts.may_have_spikes = isphys;
+            opts.target_dchi2    = 1.0f;          // 1σ band
+            if (task_is_chunk) {
+                // Reduce per-chunk fit count: 5 anchors + 5 coarse instead of 9+9.
+                // With chunks=N, total points across the param ≈ N×10 vs unchunked 18,
+                // so coverage is comparable while per-chunk wall time drops by ~50%.
+                opts.anchor_sigmas = {0.0f, -0.6f, 0.6f, -1.3f, 1.3f};
+                opts.coarse_n      = 5;
+            }
+            // sigma_init: nuisances are already in σ-units; for physics, derive
+            // from this task's sub-range (chunk width / 6 ≈ a 3σ half-width within
+            // the chunk). For unchunked tasks this is the full-range / 6 as before.
+            float scale = 1.0f;
+            if(isphys){
+                float plb_m = task.sub_lb;
+                float pub_m = task.sub_ub;
+                if(std::isinf(plb_m)) plb_m = -3.0f;
+                if(std::isinf(pub_m)) pub_m =  3.0f;
+                float width = pub_m - plb_m;
+                scale = (std::isfinite(width) && width > 0.0f) ? width / 6.0f : 1.0f;
+            }
+            opts.sigma_init = scale;
+
+            // Anchor centre: prefer the global BF if it lies in this task's chunk;
+            // otherwise use the chunk midpoint so anchors don't all clamp to a
+            // boundary. For unchunked tasks the chunk == full range, so this
+            // reduces to the global BF (existing behaviour).
+            const float global_bf = !seed_points.empty()
+                                    ? seed_points.front()((int)which_spline)
+                                    : (isphys ? local_metric->GetModel().default_val((int)which_spline) : 0.0f);
+            float bf_value = (global_bf >= task.sub_lb && global_bf <= task.sub_ub)
+                             ? global_bf
+                             : 0.5f * (task.sub_lb + task.sub_ub);
+
+            PRObe::CrossingResult r = PRObe::chi2_crossing_1d(
+                *local_metric, which_spline, tlb, tub, bf_value,
+                seed_points, fitconfig, seed + (uint32_t)t_idx, opts);
+
+            for(size_t k = 0; k < r.theta.size(); ++k){
+                output.knob_vals.push_back(r.theta[k]);
+                output.knob_chis.push_back(r.chi2[k] - minchi);
+                output.knob_bfs.push_back(r.best_fits[k]);
+                if (fitconfig.progress_bar) progressbar.increment_bar((int)which_spline - bar_index_offset);
+            }
+            log<LOG_INFO>(L"%1% || PRObe done for spline #%2%: %3% fits, surrogate=%4%")
+                % __func__ % which_spline % r.n_fits % (int)r.used_surrogate;
+
+            output.sort();
+            outs.push_back(output);
+
+            // If this was the last task for the param, mark its bar as complete.
+            if (tasks_remaining) {
+                const int bar_idx = (int)which_spline - bar_index_offset;
+                const int prev = tasks_remaining[bar_idx].fetch_sub(1);
+                if (prev <= 1 && fitconfig.progress_bar) {
+                    progressbar.complete_bar(bar_idx);
+                }
+            }
+            continue; // skip the legacy 18-uniform loop below
+        }
 
         //first get what values to sample
         std::vector<float> test_values;
@@ -344,12 +443,20 @@ std::vector<profOut> PROfile::PROfilePointHelper(const PROsyst *systs, const PRO
             log<LOG_INFO>(L"%1% || at a BF param value of @ %2%") % __func__ %  spec_string.c_str();
 
             last_val = which_value;
-            if(fitconfig.progress_bar)progressbar.increment_bar(which_spline);
+            if(fitconfig.progress_bar)progressbar.increment_bar((int)which_spline - bar_index_offset);
 
-        }    //end step loop        
+        }    //end step loop
         output.sort();
         outs.push_back(output);
 
+        // If this was the last task for the param, mark its bar as complete.
+        if (tasks_remaining) {
+            const int bar_idx = (int)which_spline - bar_index_offset;
+            const int prev = tasks_remaining[bar_idx].fetch_sub(1);
+            if (prev <= 1 && fitconfig.progress_bar) {
+                progressbar.complete_bar(bar_idx);
+            }
+        }
     }//end thread
 
     delete local_metric;
@@ -359,14 +466,20 @@ std::vector<profOut> PROfile::PROfilePointHelper(const PROsyst *systs, const PRO
 
 
 
-std::vector<surfOut> PROsurf::PointHelper(const PROfitterConfig &fitconfig, std::vector<surfOut> multi_physics_params, int start, int end, uint32_t seed){
+std::vector<surfOut> PROsurf::PointHelper(const PROfitterConfig &fitconfig, std::vector<surfOut> multi_physics_params, std::atomic<int> *point_counter, uint32_t seed, MultiPROgressBar* progressbar){
 
     std::vector<surfOut> outs;
+    const int total = (int)multi_physics_params.size();
 
     // Make a local copy for this thread
     PROmetric *local_metric = metric.Clone();
 
-    for(int i=start; i<end;i++){
+    // Dynamic dispatch: pull the next available grid point from the shared atomic
+    // counter. The previous static contiguous-block dispatch left fast threads idle
+    // at the tail of an uneven surface.
+    while (true) {
+        int i = point_counter->fetch_add(1);
+        if (i >= total) break;
         local_metric->reset();
 
         surfOut output;
@@ -377,11 +490,12 @@ std::vector<surfOut> PROsurf::PointHelper(const PROfitterConfig &fitconfig, std:
         int nparams = local_metric->GetModel().nparams + local_metric->GetSysts().GetNSplines() - 2;
 
         if(nparams == 0) {
-            Eigen::VectorXf empty_vec, 
+            Eigen::VectorXf empty_vec,
                 params = Eigen::VectorXf::Map(physics_params.data(), physics_params.size());
             output.chi = (*local_metric)(params, empty_vec, false);
-            output.best_fit = params; 
+            output.best_fit = params;
             outs.push_back(output);
+            if (progressbar) progressbar->increment_bar(0);
             continue;
         }
 
@@ -397,14 +511,18 @@ std::vector<surfOut> PROsurf::PointHelper(const PROfitterConfig &fitconfig, std:
 
         local_metric->setBounds(lb,ub);
 
-        PROfitter fitter(ub, lb, fitconfig, seed+i);
-        if(i!=start){
+        PROfitter fitter(ub, lb, fitconfig, seed+(uint32_t)i);
+        // Warm-start from the most recent fit on this thread when available.
+        // With dynamic dispatch the previous fit may not be a grid neighbour, but
+        // it's still inside the explored region and is a useful seed.
+        if(!outs.empty()){
             output.chi = fitter.Fit(*local_metric, outs.back().best_fit);
         }else{
             output.chi = fitter.Fit(*local_metric);
         }
         output.best_fit = fitter.best_fit;
         outs.push_back(output);
+        if (progressbar) progressbar->increment_bar(0);
     }
 
     delete local_metric;
@@ -430,26 +548,32 @@ void PROsurf::FillSurface(const PROfitterConfig &fitconfig, std::string filename
     }
 
     int loopSize = grid.size();
-    int chunkSize = loopSize / nThreads;
-    int remainder = loopSize % nThreads;
 
-    std::vector<std::future<std::vector<surfOut>>> futures; 
+    std::vector<std::future<std::vector<surfOut>>> futures;
 
-    log<LOG_INFO>(L"%1% || Starting THREADS  : %2% , Loops %3%, Chunks %4%") % __func__ % nThreads % loopSize % chunkSize;
+    log<LOG_INFO>(L"%1% || Starting THREADS  : %2% , Loops %3% (dynamic dispatch)") % __func__ % nThreads % loopSize;
 
-    int start = 0;
-    int end = 0;
+    // Single-bar progress meter for the whole surface. Each grid point increments;
+    // finish_all() rounds it up to 100% at the end so we land cleanly even if a
+    // grid point fails or is skipped.
+    std::vector<std::pair<int, std::string>> surf_PB_configs;
+    surf_PB_configs.push_back({std::max(1, loopSize), "Surface scan"});
+    MultiPROgressBar surf_progress(surf_PB_configs);
+    if (fitconfig.progress_bar) {
+        surf_progress.initialize_display();
+        surf_progress.start_display_thread();
+    }
+    MultiPROgressBar* surf_pb_ptr = fitconfig.progress_bar ? &surf_progress : nullptr;
+
+    // Dynamic dispatch: workers race on this counter; each one grabs the next
+    // un-claimed grid point until the surface is fully covered. Avoids tail
+    // imbalance on uneven grids.
+    std::atomic<int> point_counter{0};
+
     for (int t = 0; t < nThreads; ++t) {
-        start = end;
-        end = start + chunkSize;
-        if(t < remainder) end++;
-        // make new vars for async, avoid mem issues
-        int thread_start = start;
-        int thread_end = end;
-        futures.emplace_back(std::async(std::launch::async, [&, thread_start, thread_end]() {
-                    return this->PointHelper(fitconfig, grid, thread_start, thread_end, proseed.getThreadSeeds()->at(t));
+        futures.emplace_back(std::async(std::launch::async, [&, t]() {
+                    return this->PointHelper(fitconfig, grid, &point_counter, proseed.getThreadSeeds()->at(t), surf_pb_ptr);
                     }));
-
     }
 
     std::vector<surfOut> combinedResults;
@@ -457,6 +581,7 @@ void PROsurf::FillSurface(const PROfitterConfig &fitconfig, std::string filename
         std::vector<surfOut> result = fut.get();
         combinedResults.insert(combinedResults.end(), result.begin(), result.end());
     }
+    if (fitconfig.progress_bar) surf_progress.finish_all();
 
     if(filename != "") {
         chi_file << "Dimensions: " << nbinsx << " " << nbinsy << "\n";
@@ -507,19 +632,26 @@ std::vector<surfOut> PROsurf::FillCurve(const PROfitterConfig &fitconfig, PROsee
     }
 
     int loopSize = grid.size();
-    int chunkSize = loopSize / nThreads;
 
-    std::vector<std::future<std::vector<surfOut>>> futures; 
+    std::vector<std::future<std::vector<surfOut>>> futures;
 
-    log<LOG_INFO>(L"%1% || Starting THREADS  : %2% , Loops %3%, Chunks %4%") % __func__ % nThreads % loopSize % chunkSize;
+    log<LOG_INFO>(L"%1% || Starting THREADS  : %2% , Loops %3% (dynamic dispatch)") % __func__ % nThreads % loopSize;
+
+    std::vector<std::pair<int, std::string>> curve_PB_configs;
+    curve_PB_configs.push_back({std::max(1, loopSize), "Curve scan"});
+    MultiPROgressBar curve_progress(curve_PB_configs);
+    if (fitconfig.progress_bar) {
+        curve_progress.initialize_display();
+        curve_progress.start_display_thread();
+    }
+    MultiPROgressBar* curve_pb_ptr = fitconfig.progress_bar ? &curve_progress : nullptr;
+
+    std::atomic<int> point_counter{0};
 
     for (int t = 0; t < nThreads; ++t) {
-        int start = t * chunkSize;
-        int end = (t == nThreads - 1) ? loopSize : start + chunkSize;
-        futures.emplace_back(std::async(std::launch::async, [&, start, end]() {
-                    return this->PointHelper(fitconfig, grid, start, end, proseed.getThreadSeeds()->at(t));
+        futures.emplace_back(std::async(std::launch::async, [&, t]() {
+                    return this->PointHelper(fitconfig, grid, &point_counter, proseed.getThreadSeeds()->at(t), curve_pb_ptr);
                     }));
-
     }
 
     std::vector<surfOut> combinedResults;
@@ -527,6 +659,7 @@ std::vector<surfOut> PROsurf::FillCurve(const PROfitterConfig &fitconfig, PROsee
         std::vector<surfOut> result = fut.get();
         combinedResults.insert(combinedResults.end(), result.begin(), result.end());
     }
+    if (fitconfig.progress_bar) curve_progress.finish_all();
 
     return combinedResults;
 
@@ -701,7 +834,7 @@ std::vector<float> findMinAndBounds(TGraph *g, float val, float lo, float hi) {
 }
 
 
-PROfile::PROfile(const PROconfig &config, const PROsyst &systs, const PROmodel &model, PROmetric &metric, PROseed &proseed, const PROfitterConfig &fitconfig, [[maybe_unused]] std::string filename, float minchi, bool with_osc, int nThreads, const std::vector<Eigen::VectorXf> &seed_points, [[maybe_unused]] const Eigen::VectorXf & true_params) : metric(metric) {
+PROfile::PROfile(const PROconfig &config, const PROsyst &systs, const PROmodel &model, PROmetric &metric, PROseed &proseed, const PROfitterConfig &fitconfig, [[maybe_unused]] std::string filename, float minchi, bool with_osc, int nThreads, const std::vector<Eigen::VectorXf> &seed_points, [[maybe_unused]] const Eigen::VectorXf & true_params, bool use_probe, int n_physics_chunks) : metric(metric) {
     LBFGSpp::LBFGSBSolver<float> solver(fitconfig.param);
     int nparams = systs.GetNSplines() + model.nparams*with_osc;
     std::vector<float> physics_params; 
@@ -732,50 +865,158 @@ PROfile::PROfile(const PROconfig &config, const PROsyst &systs, const PROmodel &
 
     std::vector<std::future<std::vector<profOut>>> futures; 
 
+    // Resolve dispatcher state up-front so the progress-bar config knows per-bar totals.
+    const int nparams_helper = (int)model.nparams + (int)systs.GetNSplines();
+    const int loop_start_helper = with_osc ? 0 : (int)model.nparams;
+    const int n_scanned = nparams_helper - loop_start_helper;
+
+    // Resolve n_physics_chunks:
+    //   - sentinel ≤ 0    → 1 (no chunking; opt-in only).
+    //   - explicit  ≥ 1   → respected.
+    // Then hard-cap at nthreads (chunks > nthreads adds total CPU work without
+    // any parallel speedup).
+    //
+    // Default is 1 because chunking only wins wall time when (a) physics is the
+    // bottleneck and (b) there are spare threads beyond what nuisances need.
+    // For typical fits (nuisances dominate) chunking adds CPU work for little
+    // benefit. Users can set --probe-chunks N when they know physics is slow.
+    const int n_phys = (int)model.nparams;
+    int chunks_resolved;
+    if (n_physics_chunks <= 0) {
+        chunks_resolved = 1;
+    } else {
+        chunks_resolved = n_physics_chunks;
+    }
+    const int chunk_cap = std::max(1, nThreads);
+    if (chunks_resolved > chunk_cap) {
+        log<LOG_WARNING>(L"%1% || --probe-chunks=%2% exceeds nthreads=%3%; clamping to %3% (extra chunks would add CPU work with no parallel benefit).")
+            % __func__ % chunks_resolved % chunk_cap;
+        chunks_resolved = chunk_cap;
+    }
+    const int chunks = (use_probe && chunks_resolved > 1) ? chunks_resolved : 1;
+    log<LOG_INFO>(L"%1% || PRObe chunking: requested=%2%, resolved=%3% (n_phys=%4%, nthreads=%5%)")
+        % __func__ % n_physics_chunks % chunks % n_phys % nThreads;
+
+    // Build per-bar configs. Bars are indexed [0, n_scanned); bar k corresponds
+    // to helper-space param index (k + loop_start_helper). In syst-only mode we
+    // skip the physics indices entirely (no bars for parameters that aren't scanned).
+    // Per-bar total = expected total fits across all chunks for that param:
+    //   - legacy 18-uniform: 18 fits per scan, 1 chunk → 18
+    //   - PRObe smooth (nuisance): ~11 fits per scan, 1 chunk → 11
+    //   - PRObe spiky (physics): up to opts.max_fits=25 fits per scan, × n_chunks
     std::vector<std::pair<int, std::string>> prof_PB_configs;
-    for (int i = 0; i < nparams; ++i) {
+    prof_PB_configs.reserve(n_scanned);
+    for (int b = 0; b < n_scanned; ++b) {
+        const int helper_idx = b + loop_start_helper;
+        const bool isphys = helper_idx < (int)model.nparams;
         std::string nam;
-        if(i < (long)metric.GetModel().nparams){
-            nam = metric.GetModel().pretty_param_names[i];
-            prof_PB_configs.push_back({9+3*seed_points.size(), nam});
-        }else{
-            long idx =  i - metric.GetModel().nparams ;
-            std::string bad_name = metric.GetSysts().spline_names[idx];
-            nam = config.m_mcgen_variation_plotname_map.at(bad_name);
-            prof_PB_configs.push_back({19, nam});
+        if (isphys) {
+            nam = metric.GetModel().pretty_param_names[helper_idx];
+        } else {
+            const int sidx = helper_idx - (int)model.nparams;
+            const std::string raw = metric.GetSysts().spline_names[sidx];
+            auto it = config.m_mcgen_variation_plotname_map.find(raw);
+            nam = (it != config.m_mcgen_variation_plotname_map.end()) ? it->second : raw;
         }
+        int per_chunk_fits;
+        if (use_probe) {
+            per_chunk_fits = isphys ? 25 : 13; // smooth ≈ 11, give a hair of headroom; spiky cap = max_fits
+        } else {
+            per_chunk_fits = 19;               // legacy 18-uniform + a slot for the fixed-bound case
+        }
+        const int n_chunks_for_param = (use_probe && isphys) ? chunks : 1;
+        const int total_for_bar = std::max(1, per_chunk_fits * n_chunks_for_param);
+        prof_PB_configs.push_back({total_for_bar, nam});
     }
 
     MultiPROgressBar prof_progress(prof_PB_configs);
     if(fitconfig.progress_bar){
         prof_progress.initialize_display();
-        prof_progress.start_display_thread(); 
+        prof_progress.start_display_thread();
     }
 
+    std::vector<ScanTask> tasks;
+    for (int i = loop_start_helper; i < nparams_helper; ++i) {
+        const bool isphys = i < (int)model.nparams;
+        float pl, pu;
+        if (isphys) {
+            pl = model.lb(i);
+            pu = model.ub(i);
+        } else {
+            int s = i - (int)model.nparams;
+            pl = systs.spline_lo[s];
+            pu = systs.spline_hi[s];
+        }
+        if (use_probe && isphys && chunks > 1) {
+            // Substitute finite ±3 for ±inf so the split arithmetic is sane.
+            const float plf = std::isinf(pl) ? -3.0f : pl;
+            const float puf = std::isinf(pu) ?  3.0f : pu;
+            for (int k = 0; k < chunks; ++k) {
+                ScanTask t;
+                t.param_idx = i;
+                t.sub_lb = plf + (puf - plf) * float(k)     / float(chunks);
+                t.sub_ub = plf + (puf - plf) * float(k + 1) / float(chunks);
+                tasks.push_back(t);
+            }
+        } else {
+            tasks.push_back({i, pl, pu});
+        }
+    }
 
-    log<LOG_INFO>(L"%1% || Starting THREADS  : %2% , Loops %3%, Chunks %4%") % __func__ % nThreads % loopSize % chunkSize;
+    log<LOG_INFO>(L"%1% || Starting THREADS  : %2% , Loops %3%, Tasks %4% (probe=%5%, chunks=%6%)")
+        % __func__ % nThreads % loopSize % (int)tasks.size() % (int)use_probe % chunks;
+
+    // Per-bar task tracker: count how many tasks share each bar (=1 for non-physics
+    // and unchunked physics, =chunks for chunked physics). The helper decrements
+    // its bar's counter when a task scan completes; the thread that takes it to
+    // zero calls complete_bar() so the bar lands on 100% as that param finishes.
+    // Heap-allocated array because std::atomic isn't movable (vectors won't hold them).
+    std::unique_ptr<std::atomic<int>[]> tasks_remaining(new std::atomic<int>[std::max(1, n_scanned)]);
+    for (int i = 0; i < n_scanned; ++i) tasks_remaining[i].store(0);
+    for (const auto& tk : tasks) {
+        const int b = tk.param_idx - loop_start_helper;
+        if (b >= 0 && b < n_scanned) tasks_remaining[b].fetch_add(1);
+    }
+
+    // Dynamic dispatch: workers pull the next available task from this shared
+    // atomic counter. Each task runs a single PRObe / 18-uniform scan to
+    // completion on one thread (so the seed pool stays local), but the *choice*
+    // of which task is next is made when the thread is free.
+    std::atomic<int> task_counter{0};
 
     for (int t = 0; t < nThreads; ++t) {
-        std::string  strD = "";
-        for(int i=t; i<nparams;i+=nThreads) {
-            strD+=std::to_string(i);
-        }
-        log<LOG_INFO>(L"%1% || THREAD #%2% runs pts: %3% ") % __func__ % t % strD.c_str();
-
-        futures.emplace_back(std::async(std::launch::async, [&, t]() {
-                    return this->PROfilePointHelper(&systs, fitconfig, t, nThreads, minchi, with_osc, std::ref(prof_progress), seed_points, proseed.getThreadSeeds()->at(t));
+        std::atomic<int>* tasks_remaining_raw = tasks_remaining.get();
+        futures.emplace_back(std::async(std::launch::async, [&, t, tasks_remaining_raw]() {
+                    return this->PROfilePointHelper(&systs, fitconfig, &task_counter, &tasks, minchi, with_osc, std::ref(prof_progress), seed_points, proseed.getThreadSeeds()->at(t), use_probe, tasks_remaining_raw, loop_start_helper);
                     }));
 
     }
 
     std::vector<profOut> combinedResults(nparams);
-    int offset = 0;
-    int stride = nThreads;
     for (auto& fut : futures) {
         std::vector<profOut> result = fut.get();
-        for(size_t i = 0; i < result.size(); ++i)
-            combinedResults.at(offset+i*stride) = result.at(i);
-        ++offset;
+        for (auto& p : result) {
+            // Map helper-space index (full model+spline vector) → constructor-space slot.
+            // In with_osc, slot == param_idx. In syst-only, the constructor's vector is
+            // sized = nsplines, so spline index k in helper space lands at slot k - nphys.
+            int dst_idx = with_osc ? p.param_idx : p.param_idx - (int)model.nparams;
+            if (dst_idx < 0 || dst_idx >= (int)nparams) continue;
+            // Concatenate: chunked physics scans may produce multiple profOuts
+            // sharing the same param_idx — merge their points into one record.
+            auto& dst = combinedResults[dst_idx];
+            if (dst.knob_vals.empty()) {
+                dst = std::move(p);
+            } else {
+                dst.knob_vals.insert(dst.knob_vals.end(), p.knob_vals.begin(), p.knob_vals.end());
+                dst.knob_chis.insert(dst.knob_chis.end(), p.knob_chis.begin(), p.knob_chis.end());
+                for (auto& v : p.knob_bfs) dst.knob_bfs.push_back(std::move(v));
+            }
+        }
+    }
+    // After concatenation each profOut is unsorted by knob_val; sort now so the
+    // downstream TGraph / findMinAndBounds see a monotonic curve.
+    for (auto& po : combinedResults) {
+        if (!po.knob_vals.empty()) po.sort();
     }
     if(fitconfig.progress_bar) prof_progress.finish_all();
 
