@@ -4,26 +4,54 @@
  * @author PROfit Collaboration
  *
  * @details PRObe locates the boundaries where Δχ² = target along a single parameter
- * direction without dense uniform scanning. The default 1σ application solves
- * Δχ² = 1 with ~7 fits in the smooth case and falls back to bracket-and-bisect
- * sampling for non-parabolic / spiky chi² shapes.
+ * direction without dense uniform scanning. `chi2_crossing_1d` selects between two
+ * algorithm paths based on the chi² shape expected for the parameter, gated by
+ * `CrossingOpts::may_have_spikes`. Both paths share an `add_fit` primitive that
+ * dedups by parameter value, enforces `max_fits`, fires the optional `on_fit`
+ * progress callback, and records each completed fit in a per-scan SeedPool of
+ * (theta, best_fit, chi²) tuples.
  *
- * Algorithm (chi2_crossing_1d):
- *   Phase 0 — coarse exploration (spiky mode only): N uniform points across [lb, ub]
- *             so isolated spikes / secondary basins are surfaced.
- *   Phase 1 — anchor fits at bf_value + sigma_init * {opts.anchor_sigmas}.
- *   Phase 2 — quadratic surrogate through the nearest few pool points.
- *   Phase 3 — if the surrogate is adequate, run two confirmation fits at the
- *             analytic Δχ² = target crossings.
- *   Phase 4 — fallback bracket + bisection on either side of the minimum if the
- *             surrogate is rejected (residuals too large, downward parabola, or
- *             a spike was detected).
+ * **Nuisance path** (`may_have_spikes = false`). For Gaussian-like parameters
+ * whose chi² is well-approximated by a parabola near the minimum:
+ *   1. Phase 1 — anchor fits at `bf_value + sigma_init * anchor_sigmas`, plus
+ *                one anchor per global seed whose `param_idx` value lies inside
+ *                the scan range.
+ *   2. Phase 2 — quadratic surrogate fit through the nearest 5 pool points
+ *                around the in-pool minimum.
+ *   3. Phase 3 — if the surrogate is accepted (residual ≤ `quadratic_residual_max`
+ *                and no pool point lies above the surrogate by more than
+ *                `spike_chi2_threshold`), predict the Δχ² = target crossings
+ *                analytically and run two confirmation fits there. Confirmations
+ *                landing within `boundary_tol_chi2` of the target are taken as
+ *                the band edges.
+ *   4. Phase 4 — fallback bracket + bisection on either side of the minimum if
+ *                the surrogate is rejected (or if a confirmation misses by more
+ *                than `boundary_tol_chi2`). Bisection extends outward until a
+ *                pool point sits above target, then halves the bracket up to
+ *                `max_bisect_iter` times per side.
+ *   Typical cost: ~11–14 fits when the surrogate accepts; up to ~25 when the
+ *   bisection fallback fires (hard-capped by `max_fits`).
  *
- * A SeedPool of (theta, best_fit, chi2) records every completed fit; each new
- * fit is warm-started with the global seeds plus the closest-by-theta and
- * lowest-chi2 best-fits in the pool. This preserves the warm-start property
- * that the existing 18-uniform scan relies on, even when sample order is
- * non-monotonic.
+ * **Physics path** (`may_have_spikes = true`). For non-Gaussian parameters
+ * (asymmetric basins, sharp minima, multi-modal structure) where the surrogate
+ * above rejects too often and the bisection fallback dominates wall time:
+ *   1. Sample `coarse_n` evenly-spaced grid points across [plb, pub], plus one
+ *      anchor at `bf_value` and one per in-range global seed. No `anchor_sigmas`,
+ *      no surrogate, no spike test.
+ *   2. Find the in-pool minimum and walk neighbours on each side until a pair
+ *      straddles `min_chi² + target_dchi2`. Run **one** linear-interpolated
+ *      refine fit at the predicted crossing.
+ *   Predictable cost: `coarse_n + 1 + |seeds_in_range| + ≤ 2 ≈ 9–13 fits`.
+ *
+ * Each new fit is warm-started with the caller's `global_seeds` plus the
+ * closest-by-theta SeedPool entry once the pool is non-empty. This preserves
+ * convergence quality across the scan even when fits arrive in non-monotonic
+ * order (anchors, refines, bisection midpoints).
+ *
+ * The per-fit minimisation runs through `PROfitter::Fit()` (full Latin + PSO +
+ * multi-LBFGS pipeline). A leaner `PROfitter::FitScan()` exists for scan-mode
+ * callers but is currently unused — disabled while a fit-quality regression in
+ * that path is investigated.
  */
 #ifndef PROBE_H
 #define PROBE_H
@@ -74,16 +102,38 @@ namespace PRObe {
 
     /**
      * @brief Locate Δχ² = target crossings along one parameter axis.
-     * @param metric        Metric clone owned by caller; PRObe mutates its bounds and fixSpline state.
-     * @param param_idx     Index of the scanned parameter inside the full param vector.
-     * @param full_lb       Lower bounds for the entire param vector at call time (will be cloned per fit).
+     * @details Branches on `opts.may_have_spikes` between the surrogate-driven
+     * nuisance path and the grid + linear-refine physics path. See the
+     * file-level header for the algorithm walk-through and which CrossingOpts
+     * knobs apply to which path.
+     *
+     * @param metric        Metric clone owned by the caller. PRObe mutates its
+     *                      `setBounds` (per-fit tlb/tub) and `fixSpline` state
+     *                      across the scan.
+     * @param param_idx     Index of the scanned parameter in the full
+     *                      (model + spline) parameter vector.
+     * @param full_lb       Lower bounds for the entire param vector. Copied into
+     *                      every per-fit local bounds vector with
+     *                      `tlb[param_idx]` = current θ.
      * @param full_ub       Upper bounds (same shape).
-     * @param bf_value      The parameter's value at the global best fit (anchor centre).
-     * @param global_seeds  Seed_points from the caller (e.g. fitter.freq_seed_points).
-     * @param fitconfig     PROfitter configuration (Latin / PSO / LBFGS settings).
-     * @param base_seed     Base RNG seed; each internal fit increments it for reproducibility.
-     * @param opts          Tunables.
-     * @return              CrossingResult with sorted theta/chi2/best_fits and crossing locations.
+     * @param bf_value      Anchor centre. For an unchunked scan this is the
+     *                      parameter's value at the global best fit. For a
+     *                      chunked physics scan the dispatcher uses the chunk
+     *                      midpoint when the global BF lies outside the chunk.
+     * @param global_seeds  Caller's seed_points (typically
+     *                      `PROfitter::freq_seed_points`). Seeds whose
+     *                      `param_idx` value falls inside the scan range each
+     *                      become an additional anchor fit; the full list is
+     *                      also passed verbatim to every per-fit `Fit()` for
+     *                      LBFGS warm-starting (no dedup at this level).
+     * @param fitconfig     PROfitter configuration (Latin / PSO / LBFGS knobs).
+     * @param base_seed     Base RNG seed. Each internal fit uses
+     *                      `base_seed + n_call` so a single
+     *                      `chi2_crossing_1d` invocation is reproducible run
+     *                      to run.
+     * @param opts          Tunables — see CrossingOpts.
+     * @return              CrossingResult with the pool sorted by θ, plus the
+     *                      linear-interpolated leftX / minX / rightX band.
      */
     CrossingResult chi2_crossing_1d(
         PROmetric &metric,
