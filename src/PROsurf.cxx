@@ -1236,7 +1236,12 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
             std::string xval = is_physics ? "Log_{10}(" + model.pretty_param_names[idx]+")" : "#sigma Shift";
             std::string tit = (is_physics ? names[idx] : config.m_mcgen_variation_plotname_map.at(names[idx])) + ";" + xval + "; #Delta#Chi^{2}";
             graphs[idx]->SetTitle(tit.c_str());
-            graphs[idx]->Draw("AL");
+            // Small filled black circles at each sampled / anchored point so the
+            // adaptive sampling pattern is visible alongside the interpolated curve.
+            graphs[idx]->SetMarkerStyle(20);
+            graphs[idx]->SetMarkerSize(0.4);
+            graphs[idx]->SetMarkerColor(kBlack);
+            graphs[idx]->Draw("ALP");
             graphs[idx]->SetLineWidth(1);
             graphs[idx]->GetYaxis()->SetTitleSize(0.05);
             graphs[idx]->GetYaxis()->SetLabelSize(0.04);
@@ -1249,6 +1254,24 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
             line->SetLineWidth(1);
             line->SetLineColor(kBlack);
             line->Draw();
+
+            // Open black circles marking the crossing-calc results: the in-pool
+            // minimum (at its actual χ² value) and the ±1σ band edges (at Δχ²=1).
+            // Slightly larger than sample markers so the computed band is obvious.
+            const double minx_d = bfvalues[idx];
+            const double min_y  = graphs[idx]->Eval(minx_d);
+            TMarker* m_min = new TMarker(minx_d, min_y, 24);
+            m_min->SetMarkerColor(kBlack);
+            m_min->SetMarkerSize(1.0);
+            m_min->Draw();
+            TMarker* m_lo = new TMarker(values1_down[idx], 1.0, 24);
+            m_lo->SetMarkerColor(kBlack);
+            m_lo->SetMarkerSize(1.0);
+            m_lo->Draw();
+            TMarker* m_hi = new TMarker(values1_up[idx], 1.0, 24);
+            m_hi->SetMarkerColor(kBlack);
+            m_hi->SetMarkerSize(1.0);
+            m_hi->Draw();
 
             if(is_physics) graphs[idx]->SetLineColor(kBlue-7);
 
@@ -1275,7 +1298,11 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
                 size_t zoomIdx = w - zs;
                 plotFunctions.push_back([&, zoomIdx]() {
                     TGraph* graphClone = new TGraph(*graphs[zoomIdx]);
-                    graphClone->Draw("AL");
+                    // Same sample-point + crossing markers as the main plot.
+                    graphClone->SetMarkerStyle(20);
+                    graphClone->SetMarkerSize(0.4);
+                    graphClone->SetMarkerColor(kBlack);
+                    graphClone->Draw("ALP");
                     std::string newTitle = std::string(graphClone->GetTitle()) + " Zoomed 1#sigma";
                     graphClone->SetTitle(newTitle.c_str());
                     graphClone->SetLineColor(kViolet);
@@ -1290,6 +1317,22 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
                     graphClone->GetYaxis()->SetLabelSize(0.04);
                     graphClone->GetXaxis()->SetTitleSize(0.05);
                     graphClone->GetXaxis()->SetLabelSize(0.04);
+
+                    // Open black circles for the crossing-calc results.
+                    const double minx_d = bfvalues[zoomIdx];
+                    const double min_y  = graphClone->Eval(minx_d);
+                    TMarker* zm_min = new TMarker(minx_d, min_y, 24);
+                    zm_min->SetMarkerColor(kBlack);
+                    zm_min->SetMarkerSize(1.0);
+                    zm_min->Draw();
+                    TMarker* zm_lo = new TMarker(values1_down[zoomIdx], 1.0, 24);
+                    zm_lo->SetMarkerColor(kBlack);
+                    zm_lo->SetMarkerSize(1.0);
+                    zm_lo->Draw();
+                    TMarker* zm_hi = new TMarker(values1_up[zoomIdx], 1.0, 24);
+                    zm_hi->SetMarkerColor(kBlack);
+                    zm_hi->SetMarkerSize(1.0);
+                    zm_hi->Draw();
 
                     if(graphClone->GetN() == 1) {
                         float x_val = graphClone->GetPointX(0);
