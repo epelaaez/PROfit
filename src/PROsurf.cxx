@@ -5,6 +5,7 @@
 
 #include <Eigen/Eigen>
 
+#include <chrono>
 #include <cmath>
 #include <future>
 #include <algorithm>
@@ -203,7 +204,12 @@ void PROsurf::FillSurfaceStat(const PROconfig &config, const PROfitterConfig &fi
     delete local_metric;
 }
 
-std::vector<profOut> PROfile::PROfilePointHelper(const PROsyst *systs, const PROfitterConfig &fitconfig, std::atomic<int> *task_counter, const std::vector<ScanTask> *tasks, float minchi, bool with_osc, MultiPROgressBar& progressbar, const std::vector<Eigen::VectorXf> &seed_points, uint32_t seed, bool use_probe, std::atomic<int>* tasks_remaining, int bar_index_offset) {
+std::vector<profOut> PROfile::PROfilePointHelper(const PROsyst *systs, const PROfitterConfig &fitconfig, std::atomic<int> *task_counter, const std::vector<ScanTask> *tasks, float minchi, bool with_osc, MultiPROgressBar& progressbar, const std::vector<Eigen::VectorXf> &seed_points, uint32_t seed, bool use_probe, std::atomic<int>* tasks_remaining, int bar_index_offset, std::atomic<uint64_t>* max_thread_wall_us) {
+
+    // Per-thread wall start. When max_thread_wall_us is non-null, we atomically
+    // max-merge our wall into it at function exit, giving the dispatcher the
+    // worst-case thread wall for parallelism-efficiency reporting.
+    const auto thread_t0 = std::chrono::steady_clock::now();
 
 
     std::vector<profOut> outs;
@@ -337,6 +343,17 @@ std::vector<profOut> PROfile::PROfilePointHelper(const PROsyst *systs, const PRO
                              ? global_bf
                              : 0.5f * (task.sub_lb + task.sub_ub);
 
+            // Live progress callback: PRObe invokes this after each accepted fit
+            // so the bar advances during the scan, not in a burst at the end.
+            // increment_bar is internally thread-safe (per-bar mutex), so multiple
+            // PRObe scans running on different threads can all call it.
+            if (fitconfig.progress_bar) {
+                const int bar_idx_for_cb = (int)which_spline - bar_index_offset;
+                opts.on_fit = [&progressbar, bar_idx_for_cb]() {
+                    progressbar.increment_bar(bar_idx_for_cb);
+                };
+            }
+
             PRObe::CrossingResult r = PRObe::chi2_crossing_1d(
                 *local_metric, which_spline, tlb, tub, bf_value,
                 seed_points, fitconfig, seed + (uint32_t)t_idx, opts);
@@ -345,7 +362,6 @@ std::vector<profOut> PROfile::PROfilePointHelper(const PROsyst *systs, const PRO
                 output.knob_vals.push_back(r.theta[k]);
                 output.knob_chis.push_back(r.chi2[k] - minchi);
                 output.knob_bfs.push_back(r.best_fits[k]);
-                if (fitconfig.progress_bar) progressbar.increment_bar((int)which_spline - bar_index_offset);
             }
             log<LOG_INFO>(L"%1% || PRObe done for spline #%2%: %3% fits, surrogate=%4%")
                 % __func__ % which_spline % r.n_fits % (int)r.used_surrogate;
@@ -460,6 +476,20 @@ std::vector<profOut> PROfile::PROfilePointHelper(const PROsyst *systs, const PRO
     }//end thread
 
     delete local_metric;
+
+    // Max-merge our wall time into the dispatcher's atomic. CAS loop because
+    // std::atomic<uint64_t>::fetch_max isn't standard until C++26.
+    if (max_thread_wall_us) {
+        const uint64_t my_wall_us = (uint64_t)std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - thread_t0).count();
+        uint64_t cur = max_thread_wall_us->load(std::memory_order_relaxed);
+        while (my_wall_us > cur &&
+               !max_thread_wall_us->compare_exchange_weak(
+                   cur, my_wall_us,
+                   std::memory_order_relaxed, std::memory_order_relaxed)) {
+            // cur is updated by compare_exchange_weak on failure; retry
+        }
+    }
 
     return outs;
 }
@@ -984,10 +1014,22 @@ PROfile::PROfile(const PROconfig &config, const PROsyst &systs, const PROmodel &
     // of which task is next is made when the thread is free.
     std::atomic<int> task_counter{0};
 
+    // Optional scan-mode timing diagnostics. When enabled (via --profile-timing
+    // -> SetScanTimingEnabled(true)), PROfitter records per-phase microseconds
+    // and we track per-thread wall time here. The summary is logged at the end
+    // of the constructor.
+    const bool tim_on = PROfit::GetScanTimingEnabled();
+    if (tim_on) {
+        PROfit::GetScanTimingStats().reset();
+    }
+    std::atomic<uint64_t> max_thread_wall_us{0};
+    std::atomic<uint64_t>* max_wall_ptr = tim_on ? &max_thread_wall_us : nullptr;
+    const auto dispatch_t0 = std::chrono::steady_clock::now();
+
     for (int t = 0; t < nThreads; ++t) {
         std::atomic<int>* tasks_remaining_raw = tasks_remaining.get();
-        futures.emplace_back(std::async(std::launch::async, [&, t, tasks_remaining_raw]() {
-                    return this->PROfilePointHelper(&systs, fitconfig, &task_counter, &tasks, minchi, with_osc, std::ref(prof_progress), seed_points, proseed.getThreadSeeds()->at(t), use_probe, tasks_remaining_raw, loop_start_helper);
+        futures.emplace_back(std::async(std::launch::async, [&, t, tasks_remaining_raw, max_wall_ptr]() {
+                    return this->PROfilePointHelper(&systs, fitconfig, &task_counter, &tasks, minchi, with_osc, std::ref(prof_progress), seed_points, proseed.getThreadSeeds()->at(t), use_probe, tasks_remaining_raw, loop_start_helper, max_wall_ptr);
                     }));
 
     }
@@ -1019,6 +1061,46 @@ PROfile::PROfile(const PROconfig &config, const PROsyst &systs, const PROmodel &
         if (!po.knob_vals.empty()) po.sort();
     }
     if(fitconfig.progress_bar) prof_progress.finish_all();
+
+    // Scan-mode timing summary. Logs at LOG_ERROR level so it shows up at any
+    // verbosity. Emits parallelism efficiency = total CPU fit-time / (wall × nthreads):
+    // close to 1.0 means all threads stayed busy; far below 1.0 means tail imbalance.
+    if (tim_on) {
+        const uint64_t dispatch_wall_us = (uint64_t)std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - dispatch_t0).count();
+        const auto& s = PROfit::GetScanTimingStats();
+        const uint64_t n_fits        = s.n_fits.load();
+        const uint64_t total_fit_us  = s.total_fit_us.load();
+        const uint64_t latin_us      = s.latin_us.load();
+        const uint64_t pso_us        = s.pso_us.load();
+        const uint64_t lbfgs_us      = s.lbfgs_us.load();
+        const uint64_t max_wall_us   = max_thread_wall_us.load();
+
+        const double per_fit_ms      = n_fits ? (double)total_fit_us / (double)n_fits / 1000.0 : 0.0;
+        const double total_fit_s     = (double)total_fit_us / 1e6;
+        const double dispatch_wall_s = (double)dispatch_wall_us / 1e6;
+        const double max_wall_s      = (double)max_wall_us / 1e6;
+        const double parallel_eff    = (max_wall_us > 0)
+            ? (double)total_fit_us / ((double)max_wall_us * (double)nThreads)
+            : 0.0;
+        const double latin_frac      = total_fit_us ? (double)latin_us / (double)total_fit_us : 0.0;
+        const double pso_frac        = total_fit_us ? (double)pso_us   / (double)total_fit_us : 0.0;
+        const double lbfgs_frac      = total_fit_us ? (double)lbfgs_us / (double)total_fit_us : 0.0;
+        const char* mode             = use_probe ? (chunks > 1 ? "PRObe-chunked" : "PRObe") : "legacy-18uniform";
+
+        log<LOG_ERROR>(L"PROfile timing summary [%1%]:") % mode;
+        log<LOG_ERROR>(L"  total fits:           %1%")   % (uint64_t)n_fits;
+        log<LOG_ERROR>(L"  total tasks:          %1%")   % (int)tasks.size();
+        log<LOG_ERROR>(L"  total fit-time:       %1% s") % total_fit_s;
+        log<LOG_ERROR>(L"  per-fit avg:          %1% ms")% per_fit_ms;
+        log<LOG_ERROR>(L"  dispatch wall:        %1% s") % dispatch_wall_s;
+        log<LOG_ERROR>(L"  max thread wall:      %1% s") % max_wall_s;
+        log<LOG_ERROR>(L"  nthreads:             %1%")   % nThreads;
+        log<LOG_ERROR>(L"  parallel efficiency:  %1%   (1.0 = perfect, <0.7 = tail imbalance)") % parallel_eff;
+        log<LOG_ERROR>(L"  latin frac of fit:    %1%")   % latin_frac;
+        log<LOG_ERROR>(L"  pso frac of fit:      %1%")   % pso_frac;
+        log<LOG_ERROR>(L"  lbfgs frac of fit:    %1%")   % lbfgs_frac;
+    }
 
     //create all graphs, used directly in first setion
     for(auto & out: combinedResults){
