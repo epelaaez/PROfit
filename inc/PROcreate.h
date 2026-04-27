@@ -82,6 +82,7 @@ namespace PROfit{
         bool force_0_cv = false;    ///< If true, normalise spline shifts by the shift at knob=0.
         std::vector<int> include_only_weights; ///< 1-based indices of weight universes to include; empty = all.
         float scale = 1.0f;         ///< Scale factor applied to all weights (e.g. 0.001 for weights stored as x1000).
+        int num_decomp_knobs = -1;  ///< For "covariance_to_spline": number of top eigenpairs to keep as spline knobs (-1 = keep all).
 
         //boost serialization
         template<class Archive>
@@ -104,6 +105,7 @@ namespace PROfit{
             ar & force_0_cv;
             ar & include_only_weights;
             ar & scale;
+            ar & num_decomp_knobs;
         }
 
 

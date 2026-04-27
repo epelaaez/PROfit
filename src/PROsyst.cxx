@@ -88,6 +88,29 @@ namespace PROfit {
                 this->CreateMatrix(syst);
                 covar_names.push_back(syst.systname);
                 ++n_covar;
+            } else if(syst.mode == "covariance_to_spline") {
+                size_t n_before = splines.size();
+                FillSplinesFromCovariance(syst);
+                size_t n_after = splines.size();
+
+                // Propagate parent tag + plotname to the synthesized knob entries so downstream
+                // plotting code (PROplot.cxx) can group them under the same tag.
+                // The maps are populated by the XML parser; here we append entries for the
+                // dynamically-generated decomposition knobs.
+                PROconfig& mut_config = const_cast<PROconfig&>(config);
+                auto parent_tags_it = mut_config.m_mcgen_variation_tags.find(syst.systname);
+                auto parent_plotname_it = mut_config.m_mcgen_variation_plotname_map.find(syst.systname);
+                for(size_t si = n_before; si < n_after; ++si) {
+                    const std::string& knob_name = spline_names[si];
+                    if(parent_tags_it != mut_config.m_mcgen_variation_tags.end()) {
+                        mut_config.m_mcgen_variation_tags[knob_name] = parent_tags_it->second;
+                    }
+                    if(parent_plotname_it != mut_config.m_mcgen_variation_plotname_map.end()) {
+                        // Append "_decomp_knob_<i>" suffix onto parent plotname for readability
+                        const std::string suffix = knob_name.substr(syst.systname.size());
+                        mut_config.m_mcgen_variation_plotname_map[knob_name] = parent_plotname_it->second + suffix;
+                    }
+                }
             }else if(syst.mode == "flat"){
                 this->CreateFlatMatrix(config, syst); 
                 covar_names.push_back(syst.systname); 
@@ -785,6 +808,77 @@ namespace PROfit {
         spline_binnings.push_back(syst.binning);
 
     }
+
+    void PROsyst::FillSplinesFromCovariance(const SystStruct& syst) {
+        Eigen::MatrixXf frac_cov = PROsyst::GenerateFracCovarMatrix(syst);
+        // symmetrize to kill any float-asymmetry before eigendecomposition
+        frac_cov = 0.5f * (frac_cov + frac_cov.transpose());
+
+        Eigen::SelfAdjointEigenSolver<Eigen::MatrixXf> solver(frac_cov);
+        if(solver.info() != Eigen::Success) {
+            log<LOG_ERROR>(L"%1% || Eigendecomposition failed for covariance_to_spline systematic %2%") % __func__ % syst.systname.c_str();
+            exit(EXIT_FAILURE);
+        }
+
+        const Eigen::VectorXf eigvals = solver.eigenvalues();  // ascending
+        const Eigen::MatrixXf eigvecs = solver.eigenvectors(); // columns
+
+        const int nbins = frac_cov.rows();
+        // Count strictly-positive eigenvalues (clamp near-zero/negative to 0)
+        const float tol = 10.0f * Eigen::NumTraits<float>::dummy_precision();
+        std::vector<int> kept_indices; // indices into eigvals, in descending-eigenvalue order
+        for(int i = nbins - 1; i >= 0; --i) {
+            if(eigvals(i) > tol) kept_indices.push_back(i);
+        }
+        int K = static_cast<int>(kept_indices.size());
+        if(syst.num_decomp_knobs > 0 && syst.num_decomp_knobs < K) {
+            K = syst.num_decomp_knobs;
+        }
+        if(K == 0) {
+            log<LOG_WARNING>(L"%1% || covariance_to_spline systematic %2% has no positive-eigenvalue modes; skipping.") % __func__ % syst.systname.c_str();
+            return;
+        }
+
+        log<LOG_INFO>(L"%1% || covariance_to_spline %2%: keeping %3% of %4% eigenvectors (largest eigenvalue=%5%, smallest kept=%6%)")
+            % __func__ % syst.systname.c_str() % K % nbins % eigvals(nbins - 1) % eigvals(kept_indices[K - 1]);
+
+        const float lo = -3.0f, hi = 3.0f;
+        const int n_segments = 6; // knots at -3, -2, -1, 0, 1, 2
+
+        for(int k = 0; k < K; ++k) {
+            const int ev_idx = kept_indices[k];
+            const float lambda = eigvals(ev_idx);
+            const float sqrt_lambda = std::sqrt(lambda);
+            const Eigen::VectorXf vec = eigvecs.col(ev_idx);
+
+            // Per-bin fractional response to knob x is: alpha_b * x, where alpha_b = sqrt(lambda) * vec[b].
+            // Full ratio: f_b(x) = 1 + alpha_b * x.
+            // Represent as 6 unit-width linear segments with knots at -3..2 so GetSplineShift's clamp works.
+            Spline spline;
+            spline.bins = nbins;
+            spline.segments_per_bin = n_segments;
+            spline.segments.reserve(static_cast<size_t>(nbins) * n_segments);
+            for(int b = 0; b < nbins; ++b) {
+                const float alpha = sqrt_lambda * vec(b);
+                for(int s = 0; s < n_segments; ++s) {
+                    const float knot = static_cast<float>(s - 3); // -3..2
+                    const float c0 = 1.0f + alpha * knot;
+                    const float c1 = alpha;
+                    spline.segments.push_back(SplineSegment{knot, {c0, c1, 0.0f, 0.0f}});
+                }
+            }
+
+            const std::string knob_name = syst.systname + "_decomp_knob_" + std::to_string(k);
+            syst_map[knob_name] = {splines.size(), SystType::Spline};
+            splines.push_back(std::move(spline));
+            spline_names.push_back(knob_name);
+            spline_lo.push_back(lo);
+            spline_hi.push_back(hi);
+            spline_binnings.push_back(syst.binning);
+            ++n_splines;
+        }
+    }
+
     float PROsyst::GetSplineShift(std::string name, float shift, int bin) const {
         if(syst_map.count(name) == 0) {
             log<LOG_ERROR>(L"%1% || Unrecognized systematic %2%") % __func__ % name.c_str();

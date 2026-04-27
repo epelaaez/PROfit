@@ -365,7 +365,7 @@ namespace PROfit {
                     if(branch_variable->GetIncludeSystematics()){
                         for(const auto &variation: inconfig.m_mcgen_variation_allowlist){
                             std::string type = inconfig.m_mcgen_variation_type_map.at(variation);
-                            if (std::find(allowlist_check.begin(), allowlist_check.end(), variation  ) == allowlist_check.end() && (type=="covariance" || type=="spline" || type=="spline_to_covariance")) {
+                            if (std::find(allowlist_check.begin(), allowlist_check.end(), variation  ) == allowlist_check.end() && (type=="covariance" || type=="covariance_to_spline" || type=="spline" || type=="spline_to_covariance")) {
                                 log<LOG_ERROR>(L"%1% || ERROR! You have a variation named %2% in your allowlist, so you definitely want it, but its NOT found in the files. Is this a typo? FileID %3%") % __func__ % variation.c_str() %fid  ;
                                 throw std::runtime_error("Allowlist variation not in file.");
                             }
@@ -505,6 +505,15 @@ namespace PROfit {
                         sv.back().include_only_weights = inconfig.m_mcgen_variation_include_only_weights.at(sys_name);
                         log<LOG_INFO>(L"%1% || Setting include_only_weights for systematic %2% (%3% entries)") % __func__ % sys_name.c_str() % sv.back().include_only_weights.size();
                     }
+                }
+                if(sys_mode == "covariance_to_spline"){
+                    sv.back().binning = binningindex;
+                    auto it_nk = inconfig.m_mcgen_variation_num_decomp_knobs.find(sys_name);
+                    if(it_nk != inconfig.m_mcgen_variation_num_decomp_knobs.end()) {
+                        sv.back().num_decomp_knobs = it_nk->second;
+                        log<LOG_INFO>(L"%1% || Setting num_decomp_knobs=%2% for systematic %3%") % __func__ % sv.back().num_decomp_knobs % sys_name.c_str();
+                    }
+                    log<LOG_INFO>(L"%1% || Systematic variation %2% is a match for a covariance_to_spline systematic. Processing as such. ") % __func__ % sys_name.c_str();
                 }
                 if(sys_mode == "flat"){
                     log<LOG_INFO>(L"%1% || Systematic variation %2% is a match for a flat covariance systematic. Processing a such. ") % __func__ % sys_name.c_str();
@@ -1217,6 +1226,19 @@ namespace PROfit {
                         }
                     }
                 }
+            }else if(var_syst_objs.front()->mode == "covariance_to_spline"){
+                if(spline_bin < 0) continue;
+                for(auto so: var_syst_objs)
+                    so->FillCV(spline_bin, mc_weight);
+                for(int iuni = 0; iuni < var_syst_objs.front()->GetNUniverse(); ++iuni){
+                    float raw_weight = static_cast<float>(map_iter->second->at(iuni));
+                    float scaled_weight = raw_weight * var_syst_objs.front()->scale;
+                    float sys_wei = run_syst ? additional_weight * scaled_weight : 1.0;
+                    for(auto so: var_syst_objs){
+                        so->FillUniverse(iuni, spline_bin, mc_weight * sys_wei);
+                    }
+                }
+                continue;
             } else  if( var_syst_objs.front()->mode == "norm") {
                 if(spline_bin < 0) continue;
                 for(auto so: var_syst_objs)

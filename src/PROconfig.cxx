@@ -1168,7 +1168,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 }
 
                 //check for known attributes
-                const std::vector<std::string> expected_attrs = {"name", "type", "plotname", "binning", "knobvals", "tag", "prior", "center", "force_0_cv", "include_only_weights", "scale","filename", "xvar", "yvar"};
+                const std::vector<std::string> expected_attrs = {"name", "type", "plotname", "binning", "knobvals", "tag", "prior", "center", "force_0_cv", "include_only_weights", "scale","filename", "xvar", "yvar", "num_decomp_knobs"};
                 for (const tinyxml2::XMLAttribute* attr = pAllowList->FirstAttribute(); attr; attr = attr->Next()) {
                     std::string name = attr->Name();
                     if (std::find(expected_attrs.begin(), expected_attrs.end(), name) == expected_attrs.end()) {
@@ -1191,6 +1191,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 const char *filename = pAllowList->Attribute("filename");
                 const char *xvar = pAllowList->Attribute("xvar");
                 const char *yvar = pAllowList->Attribute("yvar");
+                const char *num_decomp_knobs = pAllowList->Attribute("num_decomp_knobs");
 
 
                 m_mcgen_variation_type.push_back(variation_type);
@@ -1306,6 +1307,10 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 if(scale) {
                     m_mcgen_variation_scale[wt] = std::strtof(scale, NULL);
                     log<LOG_INFO>(L"%1% || Parsed scale=%2% for systematic %3%") % __func__ % m_mcgen_variation_scale[wt] % wt.c_str();
+                }
+                if(num_decomp_knobs) {
+                    m_mcgen_variation_num_decomp_knobs[wt] = atoi(num_decomp_knobs);
+                    log<LOG_INFO>(L"%1% || Parsed num_decomp_knobs=%2% for systematic %3%") % __func__ % m_mcgen_variation_num_decomp_knobs[wt] % wt.c_str();
                 }
                 log<LOG_DEBUG>(L"%1% || Allowlisting variations: %2%") % __func__ % wt.c_str() ;
                 tinyxml2::XMLElement *pNext = pAllowList->NextSiblingElement("allowlist");
@@ -1586,6 +1591,10 @@ int PROconfig::LoadFromXML(const std::string &filename){
             m_num_variation_type_covariance+=1;
         }
 
+        else if(m_mcgen_variation_type[i] == "covariance_to_spline"){
+            m_num_variation_type_covariance_to_spline+=1;
+        }
+
         else if(m_mcgen_variation_type[i] == "flat"){
             m_num_variation_type_flat+=1;
         }
@@ -1608,6 +1617,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
     }
 
     log<LOG_INFO>(L"%1% || num_variation_type_covariance: %2% ") % __func__ % m_num_variation_type_covariance;
+    log<LOG_INFO>(L"%1% || num_variation_type_covariance_to_spline: %2% ") % __func__ % m_num_variation_type_covariance_to_spline;
     log<LOG_INFO>(L"%1% || num_variation_type_external_ovariance: %2% ") % __func__ % m_num_variation_type_external_covariance;
     log<LOG_INFO>(L"%1% || num_variation_type_flat: %2% ") % __func__ % m_num_variation_type_flat;
     log<LOG_INFO>(L"%1% || num_variation_type_norm: %2% ") % __func__ % m_num_variation_type_norm;
