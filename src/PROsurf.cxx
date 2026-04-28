@@ -698,6 +698,134 @@ std::vector<surfOut> PROsurf::FillCurve(const PROfitterConfig &fitconfig, PROsee
 }
 
 
+PROmesh::AMRResult PROsurf::FillSurfaceAMR(
+    const PROfitterConfig &fitconfig,
+    std::string filename,
+    [[maybe_unused]] PROseed &proseed,
+    int nthreads,
+    const std::vector<Eigen::VectorXf> &caller_seeds,
+    const PROmesh::AMROptions &opts_in)
+{
+    // Copy options so we can fill in defaults that depend on PROsurf state.
+    PROmesh::AMROptions opts = opts_in;
+    opts.nthreads = nthreads;
+    if (opts.dense_nx == 60 && nbinsx > 0) opts.dense_nx = (int)nbinsx;
+    if (opts.dense_ny == 60 && nbinsy > 0) opts.dense_ny = (int)nbinsy;
+    if (opts.initial_seed_points.empty() && !caller_seeds.empty()) {
+        opts.initial_seed_points = caller_seeds;
+    }
+
+    // Bounds in transformed (log/lin) space — match the convention used by
+    // edges_x / edges_y, which already store transformed values.
+    const float x_lo = edges_x.minCoeff();
+    const float x_hi = edges_x.maxCoeff();
+    const float y_lo = edges_y.minCoeff();
+    const float y_hi = edges_y.maxCoeff();
+
+    // Single-point evaluation. Runs concurrently on `nthreads` AMR workers.
+    // Per-thread state (a PROmetric clone) lives in thread_local storage so the
+    // first call on each thread allocates and subsequent calls reuse it.
+    PROmetric *proto = &this->metric;
+    const size_t loc_x_idx = this->x_idx;
+    const size_t loc_y_idx = this->y_idx;
+    auto eval_fn = [proto, loc_x_idx, loc_y_idx, &fitconfig](const PROmesh::EvalRequest &req)
+        -> PROmesh::EvalResult
+    {
+        thread_local std::unique_ptr<PROmetric> tls_metric;
+        if (!tls_metric) tls_metric.reset(proto->Clone());
+        PROmetric *m = tls_metric.get();
+        m->reset();
+
+        const int nphys    = (int)m->GetModel().nparams;
+        const int nspline  = (int)m->GetSysts().GetNSplines();
+        const int n_full   = nphys + nspline;
+        Eigen::VectorXf lb(n_full), ub(n_full);
+        lb << m->GetModel().lb,
+              Eigen::VectorXf::Map(m->GetSysts().spline_lo.data(), m->GetSysts().spline_lo.size());
+        ub << m->GetModel().ub,
+              Eigen::VectorXf::Map(m->GetSysts().spline_hi.data(), m->GetSysts().spline_hi.size());
+
+        // Pin the two scanned coordinates; the remaining n_full-2 parameters
+        // are optimised by PROfitter.
+        lb((int)loc_x_idx) = req.x_phys;
+        ub((int)loc_x_idx) = req.x_phys;
+        lb((int)loc_y_idx) = req.y_phys;
+        ub((int)loc_y_idx) = req.y_phys;
+        m->setBounds(lb, ub);
+
+        // Reproducible per-key seeding.
+        const uint32_t fseed = static_cast<uint32_t>(req.key & 0xffffffffu);
+        PROfitter fitter(ub, lb, fitconfig, fseed);
+
+        PROmesh::EvalResult out;
+        if (req.seeds.empty()) {
+            out.chi2 = fitter.Fit(*m);
+        } else {
+            out.chi2 = fitter.Fit(*m, req.seeds);
+        }
+        out.best_fit = fitter.best_fit;
+        return out;
+    };
+
+    log<LOG_INFO>(L"%1% || PROsurf::FillSurfaceAMR starting AMR on [%2%, %3%] × [%4%, %5%], initial=%6%×%7%, levels=%8%, nthreads=%9%.")
+        % __func__ % x_lo % x_hi % y_lo % y_hi
+        % opts.initial_nx % opts.initial_ny % opts.max_levels % opts.nthreads;
+
+    PROmesh::AMRResult amr = PROmesh::run_amr(eval_fn, x_lo, x_hi, y_lo, y_hi, opts);
+
+    // Copy reconstructed dense matrix into PROsurf::surface for plot-compat.
+    if (opts.produce_dense && amr.reconstructed_dense.size() > 0) {
+        // PROsurf::surface is (nbinsx, nbinsy) — surface(i, j) where i is x-bin, j is y-bin.
+        // amr.reconstructed_dense is (dense_ny rows × dense_nx cols) with row=y, col=x.
+        const int rx = std::min((int)nbinsx, (int)amr.reconstructed_dense.cols());
+        const int ry = std::min((int)nbinsy, (int)amr.reconstructed_dense.rows());
+        for (int ix = 0; ix < rx; ++ix) {
+            for (int iy = 0; iy < ry; ++iy) {
+                surface(ix, iy) = amr.reconstructed_dense(iy, ix);
+            }
+        }
+    }
+
+    // Populate results vector for the TTree dump. One row per AMR-evaluated
+    // grid point. (binx, biny) are quantised to the dense (nbinsx, nbinsy) grid.
+    results.clear();
+    const int finest_step = 1 << std::max(0, std::min(opts.max_levels, 7));
+    const int finest_nx   = opts.initial_nx * finest_step;
+    const int finest_ny   = opts.initial_ny * finest_step;
+    for (const auto &kv : amr.chi2_map) {
+        const int i = (int)((kv.first >> 32) & 0xffffffffu);
+        const int j = (int)( kv.first        & 0xffffffffu);
+        const int binx = std::min((int)nbinsx - 1, std::max(0, (int)((long)i * (long)nbinsx / std::max(1, finest_nx))));
+        const int biny = std::min((int)nbinsy - 1, std::max(0, (int)((long)j * (long)nbinsy / std::max(1, finest_ny))));
+        Eigen::VectorXf bf;
+        auto bf_it = amr.bestfit_map.find(kv.first);
+        if (bf_it != amr.bestfit_map.end()) bf = bf_it->second;
+        results.push_back({binx, biny, bf, kv.second - amr.min_chi2});
+    }
+
+    // Sparse evaluation dump.
+    if (!filename.empty()) {
+        std::ofstream f(filename);
+        f << "# AMR sparse evaluation map\n";
+        f << "# x_phys y_phys delta_chi2 chi2_abs\n";
+        f << "# total_fits=" << amr.total_fits
+          << " min_chi2=" << amr.min_chi2 << "\n";
+        for (const auto &kv : amr.chi2_map) {
+            const int i = (int)((kv.first >> 32) & 0xffffffffu);
+            const int j = (int)( kv.first        & 0xffffffffu);
+            const float xp = x_lo + (float)i / (float)finest_nx * (x_hi - x_lo);
+            const float yp = y_lo + (float)j / (float)finest_ny * (y_hi - y_lo);
+            f << xp << " " << yp << " " << (kv.second - amr.min_chi2) << " " << kv.second << "\n";
+        }
+    }
+
+    log<LOG_ERROR>(L"%1% || AMR done: %2% fits across %3% levels, min_chi2=%4%, %5% contour levels.")
+        % __func__ % amr.total_fits % opts.max_levels % amr.min_chi2 % amr.polylines.size();
+
+    return amr;
+}
+
+
 void PROsurf::PlotCurve(const PROconfig &config, const PROmodel &model, const PROsyst &syst, const std::vector<surfOut> & cpoints, std::string final_output_tag, bool logx, bool logy, size_t xaxis_idx,size_t yaxis_idx, std::vector<float> &A, std::vector<float> &B, [[maybe_unused]] size_t n_points){
 
     std::vector<float> binedges_x, binedges_y;

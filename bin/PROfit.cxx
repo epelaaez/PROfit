@@ -187,6 +187,11 @@ int main(int argc, char* argv[])
     bool use_probe = false;
     int n_probe_chunks = 1; // 1 = no chunking by default. Opt in via --probe-chunks N when physics is the wall-time bottleneck.
     bool profile_timing = false; // Toggles PROfile/PROfitter scan-mode timing instrumentation (latin/PSO/LBFGS phase breakdown + parallel efficiency).
+    bool use_surface_amr = false; // Adaptive-mesh-refinement surface scan (PROsurf::FillSurfaceAMR / PROmesh).
+    int amr_initial = 10;
+    int amr_levels  = 3;
+    float amr_delta = 0.5f;
+    std::vector<float> amr_contour_levels;
 
     float xlo, xhi, ylo, yhi;
     std::array<float, 2> xlims, ylims;
@@ -284,6 +289,11 @@ int main(int argc, char* argv[])
     surface_command->add_flag("--only-throw", only_brazil, "Only run Brazil band throws and not the nominal surface")->needs("--brazil-band");
     surface_command->add_option("--from-many", brazil_throws, "Make Brazil band from many provided throws")->needs("--brazil-band");
     surface_command->add_option("--curve-mode", procurve_points , "Make a PROcurve plot from param A to param B.");
+    surface_command->add_flag("--surface-amr", use_surface_amr, "Use adaptive-mesh-refinement (PROmesh) instead of the fixed dense grid. Concentrates fits near the target chi^2 contour for ~6-8x wall-time win on equivalent contour quality.");
+    surface_command->add_option("--amr-initial", amr_initial, "AMR coarsest grid size (NxN). Default 10.")->default_val(10);
+    surface_command->add_option("--amr-levels", amr_levels, "AMR refinement depth. Effective resolution along the contour is amr_initial * 2^amr_levels. Default 3.")->default_val(3);
+    surface_command->add_option("--amr-delta", amr_delta, "AMR straddle-band widening (chi^2 units). Refines a cell if any corner is within delta of any contour level. Default 0.5.")->default_val(0.5f);
+    surface_command->add_option("--amr-levels-chi2", amr_contour_levels, "Vector of Delta-chi^2 target levels for AMR contour finding. Default {5.99} = 95% CL at 2 dof. Pass e.g. --amr-levels-chi2 2.30 5.99 11.83 for 1/2/3 sigma in one pass.");
 
     //PROfile, make N profile'd chi^2 for each physics and nuisence parameters
     CLI::App *profile_command = app.add_subcommand("profile", "Make a 1D profiled chi2 for each physics and nuisence parameter.");
@@ -1314,10 +1324,34 @@ int main(int argc, char* argv[])
 
         if(progress_bar) scanFitConfig.progress_bar = true;
         if(!only_brazil) {
-            if(statonly)
+            if(statonly) {
                 surface.FillSurfaceStat(config, scanFitConfig, final_output_tag+"_statonly_surface.txt", CVParams, dseed(myseed.global_rng));
-            else
+            } else if (use_surface_amr) {
+                // Adaptive-mesh-refinement path (PROmesh::run_amr) — concentrates evaluations
+                // near the target contour. Reuses surface.surface() for plot-compat via the
+                // bilinear-reconstructed dense matrix.
+                PROmesh::AMROptions opts;
+                opts.initial_nx     = amr_initial;
+                opts.initial_ny     = amr_initial;
+                opts.max_levels     = amr_levels;
+                opts.delta_widen    = amr_delta;
+                opts.dense_nx       = (int)surface.nbinsx;
+                opts.dense_ny       = (int)surface.nbinsy;
+                opts.produce_dense  = true;
+                if (!amr_contour_levels.empty()) opts.contour_levels = amr_contour_levels;
+                // No prior global-fit best-fit available in this scope; AMR's
+                // initial-level points fall back to running PROfitter::Fit with
+                // no seed (full Latin/PSO). Subsequent level fits get cell-corner
+                // best_fits as warm-start seeds via PROmesh::run_amr.
+                std::vector<Eigen::VectorXf> caller_seeds;
+                surface.FillSurfaceAMR(scanFitConfig,
+                                       final_output_tag+"_surface_amr.txt",
+                                       myseed, nthread,
+                                       caller_seeds,
+                                       opts);
+            } else {
                 surface.FillSurface(scanFitConfig, final_output_tag+"_surface.txt",myseed,nthread);
+            }
         }
 
         std::vector<float> binedges_x, binedges_y;

@@ -20,6 +20,7 @@
 #include "PROmetric.h"
 #include "PROgress.h"
 #include "PROversion.h"
+#include "PROmesh.h"
 
 #include <Eigen/Eigen>
 
@@ -163,6 +164,31 @@ namespace PROfit {
 
             void FillSurfaceStat(const PROconfig &config, const PROfitterConfig &fitconfig, std::string filename, const Eigen::VectorXf &cv_params, uint32_t seed);
             void FillSurface(const PROfitterConfig &fitconfig, std::string filename, PROseed & proseed, int nthreads = 1);
+
+            /**
+             * @brief Adaptive-mesh-refinement surface scan.
+             * @details Replaces the fixed 60×60-style grid scan with `PROmesh::run_amr`. Each
+             * AMR grid point is evaluated by a per-thread `PROfitter::Fit` call (via a
+             * thread-local metric clone) using the AMR-supplied warm-start seeds. After AMR
+             * converges, the sparse evaluated map is written to a text file (one
+             * (xphys, yphys, χ²) row per evaluated point), polyline contours are returned for
+             * each level in `opts.contour_levels`, and the optional bilinear-reconstructed
+             * dense matrix is copied into `surface(nbinsx, nbinsy)` for plot-compat.
+             * @param fitconfig    PROfitter configuration (Latin / PSO / LBFGS).
+             * @param filename     Output basename. ".txt" gets the sparse evaluation dump.
+             * @param proseed      Per-thread RNG seeds.
+             * @param nthreads     Number of AMR worker threads.
+             * @param caller_seeds Optional global-fit seed list (e.g., freq_seed_points) used as warm-start for the initial level-0 grid.
+             * @param opts         AMR tunables.
+             * @return             AMRResult with sparse map, polylines, dense matrix, and per-level diagnostic counts.
+             */
+            PROmesh::AMRResult FillSurfaceAMR(
+                const PROfitterConfig &fitconfig,
+                std::string filename,
+                PROseed &proseed,
+                int nthreads,
+                const std::vector<Eigen::VectorXf> &caller_seeds = {},
+                const PROmesh::AMROptions &opts = {});
             std::vector<surfOut> FillCurve(const PROfitterConfig &fitconfig, PROseed &proseed, int nThreads, std::vector<float> &A, std::vector<float> &B, size_t n_points);
             void PlotCurve(const PROconfig &config, const PROmodel &model, const PROsyst &syst, const std::vector<surfOut> & cpoints, std::string final_output_tag, bool logx, bool logy,size_t xaxis_idx,size_t yaxis_idx,std::vector<float> &A, std::vector<float> &B, size_t n_points);
 
