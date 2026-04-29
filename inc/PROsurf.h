@@ -189,6 +189,28 @@ namespace PROfit {
                 int nthreads,
                 const std::vector<Eigen::VectorXf> &caller_seeds = {},
                 const PROmesh::AMROptions &opts = {});
+
+            /**
+             * @brief Render the AMR mesh as a classic "boxes shrinking around the contour" plot.
+             * @details Draws each leaf cell as a TBox at its physical (x, y) bounds.
+             * Cells are coloured by refinement level (deeper = more saturated) so
+             * the eye sees a coarse outer grid with progressively finer cells
+             * hugging the target contour. The contour polylines themselves are
+             * overlaid in red on top. Output is a single-page PDF named
+             * `<filename>_amr_mesh.pdf` written next to the other surface plots.
+             * @param amr        Result returned by FillSurfaceAMR.
+             * @param model      Used to apply log/lin axis transforms.
+             * @param filename   Output basename ("_amr_mesh.pdf" appended).
+             * @param logx       Render x-axis on log scale.
+             * @param logy       Render y-axis on log scale.
+             * @param xaxis_idx  Index of the x physics parameter (for is_log10 lookup and labels).
+             * @param yaxis_idx  Index of the y physics parameter.
+             */
+            void PlotAMRMesh(const PROmesh::AMRResult &amr,
+                             const PROmodel &model,
+                             std::string filename,
+                             bool logx, bool logy,
+                             size_t xaxis_idx, size_t yaxis_idx);
             std::vector<surfOut> FillCurve(const PROfitterConfig &fitconfig, PROseed &proseed, int nThreads, std::vector<float> &A, std::vector<float> &B, size_t n_points);
             void PlotCurve(const PROconfig &config, const PROmodel &model, const PROsyst &syst, const std::vector<surfOut> & cpoints, std::string final_output_tag, bool logx, bool logy,size_t xaxis_idx,size_t yaxis_idx,std::vector<float> &A, std::vector<float> &B, size_t n_points);
 

@@ -1344,11 +1344,16 @@ int main(int argc, char* argv[])
                 // no seed (full Latin/PSO). Subsequent level fits get cell-corner
                 // best_fits as warm-start seeds via PROmesh::run_amr.
                 std::vector<Eigen::VectorXf> caller_seeds;
-                surface.FillSurfaceAMR(scanFitConfig,
-                                       final_output_tag+"_surface_amr.txt",
-                                       myseed, nthread,
-                                       caller_seeds,
-                                       opts);
+                PROmesh::AMRResult amr_result = surface.FillSurfaceAMR(
+                    scanFitConfig,
+                    final_output_tag+"_surface_amr.txt",
+                    myseed, nthread,
+                    caller_seeds,
+                    opts);
+                // Mesh visualisation: cells coloured by refinement level + the
+                // contour polylines overlaid in red. Saved next to the heatmap.
+                surface.PlotAMRMesh(amr_result, *model, final_output_tag,
+                                    logx, logy, xaxis_idx, yaxis_idx);
             } else {
                 surface.FillSurface(scanFitConfig, final_output_tag+"_surface.txt",myseed,nthread);
             }
