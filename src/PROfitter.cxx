@@ -479,8 +479,9 @@ int PROfitter::calcFreqSeedPoints(PROmetric &metric) {
             ub(i) = metric.GetModel().ub(i);
         }
         for(size_t i = nphys; i < nparams; ++i) {
-            lb(i) = metric.GetSysts().spline_lo[i-nphys];
-            ub(i) = metric.GetSysts().spline_hi[i-nphys];
+            size_t si = i - nphys;
+            lb(i) = metric.GetSysts().spline_has_restrict[si] ? metric.GetSysts().spline_restrict_lo[si] : metric.GetSysts().spline_lo[si];
+            ub(i) = metric.GetSysts().spline_has_restrict[si] ? metric.GetSysts().spline_restrict_hi[si] : metric.GetSysts().spline_hi[si];
         }
 
         //fix dm at minima

@@ -503,6 +503,13 @@ namespace PROfit {
                         sv.back().include_only_weights = inconfig.m_mcgen_variation_include_only_weights.at(sys_name);
                         log<LOG_INFO>(L"%1% || Setting include_only_weights for systematic %2% (%3% entries)") % __func__ % sys_name.c_str() % sv.back().include_only_weights.size();
                     }
+                    // Check if restrict is set for this systematic
+                    if(inconfig.m_mcgen_variation_restrict.find(sys_name) != inconfig.m_mcgen_variation_restrict.end()) {
+                        sv.back().has_restrict = true;
+                        sv.back().restrict_lo = inconfig.m_mcgen_variation_restrict.at(sys_name).first;
+                        sv.back().restrict_hi = inconfig.m_mcgen_variation_restrict.at(sys_name).second;
+                        log<LOG_INFO>(L"%1% || Setting restrict=[%2%, %3%] for systematic %4%") % __func__ % sv.back().restrict_lo % sv.back().restrict_hi % sys_name.c_str();
+                    }
                 }
                 if(sys_mode == "flat"){
                     log<LOG_INFO>(L"%1% || Systematic variation %2% is a match for a flat covariance systematic. Processing a such. ") % __func__ % sys_name.c_str();

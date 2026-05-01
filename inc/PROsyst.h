@@ -226,6 +226,9 @@ namespace PROfit {
             std::vector<std::string> covar_names;    ///< Names of all covariance systematics in order.
             std::vector<float> spline_lo;            ///< Lower nuisance-parameter bound for each spline.
             std::vector<float> spline_hi;            ///< Upper nuisance-parameter bound for each spline.
+            std::vector<bool> spline_has_restrict;   ///< Whether each spline has an explicit restrict range.
+            std::vector<float> spline_restrict_lo;   ///< Lower clamp bound for each spline (used only when spline_has_restrict is true).
+            std::vector<float> spline_restrict_hi;   ///< Upper clamp bound for each spline (used only when spline_has_restrict is true).
             std::vector<int> spline_binnings;        ///< Binning-scheme index for each spline.
             Eigen::VectorXf spline_priors;           ///< Prior width (sigma) for each spline nuisance parameter.
             Eigen::VectorXf spline_centers;          ///< Prior centre for each spline nuisance parameter.

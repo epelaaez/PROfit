@@ -286,11 +286,19 @@ namespace PROfit {
                 if(i < nparams) {
                     if(value(i) > metric.GetModel().ub(i) || value(i) < metric.GetModel().lb(i) || value(i) < -5.0f)
                         return false;
-                } else if(metric.GetSysts().spline_hi[i-nparams] == 1.0) {
-                    if(value(i) < -1 || value(i) > 1) return false;
                 } else {
-                    if(value(i) < metric.GetSysts().spline_lo[i-nparams] || value(i) > metric.GetSysts().spline_hi[i-nparams])
-                        return false;
+                    size_t si = i - nparams;
+                    float lo, hi;
+                    if(metric.GetSysts().spline_has_restrict[si]) {
+                        lo = metric.GetSysts().spline_restrict_lo[si];
+                        hi = metric.GetSysts().spline_restrict_hi[si];
+                    } else if(metric.GetSysts().spline_hi[si] == 1.0f) {
+                        lo = -1.0f; hi = 1.0f;
+                    } else {
+                        lo = metric.GetSysts().spline_lo[si];
+                        hi = metric.GetSysts().spline_hi[si];
+                    }
+                    if(value(i) < lo || value(i) > hi) return false;
                 }
             }
             return true;
@@ -407,11 +415,19 @@ namespace PROfit {
                 if(i < nparams) {
                     if(value(i) > metric.GetModel().ub(i) || value(i) < std::max(metric.GetModel().lb(i),-5.0f))
                         return false;
-                } else if(metric.GetSysts().spline_hi[i-nparams] == 1.0) {
-                    if(value(i) < -1 || value(i) > 1) return false;
                 } else {
-                    if(value(i) < metric.GetSysts().spline_lo[i-nparams] || value(i) > metric.GetSysts().spline_hi[i-nparams])
-                        return false;
+                    size_t si = i - nparams;
+                    float lo, hi;
+                    if(metric.GetSysts().spline_has_restrict[si]) {
+                        lo = metric.GetSysts().spline_restrict_lo[si];
+                        hi = metric.GetSysts().spline_restrict_hi[si];
+                    } else if(metric.GetSysts().spline_hi[si] == 1.0f) {
+                        lo = -1.0f; hi = 1.0f;
+                    } else {
+                        lo = metric.GetSysts().spline_lo[si];
+                        hi = metric.GetSysts().spline_hi[si];
+                    }
+                    if(value(i) < lo || value(i) > hi) return false;
                 }
             }
             return true;

@@ -76,6 +76,9 @@ namespace PROfit {
                 spline_names.pop_back();
                 spline_lo.pop_back();
                 spline_hi.pop_back();
+                spline_has_restrict.pop_back();
+                spline_restrict_lo.pop_back();
+                spline_restrict_hi.pop_back();
                 spline_binnings.pop_back();
 
                 // Store as covariance instead
@@ -164,6 +167,9 @@ namespace PROfit {
                         ret.splines.push_back(std::move(spline_copy));
                         ret.spline_hi.push_back(spline_hi[idx]);
                         ret.spline_lo.push_back(spline_lo[idx]);
+                        ret.spline_has_restrict.push_back(spline_has_restrict[idx]);
+                        ret.spline_restrict_lo.push_back(spline_restrict_lo[idx]);
+                        ret.spline_restrict_hi.push_back(spline_restrict_hi[idx]);
                         ret.spline_binnings.push_back(spline_binnings[idx]);
                         tmp_priors(ret.n_splines) = spline_priors(idx);
                         tmp_centers(ret.n_splines) = spline_centers(idx);
@@ -210,6 +216,9 @@ namespace PROfit {
                         ret.splines.push_back(std::move(spline_copy));
                         ret.spline_hi.push_back(spline_hi[idx]);
                         ret.spline_lo.push_back(spline_lo[idx]);
+                        ret.spline_has_restrict.push_back(spline_has_restrict[idx]);
+                        ret.spline_restrict_lo.push_back(spline_restrict_lo[idx]);
+                        ret.spline_restrict_hi.push_back(spline_restrict_hi[idx]);
                         ret.spline_binnings.push_back(spline_binnings[idx]);
                         tmp_priors(ret.n_splines) = spline_priors(idx);
                         tmp_centers(ret.n_splines) = spline_centers(idx);
@@ -782,6 +791,9 @@ namespace PROfit {
         spline_names.push_back(syst.systname);
         spline_lo.push_back(knobvals[0]);
         spline_hi.push_back(knobvals.back());
+        spline_has_restrict.push_back(syst.has_restrict);
+        spline_restrict_lo.push_back(syst.restrict_lo);
+        spline_restrict_hi.push_back(syst.restrict_hi);
         spline_binnings.push_back(syst.binning);
 
     }

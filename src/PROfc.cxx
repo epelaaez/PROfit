@@ -25,10 +25,13 @@ void fc_worker(fc_args args, MultiPROgressBar &progress) {
     }
     //upper lower bounds for splines
     for(size_t j = nphys; j < nparams; ++j) {
-        lb_osc(j) = args.systs.spline_lo[j-nphys];
-        ub_osc(j) = args.systs.spline_hi[j-nphys];
-        lb(j) = args.systs.spline_lo[j-nphys];
-        ub(j) = args.systs.spline_hi[j-nphys];
+        size_t si = j - nphys;
+        float lo = args.systs.spline_has_restrict[si] ? args.systs.spline_restrict_lo[si] : args.systs.spline_lo[si];
+        float hi = args.systs.spline_has_restrict[si] ? args.systs.spline_restrict_hi[si] : args.systs.spline_hi[si];
+        lb_osc(j) = lo;
+        ub_osc(j) = hi;
+        lb(j) = lo;
+        ub(j) = hi;
     }
     std::uniform_int_distribution<uint32_t> dseed(0, std::numeric_limits<uint32_t>::max());
     Eigen::VectorXf cached_seed_syst = Eigen::VectorXf::Zero(nparams);
@@ -39,10 +42,11 @@ void fc_worker(fc_args args, MultiPROgressBar &progress) {
         std::normal_distribution<float> d;
         Eigen::VectorXf throwC = Eigen::VectorXf::Constant(args.config.m_num_variable_bins_total_collapsed[args.config.i_prime], 0);
         for(size_t i = 0; i < args.systs.GetNSplines(); i++) {
+            float tlo = args.systs.spline_has_restrict[i] ? args.systs.spline_restrict_lo[i] : args.systs.spline_lo[i];
+            float thi = args.systs.spline_has_restrict[i] ? args.systs.spline_restrict_hi[i] : args.systs.spline_hi[i];
             do {
                 throws(i+nphys) = d(rng);
-            } while(throws(i+nphys) < args.systs.spline_lo[i]
-                    || throws(i+nphys) > args.systs.spline_hi[i]);
+            } while(throws(i+nphys) < tlo || throws(i+nphys) > thi);
         }
         for(size_t i = 0; i < args.config.m_num_variable_bins_total_collapsed[args.config.i_prime]; i++)
             throwC(i) = d(rng);

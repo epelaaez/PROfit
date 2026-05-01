@@ -1085,6 +1085,7 @@ int main(int argc, char* argv[])
 
         std::vector<TH1D> priors, posteriors;
         Eigen::MatrixXf prior_covariance, spline_covariance;
+        Eigen::VectorXf prior_param_lo, prior_param_hi, post_param_lo, post_param_hi;
         // Fix physics parameters
         std::vector<int> fixed_pars;
         for(size_t i = 0; i < N_phys_params; ++i) fixed_pars.push_back(i);
@@ -1098,15 +1099,15 @@ int main(int argc, char* argv[])
         //log<LOG_INFO>(L"%1% ||ARSOut %2% ") % __func__ % cv.Spec();
         //log<LOG_INFO>(L"%1% || address %2%") % __func__ % &cv;
 
-        PROerrorbar  err_band = 
+        PROerrorbar  err_band =
             MCMC_prefit_errors
-            ? getMCMCErrorBand(mh_pre, fitConfig.MCMCburn, fitConfig.MCMCiter, config, prop, *metric, best_fit, priors, prior_covariance, binwidth_scale,config.i_prime)
+            ? getMCMCErrorBand(mh_pre, fitConfig.MCMCburn, fitConfig.MCMCiter, config, prop, *metric, best_fit, priors, prior_covariance, prior_param_lo, prior_param_hi, binwidth_scale,config.i_prime)
             : getErrorBand(config, prop, variable_systs[config.i_prime], *model, cv,CVParams, binwidth_scale,config.i_prime);
 
         //Metropolis mh_post(simple_target{*metric}, simple_proposal(*metric, dseed(PROseed::global_rng), 0.2, fixed_pars), best_fit, dseed(PROseed::global_rng));
         Metropolis mh_post(simple_target{*metric}, adaptive_proposal(*metric, dseed(PROseed::global_rng), fixed_pars), best_fit, dseed(PROseed::global_rng));
         log<LOG_INFO>(L"%1% || Starting global getPostFitErrorBand() ") % __func__;
-        PROerrorbar post_err_band = getMCMCErrorBand(mh_post, fitConfig.MCMCburn, fitConfig.MCMCiter, config, prop, *metric, best_fit, posteriors, spline_covariance, binwidth_scale,config.i_prime);
+        PROerrorbar post_err_band = getMCMCErrorBand(mh_post, fitConfig.MCMCburn, fitConfig.MCMCiter, config, prop, *metric, best_fit, posteriors, spline_covariance, post_param_lo, post_param_hi, binwidth_scale,config.i_prime);
 
         std::vector<TPaveText> texts;
         TPaveText chi2text(0.55, 0.50, 0.85, 0.58, "NDC");
@@ -1168,7 +1169,7 @@ int main(int argc, char* argv[])
         log<LOG_INFO>(L"%1% || fakedataparams for Plot (true_params/red stars): %2%") % __func__ % fakedataparams;
         profile.Plot(config, metric->GetSysts(), metric->GetModel(), *metric, myseed,
                 final_output_tag+"_PROfile", !systs_only, best_fit,
-                fakedataparams);
+                fakedataparams, spline_covariance, post_param_lo, post_param_hi);
         TFile fout((final_output_tag+"_PROfile.root").c_str(), "RECREATE");
         profile.onesig.Write("one_sigma_errs");
         pre_hist.Write("cv");
@@ -2136,8 +2137,9 @@ int main(int argc, char* argv[])
                 ub(i) = metric->GetModel().default_val(i);
             }
             for(size_t i = nphys; i < nparams; ++i) {
-                lb(i) = metric->GetSysts().spline_lo[i-nphys];
-                ub(i) = metric->GetSysts().spline_hi[i-nphys];
+                size_t si = i - nphys;
+                lb(i) = metric->GetSysts().spline_has_restrict[si] ? metric->GetSysts().spline_restrict_lo[si] : metric->GetSysts().spline_lo[si];
+                ub(i) = metric->GetSysts().spline_has_restrict[si] ? metric->GetSysts().spline_restrict_hi[si] : metric->GetSysts().spline_hi[si];
             }
             metric->setBounds(lb, ub);
             PROfitter fitter(metric->UpperBound(), metric->LowerBound(), fitConfig);
@@ -2454,6 +2456,7 @@ int main(int argc, char* argv[])
 
         std::vector<TH1D> priors, posteriors;
         Eigen::MatrixXf prior_covariance, spline_covariance;
+        Eigen::VectorXf prior_param_lo, prior_param_hi, post_param_lo, post_param_hi;
         // Fix physics parameters
         std::vector<int> fixed_pars;
         for(size_t i = 0; i < N_phys_params; ++i) fixed_pars.push_back(i);
@@ -2465,14 +2468,14 @@ int main(int argc, char* argv[])
         log<LOG_INFO>(L"%1% || Starting global getErrorBand() ") % __func__;
         Metropolis mh_pre(prior_only_target{*metric}, adaptive_proposal(*metric, dseed(PROseed::global_rng), fixed_pars), best_fit, dseed(PROseed::global_rng));
 
-        PROerrorbar  err_band = 
+        PROerrorbar  err_band =
             MCMC_prefit_errors
-            ? getMCMCErrorBand(mh_pre, fitConfig.MCMCburn, fitConfig.MCMCiter, config, prop, *metric, best_fit, priors, prior_covariance, binwidth_scale,config.i_prime)
+            ? getMCMCErrorBand(mh_pre, fitConfig.MCMCburn, fitConfig.MCMCiter, config, prop, *metric, best_fit, priors, prior_covariance, prior_param_lo, prior_param_hi, binwidth_scale,config.i_prime)
             : getErrorBand(config, prop, variable_systs[config.i_prime], *model, cv,CVParams, binwidth_scale,config.i_prime);
 
         Metropolis mh_post(simple_target{*metric}, adaptive_proposal(*metric, dseed(PROseed::global_rng), fixed_pars), best_fit, dseed(PROseed::global_rng));
         log<LOG_INFO>(L"%1% || Starting global getPostFitErrorBand() ") % __func__;
-        PROerrorbar post_err_band = getMCMCErrorBand(mh_post, fitConfig.MCMCburn, fitConfig.MCMCiter, config, prop, *metric, best_fit, posteriors, spline_covariance, binwidth_scale,config.i_prime);
+        PROerrorbar post_err_band = getMCMCErrorBand(mh_post, fitConfig.MCMCburn, fitConfig.MCMCiter, config, prop, *metric, best_fit, posteriors, spline_covariance, post_param_lo, post_param_hi, binwidth_scale,config.i_prime);
 
         std::vector<TPaveText> texts;
         TPaveText chi2text(0.55, 0.50, 0.85, 0.58, "NDC");
