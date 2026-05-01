@@ -920,10 +920,9 @@ int PROconfig::LoadFromXML(const std::string &filename){
             log<LOG_INFO>(L"%1% || Parsing <DetVarSection> index %2%") % __func__ % section_idx;
 
             const char* dv_treename = pDetVar->Attribute("treename");
-            if(!dv_treename) {
-                log<LOG_ERROR>(L"%1% || ERROR: <DetVarSection> must have a treename attribute") % __func__;
-                exit(EXIT_FAILURE);
-            }
+            bool have_tree = dv_treename;
+            const char* dv_filename = pDetVar->Attribute("filename");
+            bool have_file = dv_filename;
 
             const char* dv_scale_str = pDetVar->Attribute("scale");
             std::string dv_scale = dv_scale_str ? dv_scale_str : "1.0";
@@ -975,14 +974,24 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 log<LOG_ERROR>(L"%1% || ERROR: <DetVarSection> must have a <cv> element") % __func__;
                 exit(EXIT_FAILURE);
             }
-            const char* cv_filename = pCV->Attribute("filename");
+            if(!have_file) dv_filename = pCV->Attribute("filename");
+            if(!dv_filename) {
+                log<LOG_ERROR>(L"%1% || ERROR: Require filename attribute in either DetVarSection or cv.") % __func__;
+                exit(EXIT_FAILURE);
+            }
             const char* cv_pot_str = pCV->Attribute("pot");
-            if(!cv_filename || !cv_pot_str) {
-                log<LOG_ERROR>(L"%1% || ERROR: <cv> must have filename and pot attributes") % __func__;
+            if(!cv_pot_str) {
+                log<LOG_ERROR>(L"%1% || ERROR: <cv> must have pot attribute") % __func__;
+                exit(EXIT_FAILURE);
+            }
+            if(!have_tree) dv_treename = pCV->Attribute("treename");
+            if(!dv_treename) {
+                log<LOG_ERROR>(L"%1% || ERROR: Require a treename in either the DetVarSection or cv elements.") % __func__;
                 exit(EXIT_FAILURE);
             }
             DetVarFile cv_file;
-            cv_file.filename = cv_filename;
+            cv_file.filename = dv_filename;
+            cv_file.treename = dv_treename;
             cv_file.name = (section_idx == 0) ? "cv" : ("cv_" + std::to_string(section_idx));
             cv_file.pot = strtod(cv_pot_str, &end);
             cv_file.is_cv = true;
@@ -990,29 +999,41 @@ int PROconfig::LoadFromXML(const std::string &filename){
             { const char* frac = pCV->Attribute("partial_load_frac");
               cv_file.partial_load_frac = frac ? (float)strtod(frac, nullptr) : 1.0f; }
             m_detvar_files.push_back(cv_file);
-            log<LOG_INFO>(L"%1% || DetVar CV file (section %2%): %3%, POT: %4%") % __func__ % section_idx % cv_filename % cv_file.pot;
+            log<LOG_INFO>(L"%1% || DetVar CV file (section %2%): %3%, POT: %4%") % __func__ % section_idx % dv_filename % cv_file.pot;
 
             // Parse variation files
             tinyxml2::XMLElement *pVar = pDetVar->FirstChildElement("variation");
             while(pVar) {
-                const char* var_filename = pVar->Attribute("filename");
-                const char* var_name = pVar->Attribute("name");
-                const char* var_pot_str = pVar->Attribute("pot");
-                if(!var_filename || !var_name || !var_pot_str) {
-                    log<LOG_ERROR>(L"%1% || ERROR: <variation> must have filename, name, and pot attributes") % __func__;
+                if(!have_file) dv_filename = pVar->Attribute("filename");
+                if(!dv_filename) {
+                    log<LOG_ERROR>(L"%1% || ERROR: Require filename attribute in either DetVarSection or variation.") % __func__;
                     exit(EXIT_FAILURE);
                 }
+                const char* var_name = pVar->Attribute("name");
+                const char* var_pot_str = pVar->Attribute("pot");
+                if(!var_name || !var_pot_str) {
+                    log<LOG_ERROR>(L"%1% || ERROR: <variation> must have name and pot attributes") % __func__;
+                    exit(EXIT_FAILURE);
+                }
+                if(!have_tree) dv_treename = pVar->Attribute("treename");
+                if(!dv_treename) {
+                    log<LOG_ERROR>(L"%1% || ERROR: Require a treename in either the DetVarSection or variation elements.") % __func__;
+                    exit(EXIT_FAILURE);
+                }
+                const char *knobval = pVar->Attribute("knobval");
                 DetVarFile var_file;
-                var_file.filename = var_filename;
+                var_file.filename = dv_filename;
+                var_file.treename = dv_treename;
                 var_file.name = var_name;
                 var_file.pot = strtod(var_pot_str, &end);
                 var_file.is_cv = false;
+                var_file.knobval = knobval ? strtod(knobval, &end) : 1;
                 var_file.section_index = section_idx;
                 { const char* frac = pVar->Attribute("partial_load_frac");
                   var_file.partial_load_frac = frac ? (float)strtod(frac, nullptr) : 1.0f; }
                 m_detvar_files.push_back(var_file);
                 m_detvar_variation_names.insert(var_name);
-                log<LOG_INFO>(L"%1% || DetVar variation '%2%' file (section %3%): %4%, POT: %5%") % __func__ % var_name % section_idx % var_filename % var_file.pot;
+                log<LOG_INFO>(L"%1% || DetVar variation '%2%' file (section %3%): %4%, POT: %5%") % __func__ % var_name % section_idx % dv_filename % var_file.pot;
 
                 pVar = pVar->NextSiblingElement("variation");
             }
@@ -1083,7 +1104,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 }
 
                 // MCFile template with placeholders
-                dvXml << "<MCFile treename=\"" << dv_treename << "\" filename=\"__DETVAR_FILENAME__\" scale=\"" << dv_scale << "\" pot=\"__DETVAR_POT__\" partial_load_frac=\"__DETVAR_PARTIAL_LOAD_FRAC__\">\n";
+                dvXml << "<MCFile treename=\"__DETVAR_TREENAME__\" filename=\"__DETVAR_FILENAME__\" scale=\"" << dv_scale << "\" pot=\"__DETVAR_POT__\" partial_load_frac=\"__DETVAR_PARTIAL_LOAD_FRAC__\">\n";
 
                 // Serialize friend trees from this DetVarSection
                 tinyxml2::XMLElement *pDVFriend = pDetVar->FirstChildElement("friend");
@@ -2365,6 +2386,12 @@ PROconfig PROconfig::BuildDetVarConfig(size_t file_index) const {
         auto pos = xml_str.find(fn_placeholder);
         if(pos != std::string::npos) {
             xml_str.replace(pos, fn_placeholder.size(), dvfile.filename);
+        }
+
+        std::string tr_placeholder = "__DETVAR_TREENAME__";
+        pos = xml_str.find(tr_placeholder);
+        if(pos != std::string::npos) {
+            xml_str.replace(pos, tr_placeholder.size(), dvfile.treename);
         }
 
         std::string pot_placeholder = "__DETVAR_POT__";

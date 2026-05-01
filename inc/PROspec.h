@@ -247,6 +247,14 @@ namespace PROfit{
                 }
 
             /**
+             * @brief Return a (non-const) reference to the underlying spectrum vector.
+             * @return (Non-const) Reference to the Eigen::VectorXf of bin contents.
+             */
+            inline Eigen::VectorXf& Spec() {
+                return spec;
+            }
+
+            /**
              * @brief Return a const reference to the underlying error vector.
              * @return Const reference to the Eigen::VectorXf of per-bin errors.
              */
@@ -255,6 +263,13 @@ namespace PROfit{
                     return error;
                 }
 
+            /**
+             * @brief Return a (non-const) reference to the underlying error vector.
+             * @return (Non-const) Reference to the Eigen::VectorXf of per-bin errors.
+             */
+            inline Eigen::VectorXf& Error() {
+                return error;
+            }
 
             /**
              * @brief Check whether two PROspec objects have the same number of bins.
