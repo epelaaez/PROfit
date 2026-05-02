@@ -380,7 +380,10 @@ namespace PROfit{
 
             std::vector<std::vector<std::pair<float,float>>> m_variable_bin_to_edges;
 
-            std::vector<Eigen::MatrixXf> variable_collapsing_matrices; 
+            std::vector<Eigen::MatrixXf> variable_collapsing_matrices;
+            // Sparse companions to variable_collapsing_matrices (one nonzero per row).
+            // Used by CollapseMatrix in the chi^2 inner loop; built once in construct_variable_collapsing_matrices.
+            std::vector<Eigen::SparseMatrix<float>> variable_collapsing_matrices_sparse;
             std::vector<Eigen::VectorXf> collapsed_bin_widths;
 
             //This section entirely for montecarlo generation of a covariance matrix or PROspec 
@@ -460,10 +463,14 @@ namespace PROfit{
              * Note: To collapse a full matrix M, please do T.transpose() * M * T
              * 	     To collapse a full vector V, please do T.transpose() * V
              */
-            inline 
-                Eigen::MatrixXf GetCollapsingMatrix() const {return variable_collapsing_matrices[i_prime]; }
             inline
-                Eigen::MatrixXf GetCollapsingMatrix(int other_index) const {return variable_collapsing_matrices[other_index]; }
+                const Eigen::MatrixXf& GetCollapsingMatrix() const {return variable_collapsing_matrices[i_prime]; }
+            inline
+                const Eigen::MatrixXf& GetCollapsingMatrix(int other_index) const {return variable_collapsing_matrices[other_index]; }
+            inline
+                const Eigen::SparseMatrix<float>& GetCollapsingMatrixSparse() const {return variable_collapsing_matrices_sparse[i_prime]; }
+            inline
+                const Eigen::SparseMatrix<float>& GetCollapsingMatrixSparse(int other_index) const {return variable_collapsing_matrices_sparse[other_index]; }
 
             /* Function: Calculate how big each mode block and decector block are, for any given number of channels/subchannels, before and after the collapse
              * Note: only consider mode/detector/channel/subchannels that are actually used 

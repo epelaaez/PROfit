@@ -2233,6 +2233,14 @@ void PROconfig::construct_variable_collapsing_matrices(){
         }
 
     }
+
+    // Build sparse companions. Each row of T has exactly one 1.0, so nnz = m_num_variable_bins_total[io].
+    variable_collapsing_matrices_sparse.clear();
+    variable_collapsing_matrices_sparse.reserve(m_num_variables);
+    for(size_t io = 0; io < m_num_variables; ++io) {
+        variable_collapsing_matrices_sparse.emplace_back(variable_collapsing_matrices[io].sparseView());
+        variable_collapsing_matrices_sparse.back().makeCompressed();
+    }
     return;
 }
 
