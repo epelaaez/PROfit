@@ -69,7 +69,7 @@ namespace PROfit{
 
             /*Function: operator() is what is passed to minimizer.*/
             virtual float operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient);
-            virtual float operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient, bool nograd);
+            virtual float operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient, bool rungradient);
 
             /** @brief Reset cached state and clear any fixed-parameter list. */
             virtual void reset() {

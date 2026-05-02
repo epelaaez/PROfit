@@ -67,7 +67,7 @@ namespace PROfit{
 
             /*Function: operator() is what is passed to minimizer.*/
             virtual float operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient);
-            virtual float operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient, bool nograd);
+            virtual float operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient, bool rungradient);
 
             /** @brief Return a heap-allocated copy of this PROCNP. */
             PROmetric *Clone() const {

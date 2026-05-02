@@ -87,10 +87,9 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
 
     Eigen::MatrixXf inverted_collapsed_full_covariance(config.m_num_variable_bins_total_collapsed[config.i_prime],config.m_num_variable_bins_total_collapsed[config.i_prime]);
 
-    Eigen::MatrixXf diag = result.Spec().array().matrix().asDiagonal(); 
-    Eigen::MatrixXf full_covariance = diag*(syst->fractional_covariance)*diag;
-   
-    Eigen::VectorXf normdata = shape_only 
+    Eigen::MatrixXf full_covariance = result.Spec().asDiagonal() * (syst->fractional_covariance) * result.Spec().asDiagonal();
+
+    Eigen::VectorXf normdata = shape_only
         ? data.Normalize(config,result)
         : data.Spec();
 
@@ -193,8 +192,7 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
                 // Calculate chi2_plus or chi2_minus, depending on boundary
                 PROspec result = FillSpectra(config, peller, *syst, model, param_plus, strat != EventByEvent,config.i_prime);
 
-                Eigen::MatrixXf diag = result.Spec().array().matrix().asDiagonal();
-                Eigen::MatrixXf full_covariance = diag*(syst->fractional_covariance)*diag;
+                Eigen::MatrixXf full_covariance = result.Spec().asDiagonal() * (syst->fractional_covariance) * result.Spec().asDiagonal();
                 Eigen::MatrixXf collapsed_full_covariance = CollapseMatrix(config, full_covariance);
                 
                 // Reduce matrices using non_empty_indices
@@ -239,8 +237,7 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
                 } else {
                     PROspec result = FillSpectra(config, peller, *syst, model, param_plus, strat != EventByEvent,config.i_prime);
 
-                    Eigen::MatrixXf diag = result.Spec().array().matrix().asDiagonal();
-                    Eigen::MatrixXf full_covariance = diag*(syst->fractional_covariance)*diag;
+                    Eigen::MatrixXf full_covariance = result.Spec().asDiagonal() * (syst->fractional_covariance) * result.Spec().asDiagonal();
                     Eigen::MatrixXf collapsed_full_covariance = CollapseMatrix(config, full_covariance);
                     
                     // Reduce matrices using non_empty_indices
@@ -269,8 +266,7 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
                 } else {
                     PROspec result = FillSpectra(config, peller, *syst, model, param_minus, strat != EventByEvent,config.i_prime);
 
-                    Eigen::MatrixXf diag = result.Spec().array().matrix().asDiagonal();
-                    Eigen::MatrixXf full_covariance = diag*(syst->fractional_covariance)*diag;
+                    Eigen::MatrixXf full_covariance = result.Spec().asDiagonal() * (syst->fractional_covariance) * result.Spec().asDiagonal();
                     Eigen::MatrixXf collapsed_full_covariance = CollapseMatrix(config, full_covariance);
                     
                     // Reduce matrices using non_empty_indices
@@ -327,8 +323,7 @@ float PROchi::getSingleChannelChi(size_t global_channel_index, const PROspec & c
     //only calculate a syst covariance if we have any covariance parameters as defined in the xml
     if(syst->GetNCovar()){
         // Calculate Full Syst Covariance matrix
-        Eigen::MatrixXf diag =  cv.Spec().array().matrix().asDiagonal(); 
-        Eigen::MatrixXf full_covariance =  diag*(syst->fractional_covariance)*diag;
+        Eigen::MatrixXf full_covariance = cv.Spec().asDiagonal() * (syst->fractional_covariance) * cv.Spec().asDiagonal();
 
         // Collapse Covariance and Spectra 
         Eigen::MatrixXf collapsed_full_covariance =  CollapseMatrix(config,full_covariance);
