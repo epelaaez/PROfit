@@ -42,6 +42,91 @@ namespace PROfit {
     }
 
 
+    PROspec FillSpectra(const PROconfig &inconfig, const PROpeller &inprop, const PROsyst &insyst, const PROmodel &inmodel, const Eigen::VectorXf &params, FillSpectraCache &cache, bool binned, size_t var_index) {
+        // Unbinned path can't be cleanly split phys/syst (per-event Fill mixes them).
+        // Fall back, invalidate cache.
+        if(!binned) {
+            cache.invalidate();
+            return FillSpectra(inconfig, inprop, insyst, inmodel, params, binned, var_index);
+        }
+
+        Eigen::VectorXf phys = params.segment(0, inmodel.nparams);
+        Eigen::VectorXf shifts = params.segment(inmodel.nparams, params.size() - inmodel.nparams);
+
+        const bool ctx_changed = (cache.last_var_index != (int)var_index ||
+                                  cache.last_syst_ptr != &insyst ||
+                                  cache.last_model_ptr != &inmodel);
+
+        // ---- Systematic-weights half (depends only on shifts) ----
+        const bool shifts_changed = ctx_changed ||
+                                    cache.last_shifts.size() != shifts.size() ||
+                                    cache.last_shifts != shifts;
+        if(shifts_changed) {
+            const size_t nbins_var = inconfig.m_num_variable_bins_total[var_index];
+            Eigen::VectorXf systw = Eigen::VectorXf::Constant(nbins_var, 1);
+            for(int i = 0; i < (int)insyst.GetNSplines(); ++i) {
+                size_t binning = insyst.spline_binnings[i];
+                if(binning == var_index) {
+                    for(size_t k = 0; k < nbins_var; ++k)
+                        systw(k) *= insyst.GetSplineShift(i, shifts(i), k);
+                } else {
+                    const size_t nbins_binning = inconfig.m_num_variable_bins_total[binning];
+                    Eigen::VectorXf spline_shifts(nbins_binning);
+                    for(size_t j = 0; j < nbins_binning; ++j)
+                        spline_shifts(j) = insyst.GetSplineShift(i, shifts(i), j);
+                    const auto &hist = inprop.variable_hist_storage(binning, var_index);
+                    Eigen::VectorXf weighted_sum   = hist.transpose() * spline_shifts;
+                    Eigen::VectorXf unweighted_sum = hist.colwise().sum().transpose();
+                    for(size_t k = 0; k < nbins_var; ++k)
+                        if(unweighted_sum(k) > 0)
+                            systw(k) *= weighted_sum(k) / unweighted_sum(k);
+                }
+            }
+            cache.last_systw = std::move(systw);
+            cache.last_shifts = shifts;
+        }
+
+        // ---- Physics-result half (depends only on phys) ----
+        const bool phys_changed = ctx_changed ||
+                                  cache.last_phys.size() != phys.size() ||
+                                  cache.last_phys != phys;
+        if(phys_changed) {
+            Eigen::VectorXf result;
+            if(inmodel.is_trivial) {
+                result = inmodel.H_combined[var_index].col(0);
+            } else {
+                const size_t N_ivars = inmodel.ivars.size();
+                std::vector<size_t> ivar_sizes(N_ivars);
+                for(size_t k = 0; k < N_ivars; ++k)
+                    ivar_sizes[k] = inprop.variable_midbin[inmodel.ivars[k]].size();
+
+                std::vector<std::vector<float>> var_arrs(N_ivars, std::vector<float>(inmodel.n_phys_bins));
+                for(long int flat = 0; flat < inmodel.n_phys_bins; ++flat) {
+                    long int rem = flat;
+                    for(int k = (int)N_ivars - 1; k >= 0; --k) {
+                        var_arrs[k][flat] = inprop.variable_midbin[inmodel.ivars[k]][rem % ivar_sizes[k]];
+                        rem /= (long int)ivar_sizes[k];
+                    }
+                }
+
+                auto probs = inmodel.get_probs(phys, var_arrs);
+                Eigen::Map<const Eigen::VectorXf> probs_flat(probs.data(), probs.size());
+                result = inmodel.H_combined[var_index] * probs_flat;
+            }
+            cache.last_result = std::move(result);
+            cache.last_phys = phys;
+        }
+
+        cache.last_var_index = (int)var_index;
+        cache.last_syst_ptr = &insyst;
+        cache.last_model_ptr = &inmodel;
+
+        Eigen::VectorXf final_spec  = cache.last_systw.cwiseProduct(cache.last_result);
+        Eigen::VectorXf final_error = final_spec.array().abs().sqrt();
+        return PROspec(final_spec, final_error);
+    }
+
+
     PROspec FillSpectra(const PROconfig &inconfig, const PROpeller &inprop, const PROsyst &insyst, const PROmodel &inmodel, const Eigen::VectorXf &params, bool binned, size_t var_index){
         PROspec myspectrum(inconfig.m_num_variable_bins_total[var_index]);
         Eigen::VectorXf phys   = params.segment(0, inmodel.nparams);

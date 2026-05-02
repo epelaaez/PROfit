@@ -41,6 +41,7 @@ PROpoisson::PROpoisson(const std::string tag, const PROconfig &conin, const PROp
           prior_covariance(iB, iA) = std::get<2>(t);
         }
         prior_covariance = systin->spline_priors.asDiagonal() * prior_covariance * systin->spline_priors.asDiagonal();
+        prior_covariance_inv = prior_covariance.inverse();
     }
 }
 
@@ -51,7 +52,7 @@ float PROpoisson::Pull(const Eigen::VectorXf &systs) {
         return (centered.array().square() / syst->spline_priors.array().square()).sum();
     }
 
-    return centered.dot(prior_covariance.inverse() * centered);
+    return centered.dot(prior_covariance_inv * centered);
 }
 
 void PROpoisson::fixSpline(int fix, float valin){
@@ -78,9 +79,9 @@ float PROpoisson::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &grad
     }
     Eigen::VectorXf subvector2 = param.segment(nparams - nsyst, nsyst);
     
-    PROspec result = FillSpectra(config, peller, *syst, model, param, strat == BinnedChi2);
+    PROspec result = FillSpectra(config, peller, *syst, model, param, fs_cache, strat == BinnedChi2);
 
-    const Eigen::VectorXf vdata = shape_only 
+    const Eigen::VectorXf vdata = shape_only
         ? data.Normalize(config,result)
         : data.Spec();
     const Eigen::VectorXf vmc = CollapseMatrix(config, result.Spec());
@@ -111,7 +112,7 @@ float PROpoisson::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &grad
                     continue;
                 }
             }
-            PROspec result = FillSpectra(config, peller, *syst, model, tmpParams, strat != EventByEvent);
+            PROspec result = FillSpectra(config, peller, *syst, model, tmpParams, fs_cache, strat != EventByEvent);
 
             const Eigen::VectorXf vdata = shape_only 
                 ? data.Normalize(config,result)

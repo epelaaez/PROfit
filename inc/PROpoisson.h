@@ -26,6 +26,7 @@
 #include "PROpeller.h"
 #include "PROmodel.h"
 #include "PROmetric.h"
+#include "PROcess.h"
 
 namespace PROfit{
 
@@ -61,6 +62,9 @@ namespace PROfit{
 
             bool correlated_systematics;      ///< If true, use correlated pull covariance.
             Eigen::MatrixXf prior_covariance; ///< Prior covariance matrix for nuisance parameters.
+            Eigen::MatrixXf prior_covariance_inv; ///< Inverse of prior_covariance, computed once in the ctor.
+
+            FillSpectraCache fs_cache;        ///< Per-thread split-half cache for FillSpectra.
 
 
             /*Function: Constructor bringing all objects together*/
@@ -76,6 +80,7 @@ namespace PROfit{
                 physics_param_fixed.clear();
                 last_value = 0;
                 last_param = Eigen::VectorXf::Constant(last_param.size(), 0);
+                fs_cache.invalidate();
             }
 
             /** @brief Return a heap-allocated copy of this PROpoisson. */
@@ -96,6 +101,7 @@ namespace PROfit{
             /** @brief Replace the internal systematic pointer with @p new_syst. */
             virtual void override_systs(const PROsyst &new_syst) {
                 syst = &new_syst;
+                fs_cache.invalidate();
             }
 
             /**
