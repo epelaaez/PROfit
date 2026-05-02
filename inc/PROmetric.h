@@ -51,12 +51,12 @@ namespace PROfit {
             virtual float operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient) = 0;
             /**
              * @brief Evaluate the chi-squared, optionally skipping gradient computation.
-             * @param param    Current parameter vector.
-             * @param gradient Output gradient vector; may not be filled if @p nograd is true.
-             * @param nograd   If true, skip gradient computation for speed.
+             * @param param       Current parameter vector.
+             * @param gradient    Output gradient vector; only filled when @p rungradient is true.
+             * @param rungradient If true, compute the gradient; if false, skip it for speed.
              * @return Chi-squared value.
              */
-            virtual float operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient, bool nograd) = 0;
+            virtual float operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient, bool rungradient) = 0;
             /** @brief Reset any cached state (e.g. last parameter vector and value). */
             virtual void reset() = 0;
             /** @brief Return a heap-allocated deep copy of this PROmetric. */
