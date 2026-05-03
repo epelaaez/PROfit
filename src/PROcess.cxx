@@ -58,32 +58,117 @@ namespace PROfit {
                                   cache.last_model_ptr != &inmodel);
 
         // ---- Systematic-weights half (depends only on shifts) ----
-        const bool shifts_changed = ctx_changed ||
-                                    cache.last_shifts.size() != shifts.size() ||
-                                    cache.last_shifts != shifts;
-        if(shifts_changed) {
-            const size_t nbins_var = inconfig.m_num_variable_bins_total[var_index];
+        // Three branches for the systw vector:
+        //   * full_systw_hit    : shifts identical to cached -> reuse cache.last_systw.
+        //   * try_incremental   : shifts differs in EXACTLY one spline-range element
+        //                          -> Tier 1.3: divide out old factor, multiply in new
+        //                          factor for that one spline. Cache stays pinned to
+        //                          its "central" state (no write-back).
+        //   * full recompute    : everything else (size mismatch, ctx change, multi-diff,
+        //                          or incremental gave a divide-by-near-zero on some bin).
+        //                          Re-runs the full loop AND populates central_factors.
+        const size_t       nbins_var      = inconfig.m_num_variable_bins_total[var_index];
+        const Eigen::Index nsplines_e     = (Eigen::Index)insyst.GetNSplines();
+        const bool         size_match     = (cache.last_shifts.size() == shifts.size());
+        const bool         factors_valid  = (cache.central_factors.cols() == nsplines_e &&
+                                             cache.central_factors.rows() == (Eigen::Index)nbins_var);
+        const bool         diff_check_ok  = !ctx_changed && size_match && factors_valid;
+
+        int diff_count = 0;
+        int diff_idx   = -1;
+        if(diff_check_ok) {
+            for(Eigen::Index i = 0; i < shifts.size(); ++i) {
+                if(cache.last_shifts(i) != shifts(i)) {
+                    diff_idx = (int)i;
+                    if(++diff_count > 1) break;
+                }
+            }
+        }
+        const bool full_systw_hit  = diff_check_ok && (diff_count == 0);
+        const bool try_incremental = diff_check_ok && (diff_count == 1)
+                                                   && (diff_idx >= 0)
+                                                   && (diff_idx < (int)insyst.GetNSplines());
+
+        Eigen::VectorXf       systw_local;            // populated only on the incremental path
+        const Eigen::VectorXf *systw_to_use = nullptr; // points to whichever vector we'll combine
+
+        if(full_systw_hit) {
+            systw_to_use = &cache.last_systw;
+        } else if(try_incremental) {
+            const size_t j       = (size_t)diff_idx;
+            const size_t binning = insyst.spline_binnings[j];
+
+            Eigen::VectorXf new_factor_j(nbins_var);
+            if(binning == var_index) {
+                for(size_t k = 0; k < nbins_var; ++k)
+                    new_factor_j(k) = insyst.GetSplineShift((int)j, shifts(j), (int)k);
+            } else {
+                const size_t nbins_binning = inconfig.m_num_variable_bins_total[binning];
+                Eigen::VectorXf spline_shifts_one(nbins_binning);
+                for(size_t b = 0; b < nbins_binning; ++b)
+                    spline_shifts_one(b) = insyst.GetSplineShift((int)j, shifts(j), (int)b);
+                const auto &hist = inprop.variable_hist_storage(binning, var_index);
+                Eigen::VectorXf weighted_sum   = hist.transpose() * spline_shifts_one;
+                Eigen::VectorXf unweighted_sum = hist.colwise().sum().transpose();
+                for(size_t k = 0; k < nbins_var; ++k)
+                    new_factor_j(k) = (unweighted_sum(k) > 0) ? weighted_sum(k) / unweighted_sum(k)
+                                                              : 1.0f;
+            }
+
+            // Apply division+multiplication into a fresh local systw without touching cache.
+            // If any cached factor for spline j is too small, fall back to full recompute.
+            constexpr float kTiny = 1e-30f;
+            systw_local.resize(nbins_var);
+            bool ok = true;
+            for(size_t k = 0; k < nbins_var; ++k) {
+                const float old_f = cache.central_factors(k, (Eigen::Index)j);
+                if(std::abs(old_f) < kTiny) { ok = false; break; }
+                systw_local(k) = cache.last_systw(k) / old_f * new_factor_j(k);
+            }
+
+            if(ok) {
+                systw_to_use = &systw_local;
+                // CRITICAL: do NOT update cache.last_shifts, cache.last_systw, or
+                // cache.central_factors. Cache stays pinned to the central point so
+                // subsequent single-shift gradient calls also hit the incremental path.
+            }
+            // else fall through to full recompute below
+        }
+
+        if(systw_to_use == nullptr) {
+            // Full recompute: rebuild systw AND populate per-spline factors. The
+            // existing math is preserved bit-for-bit; we just stash each spline's
+            // contribution as we go.
             Eigen::VectorXf systw = Eigen::VectorXf::Constant(nbins_var, 1);
+            Eigen::MatrixXf factors(nbins_var, insyst.GetNSplines());
             for(int i = 0; i < (int)insyst.GetNSplines(); ++i) {
                 size_t binning = insyst.spline_binnings[i];
                 if(binning == var_index) {
-                    for(size_t k = 0; k < nbins_var; ++k)
-                        systw(k) *= insyst.GetSplineShift(i, shifts(i), k);
+                    for(size_t k = 0; k < nbins_var; ++k) {
+                        const float f = insyst.GetSplineShift(i, shifts(i), (int)k);
+                        factors(k, i) = f;
+                        systw(k) *= f;
+                    }
                 } else {
                     const size_t nbins_binning = inconfig.m_num_variable_bins_total[binning];
-                    Eigen::VectorXf spline_shifts(nbins_binning);
-                    for(size_t j = 0; j < nbins_binning; ++j)
-                        spline_shifts(j) = insyst.GetSplineShift(i, shifts(i), j);
+                    Eigen::VectorXf spline_shifts_loc(nbins_binning);
+                    for(size_t b = 0; b < nbins_binning; ++b)
+                        spline_shifts_loc(b) = insyst.GetSplineShift(i, shifts(i), (int)b);
                     const auto &hist = inprop.variable_hist_storage(binning, var_index);
-                    Eigen::VectorXf weighted_sum   = hist.transpose() * spline_shifts;
+                    Eigen::VectorXf weighted_sum   = hist.transpose() * spline_shifts_loc;
                     Eigen::VectorXf unweighted_sum = hist.colwise().sum().transpose();
-                    for(size_t k = 0; k < nbins_var; ++k)
-                        if(unweighted_sum(k) > 0)
-                            systw(k) *= weighted_sum(k) / unweighted_sum(k);
+                    for(size_t k = 0; k < nbins_var; ++k) {
+                        const float f = (unweighted_sum(k) > 0) ? weighted_sum(k) / unweighted_sum(k)
+                                                                : 1.0f;
+                        factors(k, i) = f;
+                        systw(k) *= f;
+                    }
                 }
             }
-            cache.last_systw = std::move(systw);
-            cache.last_shifts = shifts;
+            cache.last_systw      = std::move(systw);
+            cache.last_shifts     = shifts;
+            cache.central_factors = std::move(factors);
+            systw_to_use          = &cache.last_systw;
         }
 
         // ---- Physics-result half (depends only on phys) ----
@@ -121,7 +206,9 @@ namespace PROfit {
         cache.last_syst_ptr = &insyst;
         cache.last_model_ptr = &inmodel;
 
-        Eigen::VectorXf final_spec  = cache.last_systw.cwiseProduct(cache.last_result);
+        // systw_to_use points to either cache.last_systw (full hit / full recompute) or
+        // to the local perturbed vector built by the Tier 1.3 incremental path.
+        Eigen::VectorXf final_spec  = systw_to_use->cwiseProduct(cache.last_result);
         Eigen::VectorXf final_error = final_spec.array().abs().sqrt();
         return PROspec(final_spec, final_error);
     }

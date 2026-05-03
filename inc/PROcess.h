@@ -47,6 +47,16 @@ namespace PROfit{
         Eigen::VectorXf last_shifts;          ///< Cached spline subvector for last_systw.
         Eigen::VectorXf last_result;          ///< Cached H_combined * probs (or trivial-model result).
         Eigen::VectorXf last_systw;           ///< Cached per-bin systematic-weight vector.
+
+        /// Per-spline factors at the cached "central" point, shape (nbins_var, nsplines).
+        /// central_factors(k, i) = spline i's multiplicative contribution to systw at bin k.
+        /// systw_central(k) = product over i of central_factors(k, i). Used by the Tier 1.3
+        /// incremental update path (single-spline-shift gradient calls) so we can divide
+        /// out the old contribution and multiply in the new one without rerunning the full
+        /// spline loop. Empty/zero-sized when the cache has not yet been populated by a
+        /// full recompute.
+        Eigen::MatrixXf central_factors;
+
         int last_var_index = -1;              ///< var_index for which the cache is valid.
         const PROsyst *last_syst_ptr = nullptr;
         const PROmodel *last_model_ptr = nullptr;
