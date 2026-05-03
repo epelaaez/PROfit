@@ -859,6 +859,58 @@ int main(int argc, char* argv[])
         }
     }
 
+    // Empty-bin sanity check: build a default-CV spectrum and look for collapsed bins
+    // that would make stat-only / CNP statistics singular (CV<=0) or untrustworthy (CV<1).
+    {
+        const size_t io = config.i_prime;
+        Eigen::VectorXf cv_check_params =
+            Eigen::VectorXf::Zero(model->nparams + variable_systs[io].GetNSplines());
+        for(size_t i = 0; i < model->nparams; ++i)
+            cv_check_params(i) = model->default_val(i);
+
+        PROspec cv_check_spec = FillSpectra(config, prop, variable_systs[io], *model,
+                                            cv_check_params, !eventbyevent, io);
+        Eigen::VectorXf collapsed_cv = CollapseMatrix(config, cv_check_spec.Spec(), io);
+
+        int n_zero = 0, n_tiny = 0;
+        for(Eigen::Index b = 0; b < collapsed_cv.size(); ++b) {
+            if(collapsed_cv(b) <= 0.0f) {
+                log<LOG_ERROR>(L"%1% || Default-CV collapsed bin %2% has %3% expected events (<=0). Empty-bin would make CNP/stat covariance singular.") % __func__ % (long)b % collapsed_cv(b);
+                ++n_zero;
+            } else if(collapsed_cv(b) < 1.0f) {
+                log<LOG_WARNING>(L"%1% || Default-CV collapsed bin %2% has %3% expected events (<1). Low-stat region; results in this bin may be unreliable.") % __func__ % (long)b % collapsed_cv(b);
+                ++n_tiny;
+            }
+        }
+        if(n_zero > 0) {
+            if(!force) {
+                log<LOG_ERROR>(L"%1% || %2% collapsed CV bins are empty. Aborting. Re-run with --force to override (NOT recommended).") % __func__ % n_zero;
+                return 1;
+            }
+            log<LOG_WARNING>(L"%1% || %2% collapsed CV bins are empty but --force was set; proceeding at user's risk.") % __func__ % n_zero;
+        }
+        if(n_tiny > 0)
+            log<LOG_WARNING>(L"%1% || %2% collapsed CV bins have <1 expected event.") % __func__ % n_tiny;
+
+        if(use_real_data) {
+            int n_nan = 0, n_neg = 0;
+            const Eigen::VectorXf &dvec = data.Spec();
+            for(Eigen::Index b = 0; b < dvec.size(); ++b) {
+                if(std::isnan(dvec(b)) || std::isinf(dvec(b))) {
+                    log<LOG_ERROR>(L"%1% || Data bin %2% is NaN/inf.") % __func__ % (long)b;
+                    ++n_nan;
+                } else if(dvec(b) < 0.0f) {
+                    log<LOG_WARNING>(L"%1% || Data bin %2% is negative (%3%).") % __func__ % (long)b % dvec(b);
+                    ++n_neg;
+                }
+            }
+            if(n_nan > 0 && !force) {
+                log<LOG_ERROR>(L"%1% || %2% data bins are NaN/inf. Aborting. Re-run with --force to override.") % __func__ % n_nan;
+                return 1;
+            }
+        }
+    }
+
     //Pysics parameter input
     Eigen::VectorXf fakeDataParams = Eigen::VectorXf::Constant(model->nparams + variable_systs[config.i_prime].GetNSplines(), 0);
     Eigen::VectorXf CVParams = Eigen::VectorXf::Constant(model->nparams + variable_systs[config.i_prime].GetNSplines(), 0);
