@@ -2300,7 +2300,7 @@ int main(int argc, char* argv[])
         fc_progress.start_display_thread(); 
 
 
-        for(size_t i = 0; i < nthread; i++) {
+        for(size_t i = 0; i < FCthreads; i++) {
             dchi2s.emplace_back();
             outs.emplace_back();
             fc_args args{todo + (i >= addone), &dchi2s.back(), &outs.back(), config, prop, variable_systs[config.i_prime], chi2, fakeDataParams, L, scanFitConfig,(*myseed.getThreadSeeds())[i], (int)i, !eventbyevent, gof_mode};
