@@ -289,7 +289,7 @@ namespace PROfit{
      * @return PROerrorbar with per-bin asymmetric uncertainties and the histogram covariance.
      */
     template<class T, class P>
-        PROerrorbar getMCMCErrorBand(Metropolis<T, P> met, size_t burnin, size_t iterations, const PROconfig &config, const PROpeller &prop, PROmetric &metric, const Eigen::VectorXf &best_fit, std::vector<TH1D> &posteriors, Eigen::MatrixXf &post_covar, Eigen::VectorXf &param_err_lo, Eigen::VectorXf &param_err_hi, bool scale = false, int var_index=0) {
+        PROerrorbar getMCMCErrorBand(Metropolis<T, P> met, size_t burnin, size_t iterations, const PROconfig &config, const PROpeller &prop, PROmetric &metric, const Eigen::VectorXf &best_fit, std::vector<TH1D> &posteriors, Eigen::MatrixXf &post_covar, Eigen::VectorXf &param_err_lo, Eigen::VectorXf &param_err_hi, bool scale = false, int var_index=0, PROgressBar *pbar = nullptr) {
             for(size_t i = 0; i < metric.GetSysts().GetNSplines(); ++i)
                 posteriors.emplace_back("", (";"+config.m_mcgen_variation_plotname_map.at(metric.GetSysts().spline_names[i])).c_str(), 60, -3, 3);
 
@@ -324,7 +324,7 @@ namespace PROfit{
                 post_covar += diff * diff.transpose();
                 post_hist_covar += diff_hist * diff_hist.transpose();
             };
-            met.run(burnin, iterations, action);
+            met.run(burnin, iterations, action, pbar);
             post_hist_covar /= nsteps;
             post_covar /= nsteps;
 

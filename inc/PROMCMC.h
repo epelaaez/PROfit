@@ -2,6 +2,7 @@
 #define PROMCMC_H
 
 #include "PROmetric.h"
+#include "PROgress.h"
 #include <Eigen/Eigen>
 
 #include <algorithm>
@@ -58,19 +59,26 @@ namespace PROfit {
                     return false;
                 }
 
-                void run(size_t burnin, size_t steps, std::optional<std::function<void(const Eigen::VectorXf&)>> action = {}) {
+                void run(size_t burnin, size_t steps, std::optional<std::function<void(const Eigen::VectorXf&)>> action = {}, PROgressBar *pbar = nullptr) {
+                    const size_t pbar_stride = std::max<size_t>(1, (burnin + steps) / 1000);
                     for(size_t i = 0; i < burnin; i++) {
                         if constexpr(Proposal_FN::has_tune) {
                             proposal.tune(step());
                         } else {
                             step();
                         }
+                        if(pbar && (i + 1) % pbar_stride == 0) pbar->set_progress(i + 1);
                     }
-                    proposal.tune_mode = false; 
+                    proposal.tune_mode = false;
                     for(size_t i = 0; i < steps; i++) {
                         step();
                         if(save_chain) chain.push_back(current);
                         if(action) (*action)(current);
+                        if(pbar && (i + 1) % pbar_stride == 0) pbar->set_progress(burnin + i + 1);
+                    }
+                    if(pbar) {
+                        pbar->finish();
+                        std::cerr << std::endl;
                     }
                 }
 
@@ -351,8 +359,8 @@ namespace PROfit {
         // Adaptive scaling state
         std::vector<bool> accept_history;
         size_t adapt_window = 1000;  // window size for adaptation
-        float target_accept = 0.234; 
-        float adapt_factor = 1.02;   
+        float target_accept = 0.234;
+        float adapt_factor = 1.1;
 
 
         Eigen::MatrixXf sub_L;
