@@ -59,6 +59,20 @@ namespace PROfit{
 
             bool correlated_systematics;      ///< If true, use correlated (off-diagonal) pull covariance.
             Eigen::MatrixXf prior_covariance; ///< Prior covariance matrix for nuisance parameters.
+            Eigen::MatrixXf prior_covariance_inv; ///< Inverse of prior_covariance, computed once in the ctor.
+
+            // Cache for CollapseMatrix(FillSpectra(noshiftvec_for_phys)). The noshiftvec
+            // CV depends only on the physics parameters (splines are zeroed out). Cache
+            // is invalidated by reset() and override_systs().
+            Eigen::VectorXf cnp_cached_phys;       ///< Last physics subvector used to fill cnp_cached_collapsed_cv.
+            Eigen::VectorXf cnp_cached_collapsed_cv; ///< Cached collapsed noshift CV spectrum.
+            bool cnp_cv_cache_valid = false;       ///< True iff cnp_cached_collapsed_cv matches cnp_cached_phys.
+
+            /// Returns CollapseMatrix(FillSpectra(noshiftvec built from `phys`)). Hits the
+            /// cache when `phys` matches the last cached call; otherwise recomputes.
+            Eigen::VectorXf cachedNoshiftCollapsedCV(const Eigen::VectorXf &phys, Eigen::Index param_size);
+
+            FillSpectraCache fs_cache;             ///< Per-thread split-half cache for FillSpectra.
 
         public:
 
@@ -67,7 +81,7 @@ namespace PROfit{
 
             /*Function: operator() is what is passed to minimizer.*/
             virtual float operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient);
-            virtual float operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient, bool nograd);
+            virtual float operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient, bool rungradient);
 
             /** @brief Return a heap-allocated copy of this PROCNP. */
             PROmetric *Clone() const {
@@ -89,11 +103,15 @@ namespace PROfit{
                 physics_param_fixed.clear();
                 last_value = 0;
                 last_param = Eigen::VectorXf::Constant(last_param.size(), 0);
+                cnp_cv_cache_valid = false;
+                fs_cache.invalidate();
             }
 
             /** @brief Replace the internal systematic pointer with @p new_syst. */
             void override_systs(const PROsyst &new_syst) {
                 syst = &new_syst;
+                cnp_cv_cache_valid = false;
+                fs_cache.invalidate();
             }
 
             /**

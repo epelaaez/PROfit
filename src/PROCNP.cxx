@@ -39,6 +39,7 @@ PROCNP::PROCNP(const std::string tag, const PROconfig &conin, const PROpeller &p
             prior_covariance(iB, iA) = std::get<2>(t);
         }
         prior_covariance = systin->spline_priors.asDiagonal() * prior_covariance * systin->spline_priors.asDiagonal();
+        prior_covariance_inv = prior_covariance.inverse();
     }
 }
 
@@ -48,7 +49,18 @@ float PROCNP::Pull(const Eigen::VectorXf &systs) {
     if (!correlated_systematics) {
         return (centered.array().square() / syst->spline_priors.array().square()).sum();
     }
-    return centered.dot(prior_covariance.inverse() * centered);
+    return centered.dot(prior_covariance_inv * centered);
+}
+
+Eigen::VectorXf PROCNP::cachedNoshiftCollapsedCV(const Eigen::VectorXf &phys, Eigen::Index param_size) {
+    if(cnp_cv_cache_valid && cnp_cached_phys.size() == phys.size() && cnp_cached_phys == phys)
+        return cnp_cached_collapsed_cv;
+    Eigen::VectorXf noshiftvec = Eigen::VectorXf::Zero(param_size);
+    noshiftvec.head(model.nparams) = phys;
+    cnp_cached_collapsed_cv = CollapseMatrix(config, FillSpectra(config, peller, *syst, model, noshiftvec, strat != EventByEvent).Spec());
+    cnp_cached_phys = phys;
+    cnp_cv_cache_valid = true;
+    return cnp_cached_collapsed_cv;
 }
 
 void PROCNP::fixSpline(int fix, float valin){
@@ -78,14 +90,12 @@ float PROCNP::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
 
     Eigen::VectorXf subvector2 = param.segment(model.nparams, syst->GetNSplines());
     //log<LOG_DEBUG>(L"%1% || Created spline subvector with size %2%") % __func__ % subvector2.size();
-    Eigen::VectorXf noshiftvec = Eigen::VectorXf::Zero(param.size());
-    noshiftvec.head(model.nparams) = subvector1;
 
-    PROspec result = FillSpectra(config, peller, *syst, model, param, strat == BinnedChi2);
+    PROspec result = FillSpectra(config, peller, *syst, model, param, fs_cache, strat == BinnedChi2, config.i_prime);
 
 
     Eigen::MatrixXf inverted_collapsed_full_covariance(config.m_num_variable_bins_total_collapsed[config.i_prime],config.m_num_variable_bins_total_collapsed[config.i_prime]);
-    Eigen::VectorXf collapsed_cv = CollapseMatrix(config, FillSpectra(config, peller, *syst, model, noshiftvec, strat != EventByEvent).Spec());
+    Eigen::VectorXf collapsed_cv = cachedNoshiftCollapsedCV(subvector1, param.size());
     Eigen::MatrixXf collapsed_stat_covariance = Eigen::MatrixXf::Zero(data.Spec().size(), data.Spec().size());
     Eigen::VectorXf normdata = shape_only 
         ? data.Normalize(config,result)
@@ -94,10 +104,9 @@ float PROCNP::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
         collapsed_stat_covariance(i,i) = data.Spec()(i) == 0 ? collapsed_cv(i)/2 :
             3 / (1.0 / normdata(i) + 2.0 / collapsed_cv(i));
 
-    Eigen::MatrixXf diag = result.Spec().array().matrix().asDiagonal(); 
-    Eigen::MatrixXf full_covariance = diag*(syst->fractional_covariance)*diag;
+    Eigen::MatrixXf full_covariance = result.Spec().asDiagonal() * (syst->fractional_covariance) * result.Spec().asDiagonal();
 
-    Eigen::MatrixXf collapsed_full_covariance = CollapseMatrix(config, full_covariance); 
+    Eigen::MatrixXf collapsed_full_covariance = CollapseMatrix(config, full_covariance);
     inverted_collapsed_full_covariance = (collapsed_stat_covariance+ collapsed_full_covariance).inverse();
 
     Eigen::VectorXf delta = CollapseMatrix(config, result.Spec()) - normdata;
@@ -163,21 +172,17 @@ float PROCNP::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
 
                 float chi2_oneside;
                 // Calculate chi2_plus or chi2_minus, depending on boundary
-                PROspec result = FillSpectra(config, peller, *syst, model, param_plus, strat != EventByEvent,config.i_prime);
+                PROspec result = FillSpectra(config, peller, *syst, model, param_plus, fs_cache, strat != EventByEvent, config.i_prime);
 
                 Eigen::MatrixXf new_collapsed_stat_covariance = collapsed_stat_covariance;
                 if(i < model.nparams) {
-                    Eigen::VectorXf subvector1 = param_plus.segment(0, model.nparams);
-                    Eigen::VectorXf noshiftvec = Eigen::VectorXf::Zero(param.size());
-                    noshiftvec.head(model.nparams) = subvector1;
-                    Eigen::VectorXf collapsed_cv = CollapseMatrix(config, FillSpectra(config, peller, *syst, model, noshiftvec, strat != EventByEvent).Spec(),config.i_prime);
+                    Eigen::VectorXf collapsed_cv = cachedNoshiftCollapsedCV(param_plus.segment(0, model.nparams), param.size());
                     for(long j = 0; j < data.Spec().size(); ++j)
                         new_collapsed_stat_covariance(j,j) = normdata(j) == 0 ? collapsed_cv(j)/2 :
                             3 / (1.0 / normdata(j) + 2.0 / collapsed_cv(j));
                 }
 
-                Eigen::MatrixXf diag = result.Spec().array().matrix().asDiagonal();
-                Eigen::MatrixXf full_covariance = diag*(syst->fractional_covariance)*diag;
+                Eigen::MatrixXf full_covariance = result.Spec().asDiagonal() * (syst->fractional_covariance) * result.Spec().asDiagonal();
                 Eigen::MatrixXf collapsed_full_covariance = CollapseMatrix(config, full_covariance);
                 Eigen::MatrixXf inverted_collapsed_full_covariance = (new_collapsed_stat_covariance + collapsed_full_covariance).inverse();
 
@@ -209,21 +214,17 @@ float PROCNP::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
                     //log<LOG_ERROR>(L"%1% || WARNING In PROCNP: Gradient evaluation point violates unitarity. Setting gradient to large value.") % __func__;
                     chi2_plus = 1e10;
                 } else {
-                    PROspec result = FillSpectra(config, peller, *syst, model, param_plus, strat != EventByEvent,config.i_prime);
+                    PROspec result = FillSpectra(config, peller, *syst, model, param_plus, fs_cache, strat != EventByEvent, config.i_prime);
 
                     Eigen::MatrixXf new_collapsed_stat_covariance = collapsed_stat_covariance;
                     if(i < model.nparams) {
-                        Eigen::VectorXf subvector1 = param_plus.segment(0, model.nparams);
-                        Eigen::VectorXf noshiftvec = Eigen::VectorXf::Zero(param.size());
-                        noshiftvec.head(model.nparams) = subvector1;
-                        Eigen::VectorXf collapsed_cv = CollapseMatrix(config, FillSpectra(config, peller, *syst, model, noshiftvec, strat != EventByEvent).Spec(),config.i_prime);
+                        Eigen::VectorXf collapsed_cv = cachedNoshiftCollapsedCV(param_plus.segment(0, model.nparams), param.size());
                         for(long j = 0; j < data.Spec().size(); ++j)
                             new_collapsed_stat_covariance(j,j) = normdata(j) == 0 ? collapsed_cv(j)/2 :
                                 3 / (1.0 / normdata(j) + 2.0 / collapsed_cv(j));
                     }
 
-                    Eigen::MatrixXf diag = result.Spec().array().matrix().asDiagonal();
-                    Eigen::MatrixXf full_covariance = diag*(syst->fractional_covariance)*diag;
+                    Eigen::MatrixXf full_covariance = result.Spec().asDiagonal() * (syst->fractional_covariance) * result.Spec().asDiagonal();
                     Eigen::MatrixXf collapsed_full_covariance = CollapseMatrix(config, full_covariance);
                     Eigen::MatrixXf inverted_collapsed_full_covariance = (new_collapsed_stat_covariance + collapsed_full_covariance).inverse();
 
@@ -239,21 +240,17 @@ float PROCNP::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
                     //log<LOG_ERROR>(L"%1% || WARNING In PROCNP: Gradient evaluation point violates unitarity. Setting gradient to large value.") % __func__;
                     chi2_minus = 1e10;
                 } else {
-                    PROspec result = FillSpectra(config, peller, *syst, model, param_minus, strat != EventByEvent,config.i_prime);
+                    PROspec result = FillSpectra(config, peller, *syst, model, param_minus, fs_cache, strat != EventByEvent, config.i_prime);
 
                     Eigen::MatrixXf new_collapsed_stat_covariance = collapsed_stat_covariance;
                     if(i < model.nparams) {
-                        Eigen::VectorXf subvector1 = param_minus.segment(0, model.nparams);
-                        Eigen::VectorXf noshiftvec = Eigen::VectorXf::Zero(param.size());
-                        noshiftvec.head(model.nparams) = subvector1;
-                        Eigen::VectorXf collapsed_cv = CollapseMatrix(config, FillSpectra(config, peller, *syst, model, noshiftvec, strat != EventByEvent).Spec(),config.i_prime);
+                        Eigen::VectorXf collapsed_cv = cachedNoshiftCollapsedCV(param_minus.segment(0, model.nparams), param.size());
                         for(long j = 0; j < data.Spec().size(); ++j)
                             new_collapsed_stat_covariance(j,j) = normdata(j) == 0 ? collapsed_cv(j)/2 :
                                 3 / (1.0 / normdata(j) + 2.0 / collapsed_cv(j));
                     }
 
-                    Eigen::MatrixXf diag = result.Spec().array().matrix().asDiagonal();
-                    Eigen::MatrixXf full_covariance = diag*(syst->fractional_covariance)*diag;
+                    Eigen::MatrixXf full_covariance = result.Spec().asDiagonal() * (syst->fractional_covariance) * result.Spec().asDiagonal();
                     Eigen::MatrixXf collapsed_full_covariance = CollapseMatrix(config, full_covariance);
                     Eigen::MatrixXf inverted_collapsed_full_covariance = (new_collapsed_stat_covariance + collapsed_full_covariance).inverse();
 
@@ -312,8 +309,7 @@ float PROCNP::getSingleChannelChi(size_t global_channel_index, const PROspec &cv
     //only calculate a syst covariance if we have any covariance parameters as defined in the xml
     if(syst->GetNCovar()){
         // Calculate Full Syst Covariance matrix
-        Eigen::MatrixXf diag =  cv.Spec().array().matrix().asDiagonal(); 
-        Eigen::MatrixXf full_covariance =  diag*(syst->fractional_covariance)*diag;
+        Eigen::MatrixXf full_covariance = cv.Spec().asDiagonal() * (syst->fractional_covariance) * cv.Spec().asDiagonal();
 
         // Collapse Covariance and Spectra 
         Eigen::MatrixXf collapsed_full_covariance =  CollapseMatrix(config,full_covariance);
@@ -368,10 +364,9 @@ void PROCNP::print(const Eigen::VectorXf &param){
     }
 
     log<LOG_INFO>(L"%1% || Collapsed stat Covariance is : \n %2%") % __func__ % collapsed_stat_covariance;
-    Eigen::MatrixXf diag = result.Spec().array().matrix().asDiagonal(); 
-    Eigen::MatrixXf full_covariance = diag*(syst->fractional_covariance)*diag;
+    Eigen::MatrixXf full_covariance = result.Spec().asDiagonal() * (syst->fractional_covariance) * result.Spec().asDiagonal();
 
-    Eigen::MatrixXf collapsed_full_covariance = CollapseMatrix(config, full_covariance); 
+    Eigen::MatrixXf collapsed_full_covariance = CollapseMatrix(config, full_covariance);
     inverted_collapsed_full_covariance = (collapsed_stat_covariance+ collapsed_full_covariance).inverse();
 
     // Calculate Chi^2  value
@@ -438,14 +433,13 @@ void PROCNP::print(const Eigen::VectorXf &param){
             }
         }
 
-        Eigen::MatrixXf diag = result.Spec().array().matrix().asDiagonal(); 
-        Eigen::MatrixXf full_covariance = diag*(syst->fractional_covariance)*diag;
+        Eigen::MatrixXf full_covariance = result.Spec().asDiagonal() * (syst->fractional_covariance) * result.Spec().asDiagonal();
 
-        Eigen::MatrixXf collapsed_full_covariance = CollapseMatrix(config, full_covariance); 
+        Eigen::MatrixXf collapsed_full_covariance = CollapseMatrix(config, full_covariance);
         inverted_collapsed_full_covariance = (collapsed_stat_covariance+ collapsed_full_covariance).inverse();
 
         // Calculate Chi^2  value
-        Eigen::VectorXf delta  = CollapseMatrix(config,result.Spec()) - data.Spec(); 
+        Eigen::VectorXf delta  = CollapseMatrix(config,result.Spec()) - data.Spec();
 
         float pull = Pull(subvector2);
         float value_grad = (delta.transpose())*inverted_collapsed_full_covariance*(delta) + pull;
