@@ -19,6 +19,7 @@
 #include "PROseed.h"
 #include "PROversion.h"
 #include "PROplot.h"
+#include "PRObench.h"
 
 #include "CLI11.h"
 #include "LBFGSB.h"
@@ -358,6 +359,15 @@ int main(int argc, char* argv[])
     //PROtest, test things
     CLI::App *protest_command = app.add_subcommand("protest", "Testing ground for rapid quick tests.");
 
+    //PRObench, scaling/timing benchmarks. Loud greppable LOG output via [SCALETEST] tag.
+    // Uses the live PROmetric built by the main chain (PROchi/PROCNP/PROpoisson)
+    // — no separate metric-class flag needed here.
+    int    bench_N           = 1000;
+    std::string bench_tests_str = "all";
+    CLI::App *bench_command = app.add_subcommand("scale-test", "Run timing benchmarks for FillSpectra / metric / fit hot paths and emit greppable [SCALETEST] LOG lines.");
+    bench_command->add_option("-N,--n", bench_N, "Base call count: FillSpectra=N, metric=N/10, fit=N/100.")->default_val(1000);
+    bench_command->add_option("--tests", bench_tests_str, "Comma-separated subset of {a,b,c,d,e,f,g,h,i} or {fillspectra,metric,fit,all}. Default 'all'.")->default_val("all");
+
     app.set_config("--config");
     surface_command->configurable(true);
     process_command->configurable(true);
@@ -367,6 +377,7 @@ int main(int argc, char* argv[])
     profc_command->configurable(true);
     proplot_command->configurable(true);
     promcmc_command->configurable(true);
+    bench_command->configurable(true);
 
     //Parse inputs. 
     CLI11_PARSE(app, argc, argv);
@@ -2814,6 +2825,49 @@ int main(int argc, char* argv[])
     //******************** TEST AREA TEST AREA     **************************
     //***********************************************************************
     //***********************************************************************
+
+    if(*bench_command) {
+        // Parse the comma-separated --tests selector. "all"/"fillspectra"/
+        // "metric"/"fit" expand to the corresponding group; individual letters
+        // a–i map to single tests.
+        unsigned bench_mask = 0u;
+        auto match_token = [&bench_mask](const std::string &tok) {
+            using namespace PROfit::PRObench;
+            if      (tok == "all")         bench_mask |= Bench_All;
+            else if (tok == "fillspectra") bench_mask |= Bench_FillSpectra_Group;
+            else if (tok == "metric")      bench_mask |= Bench_Metric_Group;
+            else if (tok == "fit")         bench_mask |= Bench_Fit_Group;
+            else if (tok == "a")           bench_mask |= Bench_FillSpectra_All;
+            else if (tok == "b")           bench_mask |= Bench_FillSpectra_Phys;
+            else if (tok == "c")           bench_mask |= Bench_FillSpectra_Nuis;
+            else if (tok == "d")           bench_mask |= Bench_Metric_All;
+            else if (tok == "e")           bench_mask |= Bench_Metric_Phys;
+            else if (tok == "f")           bench_mask |= Bench_Metric_Nuis;
+            else if (tok == "g")           bench_mask |= Bench_Fit_All;
+            else if (tok == "h")           bench_mask |= Bench_Fit_Phys;
+            else if (tok == "i")           bench_mask |= Bench_Fit_Nuis;
+            else log<LOG_WARNING>(L"%1% || scale-test: unknown --tests token '%2%' (ignored)") % __func__ % tok.c_str();
+        };
+        const std::string &s = bench_tests_str;
+        size_t pos = 0;
+        while (pos < s.size()) {
+            size_t comma = s.find(',', pos);
+            std::string tok = s.substr(pos, (comma == std::string::npos ? s.size() : comma) - pos);
+            while (!tok.empty() && std::isspace(static_cast<unsigned char>(tok.front()))) tok.erase(tok.begin());
+            while (!tok.empty() && std::isspace(static_cast<unsigned char>(tok.back())))  tok.pop_back();
+            if (!tok.empty()) match_token(tok);
+            if (comma == std::string::npos) break;
+            pos = comma + 1;
+        }
+        if (bench_mask == 0u) bench_mask = PROfit::PRObench::Bench_All;
+
+        PROfit::PRObench::BenchOptions bopts;
+        bopts.N      = bench_N;
+        bopts.tests  = bench_mask;
+        bopts.binned = !eventbyevent;
+
+        PROfit::PRObench::run_scale_test(config, prop, *metric, fitConfig, bopts);
+    }
 
     if(*protest_command){
         log<LOG_INFO>(L"%1% || PROtest: Testing FillSpectra with fixed seed random spline throws") % __func__;
