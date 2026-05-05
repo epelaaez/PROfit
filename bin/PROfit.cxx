@@ -1222,7 +1222,7 @@ int main(int argc, char* argv[])
             //c1.Print("phys_cov.pdf");
         }
         log<LOG_INFO>(L"%1% || MCMC acceptance is  %2%. ") % __func__% ((double)mh.naccept /fitConfig.MCMCiter);
-        mh.plot_autocorrelation(final_output_tag+"_PROfile_corrmat_mcmc_autocorraltion.pdf", param_names);
+        mh.plot_autocorrelation(final_output_tag+"_PROfile_corrmat_mcmc_autocorrelation.pdf", param_names);
 
         std::string hname = "#chi^{2}/ndf = " + to_string(best_chi2) + "/" + to_string(config.m_num_variable_bins_total_collapsed[config.i_prime]);
         PROspec cv = FillSpectra(config, prop, metric->GetSysts(), metric->GetModel(), CVParams , true,config.i_prime);
@@ -2659,7 +2659,7 @@ int main(int argc, char* argv[])
         }
         log<LOG_INFO>(L"%1% || MCMC acceptance is  %2%. ") % __func__% ((double)mh.naccept /fitConfig.MCMCiter);
 
-        mh.plot_autocorrelation(final_output_tag+"_PROglobal_corrmat_mcmc_autocorraltion.pdf", param_names);
+        mh.plot_autocorrelation(final_output_tag+"_PROglobal_corrmat_mcmc_autocorrelation.pdf", param_names);
 
         std::string hname = "#chi^{2}/ndf = " + to_string(best_chi2) + "/" + to_string(config.m_num_variable_bins_total_collapsed[config.i_prime]);
         PROspec cv = FillSpectra(config, prop, metric->GetSysts(), metric->GetModel(), CVParams , true,config.i_prime);
@@ -2793,7 +2793,7 @@ int main(int argc, char* argv[])
                     tree.Fill();
                 }
                 tree.Write();
-                met.plot_autocorrelation((final_output_tag+"_PROMCMC_autocorraltion_chain"+std::to_string(chain_counter)+".pdf").c_str(), param_names);
+                met.plot_autocorrelation((final_output_tag+"_PROMCMC_autocorrelation_chain"+std::to_string(chain_counter)+".pdf").c_str(), param_names);
             }
         }
         //TCanvas c;

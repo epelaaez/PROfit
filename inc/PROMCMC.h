@@ -60,7 +60,7 @@ namespace PROfit {
                 }
 
                 void run(size_t burnin, size_t steps, std::optional<std::function<void(const Eigen::VectorXf&)>> action = {}, PROgressBar *pbar = nullptr) {
-                    const size_t pbar_stride = std::max<size_t>(1, (burnin + steps) / 10000);
+                    const size_t pbar_stride = std::max<size_t>(1, (burnin + steps) / 1000);
                     for(size_t i = 0; i < burnin; i++) {
                         if constexpr(Proposal_FN::has_tune) {
                             proposal.tune(step());
