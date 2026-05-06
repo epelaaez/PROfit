@@ -45,23 +45,34 @@ namespace PRObench {
 
     /**
      * @brief Bitmask selector for which benchmarks to run.
-     * @details Letters match the original spec (a–i). Combine with bitwise OR.
+     * @details Combine with bitwise OR.
+     * The fit benchmark has no vary_phys / vary_nuis variants because each
+     * Fit() internally explores the whole parameter space (Latin + Swarm +
+     * LBFGS) regardless of the seed point — the seed-mode variation is not
+     * observable in the timing.
      */
     enum BenchTest : unsigned int {
         Bench_None             = 0,
         Bench_FillSpectra_All  = 1u << 0,  ///< (a) FillSpectra, vary phys + nuis.
         Bench_FillSpectra_Phys = 1u << 1,  ///< (b) FillSpectra, vary phys only.
         Bench_FillSpectra_Nuis = 1u << 2,  ///< (c) FillSpectra, vary nuis only.
-        Bench_Metric_All       = 1u << 3,  ///< (d) PROmetric(), vary phys + nuis.
-        Bench_Metric_Phys      = 1u << 4,  ///< (e) PROmetric(), vary phys only.
-        Bench_Metric_Nuis      = 1u << 5,  ///< (f) PROmetric(), vary nuis only.
-        Bench_Fit_All          = 1u << 6,  ///< (g) PROfitter::Fit(), vary phys + nuis seed.
-        Bench_Fit_Phys         = 1u << 7,  ///< (h) PROfitter::Fit(), vary phys seed only.
-        Bench_Fit_Nuis         = 1u << 8,  ///< (i) PROfitter::Fit(), vary nuis seed only.
+        Bench_Metric_All       = 1u << 3,  ///< (d) PROmetric() chi² only, vary phys + nuis.
+        Bench_Metric_Phys      = 1u << 4,  ///< (e) PROmetric() chi² only, vary phys only.
+        Bench_Metric_Nuis      = 1u << 5,  ///< (f) PROmetric() chi² only, vary nuis only.
+        Bench_Fit              = 1u << 6,  ///< (g) PROfitter::Fit(), random phys+nuis seeds.
+        Bench_PseudoUniverse   = 1u << 7,  ///< (h) Pseudo-universe throw: random splines + MVN syst + Poisson stat (matches PROfc / brazil-band pattern).
+        Bench_Collapse         = 1u << 8,  ///< (i) CollapseMatrix() on a CV vector — bin-collapsing hot path.
+        Bench_MetricGrad_All   = 1u << 9,  ///< (j) PROmetric() chi² + finite-diff gradient, vary phys + nuis.
+        Bench_MetricGrad_Phys  = 1u << 10, ///< (k) PROmetric() chi² + finite-diff gradient, vary phys only.
+        Bench_MetricGrad_Nuis  = 1u << 11, ///< (l) PROmetric() chi² + finite-diff gradient, vary nuis only.
+        Bench_MCMC_Burnin      = 1u << 12, ///< (m) Metropolis::step() during burnin (tune_mode=true; proposal Cholesky rebuilt every step + tune()).
+        Bench_MCMC_Post        = 1u << 13, ///< (n) Metropolis::step() post-burnin (tune_mode=false; cached proposal Cholesky, no tune()).
         Bench_FillSpectra_Group = Bench_FillSpectra_All | Bench_FillSpectra_Phys | Bench_FillSpectra_Nuis,
         Bench_Metric_Group      = Bench_Metric_All       | Bench_Metric_Phys       | Bench_Metric_Nuis,
-        Bench_Fit_Group         = Bench_Fit_All          | Bench_Fit_Phys          | Bench_Fit_Nuis,
-        Bench_All               = Bench_FillSpectra_Group | Bench_Metric_Group | Bench_Fit_Group,
+        Bench_MetricGrad_Group  = Bench_MetricGrad_All   | Bench_MetricGrad_Phys   | Bench_MetricGrad_Nuis,
+        Bench_Fit_Group         = Bench_Fit,
+        Bench_MCMC_Group        = Bench_MCMC_Burnin      | Bench_MCMC_Post,
+        Bench_All               = Bench_FillSpectra_Group | Bench_Metric_Group | Bench_MetricGrad_Group | Bench_Fit_Group | Bench_PseudoUniverse | Bench_Collapse | Bench_MCMC_Group,
     };
 
     /**

@@ -366,7 +366,7 @@ int main(int argc, char* argv[])
     std::string bench_tests_str = "all";
     CLI::App *bench_command = app.add_subcommand("scale-test", "Run timing benchmarks for FillSpectra / metric / fit hot paths and emit greppable [SCALETEST] LOG lines.");
     bench_command->add_option("-N,--n", bench_N, "Base call count: FillSpectra=N, metric=N/10, fit=N/100.")->default_val(1000);
-    bench_command->add_option("--tests", bench_tests_str, "Comma-separated subset of {a,b,c,d,e,f,g,h,i} or {fillspectra,metric,fit,all}. Default 'all'.")->default_val("all");
+    bench_command->add_option("--tests", bench_tests_str, "Comma-separated subset of {a..n} or {fillspectra,metric,metricgrad,fit,pseudo,collapse,mcmc,all}. Default 'all'.")->default_val("all");
 
     app.set_config("--config");
     surface_command->configurable(true);
@@ -2836,16 +2836,25 @@ int main(int argc, char* argv[])
             if      (tok == "all")         bench_mask |= Bench_All;
             else if (tok == "fillspectra") bench_mask |= Bench_FillSpectra_Group;
             else if (tok == "metric")      bench_mask |= Bench_Metric_Group;
+            else if (tok == "metricgrad")  bench_mask |= Bench_MetricGrad_Group;
             else if (tok == "fit")         bench_mask |= Bench_Fit_Group;
+            else if (tok == "pseudo")      bench_mask |= Bench_PseudoUniverse;
+            else if (tok == "collapse")    bench_mask |= Bench_Collapse;
+            else if (tok == "mcmc")        bench_mask |= Bench_MCMC_Group;
             else if (tok == "a")           bench_mask |= Bench_FillSpectra_All;
             else if (tok == "b")           bench_mask |= Bench_FillSpectra_Phys;
             else if (tok == "c")           bench_mask |= Bench_FillSpectra_Nuis;
             else if (tok == "d")           bench_mask |= Bench_Metric_All;
             else if (tok == "e")           bench_mask |= Bench_Metric_Phys;
             else if (tok == "f")           bench_mask |= Bench_Metric_Nuis;
-            else if (tok == "g")           bench_mask |= Bench_Fit_All;
-            else if (tok == "h")           bench_mask |= Bench_Fit_Phys;
-            else if (tok == "i")           bench_mask |= Bench_Fit_Nuis;
+            else if (tok == "g")           bench_mask |= Bench_Fit;
+            else if (tok == "h")           bench_mask |= Bench_PseudoUniverse;
+            else if (tok == "i")           bench_mask |= Bench_Collapse;
+            else if (tok == "j")           bench_mask |= Bench_MetricGrad_All;
+            else if (tok == "k")           bench_mask |= Bench_MetricGrad_Phys;
+            else if (tok == "l")           bench_mask |= Bench_MetricGrad_Nuis;
+            else if (tok == "m")           bench_mask |= Bench_MCMC_Burnin;
+            else if (tok == "n")           bench_mask |= Bench_MCMC_Post;
             else log<LOG_WARNING>(L"%1% || scale-test: unknown --tests token '%2%' (ignored)") % __func__ % tok.c_str();
         };
         const std::string &s = bench_tests_str;
