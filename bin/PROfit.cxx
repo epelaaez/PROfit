@@ -2209,9 +2209,10 @@ int main(int argc, char* argv[])
             std::map<std::string, std::vector<std::pair<std::unique_ptr<TGraph>,std::unique_ptr<TGraph>>>> spline_graphs = getSplineGraphs(variable_systs[config.i_prime], config);
             c.Clear();
             c.Divide(4,4);
-            int chan=0;
+            int chan=0, snum = 0;
             for(const auto &[syst_name, syst_bins]: spline_graphs) {
                 int bin = 0;
+                int binning = variable_systs[config.i_prime].spline_binnings[snum++];
                 bool unprinted = true;
                 chan++;
                 int col = chan%2==0 ? kRed: kBlue;
@@ -2220,13 +2221,13 @@ int main(int argc, char* argv[])
 
                     unprinted = true;
                     c.cd(bin%16+1);
-                    size_t sbi = config.GetSubchannelIndexFromVariableGlobalBin(bin,config.i_prime);
+                    size_t sbi = config.GetSubchannelIndexFromVariableGlobalBin(bin,binning);
                     std::string nsubchannel = config.GetSubchannelName(sbi);
                     size_t local_channel_index = config.GetLocalChannelIndexFromGlobalSubchannelIndex(sbi);
-                    std::string chan_units = config.m_channel_variable_units[local_channel_index][config.i_prime];
-                    int edges_vec_sz = (int)config.m_variable_bin_to_edges[config.i_prime].size();
+                    std::string chan_units = config.m_channel_variable_units[local_channel_index][binning];
+                    int edges_vec_sz = (int)config.m_variable_bin_to_edges[binning].size();
                     size_t safe_bin = (edges_vec_sz>0) ? std::min((size_t)bin, (size_t)edges_vec_sz-1) : 0;
-                    std::pair<float,float> edg = config.m_variable_bin_to_edges[config.i_prime][safe_bin];
+                    std::pair<float,float> edg = config.m_variable_bin_to_edges[binning][safe_bin];
 
                     fixed_pts->SetMarkerColor(col);
                     fixed_pts->SetMarkerStyle(kFullCircle);
