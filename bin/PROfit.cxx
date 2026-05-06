@@ -1086,7 +1086,7 @@ int main(int argc, char* argv[])
     if(*profile_command){
 
         PROfitter fitter(global_ub, global_lb, fitConfig);
-        metric->setBounds(global_ub, global_ub);
+        metric->setBounds(global_ub, global_lb);
 
         log<LOG_INFO>(L"%1% || ########### Starting Global Best Fit Minimizing ############") % __func__;
 
@@ -2525,10 +2525,8 @@ int main(int argc, char* argv[])
     //***********************************************************************
     if(*proglobal_command){
 
-
-
-        PROfitter fitter(metric->UpperBound(), metric->LowerBound(), fitConfig);
-        metric->setBounds(metric->UpperBound(), metric->LowerBound());
+        PROfitter fitter(global_ub, global_lb, fitConfig);
+        metric->setBounds(global_ub, global_lb);
 
         log<LOG_INFO>(L"%1% || ########### Print of inputs ############") % __func__;
         //metric->print(fakedataparams); //fix
