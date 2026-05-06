@@ -2045,6 +2045,11 @@ int main(int argc, char* argv[])
                             cv_hist->GetYaxis()->SetTitle("Events/GeV");
                         else
                             cv_hist->GetYaxis()->SetTitle("Events");
+                        if(area_normalized) {
+                            cv_hist->GetYaxis()->SetTitle("Area Normalized");
+                            cv_hist->Scale(1.0 / cv_hist->Integral());
+                            osc_hist->Scale(1.0 / osc_hist->Integral());
+                        }
                         cv_hist->SetTitle((config.m_mode_names[im]  +" "+ config.m_detector_names[id]+" "+ config.m_channel_names[ic]).c_str());
                         cv_hist->GetXaxis()->SetTitle("");
                         cv_hist->SetLineColor(kBlack);
