@@ -430,9 +430,16 @@ std::vector<BenchResult> run_scale_test(
     const int N_metric = std::max(1, opts.N / 10);
     const int N_fit    = std::max(1, opts.N / 100);
 
+    // Honour the gradient mode the user selected via --grad-mode. The fit
+    // benchmark already gets this through PROfitter::Fit(), but the
+    // metric_grad_* tests call metric() directly and would otherwise see the
+    // metric's default mode regardless of CLI selection.
+    metric.setGradientMode(fitconfig.gradient_mode);
+
     log<LOG_INFO>(L"%1% || ===== PRObench scale-test starting =====") % __func__;
-    log<LOG_INFO>(L"%1% || N_fillspectra=%2%  N_metric=%3%  N_fit=%4%")
-        % __func__ % N_fill % N_metric % N_fit;
+    log<LOG_INFO>(L"%1% || N_fillspectra=%2%  N_metric=%3%  N_fit=%4%  grad_mode=%5%")
+        % __func__ % N_fill % N_metric % N_fit
+        % PROmetric::gradientModeName(fitconfig.gradient_mode);
     log<LOG_INFO>(L"%1% || nphys=%2%  nnuis=%3%  nbins=%4%")
         % __func__ % model.nparams % syst.GetNSplines() % config.m_num_variable_bins_total[config.i_prime];
 

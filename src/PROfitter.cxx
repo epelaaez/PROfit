@@ -127,6 +127,11 @@ float PROfitter::Fit(PROmetric &metric, const Eigen::VectorXf &seed_pt ) {
 
 float PROfitter::Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed_points ) {
 
+    // Apply the configured gradient strategy to the metric for the duration of
+    // this fit. The metric stores the mode itself (PROmetric::gradient_mode)
+    // so any subsequent operator() call inside the LBFGS solver will use it.
+    metric.setGradientMode(fitconfig.gradient_mode);
+
     std::mt19937 rng;
     rng.seed(seed);
     std::normal_distribution<float> d;
