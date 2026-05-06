@@ -163,6 +163,47 @@ bool LOGGING_TO_FILE = false;
 
 void mcmc_worker(std::vector<Metropolis<simple_target, adaptive_proposal>> &mets, Eigen::VectorXf initial, PROmetric *metric, uint32_t seed, size_t nchains, size_t burnin, size_t steps);
 
+struct GlobalFitResult {
+    PROfitter fitter;
+    std::optional<Metropolis<simple_target, adaptive_proposal>> mh;
+
+    std::vector<TH1D> priors, posteriors;
+    Eigen::VectorXf prior_param_lo, prior_param_hi, post_param_lo, post_param_hi;
+    Eigen::MatrixXf covmat, fraccovmat, corrmat, prior_covariance, spline_covariance;
+
+    std::optional<PROerrorbar> err_band, post_err_band;
+
+    float chi2;
+
+    GlobalFitResult(const Eigen::VectorXf &ub, const Eigen::VectorXf &lb, const PROfitterConfig &config)
+        : fitter(ub, lb, config) {}
+};
+enum struct GlobalFitOptions {
+    Default             = 0,
+    Progress            = 1 << 0,
+    FreqSeedPts         = 1 << 1,
+    Correlations        = 1 << 2,
+    PrefitErrorBand     = 1 << 3,
+    MCMCPrefitErrorBand = 1 << 4,
+    PostFitErrorBand    = 1 << 5,
+    BinWidthScaled      = 1 << 6,
+};
+GlobalFitOptions operator|(GlobalFitOptions lhs, GlobalFitOptions rhs) { 
+    return static_cast<GlobalFitOptions>(static_cast<int>(lhs) | static_cast<int>(rhs)); 
+}
+GlobalFitOptions operator|=(GlobalFitOptions &lhs, GlobalFitOptions rhs) {
+    lhs = lhs | rhs;
+    return lhs;
+}
+GlobalFitOptions operator&(GlobalFitOptions lhs, GlobalFitOptions rhs) { 
+    return static_cast<GlobalFitOptions>(static_cast<int>(lhs) & static_cast<int>(rhs)); 
+}
+GlobalFitOptions operator&=(GlobalFitOptions &lhs, GlobalFitOptions rhs) {
+    lhs = lhs & rhs;
+    return lhs;
+}
+GlobalFitResult do_a_fit(const PROconfig &config, const PROpeller &prop, const PROdata &data, PROmetric *metric, const Eigen::VectorXf &ub, const Eigen::VectorXf &lb, const PROfitterConfig &fit_config, const Eigen::VectorXf &CVParams, const PROspec &cv, const std::vector<int> &global_fixed, GlobalFitOptions opt);
+
 // Walks the collapsed reco bins and logs any with prediction < threshold,
 // printing the channel, bin index/edges, prediction, and data count side-by-side.
 static void logLowPredictionBins(const PROconfig &config, const Eigen::VectorXf &pred_collapsed, const Eigen::VectorXf &data_collapsed, float threshold = 1.0f, size_t var_index = 0) {
@@ -2525,111 +2566,19 @@ int main(int argc, char* argv[])
     //***********************************************************************
     if(*proglobal_command){
 
-        PROfitter fitter(global_ub, global_lb, fitConfig);
-        metric->setBounds(global_ub, global_lb);
-
-        log<LOG_INFO>(L"%1% || ########### Print of inputs ############") % __func__;
-        //metric->print(fakedataparams); //fix
-        log<LOG_INFO>(L"%1% || ########### Starting Global Best Fit Minimizing ############") % __func__;
-
-        std::vector<std::pair<int, std::string>> global_PB_configs;
-        global_PB_configs.push_back({fitConfig.n_latin_points, "(1) LatinHyperCube"});
-        global_PB_configs.push_back({fitConfig.n_swarm_iterations, "(2) ParticleSwarm"});
-        global_PB_configs.push_back({fitConfig.n_localfit, "(3) BestLBFGSB"});
-        global_PB_configs.push_back({fitConfig.harmonic_num_test_points, "(4) HarmonicScan"});
-        global_PB_configs.push_back({100, "(5) HarmonicLBFGSB"});
-        MultiPROgressBar global_progress(global_PB_configs);
-
-        if(progress_bar){
-            global_progress.initialize_display();
-            global_progress.start_display_thread(); 
-            fitter.setProgressBar(&global_progress);
-        }
-
-        float best_chi2 = fitter.Fit(*metric,CVParams); 
-        Eigen::VectorXf best_fit = fitter.best_fit;
-        Eigen::MatrixXf post_covar = fitter.Covariance();
-        if(!global_fixed[0] || !systs_only) fitter.calcFreqSeedPoints(*metric);
-
-        PROsyst pre_allcovsyst = variable_systs[config.i_prime].allsplines2cov(config, prop, *model, CVParams, dseed(PROseed::global_rng));
-        PROsyst post_allcovsyst = variable_systs[config.i_prime].allsplines2cov(config, prop, *model, best_fit, dseed(PROseed::global_rng));
-
-        for(size_t i=0; i< fitter.freq_seed_points.size(); i++){
-            float chi_freq = fitter.freq_seed_values.at(i);
-            if( chi_freq < best_chi2){
-                log<LOG_INFO>(L"%1% || One of the harmonics of first pass best fit, is a lower chi :  %2% ") % __func__ % fitter.freq_seed_values.at(i);
-                log<LOG_INFO>(L"%1% || -- at params:  %2% ") % __func__ % fitter.freq_seed_points.at(i);
-                best_chi2 = chi_freq;
-                best_fit = fitter.freq_seed_points.at(i);
-            }
-        }
-        if(progress_bar)global_progress.finish_all();
-        global_fit_chi2 = best_chi2;
-        if(global_fit_result.size() == 0) global_fit_result = best_fit;
-
-        if (fitter.exception_string_map.empty()) {
-            log<LOG_INFO>(L"%1% || No exceptions were caught from LBFGSB [ --INFO-- ]") % __func__;
-        } else {
-            log<LOG_INFO>(L"%1% || Some exceptions were caught in LBFGSB [ --INFO-- ]") % __func__;
-            for (const auto &[msg, count] : fitter.exception_string_map) {
-                log<LOG_INFO>(L"%1% ||  -- Exception \"%2%\" occurred %3% time(s)") % __func__ % msg.c_str() % count;
-            }
-        }
-
-
-        log<LOG_INFO>(L"%1% || ################################################") % __func__;
-        log<LOG_INFO>(L"%1% || ########### Global Best Fit Results ############") % __func__;
-        log<LOG_INFO>(L"%1% || ################################################") % __func__;
-        log<LOG_INFO>(L"%1% || Global Best Fit chi^2: %2%") %__func__ % best_chi2;
-        log<LOG_INFO>(L"%1% || at paramters: ") % __func__;
-
-        for(size_t i = 0; i< N_params; i++){
-
-            if(i<N_phys_params){
-                log<LOG_INFO>(L"%1% || %2%  : %3% (log) %4% (nonlog) ") % __func__ % metric->GetModel().pretty_param_names[i].c_str() % best_fit(i) % pow(10,best_fit(i));
-            }else{
-                log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % config.m_mcgen_variation_plotname_map.at(metric->GetSysts().spline_names[i-N_phys_params]).c_str() % best_fit(i);
-            }
-        }
-        log<LOG_INFO>(L"%1% || ################################################") % __func__;
-
-        {
-            Eigen::VectorXf bf_spec_full = FillSpectra(config, prop, metric->GetSysts(), metric->GetModel(), best_fit, true, config.i_prime).Spec();
-            Eigen::VectorXf bf_spec_coll = CollapseMatrix(config, bf_spec_full);
-            logLowPredictionBins(config, bf_spec_coll, data.Spec(), 1.0f, config.i_prime);
-        }
-
-        log<LOG_INFO>(L"%1% || Starting a metropolis hastings chain to estimate the covariance matrix aroud the above best fit. Run and Burn is (%2%,%3%);") % __func__%fitConfig.MCMCiter % fitConfig.MCMCburn;
-        std::vector<int> fixed;
-        for(size_t i = 0; i< global_fixed.size();i++){
-            if(global_fixed.at(i) == 1)
-                fixed.push_back(i);
-        }
-        Metropolis mh(simple_target{*metric}, adaptive_proposal(*metric, dseed(PROseed::global_rng), fixed), best_fit, dseed(PROseed::global_rng));
-
-        Eigen::MatrixXf covmat = Eigen::MatrixXf::Constant(N_params, N_params, 0);
-        size_t count = 0;
-        const auto action = [&](const Eigen::VectorXf &value) {
-            covmat += (value-best_fit) * (value-best_fit).transpose();
-            count += 1;
-        };
-        std::optional<PROgressBar> mh_pbar;
-        if(progress_bar) mh_pbar.emplace(int(fitConfig.MCMCburn + fitConfig.MCMCiter), 30, "MCMC postfit");
-        mh.run(fitConfig.MCMCburn,fitConfig.MCMCiter, action, mh_pbar ? &*mh_pbar : nullptr);
-
-        covmat /= count;
-        Eigen::VectorXf inv_best_fit = best_fit.array().abs().max(1e-10f).inverse();
-        Eigen::MatrixXf fraccovmat = inv_best_fit.asDiagonal() * covmat * inv_best_fit.asDiagonal();
-
-        Eigen::VectorXf inv_sqrt_diag = fraccovmat.diagonal().array().abs().max(1e-10f).sqrt().inverse();
-        Eigen::MatrixXf corrmat = inv_sqrt_diag.asDiagonal() * fraccovmat * inv_sqrt_diag.asDiagonal();
-
+        GlobalFitOptions opt = GlobalFitOptions::Default;
+        if(progress_bar) opt |= GlobalFitOptions::Progress;
+        if(binwidth_scale) opt |= GlobalFitOptions::BinWidthScaled;
+        if(!global_fixed[0] || !systs_only) opt |= GlobalFitOptions::FreqSeedPts;
+        opt |= MCMC_prefit_errors ? GlobalFitOptions::MCMCPrefitErrorBand : GlobalFitOptions::PrefitErrorBand;
+        opt |= GlobalFitOptions::PostFitErrorBand;
+        opt |= GlobalFitOptions::Correlations;
+        PROspec cv = FillSpectra(config, prop, metric->GetSysts(), metric->GetModel(), CVParams , true ,config.i_prime);
+        GlobalFitResult fitres = do_a_fit(config, prop, data, metric, global_ub, global_lb, fitConfig, CVParams, cv, global_fixed, opt); 
 
         TH2D corrhist("crh", "", N_params, 0, N_params, N_params, 0, N_params);
         TH2D fraccovhist("fch", "", N_params, 0, N_params, N_params, 0, N_params);
         TH2D covhist("ch", "", N_params, 0, N_params, N_params, 0, N_params);
-        TH2D physhist;
-        if(N_phys_params > 0) physhist = TH2D("ph","", N_params, 0, N_params, N_phys_params, 0, N_phys_params);
         std::vector<std::string> param_names;
         for(size_t i = 0; i < N_params; ++i) {
             std::string label = i < N_phys_params 
@@ -2642,14 +2591,10 @@ int main(int argc, char* argv[])
             fraccovhist.GetYaxis()->SetBinLabel(i+1, label.c_str());
             corrhist.GetXaxis()->SetBinLabel(i+1, label.c_str());
             corrhist.GetYaxis()->SetBinLabel(i+1, label.c_str());
-            if(N_phys_params > 0) physhist.GetXaxis()->SetBinLabel(i+1, label.c_str());
-            if(i < N_phys_params) physhist.GetYaxis()->SetBinLabel(i+1, label.c_str());
             for(size_t j = 0; j < N_params; ++j) {
-                covhist.SetBinContent(i+1, j+1, covmat(i,j));
-                fraccovhist.SetBinContent(i+1, j+1, fraccovmat(i,j));
-                corrhist.SetBinContent(i+1, j+1, corrmat(i,j));
-                if(j < N_phys_params)
-                    physhist.SetBinContent(i+1, j+1, covmat(i,j));
+                covhist.SetBinContent(i+1, j+1, fitres.covmat(i,j));
+                fraccovhist.SetBinContent(i+1, j+1, fitres.fraccovmat(i,j));
+                corrhist.SetBinContent(i+1, j+1, fitres.corrmat(i,j));
             }
         }
         TCanvas c1;
@@ -2670,17 +2615,13 @@ int main(int argc, char* argv[])
         line.DrawLine(N_phys_params, 0, N_phys_params, N_params);
         line.DrawLine(0, N_phys_params, N_params, N_phys_params);
         c1.Print((final_output_tag+"_postfit_correlation_matrix.pdf").c_str());
-        if(N_phys_params > 0) {
-            physhist.Draw("colz");
-            //c1.Print("phys_cov.pdf");
-        }
-        log<LOG_INFO>(L"%1% || MCMC acceptance is  %2%. ") % __func__% ((double)mh.naccept /fitConfig.MCMCiter);
 
-        mh.plot_autocorrelation(final_output_tag+"_PROglobal_corrmat_mcmc_autocorrelation.pdf", param_names);
+        log<LOG_INFO>(L"%1% || MCMC acceptance is  %2%. ") % __func__% ((double)fitres.mh->naccept /fitConfig.MCMCiter);
 
-        std::string hname = "#chi^{2}/ndf = " + to_string(best_chi2) + "/" + to_string(config.m_num_variable_bins_total_collapsed[config.i_prime]);
-        PROspec cv = FillSpectra(config, prop, metric->GetSysts(), metric->GetModel(), CVParams , true,config.i_prime);
-        PROspec bf = FillSpectra(config, prop, metric->GetSysts(), metric->GetModel(), best_fit, true,config.i_prime);
+        fitres.mh->plot_autocorrelation(final_output_tag+"_PROglobal_corrmat_mcmc_autocorrelation.pdf", param_names);
+
+        std::string hname = "#chi^{2}/ndf = " + to_string(fitres.chi2) + "/" + to_string(config.m_num_variable_bins_total_collapsed[config.i_prime]);
+        PROspec bf = FillSpectra(config, prop, metric->GetSysts(), metric->GetModel(), fitres.fitter.best_fit, true ,config.i_prime);
 
         TH1D post_hist("ph", hname.c_str(), config.m_num_variable_bins_total_collapsed[config.i_prime], config.m_channel_variable_bins[config.i_prime][0].Edges().data());
         TH1D pre_hist("prh", hname.c_str(), config.m_num_variable_bins_total_collapsed[config.i_prime], config.m_channel_variable_bins[config.i_prime][0].Edges().data());
@@ -2688,35 +2629,6 @@ int main(int argc, char* argv[])
             post_hist.SetBinContent(i+1, bf.Spec()(i));
             pre_hist.SetBinContent(i+1, cv.Spec()(i));
         }
-
-        log<LOG_INFO>(L"%1% || Finished the metropolis hastings chain ") % __func__;
-
-        std::vector<TH1D> priors, posteriors;
-        Eigen::MatrixXf prior_covariance, spline_covariance;
-        Eigen::VectorXf prior_param_lo, prior_param_hi, post_param_lo, post_param_hi;
-        // Fix physics parameters
-        std::vector<int> fixed_pars;
-        for(size_t i = 0; i < N_phys_params; ++i) fixed_pars.push_back(i);
-        for(size_t i = N_phys_params; i< global_fixed.size();i++){
-            if(global_fixed.at(i)==1)fixed_pars.push_back(i);
-        }
-
-
-        log<LOG_INFO>(L"%1% || Starting global getErrorBand() ") % __func__;
-        Metropolis mh_pre(prior_only_target{*metric}, adaptive_proposal(*metric, dseed(PROseed::global_rng), fixed_pars), best_fit, dseed(PROseed::global_rng));
-
-        std::optional<PROgressBar> errband_pre_pbar;
-        if(progress_bar && MCMC_prefit_errors) errband_pre_pbar.emplace(int(fitConfig.MCMCburn + fitConfig.MCMCiter), 30, "MCMC prefit");
-        PROerrorbar  err_band =
-            MCMC_prefit_errors
-            ? getMCMCErrorBand(mh_pre, fitConfig.MCMCburn, fitConfig.MCMCiter, config, prop, *metric, best_fit, priors, prior_covariance, prior_param_lo, prior_param_hi, binwidth_scale,config.i_prime, errband_pre_pbar ? &*errband_pre_pbar : nullptr)
-            : getErrorBand(config, prop, variable_systs[config.i_prime], *model, cv,CVParams, binwidth_scale,config.i_prime);
-
-        Metropolis mh_post(simple_target{*metric}, adaptive_proposal(*metric, dseed(PROseed::global_rng), fixed_pars), best_fit, dseed(PROseed::global_rng));
-        log<LOG_INFO>(L"%1% || Starting global getPostFitErrorBand() ") % __func__;
-        std::optional<PROgressBar> errband_post_pbar;
-        if(progress_bar) errband_post_pbar.emplace(int(fitConfig.MCMCburn + fitConfig.MCMCiter), 30, "MCMC postfit band");
-        PROerrorbar post_err_band = getMCMCErrorBand(mh_post, fitConfig.MCMCburn, fitConfig.MCMCiter, config, prop, *metric, best_fit, posteriors, spline_covariance, post_param_lo, post_param_hi, binwidth_scale,config.i_prime, errband_post_pbar ? &*errband_post_pbar : nullptr);
 
         std::vector<TPaveText> texts;
         TPaveText chi2text(0.55, 0.50, 0.85, 0.58, "NDC");
@@ -2727,18 +2639,16 @@ int main(int argc, char* argv[])
         //chi2text.SetTextSize(0.035); 
         texts.push_back(chi2text);
 
-	PlotOptions opt; 
-	if(data_mc_ratio){
-	    opt = PlotOptions::DataMCRatio;
-	} 
-	else{
-	    opt = PlotOptions::DataPostfitRatio;
-	}
-        if(binwidth_scale) opt |= PlotOptions::BinWidthScaled;
-        if(area_normalized) opt |= PlotOptions::AreaNormalized;
-        plot_channels((final_output_tag+"_PROglobal_hists.pdf"), config, cv, bf, data, err_band, post_err_band, texts, pbounds, opt, 0, true);
-
-
+        PlotOptions popt; 
+        if(data_mc_ratio){
+            popt = PlotOptions::DataMCRatio;
+        } 
+        else{
+            popt = PlotOptions::DataPostfitRatio;
+        }
+        if(binwidth_scale) popt |= PlotOptions::BinWidthScaled;
+        if(area_normalized) popt |= PlotOptions::AreaNormalized;
+        plot_channels((final_output_tag+"_PROglobal_hists.pdf"), config, cv, bf, data, fitres.err_band, fitres.post_err_band, texts, pbounds, popt, 0, true);
     }
 
     if(*promcmc_command) {
@@ -3196,5 +3106,149 @@ void mcmc_worker(std::vector<Metropolis<simple_target, adaptive_proposal>> &mets
         mets.emplace_back(target, proposal, initial, dseed(rng));
         mets.back().run(burnin, steps);
     }
+}
+
+GlobalFitResult do_a_fit(const PROconfig &config, const PROpeller &prop, const PROdata &data, PROmetric *metric, const Eigen::VectorXf &ub, const Eigen::VectorXf &lb, const PROfitterConfig &fit_config, const Eigen::VectorXf &CVParams, const PROspec &cv, const std::vector<int> &global_fixed, GlobalFitOptions opt) {
+    GlobalFitResult res(ub, lb, fit_config);
+    metric->setBounds(ub, lb);
+
+    log<LOG_INFO>(L"%1% || ########### Starting Global Best Fit Minimizing ############") % __func__;
+
+    std::vector<std::pair<int, std::string>> progress_configs;
+    progress_configs.push_back({fit_config.n_latin_points, "(1) LatinHyperCube"});
+    progress_configs.push_back({fit_config.n_swarm_iterations, "(2) ParticleSwarm"});
+    progress_configs.push_back({fit_config.n_localfit, "(3) BestLBFGSB"});
+    progress_configs.push_back({fit_config.harmonic_num_test_points, "(4) HarmonicScan"});
+    progress_configs.push_back({100, "(5) HarmonicLBFGSB"});
+    MultiPROgressBar progress(progress_configs);
+
+    bool progress_bar = (opt & GlobalFitOptions::Progress) != GlobalFitOptions::Default;
+    if(progress_bar){
+        progress.initialize_display();
+        progress.start_display_thread(); 
+        res.fitter.setProgressBar(&progress);
+    }
+
+    float best_chi2 = res.fitter.Fit(*metric, CVParams); 
+    Eigen::VectorXf best_fit = res.fitter.best_fit;
+    if((opt & GlobalFitOptions::FreqSeedPts) != GlobalFitOptions::Default) res.fitter.calcFreqSeedPoints(*metric);
+
+    for(size_t i=0; i< res.fitter.freq_seed_points.size(); i++){
+        float chi_freq = res.fitter.freq_seed_values.at(i);
+        if( chi_freq < best_chi2){
+            log<LOG_INFO>(L"%1% || One of the harmonics of first pass best fit, is a lower chi :  %2% ") % __func__ % res.fitter.freq_seed_values.at(i);
+            log<LOG_INFO>(L"%1% || -- at params:  %2% ") % __func__ % res.fitter.freq_seed_points.at(i);
+            best_chi2 = chi_freq;
+            best_fit = res.fitter.freq_seed_points.at(i);
+        }
+    }
+    res.chi2 = best_chi2;   
+    if(progress_bar) progress.finish_all();
+
+    if (res.fitter.exception_string_map.empty()) {
+        log<LOG_INFO>(L"%1% || No exceptions were caught from LBFGSB [ --INFO-- ]") % __func__;
+    } else {
+        log<LOG_INFO>(L"%1% || Some exceptions were caught in LBFGSB [ --INFO-- ]") % __func__;
+        for (const auto &[msg, count] : res.fitter.exception_string_map) {
+            log<LOG_INFO>(L"%1% ||  -- Exception \"%2%\" occurred %3% time(s)") % __func__ % msg.c_str() % count;
+        }
+    }
+
+    log<LOG_INFO>(L"%1% || ################################################") % __func__;
+    log<LOG_INFO>(L"%1% || ########### Global Best Fit Results ############") % __func__;
+    log<LOG_INFO>(L"%1% || ################################################") % __func__;
+    log<LOG_INFO>(L"%1% || Global Best Fit chi^2: %2%") %__func__ % best_chi2;
+    log<LOG_INFO>(L"%1% || at paramters: ") % __func__;
+
+    size_t N_phys_params = metric->GetModel().nparams;
+    size_t N_nuisance = metric->GetSysts().GetNSplines();
+    size_t N_params = N_phys_params + N_nuisance;
+
+    for(size_t i = 0; i< N_params; i++){
+
+        if(i<N_phys_params){
+            log<LOG_INFO>(L"%1% || %2%  : %3% (log) %4% (nonlog) ") % __func__ % metric->GetModel().pretty_param_names[i].c_str() % best_fit(i) % pow(10,best_fit(i));
+        }else{
+            log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % config.m_mcgen_variation_plotname_map.at(metric->GetSysts().spline_names[i-N_phys_params]).c_str() % best_fit(i);
+        }
+    }
+    log<LOG_INFO>(L"%1% || ################################################") % __func__;
+
+    {
+        Eigen::VectorXf bf_spec_full = FillSpectra(config, prop, metric->GetSysts(), metric->GetModel(), best_fit, true, config.i_prime).Spec();
+        Eigen::VectorXf bf_spec_coll = CollapseMatrix(config, bf_spec_full);
+        logLowPredictionBins(config, bf_spec_coll, data.Spec(), 1.0f, config.i_prime);
+    }
+
+    std::uniform_int_distribution<uint32_t> dseed(0, std::numeric_limits<uint32_t>::max());
+    if((opt & GlobalFitOptions::Correlations) != GlobalFitOptions::Default) {
+        log<LOG_INFO>(L"%1% || Starting a metropolis hastings chain to estimate the covariance matrix aroud the above best fit. Run and Burn is (%2%,%3%);") % __func__%fit_config.MCMCiter % fit_config.MCMCburn;
+
+        std::vector<int> fixed;
+        for(size_t i = 0; i< global_fixed.size();i++){
+            if(global_fixed.at(i) == 1)
+                fixed.push_back(i);
+        }
+        res.mh.emplace(simple_target{*metric}, adaptive_proposal(*metric, dseed(PROseed::global_rng), fixed), best_fit, dseed(PROseed::global_rng));
+
+        res.covmat = Eigen::MatrixXf::Constant(N_params, N_params, 0);
+        size_t count = 0;
+        const auto action = [&](const Eigen::VectorXf &value) {
+            res.covmat += (value-best_fit) * (value-best_fit).transpose();
+            count += 1;
+        };
+        std::optional<PROgressBar> mh_pbar;
+        if((opt & GlobalFitOptions::Progress) != GlobalFitOptions::Default) 
+            mh_pbar.emplace(int(fit_config.MCMCburn + fit_config.MCMCiter), 30, "MCMC postfit");
+        res.mh->run(fit_config.MCMCburn,fit_config.MCMCiter, action, mh_pbar ? &*mh_pbar : nullptr);
+
+        res.covmat /= count;
+        Eigen::VectorXf inv_best_fit = best_fit.array().abs().max(1e-10f).inverse();
+        res.fraccovmat = inv_best_fit.asDiagonal() * res.covmat * inv_best_fit.asDiagonal();
+
+        Eigen::VectorXf inv_sqrt_diag = res.fraccovmat.diagonal().array().abs().max(1e-10f).sqrt().inverse();
+        res.corrmat = inv_sqrt_diag.asDiagonal() * res.fraccovmat * inv_sqrt_diag.asDiagonal();
+
+        log<LOG_INFO>(L"%1% || Finished the metropolis hastings chain ") % __func__;
+    }
+
+    bool preerr = (opt & GlobalFitOptions::PrefitErrorBand) != GlobalFitOptions::Default;
+    bool mcmcpre = (opt & GlobalFitOptions::MCMCPrefitErrorBand) != GlobalFitOptions::Default;
+    bool binwidth_scale = (opt & GlobalFitOptions::BinWidthScaled) != GlobalFitOptions::Default;
+    if(preerr || mcmcpre) {
+        // Fix physics parameters
+        std::vector<int> fixed_pars;
+        for(size_t i = 0; i < N_phys_params; ++i) fixed_pars.push_back(i);
+        for(size_t i = N_phys_params; i< global_fixed.size();i++){
+            if(global_fixed.at(i)==1)fixed_pars.push_back(i);
+        }
+
+        log<LOG_INFO>(L"%1% || Starting global getErrorBand() ") % __func__;
+        Metropolis mh_pre(prior_only_target{*metric}, adaptive_proposal(*metric, dseed(PROseed::global_rng), fixed_pars), best_fit, dseed(PROseed::global_rng));
+
+        std::optional<PROgressBar> errband_pre_pbar;
+        if(progress_bar && mcmcpre) errband_pre_pbar.emplace(int(fit_config.MCMCburn + fit_config.MCMCiter), 30, "MCMC prefit");
+        res.err_band =
+            mcmcpre
+            ? getMCMCErrorBand(mh_pre, fit_config.MCMCburn, fit_config.MCMCiter, config, prop, *metric, best_fit, res.priors, res.prior_covariance, res.prior_param_lo, res.prior_param_hi, binwidth_scale, config.i_prime, errband_pre_pbar ? &*errband_pre_pbar : nullptr)
+            : getErrorBand(config, prop, metric->GetSysts(), metric->GetModel(), cv ,CVParams, binwidth_scale, config.i_prime);
+    }
+
+    if((opt & GlobalFitOptions::PostFitErrorBand) != GlobalFitOptions::Default) {
+        // Fix physics parameters
+        std::vector<int> fixed_pars;
+        for(size_t i = 0; i < N_phys_params; ++i) fixed_pars.push_back(i);
+        for(size_t i = N_phys_params; i< global_fixed.size();i++){
+            if(global_fixed.at(i)==1)fixed_pars.push_back(i);
+        }
+
+        Metropolis mh_post(simple_target{*metric}, adaptive_proposal(*metric, dseed(PROseed::global_rng), fixed_pars), best_fit, dseed(PROseed::global_rng));
+        log<LOG_INFO>(L"%1% || Starting global getPostFitErrorBand() ") % __func__;
+        std::optional<PROgressBar> errband_post_pbar;
+        if(progress_bar) errband_post_pbar.emplace(int(fit_config.MCMCburn + fit_config.MCMCiter), 30, "MCMC postfit band");
+        res.post_err_band = getMCMCErrorBand(mh_post, fit_config.MCMCburn, fit_config.MCMCiter, config, prop, *metric, best_fit, res.posteriors, res.spline_covariance, res.post_param_lo, res.post_param_hi, binwidth_scale,config.i_prime, errband_post_pbar ? &*errband_post_pbar : nullptr);
+    }
+    
+    return res;
 }
 
