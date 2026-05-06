@@ -67,6 +67,11 @@ bool PROconfig::SameChannels(const PROconfig &one, const PROconfig &two) {
                 % __func__ % one.m_detector_names[i].c_str() % two.m_detector_names[i].c_str();
             return false;
         }
+        if(one.m_det_pot[i] != two.m_det_pot[i]) {
+            log<LOG_WARNING>(L"%1% || Found different POTs for detector %2%, %3% vs %4%")
+                % __func__ % one.m_detector_names[i].c_str() % one.m_det_pot[i] % two.m_det_pot[i];
+            return false;
+        }
     }
     if(one.m_num_channels != two.m_num_channels) {
         log<LOG_WARNING>(L"%1% || Found different number of channels %2% vs %3%")
