@@ -49,6 +49,7 @@ namespace PROfit{
                         const std::string& color = inconfig.m_subchannel_colors[ic][sc];
                         int rcolor = color == "NONE" ? kRed - 7 : inconfig.HexToROOTColor(color);
                         std::unique_ptr<TH1D> htmp = std::make_unique<TH1D>(spec.toTH1D(inconfig, global_subchannel_index, other_index));
+                        htmp->SetDirectory(nullptr);  // copy ctor re-registers with gDirectory; detach to avoid name-collision warnings on repeated calls.
                         htmp->SetLineWidth(1);
                         htmp->SetLineColor(kBlack);
                         htmp->SetFillColor(rcolor);
@@ -56,6 +57,7 @@ namespace PROfit{
                         hists[subchannel_name] = std::move(htmp);
                         std::unique_ptr<TH1D> htmp_slc = std::make_unique<TH1D>(spec.toTH1DSlices(inconfig, global_subchannel_index, other_index));
                         if(htmp_slc){
+                            htmp_slc->SetDirectory(nullptr);
                             hists[subchannel_name+"slc"] = std::move(htmp_slc);
                         }
                         ++global_subchannel_index;
@@ -76,6 +78,7 @@ namespace PROfit{
                     for(size_t sc = 0; sc < inconfig.m_num_subchannels[ic]; sc++){
                         const std::string& subchannel_name  = inconfig.m_fullnames[global_subchannel_index];
                         std::unique_ptr<TH2D> htmp = std::make_unique<TH2D>(spec.toTH2D(inconfig, global_subchannel_index, other_index));
+                        htmp->SetDirectory(nullptr);  // copy ctor re-registers with gDirectory; detach to avoid name-collision warnings on repeated calls.
                         if(scale) htmp->Scale(1,"width");
                         hists[subchannel_name] = std::move(htmp);
                         ++global_subchannel_index;
