@@ -304,6 +304,7 @@ int main(int argc, char* argv[])
     app.add_flag("--force",force,"Force loading binary data even if hash is incorrect (Be Careful!)");
     app.add_flag("--no-xrootd",noxrootd,"Do not use XRootD, which is enabled by default");
     app.add_flag("--syst-only", systs_only, "Force fitting over nuisance parameters only, currently just --fix's them");
+    app.add_flag("--area-norm", area_normalized, "Make area normalized histograms.");
 
     auto* shape_flag = app.add_flag("--shapeonly", shapeonly, "Run a shape only analysis");
     auto* rate_flag = app.add_flag("--rateonly", rateonly, "Run a rate only analysis");
@@ -341,7 +342,6 @@ int main(int argc, char* argv[])
     //PROplot, plot things
     CLI::App *proplot_command = app.add_subcommand("plot", "Make plots of CV, or injected point with error bars and covariance.");
     proplot_command->add_flag("--with-splines", with_splines, "Include graphs of splines in output.");
-    proplot_command->add_flag("--area-norm", area_normalized, "Make area normalized histograms.");
 
     //PROfc, Feldmand-Cousins
     CLI::App *profc_command = app.add_subcommand("fc", "Run Feldman-Cousins for this injected signal");
@@ -395,6 +395,8 @@ int main(int argc, char* argv[])
 
         log_impl::EnableFileLogging(log_file, FILE_LEVEL);
     }
+
+    if(shapeonly) area_normalized = true;
 
     pbounds.Load(bound_list);
 
