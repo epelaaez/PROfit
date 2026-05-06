@@ -1238,8 +1238,9 @@ int main(int argc, char* argv[])
         std::string hname = "#chi^{2}/ndf = " + to_string(best_chi2) + "/" + to_string(config.m_num_variable_bins_total_collapsed[config.i_prime]);
         PROspec cv = FillSpectra(config, prop, metric->GetSysts(), metric->GetModel(), CVParams , true,config.i_prime);
         PROspec bf = FillSpectra(config, prop, metric->GetSysts(), metric->GetModel(), best_fit, true,config.i_prime);
-        TH1D post_hist("ph", hname.c_str(), config.m_num_variable_bins_total_collapsed[config.i_prime], config.m_channel_variable_bins[config.i_prime][0].Edges().data());
-        TH1D pre_hist("prh", hname.c_str(), config.m_num_variable_bins_total_collapsed[config.i_prime], config.m_channel_variable_bins[config.i_prime][0].Edges().data());
+        // Concatenated bins across all channels share no common x-axis, so use bin-index axis.
+        TH1D post_hist("ph", hname.c_str(), config.m_num_variable_bins_total_collapsed[config.i_prime], 0, config.m_num_variable_bins_total_collapsed[config.i_prime]);
+        TH1D pre_hist("prh", hname.c_str(), config.m_num_variable_bins_total_collapsed[config.i_prime], 0, config.m_num_variable_bins_total_collapsed[config.i_prime]);
         for(size_t i = 0; i < config.m_num_variable_bins_total_collapsed[config.i_prime]; ++i) {
             post_hist.SetBinContent(i+1, bf.Spec()(i));
             pre_hist.SetBinContent(i+1, cv.Spec()(i));
@@ -2680,8 +2681,9 @@ int main(int argc, char* argv[])
         PROspec cv = FillSpectra(config, prop, metric->GetSysts(), metric->GetModel(), CVParams , true,config.i_prime);
         PROspec bf = FillSpectra(config, prop, metric->GetSysts(), metric->GetModel(), best_fit, true,config.i_prime);
 
-        TH1D post_hist("ph", hname.c_str(), config.m_num_variable_bins_total_collapsed[config.i_prime], config.m_channel_variable_bins[config.i_prime][0].Edges().data());
-        TH1D pre_hist("prh", hname.c_str(), config.m_num_variable_bins_total_collapsed[config.i_prime], config.m_channel_variable_bins[config.i_prime][0].Edges().data());
+        // Concatenated bins across all channels share no common x-axis, so use bin-index axis.
+        TH1D post_hist("ph", hname.c_str(), config.m_num_variable_bins_total_collapsed[config.i_prime], 0, config.m_num_variable_bins_total_collapsed[config.i_prime]);
+        TH1D pre_hist("prh", hname.c_str(), config.m_num_variable_bins_total_collapsed[config.i_prime], 0, config.m_num_variable_bins_total_collapsed[config.i_prime]);
         for(size_t i = 0; i < config.m_num_variable_bins_total_collapsed[config.i_prime]; ++i) {
             post_hist.SetBinContent(i+1, bf.Spec()(i));
             pre_hist.SetBinContent(i+1, cv.Spec()(i));
