@@ -1,5 +1,12 @@
 #include "PROplot.h"
 #include "TStyle.h"
+#include "TArrow.h"
+#include "TBox.h"
+#include "TH1F.h"
+#include "TLatex.h"
+#include "TLegend.h"
+#include "TMarker.h"
+#include "TText.h"
 #include <cmath>
 #include <Eigen/SVD>
 
@@ -1984,4 +1991,179 @@ namespace PROfit{
         c.Print((filename+"]").c_str());
         return 0;
     };
+
+    void plot_mcmc_1sigma(const std::string &filename, const PROconfig &config, const PROsyst &systs, const PROmodel &model, const Eigen::VectorXf &best_fit, const Eigen::VectorXf &param_err_lo, const Eigen::VectorXf &param_err_hi, bool with_osc, const Eigen::VectorXf &true_params) {
+        const int nBins = (int)systs.GetNSplines() + (with_osc ? (int)model.nparams : 0);
+        if(nBins == 0) {
+            log<LOG_WARNING>(L"%1% || No parameters to plot, skipping _1sigmaMCMC.pdf") % __func__;
+            return;
+        }
+
+        std::vector<std::string> names;
+        if(with_osc) for(const auto &n: model.pretty_param_names) names.push_back(n);
+        for(const auto &n: systs.spline_names) names.push_back(n);
+
+        std::vector<float> bfvalues(nBins, 0.0f);
+        for(int i = 0; i < nBins; ++i) {
+            int vec_idx = with_osc ? i : (i + (int)model.nparams);
+            if(vec_idx < (int)best_fit.size()) bfvalues[i] = (float)best_fit(vec_idx);
+        }
+
+        // Y range: cover post-fit bars, always show ±1
+        float minVal = -1.2f, maxVal = 1.2f;
+        for(int i = 0; i < nBins; ++i) {
+            int syst_idx = with_osc ? (i - (int)model.nparams) : i;
+            if(syst_idx >= 0 && syst_idx < (int)param_err_lo.size() && syst_idx < (int)param_err_hi.size()) {
+                minVal = std::min(minVal, bfvalues[i] - param_err_lo(syst_idx));
+                maxVal = std::max(maxVal, bfvalues[i] + param_err_hi(syst_idx));
+            }
+        }
+        // Clamp to ±5 so a runaway bar doesn't squash everything
+        minVal = std::max(minVal, -5.0f);
+        maxVal = std::min(maxVal,  5.0f);
+        const float y_axis_min = minVal * 1.15f;
+        const float y_axis_max = maxVal * 1.15f;
+        const float y_range_size = y_axis_max - y_axis_min;
+        const float arrow_margin = y_range_size * 0.07f;
+        const float arrow_length = y_range_size * 0.05f;
+
+        const int c_width  = std::max(600, std::min(5000, 50 * nBins));
+        const int c_height = 500;
+        const float axis_label_size = std::max(0.030f, std::min(0.045f, 1.8f / nBins));
+        const float x_label_size    = std::max(0.015f, std::min(0.030f, 1.2f / nBins));
+        const float bar_halfwidth   = std::max(0.08f, std::min(0.4f,  4.0f / nBins));
+        const float marker_offset   = bar_halfwidth * 0.6f;
+        const float marker_size     = std::max(0.5f, std::min(1.4f, 6.0f / std::sqrt((float)nBins)));
+
+        TCanvas *c = new TCanvas((filename+"1sigmaMCMC").c_str(), (filename+"1sigmaMCMC").c_str(), c_width, c_height);
+        c->cd();
+        c->SetLeftMargin(0.09);
+        c->SetBottomMargin(0.30);
+        c->SetRightMargin(0.28);
+        c->SetTopMargin(0.08);
+
+        TH1F *frame = new TH1F((filename+"_frame_mcmc1s").c_str(), "", nBins, 0, nBins);
+        frame->SetMinimum(y_axis_min);
+        frame->SetMaximum(y_axis_max);
+        frame->SetStats(0);
+        frame->GetXaxis()->SetLabelSize(0);
+        frame->GetXaxis()->SetTickLength(0);
+        frame->GetYaxis()->SetTitle("Parameter value (prior #kern[0.3]{} #sigma = 1)");
+        frame->GetYaxis()->SetTitleSize(axis_label_size);
+        frame->GetYaxis()->SetLabelSize(axis_label_size);
+        frame->GetYaxis()->SetTitleOffset(1.0);
+        frame->Draw("AXIS");
+
+        TBox *prior_band = new TBox(0.0f, -1.0f, (float)nBins, 1.0f);
+        prior_band->SetFillColor(kGray);
+        prior_band->SetFillStyle(1001);
+        prior_band->SetLineColor(kGray+1);
+        prior_band->SetLineWidth(1);
+        prior_band->Draw("same");
+
+        TGraphAsymmErrors *postbars = new TGraphAsymmErrors(nBins);
+        for(int i = 0; i < nBins; ++i) {
+            int syst_idx = with_osc ? (i - (int)model.nparams) : i;
+            float err_lo = 0.0f, err_hi = 0.0f;
+            if(syst_idx >= 0 && syst_idx < (int)param_err_lo.size() && syst_idx < (int)param_err_hi.size()) {
+                err_lo = param_err_lo(syst_idx);
+                err_hi = param_err_hi(syst_idx);
+            }
+            postbars->SetPoint(i, i + 0.5f, bfvalues[i]);
+            postbars->SetPointError(i, bar_halfwidth, bar_halfwidth, err_lo, err_hi);
+        }
+        postbars->SetFillColor(kBlue-7);
+        postbars->SetFillStyle(1001);
+        postbars->SetLineColor(kBlue-8);
+        postbars->SetLineWidth(1);
+        postbars->Draw("2 same");
+
+        TLine *l_zero = new TLine(0, 0, nBins, 0);
+        l_zero->SetLineStyle(2); l_zero->SetLineColor(kGray+2); l_zero->SetLineWidth(1);
+        l_zero->Draw();
+        TLine *l_pm1 = new TLine(0, 1, nBins, 1);
+        l_pm1->SetLineStyle(3); l_pm1->SetLineColor(kGray+2); l_pm1->SetLineWidth(1);
+        l_pm1->Draw();
+        TLine *l_mm1 = new TLine(0, -1, nBins, -1);
+        l_mm1->SetLineStyle(3); l_mm1->SetLineColor(kGray+2); l_mm1->SetLineWidth(1);
+        l_mm1->Draw();
+
+        auto drawMarkerWithArrow = [&](float x, float y, int color, int marker_style, float msize) {
+            bool clamp_below = y < -5.0f;
+            bool clamp_above = y >  5.0f;
+            if(!clamp_below && !clamp_above && (y < y_axis_min || y > y_axis_max)) return;
+            float draw_y = clamp_below ? y_axis_min + arrow_margin : (clamp_above ? y_axis_max - arrow_margin : y);
+            TMarker *m = new TMarker(x, draw_y, marker_style);
+            m->SetMarkerSize(msize); m->SetMarkerColor(color); m->Draw();
+            if(clamp_below) {
+                TArrow *a = new TArrow(x, draw_y - arrow_length*0.3f, x, y_axis_min + arrow_length*0.2f, 0.008, "|>");
+                a->SetLineColor(color); a->SetFillColor(color); a->SetLineWidth(1); a->Draw();
+            } else if(clamp_above) {
+                TArrow *a = new TArrow(x, draw_y + arrow_length*0.3f, x, y_axis_max - arrow_length*0.2f, 0.008, "|>");
+                a->SetLineColor(color); a->SetFillColor(color); a->SetLineWidth(1); a->Draw();
+            }
+        };
+
+        for(int i = 0; i < nBins; ++i) {
+            int vec_idx = with_osc ? i : (i + (int)model.nparams);
+            float x_center = i + 0.5f;
+            if(vec_idx < (int)best_fit.size()) {
+                drawMarkerWithArrow(x_center - marker_offset, (float)best_fit(vec_idx), kRed, 21, marker_size);
+            }
+            if(vec_idx < (int)true_params.size()) {
+                drawMarkerWithArrow(x_center + marker_offset, (float)true_params(vec_idx), kOrange+7, 33, marker_size * 1.1f);
+            }
+        }
+
+        const float label_y = y_axis_min - y_range_size * 0.04f;
+        for(int i = 0; i < nBins; ++i) {
+            std::string label;
+            if(with_osc && i < (int)model.nparams) {
+                label = "Log_{10}(" + model.pretty_param_names[i] + ")";
+            } else {
+                auto it = config.m_mcgen_variation_plotname_map.find(names[i]);
+                label = (it != config.m_mcgen_variation_plotname_map.end()) ? it->second : names[i];
+            }
+            TLatex *t = new TLatex(i + 0.5f, label_y, label.c_str());
+            t->SetTextAlign(13);
+            t->SetTextSize(x_label_size);
+            t->SetTextAngle(-45);
+            t->Draw();
+        }
+
+        TLegend *leg = new TLegend(0.73, 0.60, 0.99, 0.92);
+        leg->SetFillStyle(1001);
+        leg->SetBorderSize(1);
+        leg->SetTextSize(std::max(0.022f, std::min(0.030f, axis_label_size * 0.85f)));
+        leg->AddEntry(prior_band, "Pre-fit #pm1#sigma (prior)", "f");
+        leg->AddEntry(postbars,    "Post-fit #pm1#sigma (MCMC)", "f");
+        TGraph *leg_bf = new TGraph(1);
+        leg_bf->SetPoint(0, 0, 0);
+        leg_bf->SetMarkerStyle(21);
+        leg_bf->SetMarkerColor(kRed);
+        leg_bf->SetMarkerSize(marker_size);
+        leg->AddEntry(leg_bf, "Global best-fit", "p");
+        TGraph *leg_tp = nullptr;
+        if(true_params.size() > 0) {
+            leg_tp = new TGraph(1);
+            leg_tp->SetPoint(0, 0, 0);
+            leg_tp->SetMarkerStyle(33);
+            leg_tp->SetMarkerColor(kOrange+7);
+            leg_tp->SetMarkerSize(marker_size * 1.1f);
+            leg->AddEntry(leg_tp, "Injected values", "p");
+        }
+        leg->Draw();
+
+        TText *vt = new TText();
+        vt->SetNDC();
+        vt->SetTextFont(42);
+        vt->SetTextSize(0.028f);
+        vt->SetTextAlign(33);
+        std::string pv = "PROfit v" + std::string(PROJECT_VERSION_STR);
+        vt->DrawText(0.96, 0.97, pv.c_str());
+
+        c->Update();
+        c->SaveAs((filename+"_1sigmaMCMC.pdf").c_str(), "pdf");
+        delete c;
+    }
 }

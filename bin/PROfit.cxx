@@ -1159,7 +1159,7 @@ int main(int argc, char* argv[])
                 fixed.push_back(i);
         }
         //Metropolis mh(simple_target{*metric}, simple_proposal(*metric, dseed(PROseed::global_rng)), best_fit, dseed(PROseed::global_rng));
-        Metropolis mh(simple_target{*metric}, adaptive_proposal(*metric, dseed(PROseed::global_rng), fixed), best_fit, dseed(PROseed::global_rng));
+        Metropolis mh(simple_target{*metric, best_chi2}, adaptive_proposal(*metric, dseed(PROseed::global_rng), fixed), best_fit, dseed(PROseed::global_rng));
 
         Eigen::MatrixXf covmat = Eigen::MatrixXf::Constant(N_params, N_params, 0);
         size_t count = 0;
@@ -1259,7 +1259,8 @@ int main(int argc, char* argv[])
 
 
         log<LOG_INFO>(L"%1% || Starting global getErrorBand() ") % __func__;
-        Metropolis mh_pre(prior_only_target{*metric}, adaptive_proposal(*metric, dseed(PROseed::global_rng), fixed_pars), best_fit, dseed(PROseed::global_rng));
+        const float pull_at_bf = metric->Pull(best_fit.segment(N_phys_params, metric->GetSysts().GetNSplines()));
+        Metropolis mh_pre(prior_only_target{*metric, pull_at_bf}, adaptive_proposal(*metric, dseed(PROseed::global_rng), fixed_pars), best_fit, dseed(PROseed::global_rng));
 
         std::optional<PROgressBar> errband_pre_pbar;
         if(progress_bar && MCMC_prefit_errors) errband_pre_pbar.emplace(int(fitConfig.MCMCburn + fitConfig.MCMCiter), 30, "MCMC prefit");
@@ -1268,7 +1269,7 @@ int main(int argc, char* argv[])
             ? getMCMCErrorBand(mh_pre, fitConfig.MCMCburn, fitConfig.MCMCiter, config, prop, *metric, best_fit, priors, prior_covariance, prior_param_lo, prior_param_hi, binwidth_scale,config.i_prime, errband_pre_pbar ? &*errband_pre_pbar : nullptr)
             : getErrorBand(config, prop, variable_systs[config.i_prime], *model, cv,CVParams, binwidth_scale,config.i_prime);
 
-        Metropolis mh_post(simple_target{*metric}, adaptive_proposal(*metric, dseed(PROseed::global_rng), fixed_pars), best_fit, dseed(PROseed::global_rng));
+        Metropolis mh_post(simple_target{*metric, best_chi2}, adaptive_proposal(*metric, dseed(PROseed::global_rng), fixed_pars), best_fit, dseed(PROseed::global_rng));
         log<LOG_INFO>(L"%1% || Starting global getPostFitErrorBand() ") % __func__;
         std::optional<PROgressBar> errband_post_pbar;
         if(progress_bar) errband_post_pbar.emplace(int(fitConfig.MCMCburn + fitConfig.MCMCiter), 30, "MCMC postfit band");
@@ -1322,13 +1323,16 @@ int main(int argc, char* argv[])
         spline_cov.SetMinimum(-1);
 
         c.Print((final_output_tag+"_postfit_correlation_matrix_nuisance_only.pdf").c_str());
+
+        plot_mcmc_1sigma(final_output_tag+"_PROfile", config, metric->GetSysts(), metric->GetModel(), best_fit, post_param_lo, post_param_hi, !systs_only, fakedataparams);
+
         log<LOG_INFO>(L"%1% ||  Beginning full PROfile ") % __func__;
 
         if(progress_bar)scanFitConfig.progress_bar = true;
 
         std::vector<Eigen::VectorXf> seeds = fitter.freq_seed_points;//to be updated to v1.1.5 harmoincs [DONE]
         if(!seeds.size()) seeds.push_back(best_fit);
-        PROfile profile(config, metric->GetSysts(), metric->GetModel(), *metric, myseed, scanFitConfig, 
+        PROfile profile(config, metric->GetSysts(), metric->GetModel(), *metric, myseed, scanFitConfig,
                 final_output_tag+"_PROfile", best_chi2, !systs_only, nthread, seeds,
                 fakedataparams);
         log<LOG_INFO>(L"%1% || fakedataparams for Plot (true_params/red stars): %2%") % __func__ % fakedataparams;
@@ -2599,7 +2603,7 @@ int main(int argc, char* argv[])
             if(global_fixed.at(i) == 1)
                 fixed.push_back(i);
         }
-        Metropolis mh(simple_target{*metric}, adaptive_proposal(*metric, dseed(PROseed::global_rng), fixed), best_fit, dseed(PROseed::global_rng));
+        Metropolis mh(simple_target{*metric, best_chi2}, adaptive_proposal(*metric, dseed(PROseed::global_rng), fixed), best_fit, dseed(PROseed::global_rng));
 
         Eigen::MatrixXf covmat = Eigen::MatrixXf::Constant(N_params, N_params, 0);
         size_t count = 0;
@@ -2697,7 +2701,8 @@ int main(int argc, char* argv[])
 
 
         log<LOG_INFO>(L"%1% || Starting global getErrorBand() ") % __func__;
-        Metropolis mh_pre(prior_only_target{*metric}, adaptive_proposal(*metric, dseed(PROseed::global_rng), fixed_pars), best_fit, dseed(PROseed::global_rng));
+        const float pull_at_bf = metric->Pull(best_fit.segment(N_phys_params, metric->GetSysts().GetNSplines()));
+        Metropolis mh_pre(prior_only_target{*metric, pull_at_bf}, adaptive_proposal(*metric, dseed(PROseed::global_rng), fixed_pars), best_fit, dseed(PROseed::global_rng));
 
         std::optional<PROgressBar> errband_pre_pbar;
         if(progress_bar && MCMC_prefit_errors) errband_pre_pbar.emplace(int(fitConfig.MCMCburn + fitConfig.MCMCiter), 30, "MCMC prefit");
@@ -2706,7 +2711,7 @@ int main(int argc, char* argv[])
             ? getMCMCErrorBand(mh_pre, fitConfig.MCMCburn, fitConfig.MCMCiter, config, prop, *metric, best_fit, priors, prior_covariance, prior_param_lo, prior_param_hi, binwidth_scale,config.i_prime, errband_pre_pbar ? &*errband_pre_pbar : nullptr)
             : getErrorBand(config, prop, variable_systs[config.i_prime], *model, cv,CVParams, binwidth_scale,config.i_prime);
 
-        Metropolis mh_post(simple_target{*metric}, adaptive_proposal(*metric, dseed(PROseed::global_rng), fixed_pars), best_fit, dseed(PROseed::global_rng));
+        Metropolis mh_post(simple_target{*metric, best_chi2}, adaptive_proposal(*metric, dseed(PROseed::global_rng), fixed_pars), best_fit, dseed(PROseed::global_rng));
         log<LOG_INFO>(L"%1% || Starting global getPostFitErrorBand() ") % __func__;
         std::optional<PROgressBar> errband_post_pbar;
         if(progress_bar) errband_post_pbar.emplace(int(fitConfig.MCMCburn + fitConfig.MCMCiter), 30, "MCMC postfit band");
@@ -3184,8 +3189,10 @@ int main(int argc, char* argv[])
 void mcmc_worker(std::vector<Metropolis<simple_target, adaptive_proposal>> &mets, Eigen::VectorXf initial, PROmetric *metric, uint32_t seed, size_t nchains, size_t burnin, size_t steps) {
     std::uniform_int_distribution<uint32_t> dseed(0, std::numeric_limits<uint32_t>::max());
     std::mt19937 rng(seed);
+    Eigen::VectorXf empty_grad = initial;
+    const float chi2_ref = (*metric)(initial, empty_grad, false);
     for(size_t i = 0; i < nchains; ++i) {
-        simple_target target{*metric};
+        simple_target target{*metric, chi2_ref};
         adaptive_proposal proposal(*metric, dseed(rng));
         mets.emplace_back(target, proposal, initial, dseed(rng));
         mets.back().run(burnin, steps);

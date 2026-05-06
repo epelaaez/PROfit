@@ -191,19 +191,27 @@ namespace PROfit {
 
     struct simple_target {
         PROmetric &metric;
+        // Reference chi^2 (typically chi^2 at best fit). The exp argument becomes
+        // -0.5*(chi^2 - chi2_ref), keeping it near 0 for typical samples and avoiding
+        // float32 underflow that would occur if chi^2 >> ~170 was exponentiated directly.
+        // The constant cancels in target(p)/target(current), so the sampled distribution
+        // is unchanged.
+        float chi2_ref = 0.0f;
 
         float operator()(Eigen::VectorXf &value) {
             Eigen::VectorXf empty = value;
-            return std::exp(-0.5f*metric(value, empty, false));
+            return std::exp(-0.5f*(metric(value, empty, false) - chi2_ref));
         }
     };
 
     struct prior_only_target {
         PROmetric &metric;
+        // Reference Pull (typically Pull at best fit). See note on simple_target::chi2_ref.
+        float pull_ref = 0.0f;
 
         float operator()(Eigen::VectorXf &value) {
             Eigen::VectorXf nuisance = value.segment(metric.GetModel().nparams, metric.GetSysts().GetNSplines());
-            return std::exp(-0.5f*metric.Pull(nuisance));
+            return std::exp(-0.5f*(metric.Pull(nuisance) - pull_ref));
         }
     };
 
