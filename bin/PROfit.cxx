@@ -1287,35 +1287,20 @@ int main(int argc, char* argv[])
     }
     if(*surface_command ){
 
+        // If we haven't run global fit yet, or we did, but it excluded some parameters
+        // Not sure global fits will exclude parameters now that we have the fixed pars for syst only though
+        // So this logic may not work anymore.
         if(global_fit_result.size() == 0 || global_fit_result.size() != (int)N_params) {
-            
-            PROfitter fitter(global_ub, global_lb, fitConfig);
-            metric->setBounds(global_lb, global_ub);
-
-            log<LOG_INFO>(L"%1% || ########### Starting Global Best Fit Minimizing ############") % __func__;
-
-
-            float fit_chi2 = fitter.Fit(*metric, CVParams); 
-            global_fit_chi2_surf = fit_chi2;
-            Eigen::VectorXf best_fit = fitter.best_fit;
-            if(global_fit_result.size() == 0) global_fit_result = best_fit;
-            else if(global_fit_result.size() != best_fit.size()) global_fit_result_surf = best_fit;
-
-            log<LOG_INFO>(L"%1% || ################################################") % __func__;
-            log<LOG_INFO>(L"%1% || ########### Global Best Fit Results ############") % __func__;
-            log<LOG_INFO>(L"%1% || ################################################") % __func__;
-            log<LOG_INFO>(L"%1% || Global Best Fit chi^2: %2%") %__func__ % fit_chi2;
-            log<LOG_INFO>(L"%1% || at paramters: ") % __func__;
-
-            for(size_t i = 0; i< N_params; i++){
-
-                if(i<N_phys_params){
-                    log<LOG_INFO>(L"%1% || %2%  :  %3% (non-log %4%)") % __func__ % metric->GetModel().pretty_param_names[i].c_str() % best_fit(i) % pow(10,best_fit(i));
-                }else{
-                    log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % config.m_mcgen_variation_plotname_map.at(metric->GetSysts().spline_names[i-N_phys_params]).c_str() % best_fit(i);
-                }
-            }
-            log<LOG_INFO>(L"%1% || ################################################") % __func__;
+            GlobalFitOptions opt = GlobalFitOptions::Default;
+            if(progress_bar) opt |= GlobalFitOptions::Progress;
+            opt |= GlobalFitOptions::FreqSeedPts;
+            PROspec cv = FillSpectra(config, prop, metric->GetSysts(), metric->GetModel(), CVParams , true ,config.i_prime);
+            // Should we pass in global fixed here? This mostly gets used with syst_only which would not make sense for a surface.
+            GlobalFitResult fitres = do_a_fit(config, prop, data, metric, global_ub, global_lb, fitConfig, CVParams, cv, global_fixed, opt); 
+            global_fit_chi2_surf = fitres.chi2;
+            global_fit_result_surf = fitres.fitter.best_fit;
+        } else {
+            global_fit_chi2_surf = global_fit_chi2;
         }
         if (grid_size.empty()) {
             grid_size = {40, 40};
@@ -1389,7 +1374,7 @@ int main(int argc, char* argv[])
             if(statonly)
                 surface.FillSurfaceStat(config, scanFitConfig, final_output_tag+"_statonly_surface.txt", CVParams, dseed(myseed.global_rng));
             else
-                surface.FillSurface(scanFitConfig, final_output_tag+"_surface.txt",myseed,nthread);
+                surface.FillSurface(scanFitConfig, final_output_tag+"_surface.txt",myseed, global_fit_chi2_surf, nthread);
         }
 
         std::vector<float> binedges_x, binedges_y;
@@ -1486,6 +1471,11 @@ int main(int argc, char* argv[])
                     log<LOG_ERROR>(L"%1% || Unrecognized chi2 function %2%") % __func__ % chi2.c_str();
                     abort();
                 }
+                GlobalFitOptions opt = GlobalFitOptions::Default;
+                if(progress_bar) opt |= GlobalFitOptions::Progress;
+                opt |= GlobalFitOptions::FreqSeedPts;
+                PROspec cv = FillSpectra(config, prop, metric->GetSysts(), metric->GetModel(), CVParams , true ,config.i_prime);
+                GlobalFitResult fitres = do_a_fit(config, prop, data, metric, global_ub, global_lb, fitConfig, CVParams, cv, global_fixed, opt); 
 
                 brazil_band_surfaces.emplace_back(*metric, xaxis_idx, yaxis_idx, nbinsx, logx ? PROsurf::LogAxis : PROsurf::LinAxis, xlo, xhi,
                         nbinsy, logy ? PROsurf::LogAxis : PROsurf::LinAxis, ylo, yhi);
@@ -1493,7 +1483,7 @@ int main(int argc, char* argv[])
                 if(statonly)
                     brazil_band_surfaces.back().FillSurfaceStat(config, scanFitConfig, "", CVParams, dseed(myseed.global_rng));
                 else
-                    brazil_band_surfaces.back().FillSurface(scanFitConfig, "", myseed, nthread);
+                    brazil_band_surfaces.back().FillSurface(scanFitConfig, "", myseed, fitres.chi2, nthread);
 
                 TH2D surf("surf", (";"+xlabel+";"+ylabel).c_str(), surface.nbinsx, binedges_x.data(), surface.nbinsy, binedges_y.data());
 
@@ -2988,7 +2978,7 @@ void mcmc_worker(std::vector<Metropolis<simple_target, adaptive_proposal>> &mets
 
 GlobalFitResult do_a_fit(const PROconfig &config, const PROpeller &prop, const PROdata &data, PROmetric *metric, const Eigen::VectorXf &ub, const Eigen::VectorXf &lb, const PROfitterConfig &fit_config, const Eigen::VectorXf &CVParams, const PROspec &cv, const std::vector<int> &global_fixed, GlobalFitOptions opt) {
     GlobalFitResult res(ub, lb, fit_config);
-    metric->setBounds(ub, lb);
+    metric->setBounds(lb, ub);
 
     log<LOG_INFO>(L"%1% || ########### Starting Global Best Fit Minimizing ############") % __func__;
 
