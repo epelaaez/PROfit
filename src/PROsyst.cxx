@@ -17,7 +17,8 @@ namespace PROfit {
         for(const auto& syst: systs) {
             log<LOG_DEBUG>(L"%1% || syst mode: %2%") % __func__ % syst.mode.c_str();
             if(syst.mode == "spline" || syst.mode == "norm" || syst.mode == "hist1d" || syst.mode == "hist2d") {
-                FillSpline(syst);
+                bool unmirrored = config.m_mcgen_variation_unmirrored.find(syst.systname) != config.m_mcgen_variation_unmirrored.end();
+                FillSpline(syst, unmirrored);
                 ++n_splines;
             } else if(syst.mode == "spline_to_covariance") {
                 if(model == nullptr){
@@ -27,7 +28,8 @@ namespace PROfit {
                     exit(EXIT_FAILURE);
                 }
                 // Build spline first, then convert to covariance matrix
-                FillSpline(syst);
+                bool unmirrored = config.m_mcgen_variation_unmirrored.find(syst.systname) != config.m_mcgen_variation_unmirrored.end();
+                FillSpline(syst, unmirrored);
                 size_t spline_idx = splines.size() - 1;
 
                 // Build temporary priors/centers for the current spline list (including the
@@ -654,7 +656,7 @@ namespace PROfit {
         return c[0] + x*(c[1] + x*(c[2] + x*c[3]));
     }
 
-    void PROsyst::FillSpline(const SystStruct& syst) {
+    void PROsyst::FillSpline(const SystStruct& syst, bool unmirrored) {
         std::vector<PROspec> ratios;
         ratios.reserve(syst.p_multi_spec.size());
         float cv_integral = syst.p_cv->Spec().sum();
@@ -736,7 +738,10 @@ namespace PROfit {
                 const float y1 = ratios[0].GetBinContent(i);
                 const float y2 = ratios[1].GetBinContent(i);
                 const float slope = (y2 - y1) / (knobvals[1] - knobvals[0]);
-                bin_segments.push_back(SplineSegment{(float)(-knobvals[1]), {y2, -slope, 0, 0}});
+                if(unmirrored)
+                    bin_segments.push_back(SplineSegment{(float)(-knobvals[1]), {-y2, slope, 0, 0}});
+                else
+                    bin_segments.push_back(SplineSegment{(float)(-knobvals[1]), {y2, -slope, 0, 0}});
                 bin_segments.push_back(SplineSegment{(float)knobvals[0], {slope * (float)knobvals[0] + y1, slope, 0, 0}});
             } else {
                 {

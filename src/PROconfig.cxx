@@ -1189,7 +1189,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 }
 
                 //check for known attributes
-                const std::vector<std::string> expected_attrs = {"name", "type", "plotname", "binning", "knobvals", "tag", "prior", "center", "force_0_cv", "include_only_weights", "scale","filename", "xvar", "yvar", "restrict"};
+                const std::vector<std::string> expected_attrs = {"name", "type", "plotname", "binning", "knobvals", "tag", "prior", "center", "force_0_cv", "include_only_weights", "scale","filename", "xvar", "yvar", "restrict", "mirror"};
                 for (const tinyxml2::XMLAttribute* attr = pAllowList->FirstAttribute(); attr; attr = attr->Next()) {
                     std::string name = attr->Name();
                     if (std::find(expected_attrs.begin(), expected_attrs.end(), name) == expected_attrs.end()) {
@@ -1213,6 +1213,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 const char *filename = pAllowList->Attribute("filename");
                 const char *xvar = pAllowList->Attribute("xvar");
                 const char *yvar = pAllowList->Attribute("yvar");
+                const char *mirrored = pAllowList->Attribute("mirror");
 
 
                 m_mcgen_variation_type.push_back(variation_type);
@@ -1338,6 +1339,10 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 if(scale) {
                     m_mcgen_variation_scale[wt] = std::strtof(scale, NULL);
                     log<LOG_INFO>(L"%1% || Parsed scale=%2% for systematic %3%") % __func__ % m_mcgen_variation_scale[wt] % wt.c_str();
+                }
+                if(mirrored) {
+                    if(strcmp(mirrored, "false") == 0 || strcmp(mirrored, "no") == 0 || strcmp(mirrored, "0") == 0)
+                        m_mcgen_variation_unmirrored.insert(wt);
                 }
                 log<LOG_DEBUG>(L"%1% || Allowlisting variations: %2%") % __func__ % wt.c_str() ;
                 tinyxml2::XMLElement *pNext = pAllowList->NextSiblingElement("allowlist");
