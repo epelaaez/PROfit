@@ -14,8 +14,49 @@
 #include "TFriendElement.h"
 using namespace PROfit;
 
+namespace {
+    // Trim trailing whitespace from a string (in place).
+    void RTrim(std::string &s) {
+        while(!s.empty() && std::isspace(static_cast<unsigned char>(s.back()))) s.pop_back();
+    }
 
-PROconfig::PROconfig(const std::string &xml, bool rate_only): 
+    // Resolve the (label, unit) pair from the optional `xaxislabel` and `unit`
+    // XML attributes. New form: both attributes are passed through. Legacy
+    // form (only `unit` set): if it ends with a trailing "[...]", split into
+    // label = everything before the bracket, unit = bracket contents;
+    // otherwise label = the whole string, unit = "".
+    void ResolveAxisLabelAndUnit(const char* xaxislabel_attr, const char* unit_attr,
+                                 std::string &label_out, std::string &unit_out) {
+        if(xaxislabel_attr != nullptr) {
+            label_out = xaxislabel_attr;
+            unit_out = unit_attr ? unit_attr : "";
+            return;
+        }
+        if(unit_attr == nullptr) {
+            label_out = "";
+            unit_out = "";
+            return;
+        }
+        std::string s(unit_attr);
+        std::string trimmed = s;
+        RTrim(trimmed);
+        if(!trimmed.empty() && trimmed.back() == ']') {
+            auto open = trimmed.rfind('[');
+            if(open != std::string::npos) {
+                std::string label = trimmed.substr(0, open);
+                RTrim(label);
+                unit_out = trimmed.substr(open + 1, trimmed.size() - open - 2);
+                label_out = label;
+                return;
+            }
+        }
+        label_out = s;
+        unit_out = "";
+    }
+}
+
+
+PROconfig::PROconfig(const std::string &xml, bool rate_only):
     m_xmlname(xml), 
     m_det_pot(),
     m_num_detectors(0),
@@ -276,7 +317,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
         exit(EXIT_FAILURE);
     }else{
 
-        std::vector<std::string> expected_attrs = {"name","plotname","use","unit"};
+        std::vector<std::string> expected_attrs = {"name","plotname","use","unit","xaxislabel"};
         for (const tinyxml2::XMLAttribute* attr = pChan->FirstAttribute(); attr; attr = attr->Next()) {
             std::string name = attr->Name();
             if (std::find(expected_attrs.begin(), expected_attrs.end(), name) == expected_attrs.end()) {
@@ -315,16 +356,19 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 m_channel_bool.push_back(false);
 
 
+            const char* channel_xaxislabel = pChan->Attribute("xaxislabel");
             const char* channel_unit= pChan->Attribute("unit");
-            if(channel_unit==NULL){
-                m_channel_units.push_back("");
-            }else{
-                m_channel_units.push_back(channel_unit);
+            {
+                std::string label, unit;
+                ResolveAxisLabelAndUnit(channel_xaxislabel, channel_unit, label, unit);
+                m_channel_xaxis_labels.push_back(label);
+                m_channel_units.push_back(unit);
             }
 
             log<LOG_DEBUG>(L"%1% || Loading Channel %2% with   ") % __func__ % m_channel_names.back().c_str() ;
 
             m_channel_variable_bins.push_back({});
+            m_channel_variable_xaxis_labels.push_back({});
             m_channel_variable_units.push_back({});
             m_channel_variable_dims.push_back({});
 
@@ -348,6 +392,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                         (omin_y == NULL && omax_y == NULL && onbins_y == NULL && oedges_y == NULL)) {
                     log<LOG_DEBUG>(L"%1% || This variable has a NO other binning (or attribute min,max,nbins)  ") % __func__ ;
                     m_channel_variable_bins.back().push_back(PROconfig::Binning());
+                    m_channel_variable_xaxis_labels.back().push_back("");
                     m_channel_variable_units.back().push_back("");
                     m_channel_variable_dims.back().push_back(2);
                     m_channel_variable_plot_bool.push_back(true);
@@ -405,6 +450,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                     }
 
                     m_channel_variable_bins.back().push_back(PROconfig::Binning(std::vector<std::vector<float>>({binedge_x, binedge_y})));
+                    m_channel_variable_xaxis_labels.back().push_back("");
                     m_channel_variable_units.back().push_back(ounits ? ounits : "");
                     m_channel_variable_dims.back().push_back(2);
                 }
@@ -414,7 +460,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
             tinyxml2::XMLElement *pBinO = pChan->FirstChildElement("bins"); // 1D Bins
             while(pBinO){
-                expected_attrs = {"min","max","nbins","edges","unit","plot"};
+                expected_attrs = {"min","max","nbins","edges","unit","xaxislabel","plot"};
                 for (const tinyxml2::XMLAttribute* attr = pBinO->FirstAttribute(); attr; attr = attr->Next()) {
                     std::string name = attr->Name();
                     if (std::find(expected_attrs.begin(), expected_attrs.end(), name) == expected_attrs.end()) {
@@ -429,10 +475,12 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 const char* onbins = pBinO->Attribute("nbins");
                 const char* oedges = pBinO->Attribute("edges");
                 const char* ounits = pBinO->Attribute("unit");
+                const char* oxaxislabel = pBinO->Attribute("xaxislabel");
                 const char* oplot = pBinO->Attribute("plot");
                 if(omin==NULL && omax==NULL && onbins==NULL && oedges == NULL) {
                     log<LOG_DEBUG>(L"%1% || This variable has a NO other binning (or attribute min,max,nbins)  ") % __func__ ;
                     m_channel_variable_bins.back().push_back(PROconfig::Binning());
+                    m_channel_variable_xaxis_labels.back().push_back("");
                     m_channel_variable_units.back().push_back("");
                     m_channel_variable_dims.back().push_back(1);
                     m_channel_variable_plot_bool.push_back(true);
@@ -469,7 +517,12 @@ int PROconfig::LoadFromXML(const std::string &filename){
                     }
 
                     m_channel_variable_bins.back().push_back({binedge});
-                    m_channel_variable_units.back().push_back(ounits ? ounits : "");
+                    {
+                        std::string label, unit;
+                        ResolveAxisLabelAndUnit(oxaxislabel, ounits, label, unit);
+                        m_channel_variable_xaxis_labels.back().push_back(label);
+                        m_channel_variable_units.back().push_back(unit);
+                    }
                     m_channel_variable_dims.back().push_back(1);
                 }
                 pBinO = pBinO->NextSiblingElement("bins");
@@ -1846,6 +1899,51 @@ const PROconfig::Binning& PROconfig::GetChannelVariableBins(size_t channel_index
     return m_channel_variable_bins[GetLocalChannelIndexFromGlobalChannelIndex(channel_index)][other_index];
 }
 
+namespace {
+    std::string FormatLabelUnit(const std::string &label, const std::string &unit) {
+        if(label.empty() && unit.empty()) return "";
+        if(unit.empty()) return label;
+        if(label.empty()) return "[" + unit + "]";
+        return label + " [" + unit + "]";
+    }
+}
+
+std::string PROconfig::GetChannelXAxisTitle(size_t channel_index) const {
+    if(channel_index >= m_channel_units.size()) return "";
+    return FormatLabelUnit(m_channel_xaxis_labels[channel_index], m_channel_units[channel_index]);
+}
+
+std::string PROconfig::GetChannelXAxisTitle(size_t channel_index, size_t other_index) const {
+    if(channel_index >= m_channel_variable_units.size()) return "";
+    if(other_index >= m_channel_variable_units[channel_index].size()) return "";
+    // 2D variables keep the legacy combined "xtitle;ytitle" string.
+    if(channel_index < m_channel_variable_dims.size() &&
+       other_index < m_channel_variable_dims[channel_index].size() &&
+       m_channel_variable_dims[channel_index][other_index] == 2) {
+        return m_channel_variable_units[channel_index][other_index];
+    }
+    return FormatLabelUnit(m_channel_variable_xaxis_labels[channel_index][other_index],
+                           m_channel_variable_units[channel_index][other_index]);
+}
+
+std::string PROconfig::GetChannelUnit(size_t channel_index, size_t other_index) const {
+    // 2D variables keep the legacy combined "xtitle;ytitle" string in their
+    // units slot, so it isn't a real unit -- skip straight to the channel-level.
+    bool is_2d = (channel_index < m_channel_variable_dims.size() &&
+                  other_index < m_channel_variable_dims[channel_index].size() &&
+                  m_channel_variable_dims[channel_index][other_index] == 2);
+    if(!is_2d &&
+       channel_index < m_channel_variable_units.size() &&
+       other_index < m_channel_variable_units[channel_index].size() &&
+       !m_channel_variable_units[channel_index][other_index].empty()) {
+        return m_channel_variable_units[channel_index][other_index];
+    }
+    if(channel_index < m_channel_units.size()) {
+        return m_channel_units[channel_index];
+    }
+    return "";
+}
+
 //------------ Start of private function ------------------
 //------------ Start of private function ------------------
 //------------ Start of private function ------------------
@@ -1899,15 +1997,19 @@ void PROconfig::remove_unused_channel(){
         std::vector<std::string> temp_channel_names(m_num_channels);
         std::vector<std::vector<int>> temp_variable_dims(m_num_channels);
         std::vector<std::string> temp_channel_plotnames(m_num_channels);
+        std::vector<std::string> temp_channel_xaxis_labels(m_num_channels);
         std::vector<std::string> temp_channel_units(m_num_channels);
+        std::vector<std::vector<std::string>> temp_channel_other_xaxis_labels(m_num_channels);
         std::vector<std::vector<std::string>> temp_channel_other_units(m_num_channels);
         for(size_t i=0, chan_index = 0; i< m_channel_bool.size(); ++i){
             if(m_channel_bool[i]){
                 temp_channel_names[chan_index] = m_channel_names[i];
                 temp_channel_plotnames[chan_index] = m_channel_plotnames[i];
+                temp_channel_xaxis_labels[chan_index] = m_channel_xaxis_labels[i];
                 temp_channel_units[chan_index] = m_channel_units[i];
 
                 temp_channel_other_bins[chan_index] = m_channel_variable_bins[i];
+                temp_channel_other_xaxis_labels[chan_index] = m_channel_variable_xaxis_labels[i];
                 temp_channel_other_units[chan_index] = m_channel_variable_units[i];
 
                 ++chan_index;
@@ -1916,6 +2018,7 @@ void PROconfig::remove_unused_channel(){
 
         m_channel_names = temp_channel_names;
         m_channel_plotnames = temp_channel_plotnames;
+        m_channel_xaxis_labels = temp_channel_xaxis_labels;
         m_channel_units = temp_channel_units;
     }
 

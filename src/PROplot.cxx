@@ -940,12 +940,6 @@ namespace PROfit{
         log<LOG_DEBUG>(L"%1% || Starting plot_channels") % __func__;
         std::string rat_y_title = bool(opt&PlotOptions::DataMCRatio) ? "Data/MC" : "Data/Best-Fit";
 
-        std::string ytitle = bool(opt&PlotOptions::AreaNormalized)
-            ? "Area Normalized"
-            : bool(opt&PlotOptions::BinWidthScaled) 
-            ? "Events/GeV" 
-            : "Events";
-
         TCanvas c;
         c.Print((filename+"[").c_str());
 
@@ -978,8 +972,22 @@ namespace PROfit{
 
                     log<LOG_DEBUG>(L"%1% || channel %2%") % __func__ % channel;
 
-                    std::string xtitle = config.m_channel_variable_units[channel][other_index];
+                    std::string xtitle = config.GetChannelXAxisTitle(channel, other_index);
                     std::string ratio_titles = ";"+xtitle+";"+rat_y_title;
+
+                    std::string chan_unit = config.GetChannelUnit(channel, other_index);
+                    std::string ytitle;
+                    if(bool(opt&PlotOptions::AreaNormalized)) {
+                        ytitle = "Area Normalized";
+                    } else if(bool(opt&PlotOptions::BinWidthScaled)) {
+                        if(chan_unit.empty()) {
+                            ytitle = "Events/unit";
+                        } else {
+                            ytitle = "Events/" + chan_unit;
+                        }
+                    } else {
+                        ytitle = "Events";
+                    }
 
                     size_t channel_nbins_x = config.m_channel_variable_bins[channel][other_index].NBinsAlong(0);
 
@@ -1845,7 +1853,7 @@ namespace PROfit{
                                 int color_idx = i % colors.size();
                                 int style_idx = (i / 4) % line_styles.size();  
                                 i++;
-                                TH1F* h = new TH1F((tag+"_Channel_"+std::to_string(global_channel_index)+"_"+std::to_string(i)).c_str(), (tag + ";" + config.m_channel_variable_units[channel][other_index]).c_str(), bin_edges.size()-1, bin_edges.data());
+                                TH1F* h = new TH1F((tag+"_Channel_"+std::to_string(global_channel_index)+"_"+std::to_string(i)).c_str(), (tag + ";" + config.GetChannelXAxisTitle(channel, other_index)).c_str(), bin_edges.size()-1, bin_edges.data());
 
                                 if(config.m_channel_variable_dims[channel][other_index] == 2) {
                                     channel_nbins_y = config.m_channel_variable_bins[channel][other_index].NBinsAlong(1);
@@ -1903,7 +1911,7 @@ namespace PROfit{
                             log<LOG_INFO>(L"%1% || hsum for tag '%2%': nbins=%3%, max=%4%, integral=%5%")
                                 % __func__ % tag.c_str() % hsum->GetNbinsX() % hsum->GetMaximum() % hsum->Integral();
 
-                            hsum->SetXTitle((config.m_detector_plotnames[det]+"/"+config.m_detector_plotnames[det2]+" "+config.m_channel_variable_units[channel][other_index]).c_str());
+                            hsum->SetXTitle((config.m_detector_plotnames[det]+"/"+config.m_detector_plotnames[det2]+" "+config.GetChannelXAxisTitle(channel, other_index)).c_str());
                             hsum->SetYTitle("Fractional Uncertainty");
                             hsum->SetLineColor(kBlack);
                             hsum->SetLineWidth(2);
@@ -1958,7 +1966,7 @@ namespace PROfit{
                             hsum->SetBinContent(i+1, sqrt(hsum->GetBinContent(i+1)));
                         }
                         leg->AddEntry(hsum,"Sum","l");
-                        hsum->SetXTitle((config.m_detector_plotnames[det]+"/"+config.m_detector_plotnames[det2]+" "+config.m_channel_variable_units[channel][other_index]).c_str());
+                        hsum->SetXTitle((config.m_detector_plotnames[det]+"/"+config.m_detector_plotnames[det2]+" "+config.GetChannelXAxisTitle(channel, other_index)).c_str());
                         hsum->SetTitle(("Summary: "+name).c_str());
                         hsum->SetYTitle("Fractional Uncertainty");
                         hsum->SetLineColor(kBlack);
