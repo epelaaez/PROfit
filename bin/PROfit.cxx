@@ -2233,70 +2233,31 @@ int main(int argc, char* argv[])
     if(*profc_command) {
         float global_chi2 = 0, null_chi2 = 0;
         if(gof_pvalue || pvalue) {
-            PROfitter fitter(global_ub, global_lb, fitConfig);
-            metric->setBounds(global_ub, global_ub);
-
-            std::vector<std::pair<int, std::string>> global_PB_configs;
-            global_PB_configs.push_back({fitConfig.n_latin_points, "(1) LatinHyperCube"});
-            global_PB_configs.push_back({fitConfig.n_swarm_iterations, "(2) ParticleSwarm"});
-            global_PB_configs.push_back({fitConfig.n_localfit, "(3) BestLBFGSB"});
-            global_PB_configs.push_back({fitConfig.harmonic_num_test_points, "(4) HarmonicScan"});
-            global_PB_configs.push_back({100, "(5) HarmonicLBFGSB"});
-            MultiPROgressBar global_progress(global_PB_configs);
-
-            if(progress_bar){
-                global_progress.initialize_display();
-                global_progress.start_display_thread(); 
-                fitter.setProgressBar(&global_progress);
-            }
-
-            float best_chi2 = fitter.Fit(*metric,CVParams); 
-            fitter.calcFreqSeedPoints(*metric);
-
-            for(size_t i=0; i< fitter.freq_seed_points.size(); i++){
-                float chi_freq = fitter.freq_seed_values.at(i);
-                 if(chi_freq < best_chi2){
-                    log<LOG_INFO>(L"%1% || One of the harmonics of first pass best fit, is a lower chi :  %2% ") % __func__ % fitter.freq_seed_values.at(i);
-                    log<LOG_INFO>(L"%1% || -- at params:  %2% ") % __func__ % fitter.freq_seed_points.at(i);
-                    best_chi2 = chi_freq;
-                    //best_fit = fitter.freq_seed_points.at(i);
-                }
-            }
-            global_chi2 = best_chi2;
-            global_progress.finish_all();
+            // Nominal Fit with all parameters
+            GlobalFitOptions opt = GlobalFitOptions::Default;
+            if(progress_bar) opt |= GlobalFitOptions::Progress;
+            if(!global_fixed[0] || !systs_only) opt |= GlobalFitOptions::FreqSeedPts;
+            PROspec cv = FillSpectra(config, prop, metric->GetSysts(), metric->GetModel(), CVParams , true ,config.i_prime);
+            GlobalFitResult fitres = do_a_fit(config, prop, data, metric, global_ub, global_lb, fitConfig, CVParams, cv, global_fixed, opt); 
+            global_chi2 = fitres.chi2;
         }
         if(pvalue) {
-            size_t nparams = metric->GetModel().nparams + metric->GetSysts().GetNSplines();
+            // Fit with fixed osc parameters
             size_t nphys = metric->GetModel().nparams;
-            Eigen::VectorXf lb = Eigen::VectorXf::Constant(nparams, -3.0);
-            Eigen::VectorXf ub = Eigen::VectorXf::Constant(nparams, 3.0);
+            Eigen::VectorXf lb = global_lb;
+            Eigen::VectorXf ub = global_ub;
+            std::vector<int> fixed = global_fixed;
             for(size_t i = 0; i < nphys; ++i) {
                 lb(i) = metric->GetModel().default_val(i);
                 ub(i) = metric->GetModel().default_val(i);
+                fixed[i] = 1;
             }
-            for(size_t i = nphys; i < nparams; ++i) {
-                size_t si = i - nphys;
-                lb(i) = metric->GetSysts().spline_has_restrict[si] ? metric->GetSysts().spline_restrict_lo[si] : metric->GetSysts().spline_lo[si];
-                ub(i) = metric->GetSysts().spline_has_restrict[si] ? metric->GetSysts().spline_restrict_hi[si] : metric->GetSysts().spline_hi[si];
-            }
-            metric->setBounds(lb, ub);
-            PROfitter fitter(metric->UpperBound(), metric->LowerBound(), fitConfig);
-            metric->setBounds(metric->UpperBound(), metric->LowerBound());
-            std::vector<std::pair<int, std::string>> global_PB_configs;
-            global_PB_configs.push_back({fitConfig.n_latin_points, "(1) LatinHyperCube"});
-            global_PB_configs.push_back({fitConfig.n_swarm_iterations, "(2) ParticleSwarm"});
-            global_PB_configs.push_back({fitConfig.n_localfit, "(3) BestLBFGSB"});
-            global_PB_configs.push_back({180, "(4) HarmonicScan"});
-            global_PB_configs.push_back({100, "(5) HarmonicLBFGSB"});
-
-            MultiPROgressBar global_progress(global_PB_configs);
-            global_progress.initialize_display();
-            global_progress.start_display_thread(); 
-
-            fitter.setProgressBar(&global_progress);
-            float fit_chi2 = fitter.Fit(*metric); 
-            null_chi2 = fit_chi2;
-            global_progress.finish_all();
+            
+            GlobalFitOptions opt = GlobalFitOptions::Default;
+            if(progress_bar) opt |= GlobalFitOptions::Progress;
+            PROspec cv = FillSpectra(config, prop, metric->GetSysts(), metric->GetModel(), CVParams , true ,config.i_prime);
+            GlobalFitResult fitres = do_a_fit(config, prop, data, metric, ub, lb, fitConfig, CVParams, cv, fixed, opt); 
+            null_chi2 = fitres.chi2;
         }
 
         size_t FCthreads = nthread > nuniv ? nuniv : nthread;
@@ -2342,11 +2303,14 @@ int main(int argc, char* argv[])
         log<LOG_INFO>(L"%1% || 90%% Feldman-Cousins delta chi2 after throwing %2% universes is %3%") 
             % __func__ % nuniv % flattened_dchi2s[0.9*flattened_dchi2s.size()];
         if(gof_pvalue) {
-            log<LOG_ERROR>(L"%1% || All: %2% ") % __func__ % flattened_dchi2s;
+            std::vector<float> flattened_syst_chi2;
+            for(const auto &out : outs) for(const auto &fco : out) flattened_syst_chi2.push_back(fco.chi2_syst);
+            std::sort(flattened_syst_chi2.begin(), flattened_syst_chi2.end());
+            log<LOG_ERROR>(L"%1% || All: %2% ") % __func__ % flattened_syst_chi2;
             log<LOG_ERROR>(L"%1% || chi: %2% ") % __func__ % global_chi2;
-            auto it = std::lower_bound(flattened_dchi2s.begin(), flattened_dchi2s.end(), global_chi2);
-            size_t index =  std::distance(flattened_dchi2s.begin(),it);
-            size_t count_above = flattened_dchi2s.size()-index;
+            auto it = std::lower_bound(flattened_syst_chi2.begin(), flattened_syst_chi2.end(), global_chi2);
+            size_t index =  std::distance(flattened_syst_chi2.begin(),it);
+            size_t count_above = flattened_syst_chi2.size()-index;
             float pval = (float)count_above/(float)nuniv;
             log<LOG_ERROR>(L"%1% || Finished throws. %2% %3%") % __func__ % index % count_above;
             log<LOG_ERROR>(L"%1% || GOF pval after throwing %2% universes is %3%") % __func__ % nuniv % pval ;
