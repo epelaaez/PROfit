@@ -1185,7 +1185,7 @@ int main(int argc, char* argv[])
         log<LOG_INFO>(L"%1% || MCMC acceptance is  %2%. ") % __func__% ((double)fitres.mh->naccept /fitConfig.MCMCiter);
         fitres.mh->plot_autocorrelation(final_output_tag+"_PROfile_corrmat_mcmc_autocorrelation.pdf", param_names);
 
-        std::string hname = "#chi^{2}/ndf = " + to_string(fitres.chi2) + "/" + to_string(config.m_num_variable_bins_total_collapsed[config.i_prime]);
+        std::string hname = "#chi^{2}/nbins = " + to_string(fitres.chi2) + "/" + to_string(config.m_num_variable_bins_total_collapsed[config.i_prime]);
         PROspec bf = FillSpectra(config, prop, metric->GetSysts(), metric->GetModel(), fitres.fitter.best_fit, true,config.i_prime);
         TH1D post_hist("ph", hname.c_str(), config.m_num_variable_bins_total_collapsed[config.i_prime], config.m_channel_variable_bins[config.i_prime][0].Edges().data());
         TH1D pre_hist("prh", hname.c_str(), config.m_num_variable_bins_total_collapsed[config.i_prime], config.m_channel_variable_bins[config.i_prime][0].Edges().data());
@@ -2453,7 +2453,7 @@ int main(int argc, char* argv[])
 
         fitres.mh->plot_autocorrelation(final_output_tag+"_PROglobal_corrmat_mcmc_autocorrelation.pdf", param_names);
 
-        std::string hname = "#chi^{2}/ndf = " + to_string(fitres.chi2) + "/" + to_string(config.m_num_variable_bins_total_collapsed[config.i_prime]);
+        std::string hname = "#chi^{2}/nbins = " + to_string(fitres.chi2) + "/" + to_string(config.m_num_variable_bins_total_collapsed[config.i_prime]);
         PROspec bf = FillSpectra(config, prop, metric->GetSysts(), metric->GetModel(), fitres.fitter.best_fit, true ,config.i_prime);
 
         TH1D post_hist("ph", hname.c_str(), config.m_num_variable_bins_total_collapsed[config.i_prime], config.m_channel_variable_bins[config.i_prime][0].Edges().data());
