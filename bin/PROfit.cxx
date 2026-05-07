@@ -1301,6 +1301,7 @@ int main(int argc, char* argv[])
             global_fit_result_surf = fitres.fitter.best_fit;
         } else {
             global_fit_chi2_surf = global_fit_chi2;
+            global_fit_result_surf = global_fit_result;
         }
         if (grid_size.empty()) {
             grid_size = {40, 40};
@@ -1364,7 +1365,7 @@ int main(int argc, char* argv[])
             size_t Ncurvep = grid_size.front();
             log<LOG_INFO>(L"%1% || Running a PROcurve from %2% to point %3% with %4% points") % __func__ % A% B %Ncurvep;
             
-            std::vector<surfOut> cpoints = surface.FillCurve(fitConfig, myseed, nthread, A, B, Ncurvep);
+            std::vector<surfOut> cpoints = surface.FillCurve(fitConfig, myseed, global_fit_chi2_surf, global_fit_result_surf, nthread, A, B, Ncurvep);
             surface.PlotCurve(config,*model,variable_systs[config.i_prime],cpoints,final_output_tag,logx,logy,xaxis_idx,yaxis_idx,A, B, Ncurvep); 
             return 0;
         }
@@ -1374,7 +1375,7 @@ int main(int argc, char* argv[])
             if(statonly)
                 surface.FillSurfaceStat(config, scanFitConfig, final_output_tag+"_statonly_surface.txt", CVParams, dseed(myseed.global_rng));
             else
-                surface.FillSurface(scanFitConfig, final_output_tag+"_surface.txt",myseed, global_fit_chi2_surf, nthread);
+                surface.FillSurface(scanFitConfig, final_output_tag+"_surface.txt",myseed, global_fit_chi2_surf, global_fit_result_surf, nthread);
         }
 
         std::vector<float> binedges_x, binedges_y;
@@ -1483,7 +1484,7 @@ int main(int argc, char* argv[])
                 if(statonly)
                     brazil_band_surfaces.back().FillSurfaceStat(config, scanFitConfig, "", CVParams, dseed(myseed.global_rng));
                 else
-                    brazil_band_surfaces.back().FillSurface(scanFitConfig, "", myseed, fitres.chi2, nthread);
+                    brazil_band_surfaces.back().FillSurface(scanFitConfig, "", myseed, fitres.chi2, fitres.fitter.best_fit, nthread);
 
                 TH2D surf("surf", (";"+xlabel+";"+ylabel).c_str(), surface.nbinsx, binedges_x.data(), surface.nbinsy, binedges_y.data());
 
