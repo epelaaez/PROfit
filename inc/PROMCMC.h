@@ -45,7 +45,8 @@ namespace PROfit {
                 bool step() {
                     Eigen::VectorXf p = proposal(current);
                     float acceptance;
-                    acceptance = proposal.within_bound(p) ? std::min(1.0f, target(p)/target(current) * proposal.P(current, p)/proposal.P(p, current)) : 0;
+                    // Targets return log-density (e.g. -0.5*chi^2); subtract before exp to avoid float32 underflow when chi^2 is large.
+                    acceptance = proposal.within_bound(p) ? std::min(1.0f, std::exp(target(p) - target(current)) * proposal.P(current, p)/proposal.P(p, current)) : 0;
                     float u = uniform(rng);
 
                     if(u <= acceptance) {
@@ -191,27 +192,21 @@ namespace PROfit {
 
     struct simple_target {
         PROmetric &metric;
-        // Reference chi^2 (typically chi^2 at best fit). The exp argument becomes
-        // -0.5*(chi^2 - chi2_ref), keeping it near 0 for typical samples and avoiding
-        // float32 underflow that would occur if chi^2 >> ~170 was exponentiated directly.
-        // The constant cancels in target(p)/target(current), so the sampled distribution
-        // is unchanged.
-        float chi2_ref = 0.0f;
 
+        // Returns log-target (-0.5*chi^2). Metropolis::step does exp(target(p) - target(current))
+        // so the exp argument stays in safe float32 range even when chi^2 is large.
         float operator()(Eigen::VectorXf &value) {
             Eigen::VectorXf empty = value;
-            return std::exp(-0.5f*(metric(value, empty, false) - chi2_ref));
+            return -0.5f*metric(value, empty, false);
         }
     };
 
     struct prior_only_target {
         PROmetric &metric;
-        // Reference Pull (typically Pull at best fit). See note on simple_target::chi2_ref.
-        float pull_ref = 0.0f;
 
         float operator()(Eigen::VectorXf &value) {
             Eigen::VectorXf nuisance = value.segment(metric.GetModel().nparams, metric.GetSysts().GetNSplines());
-            return std::exp(-0.5f*(metric.Pull(nuisance) - pull_ref));
+            return -0.5f*metric.Pull(nuisance);
         }
     };
 
