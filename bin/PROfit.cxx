@@ -304,6 +304,7 @@ int main(int argc, char* argv[])
     app.add_flag("--force",force,"Force loading binary data even if hash is incorrect (Be Careful!)");
     app.add_flag("--no-xrootd",noxrootd,"Do not use XRootD, which is enabled by default");
     app.add_flag("--syst-only", systs_only, "Force fitting over nuisance parameters only, currently just --fix's them");
+    app.add_flag("--area-norm", area_normalized, "Make area normalized histograms.");
 
     auto* shape_flag = app.add_flag("--shapeonly", shapeonly, "Run a shape only analysis");
     auto* rate_flag = app.add_flag("--rateonly", rateonly, "Run a rate only analysis");
@@ -341,7 +342,6 @@ int main(int argc, char* argv[])
     //PROplot, plot things
     CLI::App *proplot_command = app.add_subcommand("plot", "Make plots of CV, or injected point with error bars and covariance.");
     proplot_command->add_flag("--with-splines", with_splines, "Include graphs of splines in output.");
-    proplot_command->add_flag("--area-norm", area_normalized, "Make area normalized histograms.");
 
     //PROfc, Feldmand-Cousins
     CLI::App *profc_command = app.add_subcommand("fc", "Run Feldman-Cousins for this injected signal");
@@ -395,6 +395,8 @@ int main(int argc, char* argv[])
 
         log_impl::EnableFileLogging(log_file, FILE_LEVEL);
     }
+
+    if(shapeonly) area_normalized = true;
 
     pbounds.Load(bound_list);
 
@@ -1084,7 +1086,7 @@ int main(int argc, char* argv[])
     if(*profile_command){
 
         PROfitter fitter(global_ub, global_lb, fitConfig);
-        metric->setBounds(global_ub, global_ub);
+        metric->setBounds(global_ub, global_lb);
 
         log<LOG_INFO>(L"%1% || ########### Starting Global Best Fit Minimizing ############") % __func__;
 
@@ -2073,6 +2075,11 @@ int main(int argc, char* argv[])
                             }
                             cv_hist->GetYaxis()->SetTitle(ytitle.c_str());
                         }
+                        if(area_normalized) {
+                            cv_hist->GetYaxis()->SetTitle("Area Normalized");
+                            cv_hist->Scale(1.0 / cv_hist->Integral());
+                            osc_hist->Scale(1.0 / osc_hist->Integral());
+                        }
                         cv_hist->SetTitle((config.m_mode_names[im]  +" "+ config.m_detector_names[id]+" "+ config.m_channel_names[ic]).c_str());
                         cv_hist->GetXaxis()->SetTitle("");
                         cv_hist->SetLineColor(kBlack);
@@ -2239,9 +2246,10 @@ int main(int argc, char* argv[])
             std::map<std::string, std::vector<std::pair<std::unique_ptr<TGraph>,std::unique_ptr<TGraph>>>> spline_graphs = getSplineGraphs(variable_systs[config.i_prime], config);
             c.Clear();
             c.Divide(4,4);
-            int chan=0;
+            int chan=0, snum = 0;
             for(const auto &[syst_name, syst_bins]: spline_graphs) {
                 int bin = 0;
+                int binning = variable_systs[config.i_prime].spline_binnings[snum++];
                 bool unprinted = true;
                 chan++;
                 int col = chan%2==0 ? kRed: kBlue;
@@ -2250,13 +2258,13 @@ int main(int argc, char* argv[])
 
                     unprinted = true;
                     c.cd(bin%16+1);
-                    size_t sbi = config.GetSubchannelIndexFromVariableGlobalBin(bin,config.i_prime);
+                    size_t sbi = config.GetSubchannelIndexFromVariableGlobalBin(bin,binning);
                     std::string nsubchannel = config.GetSubchannelName(sbi);
                     size_t local_channel_index = config.GetLocalChannelIndexFromGlobalSubchannelIndex(sbi);
-                    std::string chan_units = config.GetChannelXAxisTitle(local_channel_index, config.i_prime);
-                    int edges_vec_sz = (int)config.m_variable_bin_to_edges[config.i_prime].size();
+                    std::string chan_units = config.GetChannelXAxisTitle(local_channel_index, binning);
+                    int edges_vec_sz = (int)config.m_variable_bin_to_edges[binning].size();
                     size_t safe_bin = (edges_vec_sz>0) ? std::min((size_t)bin, (size_t)edges_vec_sz-1) : 0;
-                    std::pair<float,float> edg = config.m_variable_bin_to_edges[config.i_prime][safe_bin];
+                    std::pair<float,float> edg = config.m_variable_bin_to_edges[binning][safe_bin];
 
                     fixed_pts->SetMarkerColor(col);
                     fixed_pts->SetMarkerStyle(kFullCircle);
@@ -2547,10 +2555,8 @@ int main(int argc, char* argv[])
     //***********************************************************************
     if(*proglobal_command){
 
-
-
-        PROfitter fitter(metric->UpperBound(), metric->LowerBound(), fitConfig);
-        metric->setBounds(metric->UpperBound(), metric->LowerBound());
+        PROfitter fitter(global_ub, global_lb, fitConfig);
+        metric->setBounds(global_ub, global_lb);
 
         log<LOG_INFO>(L"%1% || ########### Print of inputs ############") % __func__;
         //metric->print(fakedataparams); //fix
