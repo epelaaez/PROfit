@@ -90,39 +90,155 @@ float PROpoisson::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &grad
     float value = poisson + pull;
 
     if(rungradient){
-        float dval = 1e-4;
-        for (size_t i = 0; i < nparams; i++) {
-            //if(i == fixed_index) gradient(i) = 0;
-            //Eigen::VectorXd tmpParams = last_param;
-            Eigen::VectorXf tmpParams = param;
-            int sgn = ((param(i) - last_param(i)) > 0) - ((param(i) - last_param(i)) < 0);
-            if(!sgn) sgn = 1;
-            //if(fitparams.size() != 0 && i == 1 && param(i) < -4 + dval) sgn = 1;
-            //if(fitparams.size() != 0 && i == 1 && param(i) > 0 - dval) sgn = -1;
-            tmpParams(i) = /*param(i) != last_param(i) ? param(i) :*/ param(i) + sgn * dval;
-            
-            Eigen::VectorXf subvector1 = tmpParams.segment(0, nparams - nsyst);
-            Eigen::VectorXf subvector2 = tmpParams.segment(nparams - nsyst, nsyst);
+        // ----- Gradient mode dispatch (see PROmetric::GradientMode) -----
+        //
+        // Poisson chi² has the closed form
+        //     chi²_Pois = 2 Σ_b [ s_b - n_b + n_b · ln(n_b / s_b) ] + Pull
+        // with analytic per-bin sensitivity
+        //     d chi²_Pois / d s_b = 2 (1 - n_b / s_b)
+        //
+        // Linearised modes here compose this analytic ∂chi²/∂s with an FD on s:
+        //     d chi²/dθ_i ≈ Σ_b 2(1 - n_b/s_b^base) · (ds_b/dθ_i)_FD + dP/dθ_i
+        // For shape_only mode we hold n_b at its base value (same convention as
+        // the existing FD code held vdata fixed in the FD branches via the
+        // outer-scope `vdata` — see lines 117-119 of the previous version).
+        //
+        // Note: previous default for PROpoisson was a sign-heuristic 1-sided FD
+        // that picked direction based on the LBFGS step. The new default
+        // (GradientCentralFull) matches PROchi/PROCNP and gives a more
+        // accurate gradient. To preserve the legacy heuristic, set
+        // GradientOneSidedFull — but with a fixed forward stencil rather than
+        // the LBFGS-direction-tracking heuristic, which was always somewhat
+        // approximate.
+        const GradientMode mode = gradient_mode;
+        const bool linearised = (mode == GradientCentralLin) || (mode == GradientOneSidedLin);
+        const bool one_sided  = (mode == GradientOneSidedFull) || (mode == GradientOneSidedLin);
 
-            // If this new gradient evaluation point violates unitarity, set the gradient to a large value
-            if(model.model_constraint){
-                if(!model.model_constraint(subvector1)){
-                    //log<LOG_ERROR>(L"%1% || WARNING In PROpoisson: Gradient evaluation point violates unitarity. Setting gradient to large value.") % __func__;
-                    gradient(i) = sgn * 1e10;
-                    continue;
+        // Base spectrum + per-bin sensitivity for linearised modes.
+        // vdata and vmc were already computed for the base value.
+        Eigen::VectorXf w_base;     // 2 (1 - n/s) at base, used by linearised
+        Eigen::VectorXf pull_grad_nuis;
+        Eigen::VectorXf vmc_base = vmc;  // base collapsed MC (preserve before perturbed FillSpectra calls)
+        Eigen::VectorXf vdata_base = vdata;
+        if (linearised) {
+            // Guard against zero/negative s entries.
+            w_base.resize(vmc_base.size());
+            for (long b = 0; b < vmc_base.size(); ++b) {
+                const float s = vmc_base(b);
+                w_base(b) = (s > 0.0f) ? 2.0f * (1.0f - vdata_base(b) / s) : 0.0f;
+            }
+            const Eigen::VectorXf centered = subvector2 - syst->spline_centers;
+            if (!correlated_systematics) {
+                pull_grad_nuis = 2.0f * centered.array() /
+                                 (syst->spline_priors.array() * syst->spline_priors.array());
+            } else {
+                pull_grad_nuis = 2.0f * (prior_covariance_inv * centered);
+            }
+        }
+
+        // Helper: collapsed MC spec at arbitrary param. Holds vdata at base
+        // (matches the existing FD semantics in shape_only mode).
+        auto compute_vmc_at = [&](const Eigen::VectorXf &param_at,
+                                  Eigen::VectorXf &vmc_out) -> bool {
+            Eigen::VectorXf phys = param_at.segment(0, nparams - nsyst);
+            if(model.model_constraint && !model.model_constraint(phys)) return false;
+            PROspec rl = FillSpectra(config, peller, *syst, model, param_at, fs_cache,
+                                     strat != EventByEvent);
+            vmc_out = CollapseMatrix(config, rl.Spec());
+            return true;
+        };
+
+        // Helper: full chi² Poisson + Pull at arbitrary param.
+        auto compute_chi2_at = [&](const Eigen::VectorXf &param_at,
+                                   float &chi2_out) -> bool {
+            Eigen::VectorXf phys = param_at.segment(0, nparams - nsyst);
+            if(model.model_constraint && !model.model_constraint(phys)) return false;
+            PROspec rl = FillSpectra(config, peller, *syst, model, param_at, fs_cache,
+                                     strat != EventByEvent);
+            // vdata may depend on result in shape_only mode; preserve that
+            // (shape_only re-normalises to perturbed result like the original).
+            const Eigen::VectorXf vdata_l = shape_only ? data.Normalize(config, rl) : data.Spec();
+            const Eigen::VectorXf vmc_l   = CollapseMatrix(config, rl.Spec());
+            float pois = 2.0f * (vmc_l.array() - vdata_l.array() +
+                                 vdata_l.array() * (vdata_l.array() / vmc_l.array()).log()).sum();
+            Eigen::VectorXf nuis = param_at.segment(nparams - nsyst, nsyst);
+            chi2_out = pois + Pull(nuis);
+            return true;
+        };
+
+        for (size_t i = 0; i < nparams; i++) {
+            if (is_fixed.size() > 0 && is_fixed.at(i)) {
+                gradient(i) = 0.0f;
+                continue;
+            }
+
+            const float h = (i < nparams - nsyst) ? 1e-3f : 1e-4f;
+
+            // Boundary detection: only meaningful if bounds were set on the
+            // metric (setBounds). Otherwise treat as interior.
+            const bool have_bounds = (lb.size() > (Eigen::Index)i && ub.size() > (Eigen::Index)i);
+            const float boundary_tol = 2.0f * std::numeric_limits<float>::epsilon();
+            const bool at_lower = have_bounds && std::fabs(param(i) - lb(i)) < boundary_tol;
+            const bool at_upper = have_bounds && std::fabs(ub(i) - param(i)) < boundary_tol;
+
+            if (at_lower && at_upper) {
+                gradient(i) = 0.0f;
+                continue;
+            }
+
+            const bool boundary_step = (at_lower || at_upper);
+            const int  sign          = boundary_step ? (at_lower ? 1 : -1) : 1;
+            const bool use_central   = !boundary_step && !one_sided;
+
+            Eigen::VectorXf param_plus  = param;  param_plus(i)  = param(i) + sign * h;
+            Eigen::VectorXf param_minus = param;  param_minus(i) = param(i) - sign * h;
+
+            if (linearised) {
+                Eigen::VectorXf vmc_plus, vmc_minus;
+                bool ok_plus  = compute_vmc_at(param_plus,  vmc_plus);
+                bool ok_minus = use_central ? compute_vmc_at(param_minus, vmc_minus) : true;
+
+                Eigen::VectorXf ds_dtheta;
+                if (use_central) {
+                    if (!ok_plus && !ok_minus) { gradient(i) = 0.0f; continue; }
+                    if (!ok_plus)  { gradient(i) = +1e10f; continue; }
+                    if (!ok_minus) { gradient(i) = -1e10f; continue; }
+                    ds_dtheta = (vmc_plus - vmc_minus) / (2.0f * h);
+                } else {
+                    if (!ok_plus) {
+                        gradient(i) = sign * 1e10f;
+                        if (boundary_step && sign * gradient(i) > 0) gradient(i) = 0.0f;
+                        continue;
+                    }
+                    ds_dtheta = (sign * (vmc_plus - vmc_base)) / h;
+                }
+
+                float grad_i = w_base.dot(ds_dtheta);
+                if (i >= (size_t)(nparams - nsyst)) {
+                    grad_i += pull_grad_nuis(i - (nparams - nsyst));
+                }
+                gradient(i) = grad_i;
+            } else {
+                if (use_central) {
+                    float chi2_plus = 1e10f, chi2_minus = 1e10f;
+                    compute_chi2_at(param_plus,  chi2_plus);
+                    compute_chi2_at(param_minus, chi2_minus);
+                    gradient(i) = (chi2_plus - chi2_minus) / (2.0f * h);
+                } else {
+                    float chi2_one = 0.0f;
+                    if (!compute_chi2_at(param_plus, chi2_one)) {
+                        gradient(i) = sign * 1e10f;
+                        if (!std::isfinite(gradient(i))) gradient(i) = 0.0f;
+                        continue;
+                    }
+                    gradient(i) = sign * (chi2_one - value) / h;
                 }
             }
-            PROspec result = FillSpectra(config, peller, *syst, model, tmpParams, fs_cache, strat != EventByEvent);
 
-            const Eigen::VectorXf vdata = shape_only 
-                ? data.Normalize(config,result)
-                : data.Spec();
-            const Eigen::VectorXf vmc = CollapseMatrix(config, result.Spec());
-            float poisson = 2 * (vmc.array() - vdata.array() + vdata.array() * (vdata.array() / vmc.array()).log()).sum();
-            float pull = Pull(subvector2);
-            float value_grad = poisson + pull;
-
-            gradient(i) = (value_grad-value)/(tmpParams(i) - param(i));
+            if (boundary_step && sign * gradient(i) > 0) {
+                gradient(i) = 0.0f;
+            }
+            if (!std::isfinite(gradient(i))) gradient(i) = 0.0f;
         }
     }
     //std::cout<<"Grad: "<<gradient<<std::endl;
