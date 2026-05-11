@@ -202,7 +202,7 @@ namespace PROfit {
             static bool isPositiveSemiDefinite(const Eigen::MatrixXf& in_matrix);
 
             /* Function: Fill splines assuming p_cv and p_multi_spec have been filled in the SystStruct*/
-            void FillSpline(const SystStruct& syst);
+            void FillSpline(const SystStruct& syst, bool unmirrored);
 
             /* Function: Get weight for bin for a given shift using spline */
             float GetSplineShift(int syst_num, float shift, int bin) const;

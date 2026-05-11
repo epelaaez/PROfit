@@ -361,7 +361,7 @@ std::vector<profOut> PROfile::PROfilePointHelper(const PROsyst *systs, const PRO
 
 
 
-std::vector<surfOut> PROsurf::PointHelper(const PROfitterConfig &fitconfig, std::vector<surfOut> multi_physics_params, int start, int end, uint32_t seed){
+std::vector<surfOut> PROsurf::PointHelper(const PROfitterConfig &fitconfig, std::vector<surfOut> multi_physics_params, int start, int end, uint32_t seed, const Eigen::VectorXf &seed_pt){
 
     std::vector<surfOut> outs;
 
@@ -398,13 +398,12 @@ std::vector<surfOut> PROsurf::PointHelper(const PROfitterConfig &fitconfig, std:
         ub(y_idx) = multi_physics_params[i].grid_val[0];
 
         local_metric->setBounds(lb,ub);
+        std::vector<Eigen::VectorXf> seeds;
+        seeds.push_back(seed_pt);
+        if(i != start) seeds.push_back(outs.back().best_fit);
 
         PROfitter fitter(ub, lb, fitconfig, seed+i);
-        if(i!=start){
-            output.chi = fitter.Fit(*local_metric, outs.back().best_fit);
-        }else{
-            output.chi = fitter.Fit(*local_metric);
-        }
+        output.chi = fitter.Fit(*local_metric, seeds);
         output.best_fit = fitter.best_fit;
         outs.push_back(output);
     }
@@ -415,7 +414,7 @@ std::vector<surfOut> PROsurf::PointHelper(const PROfitterConfig &fitconfig, std:
 }
 
 
-void PROsurf::FillSurface(const PROfitterConfig &fitconfig, std::string filename, PROseed &proseed, int nThreads) {
+void PROsurf::FillSurface(const PROfitterConfig &fitconfig, std::string filename, PROseed &proseed, float min_chi, const Eigen::VectorXf &seed_pt, int nThreads) {
     std::ofstream chi_file;
     if(!filename.empty()){
         chi_file.open(filename);
@@ -449,7 +448,7 @@ void PROsurf::FillSurface(const PROfitterConfig &fitconfig, std::string filename
         int thread_start = start;
         int thread_end = end;
         futures.emplace_back(std::async(std::launch::async, [&, thread_start, thread_end]() {
-                    return this->PointHelper(fitconfig, grid, thread_start, thread_end, proseed.getThreadSeeds()->at(t));
+                    return this->PointHelper(fitconfig, grid, thread_start, thread_end, proseed.getThreadSeeds()->at(t), seed_pt);
                     }));
 
     }
@@ -471,9 +470,15 @@ void PROsurf::FillSurface(const PROfitterConfig &fitconfig, std::string filename
         for(size_t i = 0; i < metric.GetModel().nparams + metric.GetSysts().GetNSplines(); ++i)
             chi_file << " p" << i;
     }
-    float min_chi = 1e9;
+    float orig_chi = min_chi;
     for(const auto &item: combinedResults) {
-        if(item.chi < min_chi) min_chi = item.chi;
+        if(item.chi < orig_chi) {
+            log<LOG_WARNING>(L"%1% || Found a point in the surface, index (%2%, %3%) with value (%4%, %5%), with chi^2 %6% which is lower than the minimum chi^2 passed into the function %7%. We will use this new value or the lowest other value in the surface instead of the min_chi passed in.") 
+                % __func__ % item.grid_index[0] % item.grid_index[1] % item.grid_val[0] % item.grid_val[1] % item.chi % orig_chi;
+        }
+        if(item.chi < min_chi) {
+            min_chi = item.chi;
+        }
     }
     for (const auto& item : combinedResults) {
         log<LOG_INFO>(L"%1% || Finished  : %2% %3% %4%") % __func__ % item.grid_val[1] % item.grid_val[0] % (item.chi - min_chi);
@@ -489,7 +494,7 @@ void PROsurf::FillSurface(const PROfitterConfig &fitconfig, std::string filename
 
 
 
-std::vector<surfOut> PROsurf::FillCurve(const PROfitterConfig &fitconfig, PROseed &proseed, int nThreads, std::vector<float> &A, std::vector<float> &B, size_t n_points) {
+std::vector<surfOut> PROsurf::FillCurve(const PROfitterConfig &fitconfig, PROseed &proseed, float min_chi, const Eigen::VectorXf &seed_pt, int nThreads, std::vector<float> &A, std::vector<float> &B, size_t n_points) {
 
 
     std::vector<surfOut> grid;
@@ -519,9 +524,8 @@ std::vector<surfOut> PROsurf::FillCurve(const PROfitterConfig &fitconfig, PROsee
         int start = t * chunkSize;
         int end = (t == nThreads - 1) ? loopSize : start + chunkSize;
         futures.emplace_back(std::async(std::launch::async, [&, start, end]() {
-                    return this->PointHelper(fitconfig, grid, start, end, proseed.getThreadSeeds()->at(t));
+                    return this->PointHelper(fitconfig, grid, start, end, proseed.getThreadSeeds()->at(t), seed_pt);
                     }));
-
     }
 
     std::vector<surfOut> combinedResults;
@@ -530,12 +534,24 @@ std::vector<surfOut> PROsurf::FillCurve(const PROfitterConfig &fitconfig, PROsee
         combinedResults.insert(combinedResults.end(), result.begin(), result.end());
     }
 
+    float orig_chi = min_chi;
+    for(const auto &item: combinedResults) {
+        if(item.chi < orig_chi) {
+            log<LOG_WARNING>(L"%1% || Found a point in the surface, index (%2%, %3%) with value (%4%, %5%), with chi^2 %6% which is lower than the minimum chi^2 passed into the function %7%. We will use this new value or the lowest other value in the surface instead of the min_chi passed in.") 
+                % __func__ % item.grid_index[0] % item.grid_index[1] % item.grid_val[0] % item.grid_val[1] % item.chi % orig_chi;
+        }
+        if(item.chi < min_chi) {
+            min_chi = item.chi;
+        }
+    }
+
+    for (auto& item : combinedResults) {
+        log<LOG_INFO>(L"%1% || Finished  : %2% %3% %4%") % __func__ % item.grid_val[1] % item.grid_val[0] % (item.chi - min_chi);
+        item.chi -= min_chi;
+    }
+
     return combinedResults;
-
-
-
 }
-
 
 void PROsurf::PlotCurve(const PROconfig &config, const PROmodel &model, const PROsyst &syst, const std::vector<surfOut> & cpoints, std::string final_output_tag, bool logx, bool logy, size_t xaxis_idx,size_t yaxis_idx, std::vector<float> &A, std::vector<float> &B, [[maybe_unused]] size_t n_points){
 

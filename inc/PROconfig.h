@@ -427,6 +427,7 @@ namespace PROfit{
             std::vector<std::string> m_mcgen_variation_allowlist;
             std::vector<std::string> m_mcgen_variation_denylist;
             std::vector<std::string> m_mcgen_variation_type;
+            std::set<std::string> m_mcgen_variation_unmirrored;
             std::map<std::string, std::string> m_mcgen_variation_external_filename_map;
             std::map<std::string, std::array<int, 2>> m_mcgen_variation_histaxisvars_map;
             std::map<std::string, TH1*> m_mcgen_variation_hist1d_map;
