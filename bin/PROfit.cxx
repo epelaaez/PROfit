@@ -1286,6 +1286,42 @@ int main(int argc, char* argv[])
         TFile fout((final_output_tag+"_PROfile.root").c_str(), "RECREATE");
         profile.onesig.Write("one_sigma_errs");
         pre_hist.Write("cv");
+        size_t tot_offset = 0;
+        for(size_t mode = 0; mode < config.m_num_modes; ++mode) {
+            for(size_t det = 0; det < config.m_num_detectors; ++det) {
+                for(size_t channel = 0; channel < config.m_num_channels; ++channel) {
+                    size_t channel_nbins_x = config.m_channel_variable_bins[channel][config.i_prime].NBinsAlong(0);
+                    // default is 1d, but catch 2d case for ybins
+                    size_t channel_nbins_y = 1;
+                    if(config.m_channel_variable_dims[channel][config.i_prime] == 2)  channel_nbins_y = config.m_channel_variable_bins[channel][config.i_prime].NBinsAlong(1);
+                    size_t nbins_p_2dchan = channel_nbins_y*channel_nbins_x;
+                    TGraphAsymmErrors preband(nbins_p_2dchan);
+                    TGraphAsymmErrors postband(nbins_p_2dchan);
+                    for(size_t i = 0; i < nbins_p_2dchan; ++i) {
+                        float x = channel_nbins_y == 1 ? 
+                            (config.m_channel_variable_bins[channel][config.i_prime].Edges(0)[i+1] + config.m_channel_variable_bins[channel][config.i_prime].Edges(0)[i])/2 :
+                            i;
+                        float xerr = channel_nbins_y == 1 ?
+                            (config.m_channel_variable_bins[channel][config.i_prime].Edges(0)[i+1] - config.m_channel_variable_bins[channel][config.i_prime].Edges(0)[i])/2 :
+                            0.5;
+                        preband.SetPoint(i, x, fitres.err_band->error_point(tot_offset + i));
+                        preband.SetPointEYhigh(i, fitres.err_band->error_up(tot_offset + i));
+                        preband.SetPointEYlow(i, fitres.err_band->error_down(tot_offset + i));
+                        preband.SetPointEXhigh(i, xerr);
+                        preband.SetPointEXlow(i, xerr);
+                        postband.SetPoint(i, x, fitres.post_err_band->error_point(tot_offset + i));
+                        postband.SetPointEYhigh(i, fitres.post_err_band->error_up(tot_offset + i));
+                        postband.SetPointEYlow(i, fitres.post_err_band->error_down(tot_offset + i));
+                        postband.SetPointEXhigh(i, xerr);
+                        postband.SetPointEXlow(i, xerr);
+                    }
+                    std::string name = config.m_mode_names[mode]+"_"+config.m_detector_names[det]+"_"+config.m_channel_names[channel];
+                    preband.Write((name+"_prefit_err").c_str());
+                    postband.Write((name+"_postfit_err").c_str());
+                    tot_offset += nbins_p_2dchan;
+                }
+            }
+        }
         //err_band->Write("prefit_errband");
         //post_err_band->Write("postfit_errband");
         post_hist.Write("best_fit");
