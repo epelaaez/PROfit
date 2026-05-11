@@ -2138,7 +2138,7 @@ int main(int argc, char* argv[])
 
         std::vector<PROerrorbar> other_err_bands;
         for(size_t io = 0; io < config.m_num_variables; ++io) {
-            if(!config.m_channel_variable_plot_bool.at(io))continue;// For now skip the L/E 250 bin. 
+            if(!config.m_channel_variable_plot_bool.at(io)) continue; // For now skip the L/E 250 bin. 
             other_err_bands.push_back(getErrorBand(config, prop, variable_systs[io], *model, variable_cvs[io], CVParams, binwidth_scale, io));
             plot_channels(final_output_tag+"_PROplot_Variable_"+std::to_string(io)+"_ErrorBand.pdf", config, variable_cvs[io], {}, variable_data[io], 
                     other_err_bands.back(), {}, other_channel_chitexts[io], pbounds, opt | PlotOptions::DataMCRatio, io);
@@ -2231,10 +2231,13 @@ int main(int argc, char* argv[])
 
         fout.mkdir("ErrorBand");
         fout.cd("ErrorBand");
+        size_t eind = 0;
         for(size_t io = 0; io < config.m_num_variables; ++io) {
             if(!config.m_channel_variable_plot_bool.at(io))continue;// For now skip the L/E 250 bin. 
             size_t tot_offset = 0;
-            const PROerrorbar &err = other_err_bands[io];
+            // We need to use a different index here since we don't add error bars to the vector if
+            // plot="false" in the xml
+            const PROerrorbar &err = other_err_bands.at(eind++);
             for(size_t mode = 0; mode < config.m_num_modes; ++mode) {
                 for(size_t det = 0; det < config.m_num_detectors; ++det) {
                     for(size_t channel = 0; channel < config.m_num_channels; ++channel) {
@@ -2246,11 +2249,16 @@ int main(int argc, char* argv[])
                         TGraphAsymmErrors eband(nbins_p_2dchan);
                         for(size_t i = 0; i < nbins_p_2dchan; ++i) {
                             float x = channel_nbins_y == 1 ? 
-                                (config.m_channel_variable_bins[channel][io].Edges(0)[i+1] - config.m_channel_variable_bins[channel][io].Edges(0)[i])/2 :
+                                (config.m_channel_variable_bins[channel][io].Edges(0)[i+1] + config.m_channel_variable_bins[channel][io].Edges(0)[i])/2 :
                                 i;
+                            float xerr = channel_nbins_y == 1 ?
+                                (config.m_channel_variable_bins[channel][io].Edges(0)[i+1] - config.m_channel_variable_bins[channel][io].Edges(0)[i])/2 :
+                                0.5;
                             eband.SetPoint(i, x, err.error_point(tot_offset + i));
                             eband.SetPointEYhigh(i, err.error_up(tot_offset + i));
                             eband.SetPointEYlow(i, err.error_down(tot_offset + i));
+                            eband.SetPointEXhigh(i, xerr);
+                            eband.SetPointEXlow(i, xerr);
                         }
                         std::string name = config.m_mode_names[mode]+"_"+config.m_detector_names[det]+"_"+config.m_channel_names[channel]+"_var"+std::to_string(io);
                         eband.Write(name.c_str());
