@@ -2229,13 +2229,36 @@ int main(int argc, char* argv[])
         for(const auto &[name, mat]: matrices)
             mat->Write(name.c_str());
 
-        //fout.mkdir("ErrorBand");
-        //fout.cd("ErrorBand");
-        //err_band->Write("err_band");
-        //io = 0;
-        //for(const auto &band: other_err_bands)
-        //band->Write(("other_"+std::to_string(io++)+"_err_band").c_str());
-
+        fout.mkdir("ErrorBand");
+        fout.cd("ErrorBand");
+        for(size_t io = 0; io < config.m_num_variables; ++io) {
+            if(!config.m_channel_variable_plot_bool.at(io))continue;// For now skip the L/E 250 bin. 
+            size_t tot_offset = 0;
+            const PROerrorbar &err = other_err_bands[io];
+            for(size_t mode = 0; mode < config.m_num_modes; ++mode) {
+                for(size_t det = 0; det < config.m_num_detectors; ++det) {
+                    for(size_t channel = 0; channel < config.m_num_channels; ++channel) {
+                        size_t channel_nbins_x = config.m_channel_variable_bins[channel][io].NBinsAlong(0);
+                        // default is 1d, but catch 2d case for ybins
+                        size_t channel_nbins_y = 1;
+                        if(config.m_channel_variable_dims[channel][io] == 2)  channel_nbins_y = config.m_channel_variable_bins[channel][io].NBinsAlong(1);
+                        size_t nbins_p_2dchan = channel_nbins_y*channel_nbins_x;
+                        TGraphAsymmErrors eband(nbins_p_2dchan);
+                        for(size_t i = 0; i < nbins_p_2dchan; ++i) {
+                            float x = channel_nbins_y == 1 ? 
+                                (config.m_channel_variable_bins[channel][io].Edges(0)[i+1] - config.m_channel_variable_bins[channel][io].Edges(0)[i])/2 :
+                                i;
+                            eband.SetPoint(i, x, err.error_point(tot_offset + i));
+                            eband.SetPointEYhigh(i, err.error_up(tot_offset + i));
+                            eband.SetPointEYlow(i, err.error_down(tot_offset + i));
+                        }
+                        std::string name = config.m_mode_names[mode]+"_"+config.m_detector_names[det]+"_"+config.m_channel_names[channel]+"_var"+std::to_string(io);
+                        eband.Write(name.c_str());
+                        tot_offset += nbins_p_2dchan;
+                    }
+                }
+            }
+        }
 
         if((with_splines)) {
             std::map<std::string, std::vector<std::pair<std::unique_ptr<TGraph>,std::unique_ptr<TGraph>>>> spline_graphs = getSplineGraphs(variable_systs[config.i_prime], config);
