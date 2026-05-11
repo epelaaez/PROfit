@@ -95,7 +95,7 @@ namespace PROfit {
 
             PROfile(const PROconfig &config, const PROsyst &systs, const PROmodel &model, PROmetric &metric, PROseed &proseed, const PROfitterConfig &fitconfig, std::string filename, float minchi = 0, bool with_osc = false, int nThreads = 1, const std::vector<Eigen::VectorXf> &seed_points = {}, const Eigen::VectorXf& true_params = Eigen::VectorXf() ) ;
 
-            void Plot(const PROconfig &config, const PROsyst &systs, const PROmodel &model, PROmetric &metric, PROseed &proseed, std::string filename, bool with_osc = false, const Eigen::VectorXf& init_seed = Eigen::VectorXf(), const Eigen::VectorXf& true_params = Eigen::VectorXf(), bool mask_osc = false) ;
+            void Plot(const PROconfig &config, const PROsyst &systs, const PROmodel &model, PROmetric &metric, PROseed &proseed, std::string filename, bool with_osc = false, const Eigen::VectorXf& init_seed = Eigen::VectorXf(), const Eigen::VectorXf& true_params = Eigen::VectorXf(), const Eigen::MatrixXf& spline_covariance = Eigen::MatrixXf{}, const Eigen::VectorXf& param_err_lo = Eigen::VectorXf{}, const Eigen::VectorXf& param_err_hi = Eigen::VectorXf{}, bool mask_osc = false) ;
 
             std::vector<profOut> PROfilePointHelper(const PROsyst *systs, const PROfitterConfig &fitconfig, int offset, int stride, float minchi, bool with_osc, MultiPROgressBar& progressbar, const std::vector<Eigen::VectorXf> &seed_points = {}, uint32_t seed=0);
     };
@@ -142,11 +142,11 @@ namespace PROfit {
 
             PROsurf(PROmetric &metric, size_t x_idx, size_t y_idx, size_t nbinsx, LogLin llx, float x_lo, float x_hi, size_t nbinsy, LogLin lly, float y_lo, float y_hi);
 
-            std::vector<surfOut> PointHelper(const PROfitterConfig &fitconfig, std::vector<surfOut> multi_physics_params, int start, int end, uint32_t seed);
+            std::vector<surfOut> PointHelper(const PROfitterConfig &fitconfig, std::vector<surfOut> multi_physics_params, int start, int end, uint32_t seed, const Eigen::VectorXf &seed_pt);
 
             void FillSurfaceStat(const PROconfig &config, const PROfitterConfig &fitconfig, std::string filename, const Eigen::VectorXf &cv_params, uint32_t seed);
-            void FillSurface(const PROfitterConfig &fitconfig, std::string filename, PROseed & proseed, int nthreads = 1);
-            std::vector<surfOut> FillCurve(const PROfitterConfig &fitconfig, PROseed &proseed, int nThreads, std::vector<float> &A, std::vector<float> &B, size_t n_points);
+            void FillSurface(const PROfitterConfig &fitconfig, std::string filename, PROseed & proseed, float min_chi, const Eigen::VectorXf &seed_pt, int nthreads = 1);
+            std::vector<surfOut> FillCurve(const PROfitterConfig &fitconfig, PROseed &proseed, float min_chi, const Eigen::VectorXf &seed_pt, int nThreads, std::vector<float> &A, std::vector<float> &B, size_t n_points);
             void PlotCurve(const PROconfig &config, const PROmodel &model, const PROsyst &syst, const std::vector<surfOut> & cpoints, std::string final_output_tag, bool logx, bool logy,size_t xaxis_idx,size_t yaxis_idx,std::vector<float> &A, std::vector<float> &B, size_t n_points);
 
     };

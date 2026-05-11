@@ -67,6 +67,11 @@ bool PROconfig::SameChannels(const PROconfig &one, const PROconfig &two) {
                 % __func__ % one.m_detector_names[i].c_str() % two.m_detector_names[i].c_str();
             return false;
         }
+        if(one.m_det_pot[i] != two.m_det_pot[i]) {
+            log<LOG_WARNING>(L"%1% || Found different POTs for detector %2%, %3% vs %4%")
+                % __func__ % one.m_detector_names[i].c_str() % one.m_det_pot[i] % two.m_det_pot[i];
+            return false;
+        }
     }
     if(one.m_num_channels != two.m_num_channels) {
         log<LOG_WARNING>(L"%1% || Found different number of channels %2% vs %3%")
@@ -920,10 +925,9 @@ int PROconfig::LoadFromXML(const std::string &filename){
             log<LOG_INFO>(L"%1% || Parsing <DetVarSection> index %2%") % __func__ % section_idx;
 
             const char* dv_treename = pDetVar->Attribute("treename");
-            if(!dv_treename) {
-                log<LOG_ERROR>(L"%1% || ERROR: <DetVarSection> must have a treename attribute") % __func__;
-                exit(EXIT_FAILURE);
-            }
+            bool have_tree = dv_treename;
+            const char* dv_filename = pDetVar->Attribute("filename");
+            bool have_file = dv_filename;
 
             const char* dv_scale_str = pDetVar->Attribute("scale");
             std::string dv_scale = dv_scale_str ? dv_scale_str : "1.0";
@@ -975,14 +979,24 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 log<LOG_ERROR>(L"%1% || ERROR: <DetVarSection> must have a <cv> element") % __func__;
                 exit(EXIT_FAILURE);
             }
-            const char* cv_filename = pCV->Attribute("filename");
+            if(!have_file) dv_filename = pCV->Attribute("filename");
+            if(!dv_filename) {
+                log<LOG_ERROR>(L"%1% || ERROR: Require filename attribute in either DetVarSection or cv.") % __func__;
+                exit(EXIT_FAILURE);
+            }
             const char* cv_pot_str = pCV->Attribute("pot");
-            if(!cv_filename || !cv_pot_str) {
-                log<LOG_ERROR>(L"%1% || ERROR: <cv> must have filename and pot attributes") % __func__;
+            if(!cv_pot_str) {
+                log<LOG_ERROR>(L"%1% || ERROR: <cv> must have pot attribute") % __func__;
+                exit(EXIT_FAILURE);
+            }
+            if(!have_tree) dv_treename = pCV->Attribute("treename");
+            if(!dv_treename) {
+                log<LOG_ERROR>(L"%1% || ERROR: Require a treename in either the DetVarSection or cv elements.") % __func__;
                 exit(EXIT_FAILURE);
             }
             DetVarFile cv_file;
-            cv_file.filename = cv_filename;
+            cv_file.filename = dv_filename;
+            cv_file.treename = dv_treename;
             cv_file.name = (section_idx == 0) ? "cv" : ("cv_" + std::to_string(section_idx));
             cv_file.pot = strtod(cv_pot_str, &end);
             cv_file.is_cv = true;
@@ -990,29 +1004,41 @@ int PROconfig::LoadFromXML(const std::string &filename){
             { const char* frac = pCV->Attribute("partial_load_frac");
               cv_file.partial_load_frac = frac ? (float)strtod(frac, nullptr) : 1.0f; }
             m_detvar_files.push_back(cv_file);
-            log<LOG_INFO>(L"%1% || DetVar CV file (section %2%): %3%, POT: %4%") % __func__ % section_idx % cv_filename % cv_file.pot;
+            log<LOG_INFO>(L"%1% || DetVar CV file (section %2%): %3%, POT: %4%") % __func__ % section_idx % dv_filename % cv_file.pot;
 
             // Parse variation files
             tinyxml2::XMLElement *pVar = pDetVar->FirstChildElement("variation");
             while(pVar) {
-                const char* var_filename = pVar->Attribute("filename");
-                const char* var_name = pVar->Attribute("name");
-                const char* var_pot_str = pVar->Attribute("pot");
-                if(!var_filename || !var_name || !var_pot_str) {
-                    log<LOG_ERROR>(L"%1% || ERROR: <variation> must have filename, name, and pot attributes") % __func__;
+                if(!have_file) dv_filename = pVar->Attribute("filename");
+                if(!dv_filename) {
+                    log<LOG_ERROR>(L"%1% || ERROR: Require filename attribute in either DetVarSection or variation.") % __func__;
                     exit(EXIT_FAILURE);
                 }
+                const char* var_name = pVar->Attribute("name");
+                const char* var_pot_str = pVar->Attribute("pot");
+                if(!var_name || !var_pot_str) {
+                    log<LOG_ERROR>(L"%1% || ERROR: <variation> must have name and pot attributes") % __func__;
+                    exit(EXIT_FAILURE);
+                }
+                if(!have_tree) dv_treename = pVar->Attribute("treename");
+                if(!dv_treename) {
+                    log<LOG_ERROR>(L"%1% || ERROR: Require a treename in either the DetVarSection or variation elements.") % __func__;
+                    exit(EXIT_FAILURE);
+                }
+                const char *knobval = pVar->Attribute("knobval");
                 DetVarFile var_file;
-                var_file.filename = var_filename;
+                var_file.filename = dv_filename;
+                var_file.treename = dv_treename;
                 var_file.name = var_name;
                 var_file.pot = strtod(var_pot_str, &end);
                 var_file.is_cv = false;
+                var_file.knobval = knobval ? strtod(knobval, &end) : 1;
                 var_file.section_index = section_idx;
                 { const char* frac = pVar->Attribute("partial_load_frac");
                   var_file.partial_load_frac = frac ? (float)strtod(frac, nullptr) : 1.0f; }
                 m_detvar_files.push_back(var_file);
                 m_detvar_variation_names.insert(var_name);
-                log<LOG_INFO>(L"%1% || DetVar variation '%2%' file (section %3%): %4%, POT: %5%") % __func__ % var_name % section_idx % var_filename % var_file.pot;
+                log<LOG_INFO>(L"%1% || DetVar variation '%2%' file (section %3%): %4%, POT: %5%") % __func__ % var_name % section_idx % dv_filename % var_file.pot;
 
                 pVar = pVar->NextSiblingElement("variation");
             }
@@ -1083,7 +1109,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 }
 
                 // MCFile template with placeholders
-                dvXml << "<MCFile treename=\"" << dv_treename << "\" filename=\"__DETVAR_FILENAME__\" scale=\"" << dv_scale << "\" pot=\"__DETVAR_POT__\" partial_load_frac=\"__DETVAR_PARTIAL_LOAD_FRAC__\">\n";
+                dvXml << "<MCFile treename=\"__DETVAR_TREENAME__\" filename=\"__DETVAR_FILENAME__\" scale=\"" << dv_scale << "\" pot=\"__DETVAR_POT__\" partial_load_frac=\"__DETVAR_PARTIAL_LOAD_FRAC__\">\n";
 
                 // Serialize friend trees from this DetVarSection
                 tinyxml2::XMLElement *pDVFriend = pDetVar->FirstChildElement("friend");
@@ -1168,7 +1194,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 }
 
                 //check for known attributes
-                const std::vector<std::string> expected_attrs = {"name", "type", "plotname", "binning", "knobvals", "tag", "prior", "center", "force_0_cv", "include_only_weights", "scale","filename", "xvar", "yvar", "num_decomp_knobs"};
+                const std::vector<std::string> expected_attrs = {"name", "type", "plotname", "binning", "knobvals", "tag", "prior", "center", "force_0_cv", "include_only_weights", "scale","filename", "xvar", "yvar", "restrict", "mirror", "num_decomp_knobs"};
                 for (const tinyxml2::XMLAttribute* attr = pAllowList->FirstAttribute(); attr; attr = attr->Next()) {
                     std::string name = attr->Name();
                     if (std::find(expected_attrs.begin(), expected_attrs.end(), name) == expected_attrs.end()) {
@@ -1187,10 +1213,12 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 const char *center = pAllowList->Attribute("center");
                 const char *force_0_cv = pAllowList->Attribute("force_0_cv");
                 const char *include_only_weights_str = pAllowList->Attribute("include_only_weights");
+                const char *restrict_str = pAllowList->Attribute("restrict");
                 const char *scale = pAllowList->Attribute("scale");
                 const char *filename = pAllowList->Attribute("filename");
                 const char *xvar = pAllowList->Attribute("xvar");
                 const char *yvar = pAllowList->Attribute("yvar");
+                const char *mirrored = pAllowList->Attribute("mirror");
                 const char *num_decomp_knobs = pAllowList->Attribute("num_decomp_knobs");
 
 
@@ -1304,9 +1332,23 @@ int PROconfig::LoadFromXML(const std::string &filename){
                     m_mcgen_variation_include_only_weights[wt] = iow_vec;
                     log<LOG_INFO>(L"%1% || Parsed include_only_weights for systematic %2%: %3% entries") % __func__ % wt.c_str() % iow_vec.size();
                 }
+                if(restrict_str) {
+                    char *end;
+                    float rlo = std::strtof(restrict_str, &end);
+                    if(end == restrict_str)
+                        throw std::invalid_argument(std::string("restrict attribute for systematic '") + wt + "' must be two numbers, e.g. restrict=\"-1, 1\"");
+                    while(*end == ' ' || *end == ',') ++end;
+                    float rhi = std::strtof(end, nullptr);
+                    m_mcgen_variation_restrict[wt] = {rlo, rhi};
+                    log<LOG_INFO>(L"%1% || Parsed restrict=[%2%, %3%] for systematic %4%") % __func__ % rlo % rhi % wt.c_str();
+                }
                 if(scale) {
                     m_mcgen_variation_scale[wt] = std::strtof(scale, NULL);
                     log<LOG_INFO>(L"%1% || Parsed scale=%2% for systematic %3%") % __func__ % m_mcgen_variation_scale[wt] % wt.c_str();
+                }
+                if(mirrored) {
+                    if(strcmp(mirrored, "false") == 0 || strcmp(mirrored, "no") == 0 || strcmp(mirrored, "0") == 0)
+                        m_mcgen_variation_unmirrored.insert(wt);
                 }
                 if(num_decomp_knobs) {
                     m_mcgen_variation_num_decomp_knobs[wt] = atoi(num_decomp_knobs);
@@ -2211,6 +2253,14 @@ void PROconfig::construct_variable_collapsing_matrices(){
         }
 
     }
+
+    // Build sparse companions. Each row of T has exactly one 1.0, so nnz = m_num_variable_bins_total[io].
+    variable_collapsing_matrices_sparse.clear();
+    variable_collapsing_matrices_sparse.reserve(m_num_variables);
+    for(size_t io = 0; io < m_num_variables; ++io) {
+        variable_collapsing_matrices_sparse.emplace_back(variable_collapsing_matrices[io].sparseView());
+        variable_collapsing_matrices_sparse.back().makeCompressed();
+    }
     return;
 }
 
@@ -2366,6 +2416,12 @@ PROconfig PROconfig::BuildDetVarConfig(size_t file_index) const {
             xml_str.replace(pos, fn_placeholder.size(), dvfile.filename);
         }
 
+        std::string tr_placeholder = "__DETVAR_TREENAME__";
+        pos = xml_str.find(tr_placeholder);
+        if(pos != std::string::npos) {
+            xml_str.replace(pos, tr_placeholder.size(), dvfile.treename);
+        }
+
         std::string pot_placeholder = "__DETVAR_POT__";
         pos = xml_str.find(pot_placeholder);
         if(pos != std::string::npos) {
@@ -2477,6 +2533,37 @@ void ROOTFormula::LoadEvent(unsigned eventno) {
     }
 }
 
+void ROOTFormula::ExtractExprTokens(const std::string& expr, std::set<std::string>& result) {
+    // Canonical skip-list: ROOT aggregate functions, C math functions, ROOT constants,
+    // and C++ keywords that can never be branch names.
+    static const std::set<std::string> kSkipTokens = {
+        "Sum", "Min", "Max", "Alt", "Count", "Iteration",
+        "MinIf", "MaxIf", "SumIf",
+        "abs", "fabs", "sqrt", "sin", "cos", "tan",
+        "asin", "acos", "atan", "atan2",
+        "sinh", "cosh", "tanh",
+        "exp", "log", "log10", "pow",
+        "ceil", "floor", "round", "fmod",
+        "TMath",
+        "kTRUE", "kFALSE",
+        "true", "false",
+        "int", "float", "double", "bool", "void",
+        "if", "else", "for", "while", "do", "return",
+    };
+    const char* p = expr.c_str();
+    while (*p) {
+        if (isalpha((unsigned char)*p) || *p == '_') {
+            const char* start = p;
+            while (isalnum((unsigned char)*p) || *p == '_') p++;
+            std::string token(start, p);
+            if (kSkipTokens.find(token) == kSkipTokens.end())
+                result.insert(std::move(token));
+        } else {
+            ++p;
+        }
+    }
+}
+
 void ROOTFormula::AddFormulaBranches(const TTreeFormula* f, std::set<std::string>& result) {
     if (!f) return;
 
@@ -2487,52 +2574,15 @@ void ROOTFormula::AddFormulaBranches(const TTreeFormula* f, std::set<std::string
         TBranch* br = leaf->GetBranch();
         if (br) {
             result.insert(std::string(br->GetName()));
-            // Also include top-level (mother) branch so split objects work
             TBranch* mother = br->GetMother();
             if (mother && mother != br) result.insert(std::string(mother->GetName()));
         }
     }
 
-    // Supplemental path: extract every C-identifier token from the formula expression
-    // string and add it to the candidate set.  This captures std::vector<T> branches
-    // (where GetLeaf() returns nullptr) and branches inside Sum$(), Min$(), Max$() whose
-    // sub-expressions are not reachable via the public TTreeFormula API.
-    // Known ROOT/C keywords that can never be branch names are filtered out so that
-    // SetBranchStatus does not emit spurious "not found" warnings for them.
-    static const std::set<std::string> kSkipTokens = {
-        // ROOT aggregate functions used before '$'
-        "Sum", "Min", "Max", "Alt", "Count", "Iteration",
-        "MinIf", "MaxIf", "SumIf",
-        // C standard math functions
-        "abs", "fabs", "sqrt", "sin", "cos", "tan",
-        "asin", "acos", "atan", "atan2",
-        "sinh", "cosh", "tanh",
-        "exp", "log", "log10", "pow",
-        "ceil", "floor", "round", "fmod",
-        // ROOT math namespace
-        "TMath",
-        // ROOT boolean constants
-        "kTRUE", "kFALSE",
-        // C++ keywords / built-in types
-        "true", "false",
-        "int", "float", "double", "bool", "void",
-        "if", "else", "for", "while", "do", "return",
-    };
+    // Supplemental path: token-extract the expression string to catch vector branches
+    // and Sum$()/Min$()/Max$() sub-expressions not reachable via GetLeaf().
     const char* title = f->GetTitle();
-    if (title) {
-        const char* p = title;
-        while (*p) {
-            if (isalpha(*p) || *p == '_') {
-                const char* start = p;
-                while (isalnum(*p) || *p == '_') p++;
-                std::string token(start, p);
-                if (kSkipTokens.find(token) == kSkipTokens.end())
-                    result.insert(std::move(token));
-            } else {
-                p++;
-            }
-        }
-    }
+    if (title) ExtractExprTokens(std::string(title), result);
 }
 
 std::set<std::string> ROOTFormula::GetNeededBranchNames() const {

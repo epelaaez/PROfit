@@ -207,6 +207,9 @@ namespace PROfit{
         std::set<std::string> GetNeededBranchNames() const;
         // Adds branches referenced by a single TTreeFormula to an existing set.
         static void AddFormulaBranches(const TTreeFormula* f, std::set<std::string>& result);
+        // Extracts identifier tokens from a formula expression string, skipping
+        // known ROOT/C keywords that can never be branch names.
+        static void ExtractExprTokens(const std::string& expr, std::set<std::string>& result);
         virtual ~ROOTFormula() {}
 
       private:
@@ -377,7 +380,10 @@ namespace PROfit{
 
             std::vector<std::vector<std::pair<float,float>>> m_variable_bin_to_edges;
 
-            std::vector<Eigen::MatrixXf> variable_collapsing_matrices; 
+            std::vector<Eigen::MatrixXf> variable_collapsing_matrices;
+            // Sparse companions to variable_collapsing_matrices (one nonzero per row).
+            // Used by CollapseMatrix in the chi^2 inner loop; built once in construct_variable_collapsing_matrices.
+            std::vector<Eigen::SparseMatrix<float>> variable_collapsing_matrices_sparse;
             std::vector<Eigen::VectorXf> collapsed_bin_widths;
 
             //This section entirely for montecarlo generation of a covariance matrix or PROspec 
@@ -420,6 +426,7 @@ namespace PROfit{
             std::vector<std::string> m_mcgen_variation_allowlist;
             std::vector<std::string> m_mcgen_variation_denylist;
             std::vector<std::string> m_mcgen_variation_type;
+            std::set<std::string> m_mcgen_variation_unmirrored;
             std::map<std::string, std::string> m_mcgen_variation_external_filename_map;
             std::map<std::string, std::array<int, 2>> m_mcgen_variation_histaxisvars_map;
             std::map<std::string, TH1*> m_mcgen_variation_hist1d_map;
@@ -435,6 +442,7 @@ namespace PROfit{
             std::map<std::string, float> m_mcgen_variation_prior_centers;
             std::map<std::string, bool> m_mcgen_variation_force_0_cv; //map of systematics with force_0_cv=true (normalize shifts by shift at knob=0)
             std::map<std::string, std::vector<int>> m_mcgen_variation_include_only_weights; //map of systematics with include_only_weights (1-based indices of which weights to include in spline universes)
+            std::map<std::string, std::pair<float,float>> m_mcgen_variation_restrict; //map of systematics with restrict="lo, hi" (clamp knob value during evaluation and fitting)
             std::map<std::string, float> m_mcgen_variation_scale; //map of systematics with scale factor to apply to weights (e.g., 0.001 for weights stored as x1000)
             std::map<std::string, int> m_mcgen_variation_num_decomp_knobs; //map of covariance_to_spline systematics to the number of eigenpairs to keep (-1 or missing = keep all)
       
@@ -458,10 +466,14 @@ namespace PROfit{
              * Note: To collapse a full matrix M, please do T.transpose() * M * T
              * 	     To collapse a full vector V, please do T.transpose() * V
              */
-            inline 
-                Eigen::MatrixXf GetCollapsingMatrix() const {return variable_collapsing_matrices[i_prime]; }
             inline
-                Eigen::MatrixXf GetCollapsingMatrix(int other_index) const {return variable_collapsing_matrices[other_index]; }
+                const Eigen::MatrixXf& GetCollapsingMatrix() const {return variable_collapsing_matrices[i_prime]; }
+            inline
+                const Eigen::MatrixXf& GetCollapsingMatrix(int other_index) const {return variable_collapsing_matrices[other_index]; }
+            inline
+                const Eigen::SparseMatrix<float>& GetCollapsingMatrixSparse() const {return variable_collapsing_matrices_sparse[i_prime]; }
+            inline
+                const Eigen::SparseMatrix<float>& GetCollapsingMatrixSparse(int other_index) const {return variable_collapsing_matrices_sparse[other_index]; }
 
             /* Function: Calculate how big each mode block and decector block are, for any given number of channels/subchannels, before and after the collapse
              * Note: only consider mode/detector/channel/subchannels that are actually used 
@@ -527,11 +539,13 @@ namespace PROfit{
             //---- Detector Variation (DetVar) support ----
             struct DetVarFile {
                 std::string filename;
+                std::string treename;
                 std::string name;  // "cv" / "cv_N" or variation name like "Recomb2"
                 float pot;
                 float partial_load_frac = 1.0f;
                 bool is_cv;
                 size_t section_index;  // which DetVarSection this file belongs to
+                int knobval = 0;
             };
 
             bool m_has_detvar_section = false;

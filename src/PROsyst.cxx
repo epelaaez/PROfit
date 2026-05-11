@@ -17,7 +17,8 @@ namespace PROfit {
         for(const auto& syst: systs) {
             log<LOG_DEBUG>(L"%1% || syst mode: %2%") % __func__ % syst.mode.c_str();
             if(syst.mode == "spline" || syst.mode == "norm" || syst.mode == "hist1d" || syst.mode == "hist2d") {
-                FillSpline(syst);
+                bool unmirrored = config.m_mcgen_variation_unmirrored.find(syst.systname) != config.m_mcgen_variation_unmirrored.end();
+                FillSpline(syst, unmirrored);
                 ++n_splines;
             } else if(syst.mode == "spline_to_covariance") {
                 if(model == nullptr){
@@ -27,7 +28,8 @@ namespace PROfit {
                     exit(EXIT_FAILURE);
                 }
                 // Build spline first, then convert to covariance matrix
-                FillSpline(syst);
+                bool unmirrored = config.m_mcgen_variation_unmirrored.find(syst.systname) != config.m_mcgen_variation_unmirrored.end();
+                FillSpline(syst, unmirrored);
                 size_t spline_idx = splines.size() - 1;
 
                 // Build temporary priors/centers for the current spline list (including the
@@ -76,6 +78,9 @@ namespace PROfit {
                 spline_names.pop_back();
                 spline_lo.pop_back();
                 spline_hi.pop_back();
+                spline_has_restrict.pop_back();
+                spline_restrict_lo.pop_back();
+                spline_restrict_hi.pop_back();
                 spline_binnings.pop_back();
 
                 // Store as covariance instead
@@ -187,6 +192,9 @@ namespace PROfit {
                         ret.splines.push_back(std::move(spline_copy));
                         ret.spline_hi.push_back(spline_hi[idx]);
                         ret.spline_lo.push_back(spline_lo[idx]);
+                        ret.spline_has_restrict.push_back(spline_has_restrict[idx]);
+                        ret.spline_restrict_lo.push_back(spline_restrict_lo[idx]);
+                        ret.spline_restrict_hi.push_back(spline_restrict_hi[idx]);
                         ret.spline_binnings.push_back(spline_binnings[idx]);
                         tmp_priors(ret.n_splines) = spline_priors(idx);
                         tmp_centers(ret.n_splines) = spline_centers(idx);
@@ -233,6 +241,9 @@ namespace PROfit {
                         ret.splines.push_back(std::move(spline_copy));
                         ret.spline_hi.push_back(spline_hi[idx]);
                         ret.spline_lo.push_back(spline_lo[idx]);
+                        ret.spline_has_restrict.push_back(spline_has_restrict[idx]);
+                        ret.spline_restrict_lo.push_back(spline_restrict_lo[idx]);
+                        ret.spline_restrict_hi.push_back(spline_restrict_hi[idx]);
                         ret.spline_binnings.push_back(spline_binnings[idx]);
                         tmp_priors(ret.n_splines) = spline_priors(idx);
                         tmp_centers(ret.n_splines) = spline_centers(idx);
@@ -668,7 +679,7 @@ namespace PROfit {
         return c[0] + x*(c[1] + x*(c[2] + x*c[3]));
     }
 
-    void PROsyst::FillSpline(const SystStruct& syst) {
+    void PROsyst::FillSpline(const SystStruct& syst, bool unmirrored) {
         std::vector<PROspec> ratios;
         ratios.reserve(syst.p_multi_spec.size());
         float cv_integral = syst.p_cv->Spec().sum();
@@ -750,7 +761,10 @@ namespace PROfit {
                 const float y1 = ratios[0].GetBinContent(i);
                 const float y2 = ratios[1].GetBinContent(i);
                 const float slope = (y2 - y1) / (knobvals[1] - knobvals[0]);
-                bin_segments.push_back(SplineSegment{(float)(-knobvals[1]), {y2, -slope, 0, 0}});
+                if(unmirrored)
+                    bin_segments.push_back(SplineSegment{(float)(-knobvals[1]), {slope * (-knobvals[1]) + y1, slope, 0, 0}});
+                else
+                    bin_segments.push_back(SplineSegment{(float)(-knobvals[1]), {y2, -slope, 0, 0}});
                 bin_segments.push_back(SplineSegment{(float)knobvals[0], {slope * (float)knobvals[0] + y1, slope, 0, 0}});
             } else {
                 {
@@ -805,6 +819,9 @@ namespace PROfit {
         spline_names.push_back(syst.systname);
         spline_lo.push_back(knobvals[0]);
         spline_hi.push_back(knobvals.back());
+        spline_has_restrict.push_back(syst.has_restrict);
+        spline_restrict_lo.push_back(syst.restrict_lo);
+        spline_restrict_hi.push_back(syst.restrict_hi);
         spline_binnings.push_back(syst.binning);
 
     }
@@ -996,10 +1013,9 @@ namespace PROfit {
     }
 
     Eigen::MatrixXf PROsyst::DecomposeFractionalCovariance(const PROconfig &config, const Eigen::VectorXf &cv_vec) const {
-        if(cv_vec.size() == last_decomp_spec.size() && cv_vec == last_decomp_spec) 
+        if(cv_vec.size() == last_decomp_spec.size() && cv_vec == last_decomp_spec)
           return last_decomp_mat;
-        Eigen::MatrixXf diag = cv_vec.asDiagonal();
-        Eigen::MatrixXf full_cov = diag * fractional_covariance * diag;
+        Eigen::MatrixXf full_cov = cv_vec.asDiagonal() * fractional_covariance * cv_vec.asDiagonal();
         Eigen::MatrixXf coll = other_index < 0 ? CollapseMatrix(config, full_cov) : CollapseMatrix(config, full_cov, other_index);
         /*Eigen::LDLT<Eigen::MatrixXf> ldlt(coll);
           Eigen::MatrixXf L = ldlt.matrixL(); 
