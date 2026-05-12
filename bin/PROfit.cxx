@@ -721,7 +721,7 @@ int main(int argc, char* argv[])
     std::vector<PROsyst> variable_systs;
     for(size_t i = 0; i < config.m_num_variables; ++i){
 
-        if(config.m_channel_variable_plot_bool.at(i)){ 
+        if(config.m_channel_variable_plot_bool.at(i) || i == config.i_prime){ 
             variable_systs.emplace_back(prop, config, systsstructs.at(i), shapeonly, i, model.get(), nullptr);
         }else{
             variable_systs.emplace_back();
