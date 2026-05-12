@@ -580,7 +580,7 @@ namespace PROfit{
             /** @brief Returns true if the tag string, when lowercased, contains "flux".
              *  Used to classify systematics as pre-migration (beam flux)
              *  vs post-migration (cross-section, detector).
-             *  Used foror 3+1+decay or other non-local oscillation models. */
+             *  Used for 3+1+decay or other non-local oscillation models. */
             static bool is_flux_tag(const std::string &tag) {
                 std::string lower = tag;
                 std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);

@@ -102,6 +102,14 @@ namespace PROfit {
                 FillSplinesFromCovariance(syst);
                 size_t n_after = splines.size();
 
+                // Each synthesized decomposition knob inherits the parent systematic's
+                // pre/post-migration classification.  A flux covariance decomposed into knobs
+                // gives all-flux (pre-migration) knobs; this keeps spline_is_pre_migration the
+                // same length as splines, so FillSpectra's has_pre_mig_info check stays true.
+                bool is_flux = config.has_flux_tag(syst.systname);
+                for(size_t si = n_before; si < n_after; ++si)
+                    spline_is_pre_migration.push_back(is_flux);
+
                 // Propagate parent tag + plotname to the synthesized knob entries so downstream
                 // plotting code (PROplot.cxx) can group them under the same tag.
                 // The maps are populated by the XML parser; here we append entries for the
