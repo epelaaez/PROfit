@@ -378,6 +378,24 @@ namespace PROfit{
             return ebar;
         }
 
+    /**
+     * @brief Produce a 1-sigma summary plot from MCMC results only (no profile scan).
+     * @details Mirrors the post-MCMC pieces of PROfile::Plot's "_1sigma_detailed.pdf":
+     * a gray ±1 prior band, blue post-fit MCMC bars centered on @p best_fit (widths
+     * from @p param_err_lo / @p param_err_hi), red squares for the global best-fit, and
+     * orange diamonds for any injected truth values. Intended to be called between the
+     * MCMC error-band step and the (slow) profile scan.
+     * @param filename     Output prefix; final file is @p filename + "_1sigmaMCMC.pdf".
+     * @param config       Analysis configuration (used for parameter pretty names).
+     * @param systs        PROsyst (provides spline names and count).
+     * @param model        Physics model.
+     * @param best_fit     Best-fit parameter vector (length nphys + nspline).
+     * @param param_err_lo Per-spline lower 1σ from MCMC quantiles (length nspline).
+     * @param param_err_hi Per-spline upper 1σ from MCMC quantiles (length nspline).
+     * @param with_osc     If true, also plot physics parameters; if false, splines only.
+     * @param true_params  Optional injected truth values.
+     */
+    void plot_mcmc_1sigma(const std::string &filename, const PROconfig &config, const PROsyst &systs, const PROmodel &model, const Eigen::VectorXf &best_fit, const Eigen::VectorXf &param_err_lo, const Eigen::VectorXf &param_err_hi, bool with_osc = false, const Eigen::VectorXf &true_params = Eigen::VectorXf());
 
 };
 
