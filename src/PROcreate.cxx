@@ -239,12 +239,10 @@ namespace PROfit {
                 } // End friend initialization
             } // End chain filling
 
-            for (size_t fid = 0; fid < (size_t)num_files; fid++) {
-                if (inconfig.m_mcgen_numfriends[fid] > 0) {
-                    for (size_t k = 0; k < friendChains[fid].size(); k++) {
-                        log<LOG_DEBUG>(L"%1% || Adding friend chain %2% to main chain %3%") % __func__ % k % fid;
-                        chains[fid]->AddFriend(friendChains[fid][k]);
-                    }
+            if (inconfig.m_mcgen_numfriends[fid] > 0) {
+                for (size_t k = 0; k < friendChains[fid].size(); k++) {
+                    log<LOG_DEBUG>(L"%1% || Adding friend chain %2% to main chain %3%") % __func__ % k % fid;
+                    chains[fid]->AddFriend(friendChains[fid][k]);
                 }
             }
 
@@ -365,7 +363,7 @@ namespace PROfit {
                     if(branch_variable->GetIncludeSystematics()){
                         for(const auto &variation: inconfig.m_mcgen_variation_allowlist){
                             std::string type = inconfig.m_mcgen_variation_type_map.at(variation);
-                            if (std::find(allowlist_check.begin(), allowlist_check.end(), variation  ) == allowlist_check.end() && (type=="covariance" || type=="spline" || type=="spline_to_covariance")) {
+                            if (std::find(allowlist_check.begin(), allowlist_check.end(), variation  ) == allowlist_check.end() && (type=="covariance" || type=="covariance_to_spline" || type=="spline" || type=="spline_to_covariance")) {
                                 log<LOG_ERROR>(L"%1% || ERROR! You have a variation named %2% in your allowlist, so you definitely want it, but its NOT found in the files. Is this a typo? FileID %3%") % __func__ % variation.c_str() %fid  ;
                                 throw std::runtime_error("Allowlist variation not in file.");
                             }
@@ -505,6 +503,22 @@ namespace PROfit {
                         sv.back().include_only_weights = inconfig.m_mcgen_variation_include_only_weights.at(sys_name);
                         log<LOG_INFO>(L"%1% || Setting include_only_weights for systematic %2% (%3% entries)") % __func__ % sys_name.c_str() % sv.back().include_only_weights.size();
                     }
+                    // Check if restrict is set for this systematic
+                    if(inconfig.m_mcgen_variation_restrict.find(sys_name) != inconfig.m_mcgen_variation_restrict.end()) {
+                        sv.back().has_restrict = true;
+                        sv.back().restrict_lo = inconfig.m_mcgen_variation_restrict.at(sys_name).first;
+                        sv.back().restrict_hi = inconfig.m_mcgen_variation_restrict.at(sys_name).second;
+                        log<LOG_INFO>(L"%1% || Setting restrict=[%2%, %3%] for systematic %4%") % __func__ % sv.back().restrict_lo % sv.back().restrict_hi % sys_name.c_str();
+                    }
+                }
+                if(sys_mode == "covariance_to_spline"){
+                    sv.back().binning = binningindex;
+                    auto it_nk = inconfig.m_mcgen_variation_num_decomp_knobs.find(sys_name);
+                    if(it_nk != inconfig.m_mcgen_variation_num_decomp_knobs.end()) {
+                        sv.back().num_decomp_knobs = it_nk->second;
+                        log<LOG_INFO>(L"%1% || Setting num_decomp_knobs=%2% for systematic %3%") % __func__ % sv.back().num_decomp_knobs % sys_name.c_str();
+                    }
+                    log<LOG_INFO>(L"%1% || Systematic variation %2% is a match for a covariance_to_spline systematic. Processing as such. ") % __func__ % sys_name.c_str();
                 }
                 if(sys_mode == "flat"){
                     log<LOG_INFO>(L"%1% || Systematic variation %2% is a match for a flat covariance systematic. Processing a such. ") % __func__ % sys_name.c_str();
@@ -696,33 +710,42 @@ namespace PROfit {
                 log<LOG_DEBUG>(L"%1% || Subchannel: %2% maps to index: %3%") % __func__ % subchannel_name.c_str() % subchannel_index[ib];
             }
 
+
             // Prune unused branches: disable everything, then re-enable only what our
             // formulas and eventweight maps actually need.  This prevents loading large
             // unused friend-tree columns on each GetEntry.
+            //
+            // NOTE: We extract branch names from the formula expression strings directly
+            // rather than via TTreeFormula::GetNcodes()/GetLeaf(), because the TTreeFormula
+            // objects created in the first file-setup loop may have stale internal state
+            // (ROOT can close/remap files when processing multiple TChains, invalidating
+            // leaf pointers stored inside those objects).
             {
                 std::set<std::string> needed;
 
-                // Branches referenced by variable and weight formulas
+                // Extract branch-name tokens from all formula expression strings.
+                // Uses ROOTFormula::ExtractExprTokens (the canonical skip-list lives there)
+                // rather than probing TTreeFormula objects, which may have stale internal
+                // state from ROOT closing/remapping files across multiple TChains.
+                log<LOG_DEBUG>(L"%1% || Branch pruning fid=%2%: extracting tokens from formula strings") % __func__ % fid;
                 for(int ib = 0; ib < num_branch; ib++) {
-                    for(const auto& rf : branches[ib]->branch_variable_formulas)
-                        for(const auto& n : rf->GetNeededBranchNames()) needed.insert(n);
-                    for(const auto& rf : branches[ib]->branch_weight_formulas)
-                        for(const auto& n : rf->GetNeededBranchNames()) needed.insert(n);
+                    for(const auto& expr : branches[ib]->variable_names)
+                        ROOTFormula::ExtractExprTokens(expr, needed);
+                    for(const auto& wname : inconfig.m_mcgen_weight_names[fid][ib])
+                        ROOTFormula::ExtractExprTokens(wname, needed);
                 }
-
-                // Branches referenced by systematic weight formulas
-                for(const auto& f : sys_weight_formula)
-                    ROOTFormula::AddFormulaBranches(f.get(), needed);
-
-                // Branches referenced by matching-variable formulas
-                for(const auto& f : matching_var_formulas)
-                    ROOTFormula::AddFormulaBranches(f.get(), needed);
+                for(const auto& sv : syst_vector)
+                    for(const auto& s : sv)
+                        if(s.HasWeightFormula())
+                            ROOTFormula::ExtractExprTokens(s.GetWeightFormula(), needed);
+                for(const auto& vname : inconfig.m_detvar_matching_vars)
+                    ROOTFormula::ExtractExprTokens(vname, needed);
 
                 // Branches bound via SetBranchAddress (eventweight maps)
                 for(const auto& [name, _] : f_event_weights[fid][0]) needed.insert(name);
                 for(const auto& [name, _] : f_knob_vals[fid][0])     needed.insert(name);
 
-                // Disable all, then re-enable needed set
+                log<LOG_DEBUG>(L"%1% || Branch pruning fid=%2%: needed set has %3% entries, calling SetBranchStatus(*,0)") % __func__ % fid % needed.size();
                 chains[fid]->SetBranchStatus("*", 0);
                 for(const auto& name : needed) {
                     UInt_t found = 0;
@@ -733,13 +756,6 @@ namespace PROfit {
 
             chains[fid]->SetCacheSize(100000000); // 100 MB read-ahead cache
             chains[fid]->AddBranchToCache("*", kTRUE); // cache all active branches
-            TObjArray* tbranches = chains[fid]->GetListOfBranches();
-            for (int i = 0; i < tbranches->GetEntries(); i++) {
-                TBranch* branch = (TBranch*)tbranches->At(i);
-                const char* branchName = branch->GetName();
-                bool isActive = chains[fid]->GetBranchStatus(branchName);
-                log<LOG_DEBUG>(L"%1% || BRANCH %2% is %3%") % __func__ % branchName % (isActive ? "active" : "inactive");
-            }
 
             // loop over all entries
             size_t to_print = nevents > 5 ? nevents / 5 : 1;
@@ -1028,14 +1044,22 @@ namespace PROfit {
 
             // Prune unused branches: disable everything, then re-enable only what our
             // formulas actually need.
+            //
+            // NOTE: extract tokens from formula strings directly rather than via
+            // TTreeFormula::GetNcodes()/GetLeaf(), because TTreeFormula objects created
+            // during the first fid loop may have stale internal state (ROOT can
+            // close/remap files when processing multiple TChains, invalidating leaf
+            // pointers stored inside those objects).
             {
                 std::set<std::string> needed;
+                log<LOG_DEBUG>(L"%1% || Branch pruning fid=%2%: extracting tokens from formula strings") % __func__ % fid;
                 for(int ib = 0; ib < num_branch; ib++) {
-                    for(const auto& rf : branches[ib]->branch_variable_formulas)
-                        for(const auto& n : rf->GetNeededBranchNames()) needed.insert(n);
-                    for(const auto& rf : branches[ib]->branch_weight_formulas)
-                        for(const auto& n : rf->GetNeededBranchNames()) needed.insert(n);
+                    for(const auto& expr : branches[ib]->variable_names)
+                        ROOTFormula::ExtractExprTokens(expr, needed);
+                    for(const auto& wname : inconfig.m_mcgen_weight_names[fid][ib])
+                        ROOTFormula::ExtractExprTokens(wname, needed);
                 }
+                log<LOG_DEBUG>(L"%1% || Branch pruning fid=%2%: needed set has %3% entries, calling SetBranchStatus(*,0)") % __func__ % fid % needed.size();
                 chains[fid]->SetBranchStatus("*", 0);
                 for(const auto& name : needed) {
                     UInt_t found = 0;
@@ -1217,6 +1241,19 @@ namespace PROfit {
                         }
                     }
                 }
+            }else if(var_syst_objs.front()->mode == "covariance_to_spline"){
+                if(spline_bin < 0) continue;
+                for(auto so: var_syst_objs)
+                    so->FillCV(spline_bin, mc_weight);
+                for(int iuni = 0; iuni < var_syst_objs.front()->GetNUniverse(); ++iuni){
+                    float raw_weight = static_cast<float>(map_iter->second->at(iuni));
+                    float scaled_weight = raw_weight * var_syst_objs.front()->scale;
+                    float sys_wei = run_syst ? additional_weight * scaled_weight : 1.0;
+                    for(auto so: var_syst_objs){
+                        so->FillUniverse(iuni, spline_bin, mc_weight * sys_wei);
+                    }
+                }
+                continue;
             } else  if( var_syst_objs.front()->mode == "norm") {
                 if(spline_bin < 0) continue;
                 for(auto so: var_syst_objs)

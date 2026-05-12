@@ -15,6 +15,9 @@
 #include "PROmodel.h"
 
 #include <Eigen/Eigen>
+#include <atomic>
+#include <cctype>
+#include <string>
 
 namespace PROfit {
 
@@ -35,6 +38,48 @@ namespace PROfit {
                 BinnedChi2    ///< Use pre-binned histograms, chi-squared only (no analytic gradient).
             };
 
+            /**
+             * @brief Strategy for computing the finite-difference gradient.
+             * @details Two orthogonal axes: the FD stencil (central vs one-sided)
+             * and the chi² treatment (full vs linearised).
+             *
+             *   - Full: each FD perturbation re-computes the entire chi²
+             *     including the covariance build, collapse, and Cholesky solve
+             *     (M = stat + reduced collapsed full covariance, with M built
+             *     from the perturbed spectrum).
+             *   - Linearised (Gauss-Newton style): freezes M at the base point
+             *     and uses the chain rule
+             *         dchi²/dθ_i ≈ 2 (M⁻¹ δ_b)^T (dδ/dθ_i) + dP/dθ_i
+             *     which drops the (M⁻¹δ)^T (dM/dθ) (M⁻¹δ) term. That term is
+             *     second-order in δ and vanishes at the minimum, so the
+             *     approximation is exact at convergence and very small far
+             *     from it. The pull derivative is computed analytically.
+             *     For PROpoisson the same idea applies with dchi²/ds = 2(1-n/s)
+             *     replacing M⁻¹δ — the linearised form is exact (modulo FD
+             *     truncation in dδ/dθ).
+             *
+             * Combined with the FD stencil this gives four configurations:
+             *
+             *  | Mode                  | δ FD       | M handling        | Pull deriv |
+             *  |-----------------------|------------|-------------------|------------|
+             *  | GradientCentralFull   | central    | rebuilt per FD    | via FD     |
+             *  | GradientOneSidedFull  | one-sided  | rebuilt per FD    | via FD     |
+             *  | GradientCentralLin    | central    | frozen at base    | analytic   |
+             *  | GradientOneSidedLin   | one-sided  | frozen at base    | analytic   |
+             *
+             * Boundary handling: any FD step that lands on a parameter bound is
+             * downgraded to a one-sided stencil pointing into the interior,
+             * regardless of the chosen mode. The "out-of-bounds gradient bounce"
+             * (zeroing dchi²/dθ when it pushes further out of the box) is
+             * preserved across all modes — LBFGSB depends on it.
+             */
+            enum GradientMode {
+                GradientCentralFull,    ///< Default: central FD on full chi². Most accurate, slowest.
+                GradientOneSidedFull,   ///< One-sided forward FD on full chi². ~2× faster, O(h) vs O(h²).
+                GradientCentralLin,     ///< Central FD on δ only, M frozen at base (Gauss-Newton). 5–10× faster.
+                GradientOneSidedLin,    ///< One-sided FD on δ only, M frozen at base. 10–20× faster.
+            };
+
             std::vector<bool> is_fixed; ///< Per-parameter flags: true if the parameter is held fixed during fitting.
             Eigen::VectorXf  lb;        ///< Lower bounds for all parameters.
             Eigen::VectorXf  ub;        ///< Upper bounds for all parameters.
@@ -51,12 +96,12 @@ namespace PROfit {
             virtual float operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient) = 0;
             /**
              * @brief Evaluate the chi-squared, optionally skipping gradient computation.
-             * @param param    Current parameter vector.
-             * @param gradient Output gradient vector; may not be filled if @p nograd is true.
-             * @param nograd   If true, skip gradient computation for speed.
+             * @param param       Current parameter vector.
+             * @param gradient    Output gradient vector; only filled when @p rungradient is true.
+             * @param rungradient If true, compute the gradient; if false, skip it for speed.
              * @return Chi-squared value.
              */
-            virtual float operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient, bool nograd) = 0;
+            virtual float operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient, bool rungradient) = 0;
             /** @brief Reset any cached state (e.g. last parameter vector and value). */
             virtual void reset() = 0;
             /** @brief Return a heap-allocated deep copy of this PROmetric. */
@@ -153,8 +198,50 @@ namespace PROfit {
                 is_fixed.clear();
             }
 
+            /** @brief Currently configured gradient mode. */
+            GradientMode getGradientMode() const { return gradient_mode; }
+
+            /** @brief Set the gradient mode used by operator() when rungradient=true. */
+            void setGradientMode(GradientMode m) { gradient_mode = m; }
+
+            /**
+             * @brief Parse a string token into a GradientMode.
+             * @details Accepts (case-insensitive) "central", "central-full",
+             * "one-sided", "one-sided-full", "central-lin", "central-linearised",
+             * "one-sided-lin", "one-sided-linearised". Returns @p fallback on
+             * unrecognised input (caller is expected to log a warning).
+             */
+            static GradientMode parseGradientMode(const std::string &tok,
+                                                   GradientMode fallback = GradientCentralFull) {
+                std::string s = tok;
+                for (auto &c : s) c = (char)std::tolower((unsigned char)c);
+                if (s == "central"          || s == "central-full")             return GradientCentralFull;
+                if (s == "one-sided"        || s == "one-sided-full"
+                                            || s == "onesided"
+                                            || s == "onesided-full")            return GradientOneSidedFull;
+                if (s == "central-lin"      || s == "central-linearised"
+                                            || s == "central-linearized")       return GradientCentralLin;
+                if (s == "one-sided-lin"    || s == "one-sided-linearised"
+                                            || s == "onesided-lin"
+                                            || s == "onesided-linearised"
+                                            || s == "one-sided-linearized")     return GradientOneSidedLin;
+                return fallback;
+            }
+
+            /** @brief Human-readable label for a GradientMode (for diagnostic logging). */
+            static const char *gradientModeName(GradientMode m) {
+                switch (m) {
+                    case GradientCentralFull:  return "central-full";
+                    case GradientOneSidedFull: return "one-sided-full";
+                    case GradientCentralLin:   return "central-linearised";
+                    case GradientOneSidedLin:  return "one-sided-linearised";
+                }
+                return "unknown";
+            }
+
         protected:
             mutable std::atomic<size_t> call_count{0}; ///< Thread-safe counter of operator() invocations.
+            GradientMode gradient_mode = GradientCentralFull; ///< Default mirrors current behaviour.
 
     };
 

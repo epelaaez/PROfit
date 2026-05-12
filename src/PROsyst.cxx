@@ -17,7 +17,8 @@ namespace PROfit {
         for(const auto& syst: systs) {
             log<LOG_DEBUG>(L"%1% || syst mode: %2%") % __func__ % syst.mode.c_str();
             if(syst.mode == "spline" || syst.mode == "norm" || syst.mode == "hist1d" || syst.mode == "hist2d") {
-                FillSpline(syst);
+                bool unmirrored = config.m_mcgen_variation_unmirrored.find(syst.systname) != config.m_mcgen_variation_unmirrored.end();
+                FillSpline(syst, unmirrored);
                 bool is_flux = config.has_flux_tag(syst.systname);
                 spline_is_pre_migration.push_back(is_flux);
                 log<LOG_DEBUG>(L"%1% || Spline '%2%' classified as %3%") % __func__ % syst.systname.c_str()
@@ -31,7 +32,8 @@ namespace PROfit {
                     exit(EXIT_FAILURE);
                 }
                 // Build spline first, then convert to covariance matrix
-                FillSpline(syst);
+                bool unmirrored = config.m_mcgen_variation_unmirrored.find(syst.systname) != config.m_mcgen_variation_unmirrored.end();
+                FillSpline(syst, unmirrored);
                 size_t spline_idx = splines.size() - 1;
 
                 // Build temporary priors/centers for the current spline list (including the
@@ -80,6 +82,9 @@ namespace PROfit {
                 spline_names.pop_back();
                 spline_lo.pop_back();
                 spline_hi.pop_back();
+                spline_has_restrict.pop_back();
+                spline_restrict_lo.pop_back();
+                spline_restrict_hi.pop_back();
                 spline_binnings.pop_back();
 
                 // Store as covariance instead
@@ -92,6 +97,29 @@ namespace PROfit {
                 this->CreateMatrix(syst);
                 covar_names.push_back(syst.systname);
                 ++n_covar;
+            } else if(syst.mode == "covariance_to_spline") {
+                size_t n_before = splines.size();
+                FillSplinesFromCovariance(syst);
+                size_t n_after = splines.size();
+
+                // Propagate parent tag + plotname to the synthesized knob entries so downstream
+                // plotting code (PROplot.cxx) can group them under the same tag.
+                // The maps are populated by the XML parser; here we append entries for the
+                // dynamically-generated decomposition knobs.
+                PROconfig& mut_config = const_cast<PROconfig&>(config);
+                auto parent_tags_it = mut_config.m_mcgen_variation_tags.find(syst.systname);
+                auto parent_plotname_it = mut_config.m_mcgen_variation_plotname_map.find(syst.systname);
+                for(size_t si = n_before; si < n_after; ++si) {
+                    const std::string& knob_name = spline_names[si];
+                    if(parent_tags_it != mut_config.m_mcgen_variation_tags.end()) {
+                        mut_config.m_mcgen_variation_tags[knob_name] = parent_tags_it->second;
+                    }
+                    if(parent_plotname_it != mut_config.m_mcgen_variation_plotname_map.end()) {
+                        // Append "_decomp_knob_<i>" suffix onto parent plotname for readability
+                        const std::string suffix = knob_name.substr(syst.systname.size());
+                        mut_config.m_mcgen_variation_plotname_map[knob_name] = parent_plotname_it->second + suffix;
+                    }
+                }
             }else if(syst.mode == "flat"){
                 this->CreateFlatMatrix(config, syst);
                 covar_names.push_back(syst.systname);
@@ -168,6 +196,9 @@ namespace PROfit {
                         ret.splines.push_back(std::move(spline_copy));
                         ret.spline_hi.push_back(spline_hi[idx]);
                         ret.spline_lo.push_back(spline_lo[idx]);
+                        ret.spline_has_restrict.push_back(spline_has_restrict[idx]);
+                        ret.spline_restrict_lo.push_back(spline_restrict_lo[idx]);
+                        ret.spline_restrict_hi.push_back(spline_restrict_hi[idx]);
                         ret.spline_binnings.push_back(spline_binnings[idx]);
                         tmp_priors(ret.n_splines) = spline_priors(idx);
                         tmp_centers(ret.n_splines) = spline_centers(idx);
@@ -214,6 +245,9 @@ namespace PROfit {
                         ret.splines.push_back(std::move(spline_copy));
                         ret.spline_hi.push_back(spline_hi[idx]);
                         ret.spline_lo.push_back(spline_lo[idx]);
+                        ret.spline_has_restrict.push_back(spline_has_restrict[idx]);
+                        ret.spline_restrict_lo.push_back(spline_restrict_lo[idx]);
+                        ret.spline_restrict_hi.push_back(spline_restrict_hi[idx]);
                         ret.spline_binnings.push_back(spline_binnings[idx]);
                         tmp_priors(ret.n_splines) = spline_priors(idx);
                         tmp_centers(ret.n_splines) = spline_centers(idx);
@@ -649,7 +683,7 @@ namespace PROfit {
         return c[0] + x*(c[1] + x*(c[2] + x*c[3]));
     }
 
-    void PROsyst::FillSpline(const SystStruct& syst) {
+    void PROsyst::FillSpline(const SystStruct& syst, bool unmirrored) {
         std::vector<PROspec> ratios;
         ratios.reserve(syst.p_multi_spec.size());
         float cv_integral = syst.p_cv->Spec().sum();
@@ -731,7 +765,10 @@ namespace PROfit {
                 const float y1 = ratios[0].GetBinContent(i);
                 const float y2 = ratios[1].GetBinContent(i);
                 const float slope = (y2 - y1) / (knobvals[1] - knobvals[0]);
-                bin_segments.push_back(SplineSegment{(float)(-knobvals[1]), {y2, -slope, 0, 0}});
+                if(unmirrored)
+                    bin_segments.push_back(SplineSegment{(float)(-knobvals[1]), {slope * (-knobvals[1]) + y1, slope, 0, 0}});
+                else
+                    bin_segments.push_back(SplineSegment{(float)(-knobvals[1]), {y2, -slope, 0, 0}});
                 bin_segments.push_back(SplineSegment{(float)knobvals[0], {slope * (float)knobvals[0] + y1, slope, 0, 0}});
             } else {
                 {
@@ -786,9 +823,83 @@ namespace PROfit {
         spline_names.push_back(syst.systname);
         spline_lo.push_back(knobvals[0]);
         spline_hi.push_back(knobvals.back());
+        spline_has_restrict.push_back(syst.has_restrict);
+        spline_restrict_lo.push_back(syst.restrict_lo);
+        spline_restrict_hi.push_back(syst.restrict_hi);
         spline_binnings.push_back(syst.binning);
 
     }
+
+    void PROsyst::FillSplinesFromCovariance(const SystStruct& syst) {
+        Eigen::MatrixXf frac_cov = PROsyst::GenerateFracCovarMatrix(syst);
+        // symmetrize to kill any float-asymmetry before eigendecomposition
+        frac_cov = 0.5f * (frac_cov + frac_cov.transpose());
+
+        Eigen::SelfAdjointEigenSolver<Eigen::MatrixXf> solver(frac_cov);
+        if(solver.info() != Eigen::Success) {
+            log<LOG_ERROR>(L"%1% || Eigendecomposition failed for covariance_to_spline systematic %2%") % __func__ % syst.systname.c_str();
+            exit(EXIT_FAILURE);
+        }
+
+        const Eigen::VectorXf eigvals = solver.eigenvalues();  // ascending
+        const Eigen::MatrixXf eigvecs = solver.eigenvectors(); // columns
+
+        const int nbins = frac_cov.rows();
+        // Count strictly-positive eigenvalues (clamp near-zero/negative to 0)
+        const float tol = 10.0f * Eigen::NumTraits<float>::dummy_precision();
+        std::vector<int> kept_indices; // indices into eigvals, in descending-eigenvalue order
+        for(int i = nbins - 1; i >= 0; --i) {
+            if(eigvals(i) > tol) kept_indices.push_back(i);
+        }
+        int K = static_cast<int>(kept_indices.size());
+        if(syst.num_decomp_knobs > 0 && syst.num_decomp_knobs < K) {
+            K = syst.num_decomp_knobs;
+        }
+        if(K == 0) {
+            log<LOG_WARNING>(L"%1% || covariance_to_spline systematic %2% has no positive-eigenvalue modes; skipping.") % __func__ % syst.systname.c_str();
+            return;
+        }
+
+        log<LOG_INFO>(L"%1% || covariance_to_spline %2%: keeping %3% of %4% eigenvectors (largest eigenvalue=%5%, smallest kept=%6%)")
+            % __func__ % syst.systname.c_str() % K % nbins % eigvals(nbins - 1) % eigvals(kept_indices[K - 1]);
+
+        const float lo = -3.0f, hi = 3.0f;
+        const int n_segments = 6; // knots at -3, -2, -1, 0, 1, 2
+
+        for(int k = 0; k < K; ++k) {
+            const int ev_idx = kept_indices[k];
+            const float lambda = eigvals(ev_idx);
+            const float sqrt_lambda = std::sqrt(lambda);
+            const Eigen::VectorXf vec = eigvecs.col(ev_idx);
+
+            // Per-bin fractional response to knob x is: alpha_b * x, where alpha_b = sqrt(lambda) * vec[b].
+            // Full ratio: f_b(x) = 1 + alpha_b * x.
+            // Represent as 6 unit-width linear segments with knots at -3..2 so GetSplineShift's clamp works.
+            Spline spline;
+            spline.bins = nbins;
+            spline.segments_per_bin = n_segments;
+            spline.segments.reserve(static_cast<size_t>(nbins) * n_segments);
+            for(int b = 0; b < nbins; ++b) {
+                const float alpha = sqrt_lambda * vec(b);
+                for(int s = 0; s < n_segments; ++s) {
+                    const float knot = static_cast<float>(s - 3); // -3..2
+                    const float c0 = 1.0f + alpha * knot;
+                    const float c1 = alpha;
+                    spline.segments.push_back(SplineSegment{knot, {c0, c1, 0.0f, 0.0f}});
+                }
+            }
+
+            const std::string knob_name = syst.systname + "_decomp_knob_" + std::to_string(k);
+            syst_map[knob_name] = {splines.size(), SystType::Spline};
+            splines.push_back(std::move(spline));
+            spline_names.push_back(knob_name);
+            spline_lo.push_back(lo);
+            spline_hi.push_back(hi);
+            spline_binnings.push_back(syst.binning);
+            ++n_splines;
+        }
+    }
+
     float PROsyst::GetSplineShift(std::string name, float shift, int bin) const {
         if(syst_map.count(name) == 0) {
             log<LOG_ERROR>(L"%1% || Unrecognized systematic %2%") % __func__ % name.c_str();
@@ -906,10 +1017,9 @@ namespace PROfit {
     }
 
     Eigen::MatrixXf PROsyst::DecomposeFractionalCovariance(const PROconfig &config, const Eigen::VectorXf &cv_vec) const {
-        if(cv_vec.size() == last_decomp_spec.size() && cv_vec == last_decomp_spec) 
+        if(cv_vec.size() == last_decomp_spec.size() && cv_vec == last_decomp_spec)
           return last_decomp_mat;
-        Eigen::MatrixXf diag = cv_vec.asDiagonal();
-        Eigen::MatrixXf full_cov = diag * fractional_covariance * diag;
+        Eigen::MatrixXf full_cov = cv_vec.asDiagonal() * fractional_covariance * cv_vec.asDiagonal();
         Eigen::MatrixXf coll = other_index < 0 ? CollapseMatrix(config, full_cov) : CollapseMatrix(config, full_cov, other_index);
         /*Eigen::LDLT<Eigen::MatrixXf> ldlt(coll);
           Eigen::MatrixXf L = ldlt.matrixL(); 

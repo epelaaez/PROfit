@@ -127,6 +127,11 @@ float PROfitter::Fit(PROmetric &metric, const Eigen::VectorXf &seed_pt ) {
 
 float PROfitter::Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed_points ) {
 
+    // Apply the configured gradient strategy to the metric for the duration of
+    // this fit. The metric stores the mode itself (PROmetric::gradient_mode)
+    // so any subsequent operator() call inside the LBFGS solver will use it.
+    metric.setGradientMode(fitconfig.gradient_mode);
+
     std::mt19937 rng;
     rng.seed(seed);
     std::normal_distribution<float> d;
@@ -479,8 +484,9 @@ int PROfitter::calcFreqSeedPoints(PROmetric &metric) {
             ub(i) = metric.GetModel().ub(i);
         }
         for(size_t i = nphys; i < nparams; ++i) {
-            lb(i) = metric.GetSysts().spline_lo[i-nphys];
-            ub(i) = metric.GetSysts().spline_hi[i-nphys];
+            size_t si = i - nphys;
+            lb(i) = metric.GetSysts().spline_has_restrict[si] ? metric.GetSysts().spline_restrict_lo[si] : metric.GetSysts().spline_lo[si];
+            ub(i) = metric.GetSysts().spline_has_restrict[si] ? metric.GetSysts().spline_restrict_hi[si] : metric.GetSysts().spline_hi[si];
         }
 
         //fix dm at minima

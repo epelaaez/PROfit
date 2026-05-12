@@ -77,6 +77,12 @@ public:
 
     std::vector<bool> is_log10; ///< True for each parameter stored in log10 space; false for linear.
 
+    /// Trivial models (e.g., NullModel) have no physics dependence: probabilities are identically 1.
+    /// When true, FillSpectra skips var_arrs / get_probs / GEMV and reads the spectrum directly from
+    /// H_combined. Also implies an empty `ivars` so events are binned per reco variable independently
+    /// (no cross-variable validity coupling through a placeholder physics-grid variable).
+    bool is_trivial = false;
+
     /**
      * @brief Build hists and H_combined from PROpeller event data.
      * @details Must be called after ivars and model_functions are set.  Iterates over all
@@ -271,10 +277,13 @@ public:
      */
     NullModel(const PROpeller &prop) {
         nparams = 0;
-        ivars = {1};
+        // Empty ivars: no placeholder physics-grid variable. Each reco variable is binned
+        // independently, so events out-of-range in one variable don't get dropped from another.
+        ivars = {};
+        is_trivial = true;
         model_functions.push_back([](const Eigen::VectorXf &, float){ return 1.0f; });
         prob_types = {0};
-       
+
         build_hists_and_combined(prop, /*filter_by_model_rule=*/false);
         is_log10.clear();
     }
@@ -296,8 +305,6 @@ public:
      *                      Must contain the key "L/E".
      */
     PROnumudis(const PROpeller &prop,const std::map<std::string,int> &parameter_map) {
-        prob_types = {0, 1};
-
         // model_functions is the non-unified version, these are optional
         // these get combined into one get_probs function in the constructor, but we can override this for faster computation
         model_functions.push_back([this]([[maybe_unused]] const Eigen::VectorXf &v, float) {(void)this; return 1.0;});
@@ -322,7 +329,7 @@ public:
         default_val = Eigen::VectorXf(2);
         lb << -2, -std::numeric_limits<float>::infinity();
         ub << 2, 0;
-        default_val << -10, -10;
+        default_val << -2, -10;
 
     };
 
@@ -435,7 +442,7 @@ public:
         default_val = Eigen::VectorXf(2);
         lb << -2, -std::numeric_limits<float>::infinity();
         ub << 2, 0;
-        default_val << -10, -10;
+        default_val << -2, -10;
     };
 
     /**
@@ -530,7 +537,7 @@ public:
         lb << -2, -10; //-std::numeric_limits<float>::infinity();
         ub << 2, 0;
         //default_val << -std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity();
-        default_val << -10, -10; //std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity();
+        default_val << -2, -10; //std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity();
     
         log<LOG_INFO>(L"%1% || setting up a model nueapp, with  %2% params.")     % __func__ % nparams;
         for(size_t i=0; i< nparams;i++){
@@ -643,7 +650,7 @@ public:
         default_val = Eigen::VectorXf(2);
         lb << -2, -std::numeric_limits<float>::infinity();
         ub << 2, 0;
-        default_val << -10, -10;
+        default_val << -2, -10;
 
     };
 
@@ -924,7 +931,7 @@ public:
             probs(i, 1) = 1.0f - 4.0f*Um4sq*(1.0f-Um4sq)*sinterm*sinterm;
 
             // P_mue
-            probs(i, 2) = 4.0f*Ue4sq*Ue4sq*sinterm*sinterm;
+            probs(i, 2) = 4.0f*Ue4sq*Um4sq*sinterm*sinterm;
 
             // P_ee
             probs(i, 3) = 1.0f - 4.0f*Ue4sq*(1.0f-Ue4sq)*sinterm*sinterm;
@@ -1459,9 +1466,9 @@ public:
  * @brief 3+1 model variant 3C: parameterised by sin^2(2*theta_mue) and an asymmetry angle xi.
  * @details Variant C uses the appearance amplitude sin^2(2*theta_mue) directly together with a
  * hyperbolic asymmetry parameter xi that sets the relative size of the nu_e and nu_mu mixing elements:
- *   U_mu4 = exp(-xi) * sqrt(sin^2(2*theta_mue)) / 2
- *   U_e4  = exp(+xi) * sqrt(sin^2(2*theta_mue)) / 2
- * A unitarity constraint |U_e4| * cosh(xi) < 1 is enforced via model_constraint.
+ *   |U_mu4|^2 = exp(-xi) * sqrt(sin^2(2*theta_mue)) / 2
+ *   |U_e4|^2  = exp(+xi) * sqrt(sin^2(2*theta_mue)) / 2
+ * A unitarity constraint sqrt(sin^2(2*theta_mue)) * cosh(xi) < 1 is enforced via model_constraint.
  * dmsq and sinsq2thmue are in log10 space; xi is linear.
  */
 class PRO3p1_3C : public PROmodel {
@@ -1641,7 +1648,6 @@ public:
         // 3+1+decay to invisible particles, example from IceCube: https://arxiv.org/pdf/2204.00612
         // (invisible means no active or sterile-oscillating-to-active neutrinos after the decay)
 
-        prob_types = {0, 1, 2, 3};
         // model_functions is the non-unified version, these are optional
         // these get combined into one get_probs function in the constructor, but we can override this for faster computation
         model_functions.push_back([this]([[maybe_unused]] const Eigen::VectorXf &v, float) {(void)this; return 1.0; });
@@ -2426,7 +2432,8 @@ public:
         lb << 6e-5f, -3e-3f, 0.2f, 0.01f, 0.3f, -M_PI;
         ub << 9e-5f, 3e-3f, 0.4f, 0.04f, 0.7f, M_PI;
         default_val = Eigen::VectorXf(6);
-        default_val << 1e-5, 1e-3, 0, 0, 0, 0;
+        // Defaults set to midpoint of [lb, ub] for each parameter so the fitter starts in-range.
+        default_val << 7.5e-5f, 1e-3f, 0.3f, 0.025f, 0.5f, 0.0f;
     }
 
     /// @brief nu_e → nu_e survival probability via NuFastLBL. @param params Physics vector (6 params). @param le L/E [km/GeV]. @return P(nu_e→nu_e).

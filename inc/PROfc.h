@@ -54,7 +54,7 @@ namespace PROfit {
         const PROconfig config;          ///< Analysis configuration (copied per thread).
         const PROpeller prop;            ///< MC event store (copied per thread).
         const PROsyst systs;             ///< Systematic object (copied per thread).
-        std::string chi2;                ///< Name of the chi-squared type to use ("chi2", "CNP", or "poisson").
+        std::string chi2;                ///< Name of the chi-squared type to use ("PROchi", "PROCNP", or "Poisson").
         const Eigen::VectorXf phy_params;///< True physics parameter point at which the FC test is evaluated.
         const Eigen::MatrixXf L;         ///< Cholesky factor of the total covariance for correlated systematic throws.
         PROfitterConfig fitconfig;       ///< Fitter configuration.

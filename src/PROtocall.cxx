@@ -38,53 +38,45 @@ namespace PROfit{
     }
 
     Eigen::MatrixXf CollapseMatrix(const PROconfig &inconfig, const Eigen::MatrixXf& full_matrix){
-        Eigen::MatrixXf variable_collapsing_matrix = inconfig.GetCollapsingMatrix();
-        int num_bin_before_collapse = variable_collapsing_matrix.rows();
+        const Eigen::SparseMatrix<float>& T = inconfig.GetCollapsingMatrixSparse();
+        const Eigen::Index num_bin_before_collapse = T.rows();
         if(full_matrix.rows() != num_bin_before_collapse || full_matrix.cols() != num_bin_before_collapse){
             log<LOG_ERROR>(L"%1% || Matrix dimension doesn't match expected size. Provided matrix: %2% x %3%. Expected matrix size: %4% x %5%") % __func__ % full_matrix.rows() % full_matrix.cols() % num_bin_before_collapse% num_bin_before_collapse;
             log<LOG_ERROR>(L"Terminating.");
             exit(EXIT_FAILURE);
         }
-
-        //log<LOG_DEBUG>(L"%1% || CT  %2% x %3%. Full matrix: %4% x %5% ") % __func__ % variable_collapsing_matrices[config.i_prime].transpose().rows() %  variable_collapsing_matrices[config.i_prime].transpose().cols() % full_matrix.rows() % full_matrix.cols();
-        Eigen::MatrixXf result_matrix   = variable_collapsing_matrix.transpose()*full_matrix*variable_collapsing_matrix;
-        return result_matrix;
+        return Eigen::MatrixXf(T.transpose() * full_matrix * T);
     }
 
     Eigen::VectorXf CollapseMatrix(const PROconfig &inconfig, const Eigen::VectorXf& full_vector){
-        Eigen::MatrixXf variable_collapsing_matrix = inconfig.GetCollapsingMatrix();
-        if(full_vector.size() != variable_collapsing_matrix.rows()){
-            log<LOG_ERROR>(L"%1% || Vector dimension doesn't match expected size. Provided vector size: %2% . Expected size: %3%") % __func__ % full_vector.size() % variable_collapsing_matrix.rows();
+        const Eigen::SparseMatrix<float>& T = inconfig.GetCollapsingMatrixSparse();
+        if(full_vector.size() != T.rows()){
+            log<LOG_ERROR>(L"%1% || Vector dimension doesn't match expected size. Provided vector size: %2% . Expected size: %3%") % __func__ % full_vector.size() % T.rows();
             log<LOG_ERROR>(L"Terminating.");
             exit(EXIT_FAILURE);
         }
-        Eigen::VectorXf result_vector = variable_collapsing_matrix.transpose() * full_vector;
-        return result_vector;
+        return Eigen::VectorXf(T.transpose() * full_vector);
     }
 
     Eigen::MatrixXf CollapseMatrix(const PROconfig &inconfig, const Eigen::MatrixXf& full_matrix, int other_index){
-        Eigen::MatrixXf variable_collapsing_matrix = inconfig.GetCollapsingMatrix(other_index);
-        int num_bin_before_collapse = variable_collapsing_matrix.rows();
+        const Eigen::SparseMatrix<float>& T = inconfig.GetCollapsingMatrixSparse(other_index);
+        const Eigen::Index num_bin_before_collapse = T.rows();
         if(full_matrix.rows() != num_bin_before_collapse || full_matrix.cols() != num_bin_before_collapse){
             log<LOG_ERROR>(L"%1% || Matrix dimension doesn't match expected size. Provided matrix: %2% x %3%. Expected matrix size: %4% x %5%") % __func__ % full_matrix.rows() % full_matrix.cols() % num_bin_before_collapse% num_bin_before_collapse;
             log<LOG_ERROR>(L"Terminating.");
             exit(EXIT_FAILURE);
         }
-
-        //log<LOG_DEBUG>(L"%1% || CT  %2% x %3%. Full matrix: %4% x %5% ") % __func__ % variable_collapsing_matrix.transpose().rows() %  variable_collapsing_matrices[config.i_prime].transpose().cols() % full_matrix.rows() % full_matrix.cols();
-        Eigen::MatrixXf result_matrix   = variable_collapsing_matrix.transpose()*full_matrix*variable_collapsing_matrix;
-        return result_matrix;
+        return Eigen::MatrixXf(T.transpose() * full_matrix * T);
     }
 
     Eigen::VectorXf CollapseMatrix(const PROconfig &inconfig, const Eigen::VectorXf& full_vector, int other_index){
-        Eigen::MatrixXf variable_collapsing_matrix = inconfig.GetCollapsingMatrix(other_index);
-        if(full_vector.size() != variable_collapsing_matrix.rows()){
-            log<LOG_ERROR>(L"%1% || Vector dimension doesn't match expected size. Provided vector size: %2% . Expected size: %3%") % __func__ % full_vector.size() % variable_collapsing_matrix.rows();
+        const Eigen::SparseMatrix<float>& T = inconfig.GetCollapsingMatrixSparse(other_index);
+        if(full_vector.size() != T.rows()){
+            log<LOG_ERROR>(L"%1% || Vector dimension doesn't match expected size. Provided vector size: %2% . Expected size: %3%") % __func__ % full_vector.size() % T.rows();
             log<LOG_ERROR>(L"Terminating.");
             exit(EXIT_FAILURE);
         }
-        Eigen::VectorXf result_vector = variable_collapsing_matrix.transpose() * full_vector;
-        return result_vector;
+        return Eigen::VectorXf(T.transpose() * full_vector);
     }
     void PrintVariableInfo(const PROconfig &inconfig){
 

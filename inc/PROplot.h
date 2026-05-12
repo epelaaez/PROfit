@@ -289,13 +289,13 @@ namespace PROfit{
      * @return PROerrorbar with per-bin asymmetric uncertainties and the histogram covariance.
      */
     template<class T, class P>
-        PROerrorbar getMCMCErrorBand(Metropolis<T, P> met, size_t burnin, size_t iterations, const PROconfig &config, const PROpeller &prop, PROmetric &metric, const Eigen::VectorXf &best_fit, std::vector<TH1D> &posteriors, Eigen::MatrixXf &post_covar,  bool scale = false,int var_index=0) {
+        PROerrorbar getMCMCErrorBand(Metropolis<T, P> met, size_t burnin, size_t iterations, const PROconfig &config, const PROpeller &prop, PROmetric &metric, const Eigen::VectorXf &best_fit, std::vector<TH1D> &posteriors, Eigen::MatrixXf &post_covar, Eigen::VectorXf &param_err_lo, Eigen::VectorXf &param_err_hi, bool scale = false, int var_index=0, PROgressBar *pbar = nullptr) {
             for(size_t i = 0; i < metric.GetSysts().GetNSplines(); ++i)
                 posteriors.emplace_back("", (";"+config.m_mcgen_variation_plotname_map.at(metric.GetSysts().spline_names[i])).c_str(), 60, -3, 3);
 
             Eigen::VectorXf cv = FillSpectra(config, prop, metric.GetSysts(), metric.GetModel(), best_fit, true, var_index).Spec();
             Eigen::VectorXf cv_coll = CollapseMatrix(config, cv);
-            Eigen::MatrixXf L; 
+            Eigen::MatrixXf L;
             if(metric.GetSysts().GetNCovar() > 0) L = metric.GetSysts().DecomposeFractionalCovariance(config, cv);
             else L = Eigen::MatrixXf::Zero(config.m_num_variable_bins_total_collapsed[var_index], config.m_num_variable_bins_total_collapsed[var_index]);
             std::normal_distribution<float> nd;
@@ -305,25 +305,38 @@ namespace PROfit{
             int nphys = metric.GetModel().nparams;
             Eigen::VectorXf splines_bf = best_fit.segment(nphys, nspline);
             post_covar = Eigen::MatrixXf::Constant(nspline, nspline, 0);
-	    Eigen::MatrixXf post_hist_covar = Eigen::MatrixXf::Constant(cv_coll.size(), cv_coll.size(), 0);
+            Eigen::MatrixXf post_hist_covar = Eigen::MatrixXf::Constant(cv_coll.size(), cv_coll.size(), 0);
             size_t nsteps = 0;
             std::vector<Eigen::VectorXf> specs;
+            std::vector<std::vector<float>> param_samples(nspline);
             const auto action = [&](const Eigen::VectorXf &value) {
                 nsteps += 1;
                 for(size_t i = 0; i < config.m_num_variable_bins_total_collapsed[var_index]; ++i)
                     throws(i) = nd(PROseed::global_rng);
                 specs.push_back(CollapseMatrix(config, FillSpectra(config, prop, metric.GetSysts(), metric.GetModel(), value, true,var_index).Spec())+L*throws);
-                for(size_t i = 0; i < metric.GetSysts().GetNSplines(); ++i)
+                for(int i = 0; i < nspline; ++i) {
                     posteriors[i].Fill(value(i+nphys));
+                    param_samples[i].push_back(value(i+nphys));
+                }
                 Eigen::VectorXf splines = value.segment(nphys, nspline);
                 Eigen::VectorXf diff = splines-splines_bf;
                 Eigen::VectorXf diff_hist = specs.back() - cv_coll;
                 post_covar += diff * diff.transpose();
                 post_hist_covar += diff_hist * diff_hist.transpose();
             };
-            met.run(burnin, iterations, action);
+            met.run(burnin, iterations, action, pbar);
             post_hist_covar /= nsteps;
             post_covar /= nsteps;
+
+            param_err_lo = Eigen::VectorXf::Zero(nspline);
+            param_err_hi = Eigen::VectorXf::Zero(nspline);
+            for(int i = 0; i < nspline; ++i) {
+                auto &v = param_samples[i];
+                std::sort(v.begin(), v.end());
+                float bf_val = best_fit(nphys + i);
+                param_err_lo(i) = std::abs(bf_val - v[int(0.160f * v.size())]);
+                param_err_hi(i) = std::abs(v[int(0.840f * v.size())] - bf_val);
+            }
             log<LOG_INFO>(L"%1% || Acceptance rate %2%") % __func__ % ((float)met.naccept / iterations);
 
             cv = CollapseMatrix(config, cv);

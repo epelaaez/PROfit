@@ -45,6 +45,7 @@
 //Boost
 #include <boost/archive/binary_oarchive.hpp>
 #include <boost/archive/binary_iarchive.hpp>
+#include <boost/serialization/version.hpp>
 
 namespace PROfit{
 
@@ -82,10 +83,14 @@ namespace PROfit{
         bool force_0_cv = false;    ///< If true, normalise spline shifts by the shift at knob=0.
         std::vector<int> include_only_weights; ///< 1-based indices of weight universes to include; empty = all.
         float scale = 1.0f;         ///< Scale factor applied to all weights (e.g. 0.001 for weights stored as x1000).
+        int num_decomp_knobs = -1;  ///< For "covariance_to_spline": number of top eigenpairs to keep as spline knobs (-1 = keep all).
+        bool has_restrict = false;  ///< If true, clamp the knob value to [restrict_lo, restrict_hi] during evaluation and fitting.
+        float restrict_lo = 0.0f;   ///< Lower clamp bound (used only when has_restrict is true).
+        float restrict_hi = 0.0f;   ///< Upper clamp bound (used only when has_restrict is true).
 
         //boost serialization
         template<class Archive>
-        void serialize(Archive &ar, [[maybe_unused]] const unsigned int version) {
+        void serialize(Archive &ar, const unsigned int version) {
             ar & systname;
             ar & n_univ;
             ar & mode;
@@ -97,13 +102,21 @@ namespace PROfit{
             ar & spline_coeffs;
             ar & binning;
             ar & p_cv;
-            ar & p_multi_spec;  
+            ar & p_multi_spec;
             ar & hash;
             ar & norm_bins;
             ar & norm_value;
             ar & force_0_cv;
             ar & include_only_weights;
             ar & scale;
+            if (version >= 1) {
+                ar & has_restrict;
+                ar & restrict_lo;
+                ar & restrict_hi;
+            }
+            if (version >= 2) {
+                ar & num_decomp_knobs;
+            }
         }
 
 
@@ -307,4 +320,7 @@ namespace PROfit{
 
 
 };
+
+BOOST_CLASS_VERSION(PROfit::SystStruct, 2)
+
 #endif

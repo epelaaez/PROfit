@@ -42,6 +42,178 @@ namespace PROfit {
     }
 
 
+    PROspec FillSpectra(const PROconfig &inconfig, const PROpeller &inprop, const PROsyst &insyst, const PROmodel &inmodel, const Eigen::VectorXf &params, FillSpectraCache &cache, bool binned, size_t var_index) {
+        // Unbinned path can't be cleanly split phys/syst (per-event Fill mixes them).
+        // Fall back, invalidate cache.
+        if(!binned) {
+            cache.invalidate();
+            return FillSpectra(inconfig, inprop, insyst, inmodel, params, binned, var_index);
+        }
+
+        Eigen::VectorXf phys = params.segment(0, inmodel.nparams);
+        Eigen::VectorXf shifts = params.segment(inmodel.nparams, params.size() - inmodel.nparams);
+
+        const bool ctx_changed = (cache.last_var_index != (int)var_index ||
+                                  cache.last_syst_ptr != &insyst ||
+                                  cache.last_model_ptr != &inmodel);
+
+        // ---- Systematic-weights half (depends only on shifts) ----
+        // Three branches for the systw vector:
+        //   * full_systw_hit    : shifts identical to cached -> reuse cache.last_systw.
+        //   * try_incremental   : shifts differs in EXACTLY one spline-range element
+        //                          -> Tier 1.3: divide out old factor, multiply in new
+        //                          factor for that one spline. Cache stays pinned to
+        //                          its "central" state (no write-back).
+        //   * full recompute    : everything else (size mismatch, ctx change, multi-diff,
+        //                          or incremental gave a divide-by-near-zero on some bin).
+        //                          Re-runs the full loop AND populates central_factors.
+        const size_t       nbins_var      = inconfig.m_num_variable_bins_total[var_index];
+        const Eigen::Index nsplines_e     = (Eigen::Index)insyst.GetNSplines();
+        const bool         size_match     = (cache.last_shifts.size() == shifts.size());
+        const bool         factors_valid  = (cache.central_factors.cols() == nsplines_e &&
+                                             cache.central_factors.rows() == (Eigen::Index)nbins_var);
+        const bool         diff_check_ok  = !ctx_changed && size_match && factors_valid;
+
+        int diff_count = 0;
+        int diff_idx   = -1;
+        if(diff_check_ok) {
+            for(Eigen::Index i = 0; i < shifts.size(); ++i) {
+                if(cache.last_shifts(i) != shifts(i)) {
+                    diff_idx = (int)i;
+                    if(++diff_count > 1) break;
+                }
+            }
+        }
+        const bool full_systw_hit  = diff_check_ok && (diff_count == 0);
+        const bool try_incremental = diff_check_ok && (diff_count == 1)
+                                                   && (diff_idx >= 0)
+                                                   && (diff_idx < (int)insyst.GetNSplines());
+
+        Eigen::VectorXf       systw_local;            // populated only on the incremental path
+        const Eigen::VectorXf *systw_to_use = nullptr; // points to whichever vector we'll combine
+
+        if(full_systw_hit) {
+            systw_to_use = &cache.last_systw;
+        } else if(try_incremental) {
+            const size_t j       = (size_t)diff_idx;
+            const size_t binning = insyst.spline_binnings[j];
+
+            Eigen::VectorXf new_factor_j(nbins_var);
+            if(binning == var_index) {
+                for(size_t k = 0; k < nbins_var; ++k)
+                    new_factor_j(k) = insyst.GetSplineShift((int)j, shifts(j), (int)k);
+            } else {
+                const size_t nbins_binning = inconfig.m_num_variable_bins_total[binning];
+                Eigen::VectorXf spline_shifts_one(nbins_binning);
+                for(size_t b = 0; b < nbins_binning; ++b)
+                    spline_shifts_one(b) = insyst.GetSplineShift((int)j, shifts(j), (int)b);
+                const auto &hist = inprop.variable_hist_storage(binning, var_index);
+                Eigen::VectorXf weighted_sum   = hist.transpose() * spline_shifts_one;
+                Eigen::VectorXf unweighted_sum = hist.colwise().sum().transpose();
+                for(size_t k = 0; k < nbins_var; ++k)
+                    new_factor_j(k) = (unweighted_sum(k) > 0) ? weighted_sum(k) / unweighted_sum(k)
+                                                              : 1.0f;
+            }
+
+            // Apply division+multiplication into a fresh local systw without touching cache.
+            // If any cached factor for spline j is too small, fall back to full recompute.
+            constexpr float kTiny = 1e-30f;
+            systw_local.resize(nbins_var);
+            bool ok = true;
+            for(size_t k = 0; k < nbins_var; ++k) {
+                const float old_f = cache.central_factors(k, (Eigen::Index)j);
+                if(std::abs(old_f) < kTiny) { ok = false; break; }
+                systw_local(k) = cache.last_systw(k) / old_f * new_factor_j(k);
+            }
+
+            if(ok) {
+                systw_to_use = &systw_local;
+                // CRITICAL: do NOT update cache.last_shifts, cache.last_systw, or
+                // cache.central_factors. Cache stays pinned to the central point so
+                // subsequent single-shift gradient calls also hit the incremental path.
+            }
+            // else fall through to full recompute below
+        }
+
+        if(systw_to_use == nullptr) {
+            // Full recompute: rebuild systw AND populate per-spline factors. The
+            // existing math is preserved bit-for-bit; we just stash each spline's
+            // contribution as we go.
+            Eigen::VectorXf systw = Eigen::VectorXf::Constant(nbins_var, 1);
+            Eigen::MatrixXf factors(nbins_var, insyst.GetNSplines());
+            for(int i = 0; i < (int)insyst.GetNSplines(); ++i) {
+                size_t binning = insyst.spline_binnings[i];
+                if(binning == var_index) {
+                    for(size_t k = 0; k < nbins_var; ++k) {
+                        const float f = insyst.GetSplineShift(i, shifts(i), (int)k);
+                        factors(k, i) = f;
+                        systw(k) *= f;
+                    }
+                } else {
+                    const size_t nbins_binning = inconfig.m_num_variable_bins_total[binning];
+                    Eigen::VectorXf spline_shifts_loc(nbins_binning);
+                    for(size_t b = 0; b < nbins_binning; ++b)
+                        spline_shifts_loc(b) = insyst.GetSplineShift(i, shifts(i), (int)b);
+                    const auto &hist = inprop.variable_hist_storage(binning, var_index);
+                    Eigen::VectorXf weighted_sum   = hist.transpose() * spline_shifts_loc;
+                    Eigen::VectorXf unweighted_sum = hist.colwise().sum().transpose();
+                    for(size_t k = 0; k < nbins_var; ++k) {
+                        const float f = (unweighted_sum(k) > 0) ? weighted_sum(k) / unweighted_sum(k)
+                                                                : 1.0f;
+                        factors(k, i) = f;
+                        systw(k) *= f;
+                    }
+                }
+            }
+            cache.last_systw      = std::move(systw);
+            cache.last_shifts     = shifts;
+            cache.central_factors = std::move(factors);
+            systw_to_use          = &cache.last_systw;
+        }
+
+        // ---- Physics-result half (depends only on phys) ----
+        const bool phys_changed = ctx_changed ||
+                                  cache.last_phys.size() != phys.size() ||
+                                  cache.last_phys != phys;
+        if(phys_changed) {
+            Eigen::VectorXf result;
+            if(inmodel.is_trivial) {
+                result = inmodel.H_combined[var_index].col(0);
+            } else {
+                const size_t N_ivars = inmodel.ivars.size();
+                std::vector<size_t> ivar_sizes(N_ivars);
+                for(size_t k = 0; k < N_ivars; ++k)
+                    ivar_sizes[k] = inprop.variable_midbin[inmodel.ivars[k]].size();
+
+                std::vector<std::vector<float>> var_arrs(N_ivars, std::vector<float>(inmodel.n_phys_bins));
+                for(long int flat = 0; flat < inmodel.n_phys_bins; ++flat) {
+                    long int rem = flat;
+                    for(int k = (int)N_ivars - 1; k >= 0; --k) {
+                        var_arrs[k][flat] = inprop.variable_midbin[inmodel.ivars[k]][rem % ivar_sizes[k]];
+                        rem /= (long int)ivar_sizes[k];
+                    }
+                }
+
+                auto probs = inmodel.get_probs(phys, var_arrs);
+                Eigen::Map<const Eigen::VectorXf> probs_flat(probs.data(), probs.size());
+                result = inmodel.H_combined[var_index] * probs_flat;
+            }
+            cache.last_result = std::move(result);
+            cache.last_phys = phys;
+        }
+
+        cache.last_var_index = (int)var_index;
+        cache.last_syst_ptr = &insyst;
+        cache.last_model_ptr = &inmodel;
+
+        // systw_to_use points to either cache.last_systw (full hit / full recompute) or
+        // to the local perturbed vector built by the Tier 1.3 incremental path.
+        Eigen::VectorXf final_spec  = systw_to_use->cwiseProduct(cache.last_result);
+        Eigen::VectorXf final_error = final_spec.array().abs().sqrt();
+        return PROspec(final_spec, final_error);
+    }
+
+
     PROspec FillSpectra(const PROconfig &inconfig, const PROpeller &inprop, const PROsyst &insyst, const PROmodel &inmodel, const Eigen::VectorXf &params, bool binned, size_t var_index){
         PROspec myspectrum(inconfig.m_num_variable_bins_total[var_index]);
         Eigen::VectorXf phys   = params.segment(0, inmodel.nparams);
@@ -119,7 +291,7 @@ namespace PROfit {
 
                     for(size_t k = 0; k < nbins_var; ++k) {
                         if(unweighted_sum(k) > 0) {
-                            systw(k) *= weighted_sum(k) / unweighted_sum(k);
+                            post_mig_systw(k) *= weighted_sum(k) / unweighted_sum(k);
                         }
                     }
                 }
@@ -132,49 +304,55 @@ namespace PROfit {
             //log<LOG_INFO>(L"%1% || Starting le_arr building %2%") % __func__ % var_index;
             //auto start_le = std::chrono::high_resolution_clock::now();
 
-            // Build var_arrs: one entry per ivar, each of length n_phys_bins (flat grid).
-            // For 1-var: var_arrs[0] = midbin values of that var (n_phys_bins = n_ivar_bins).
-            // For N-var: row-major product grid — var_arrs[k][flat] = midbin of ivar[k] at flat index.
-            const size_t N_ivars = inmodel.ivars.size();
-            std::vector<size_t> ivar_sizes(N_ivars);
-            for(size_t k = 0; k < N_ivars; ++k)
-                ivar_sizes[k] = inprop.variable_midbin[inmodel.ivars[k]].size();
-
-            std::vector<std::vector<float>> var_arrs(N_ivars, std::vector<float>(inmodel.n_phys_bins));
-            for(long int flat = 0; flat < inmodel.n_phys_bins; ++flat) {
-                long int rem = flat;
-                for(int k = (int)N_ivars - 1; k >= 0; --k) {
-                    var_arrs[k][flat] = inprop.variable_midbin[inmodel.ivars[k]][rem % ivar_sizes[k]];
-                    rem /= (long int)ivar_sizes[k];
-                }
-            }
-
-            // Compute the effective per-physics-bin oscillation probabilities.  Two paths:
-            //   - Visible-decay models (uses_get_counts): pre-scale N_truth by pre_mig_weight
-            //     so the flux reweight is applied at the PARENT neutrino's truth energy, then
-            //     call get_counts and divide by the ORIGINAL N_truth to get effective probs.
-            //     Pre-scaling rows of N_truth is equivalent to weighting the parent neutrino in
-            //     both the oscillation term (A) at flat_dst and the decay-migration term (B)
-            //     at each flat_src, because get_counts reads the passed N_truth at exactly
-            //     those bins.
-            //   - All other models: the simple get_probs path.  For these models pre_mig_weight
-            //     is always all-ones (model_has_migration == false), so no flux reweight is lost.
-            Eigen::MatrixXf probs;
-            if(inmodel.uses_get_counts()) {
-                const Eigen::MatrixXf& N_truth = inmodel.get_N_truth();
-                // Broadcast per-flat-bin flux weight to each column of N_truth.
-                Eigen::MatrixXf N_weighted = N_truth.array().colwise() * pre_mig_weight.array();
-                auto counts = inmodel.get_counts(phys, var_arrs, N_weighted);
-                auto N_arr  = N_truth.array();
-                probs = (N_arr > 0.0f).select(counts.array() / N_arr, 0.0f);
+            // Build var_arrs and the prediction.  Trivial models (empty ivars) short-circuit:
+            // probs ≡ 1 and H_combined[var_index] has shape (n_reco, 1) already holding the
+            // per-reco-bin event-weight sum, with no physics-grid coupling.
+            Eigen::VectorXf result;
+            if(inmodel.is_trivial) {
+                result = inmodel.H_combined[var_index].col(0);
             } else {
-                probs = inmodel.get_probs(phys, var_arrs);
-            }
+                // var_arrs: one entry per ivar, each of length n_phys_bins (flat grid).
+                // For 1-var: var_arrs[0] = midbin values of that var (n_phys_bins = n_ivar_bins).
+                // For N-var: row-major product grid — var_arrs[k][flat] = midbin of ivar[k] at flat index.
+                const size_t N_ivars = inmodel.ivars.size();
+                std::vector<size_t> ivar_sizes(N_ivars);
+                for(size_t k = 0; k < N_ivars; ++k)
+                    ivar_sizes[k] = inprop.variable_midbin[inmodel.ivars[k]].size();
 
-            // Single GEMV: H_combined[var_index] has shape (n_reco, n_phys*J).
-            // probs is (n_phys, J) in column-major, so probs.data() = [col0 | col1 | ...] = probs_flat.
-            Eigen::Map<const Eigen::VectorXf> probs_flat(probs.data(), probs.size());
-            Eigen::VectorXf result = inmodel.H_combined[var_index] * probs_flat;
+                std::vector<std::vector<float>> var_arrs(N_ivars, std::vector<float>(inmodel.n_phys_bins));
+                for(long int flat = 0; flat < inmodel.n_phys_bins; ++flat) {
+                    long int rem = flat;
+                    for(int k = (int)N_ivars - 1; k >= 0; --k) {
+                        var_arrs[k][flat] = inprop.variable_midbin[inmodel.ivars[k]][rem % ivar_sizes[k]];
+                        rem /= (long int)ivar_sizes[k];
+                    }
+                }
+
+                // Effective per-physics-bin oscillation probabilities.  Two paths:
+                //   - Visible-decay models (uses_get_counts): pre-scale N_truth rows by
+                //     pre_mig_weight so the flux reweight is applied at the PARENT neutrino's
+                //     truth energy, then call get_counts and divide by the ORIGINAL N_truth.
+                //     Pre-scaling N_truth weights the parent in both the oscillation term (A)
+                //     at flat_dst and the decay-migration term (B) at each flat_src, since
+                //     get_counts reads the passed N_truth at exactly those bins.
+                //   - All other models: the simple get_probs path.  pre_mig_weight is always
+                //     all-ones here (model_has_migration == false), so no flux reweight is lost.
+                Eigen::MatrixXf probs;
+                if(inmodel.uses_get_counts()) {
+                    const Eigen::MatrixXf& N_truth = inmodel.get_N_truth();
+                    Eigen::MatrixXf N_weighted = N_truth.array().colwise() * pre_mig_weight.array();
+                    auto counts = inmodel.get_counts(phys, var_arrs, N_weighted);
+                    auto N_arr  = N_truth.array();
+                    probs = (N_arr > 0.0f).select(counts.array() / N_arr, 0.0f);
+                } else {
+                    probs = inmodel.get_probs(phys, var_arrs);
+                }
+
+                // Single GEMV: H_combined[var_index] has shape (n_reco, n_phys*J).
+                // probs is (n_phys, J) column-major, so probs.data() = [col0 | col1 | ...] = probs_flat.
+                Eigen::Map<const Eigen::VectorXf> probs_flat(probs.data(), probs.size());
+                result = inmodel.H_combined[var_index] * probs_flat;
+            }
 
             // Apply post-migration systematic weights (cross-section, detector) at reco level.
             Eigen::VectorXf final_spec = post_mig_systw.cwiseProduct(result);
@@ -184,16 +362,20 @@ namespace PROfit {
         } else {
 
             // Unbinned path: per-event var values, one vector per ivar.
-            std::vector<std::vector<float>> var_arrs(inmodel.ivars.size(), std::vector<float>(inprop.NEvent()));
-            for(size_t k = 0; k < inmodel.ivars.size(); ++k)
-                for(size_t i = 0; i < inprop.NEvent(); ++i)
-                    var_arrs[k][i] = inprop.VariableValue(inmodel.ivars[k], i);
+            // For trivial models (empty ivars), skip var_arrs / get_probs entirely and use oscw = 1.
+            Eigen::MatrixXf probs;
+            if(!inmodel.is_trivial) {
+                std::vector<std::vector<float>> var_arrs(inmodel.ivars.size(), std::vector<float>(inprop.NEvent()));
+                for(size_t k = 0; k < inmodel.ivars.size(); ++k)
+                    for(size_t i = 0; i < inprop.NEvent(); ++i)
+                        var_arrs[k][i] = inprop.VariableValue(inmodel.ivars[k], i);
 
-            auto probs = inmodel.get_probs(phys, var_arrs);
+                probs = inmodel.get_probs(phys, var_arrs);
+            }
 
             for(size_t i = 0; i < inprop.NEvent(); ++i) {
-                float oscw = probs(i, inprop.model_rule[i]);
-                float add_w = inprop.added_weights[i]; 
+                float oscw = inmodel.is_trivial ? 1.0f : probs(i, inprop.model_rule[i]);
+                float add_w = inprop.added_weights[i];
                 const int reco_bin = inprop.VariableBinIndex(var_index, i);
 
                 float systw = 1;
