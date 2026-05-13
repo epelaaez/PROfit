@@ -1945,6 +1945,21 @@ class PRO3p1_decay_vis_model1 : public PROmodel {
             size_t n_flat = L_arr.size();
             size_t n_E    = phys_grid_sizes[1];
 
+            float E_bin_width = E_arr[1] - E_arr[0];
+            if (E_bin_width <= 0.0f) {
+                log<LOG_ERROR>(L"%1% || expected positive truth-E bin width but got %2%") % __func__ % E_bin_width;
+                exit(EXIT_FAILURE);
+            }
+            const float dE_tol = 1e-4f * E_bin_width;
+            for(size_t i = 2; i < n_E; ++i) {
+                float diff = E_arr[i] - E_arr[i-1];
+                if(diff > 0.0f && std::abs(diff - E_bin_width) > dE_tol) {
+                    log<LOG_ERROR>(L"%1% || 3+1+decay requires uniform truth energy binning, "
+                        L"found bin width of %2% at bin %3% when expecting %4%.") % __func__ % diff % i % E_bin_width;
+                    exit(EXIT_FAILURE);
+                }
+            }
+
             Eigen::MatrixXf counts(n_flat, 4);
             // looping over flattened (L, E) bins
             for(size_t flat_dst = 0; flat_dst < n_flat; ++flat_dst) {
@@ -1955,7 +1970,7 @@ class PRO3p1_decay_vis_model1 : public PROmodel {
                 // Gamma_nu4 = |Us4|^2 (1 - |Us4|^2) alpha_phi/4 m_4^2/E_4
                 //           = |Us4|^2 (1 - |Us4|^2) g_phi^2/(16 pi) m_4^2/E_4
                 // 1 / L_dec = Gamma_nu4
-                // expterm = exp(-L/(2 L_dec)) = exp(-L/2 Gamma_nu4) 
+                // expterm = exp(-L/(2 L_dec)) = exp(-L/2 Gamma_nu4)
                 //         = exp(-L/2 |Us4|^2 (1 - |Us4|^2) g_phi^2/(16 pi) m_4^2/E_4)
                 //         = exp(-[m_4^2 L/4E] |Us4|^2 (1 - |Us4|^2) g_phi^2/(8 pi))
                 //         = exp(-delta |Us4|^2 * sum_active g_phi^2/(8 pi))
@@ -1986,15 +2001,21 @@ class PRO3p1_decay_vis_model1 : public PROmodel {
 
                 size_t l_idx    = flat_dst / n_E;
                 size_t e_dst_idx = flat_dst % n_E;
+                // Accumulate the per-source density sums (units: events/GeV).  Multiplying by
+                // E_bin_width once at the end converts to a per-bin probability.
+                float mig_sum_mumu = 0.0f, mig_sum_mue = 0.0f, mig_sum_ee = 0.0f;
                 // looping over larger neutrino that could have possibly smeared down to this bin's energy in this L bin
                 for(size_t e_src_idx = e_dst_idx + 1; e_src_idx < n_E; ++e_src_idx) {
                     size_t flat_src = l_idx * n_E + e_src_idx;
                     float E_src = E_arr[flat_src];
                     float s_dec = 2.0f * E_dst / (E_src * E_src);
-                    counts(flat_dst, 1) += p_dec_mumu * s_dec * N_truth_vals(flat_src, 1);
-                    counts(flat_dst, 2) += p_dec_mue  * s_dec * N_truth_vals(flat_src, 2);
-                    counts(flat_dst, 3) += p_dec_ee   * s_dec * N_truth_vals(flat_src, 3);
+                    mig_sum_mumu += s_dec * N_truth_vals(flat_src, 1);
+                    mig_sum_mue  += s_dec * N_truth_vals(flat_src, 2);
+                    mig_sum_ee   += s_dec * N_truth_vals(flat_src, 3);
                 }
+                counts(flat_dst, 1) += p_dec_mumu * E_bin_width * mig_sum_mumu;
+                counts(flat_dst, 2) += p_dec_mue  * E_bin_width * mig_sum_mue;
+                counts(flat_dst, 3) += p_dec_ee   * E_bin_width * mig_sum_ee;
             }
             return counts;
         }
@@ -2071,6 +2092,21 @@ class PRO3p1_decay_vis_model2 : public PROmodel {
             size_t n_flat = L_arr.size();
             size_t n_E    = phys_grid_sizes[1];
 
+            float E_bin_width = E_arr[1] - E_arr[0];
+            if (E_bin_width <= 0.0f) {
+                log<LOG_ERROR>(L"%1% || expected positive truth-E bin width but got %2%") % __func__ % E_bin_width;
+                exit(EXIT_FAILURE);
+            }
+            const float dE_tol = 1e-4f * E_bin_width;
+            for(size_t i = 2; i < n_E; ++i) {
+                float diff = E_arr[i] - E_arr[i-1];
+                if(diff > 0.0f && std::abs(diff - E_bin_width) > dE_tol) {
+                    log<LOG_ERROR>(L"%1% || 3+1+decay requires uniform truth energy binning, "
+                        L"found bin width of %2% at bin %3% when expecting %4%.") % __func__ % diff % i % E_bin_width;
+                    exit(EXIT_FAILURE);
+                }
+            }
+
             Eigen::MatrixXf counts(n_flat, 4);
             for(size_t flat_dst = 0; flat_dst < n_flat; ++flat_dst) {
                 float E_dst = E_arr[flat_dst];
@@ -2080,7 +2116,7 @@ class PRO3p1_decay_vis_model2 : public PROmodel {
                 // Gamma_nu4 = alpha_e / 4 m_4^2/E_4
                 //           = g_e^2/(16 pi) m_4^2/E_4
                 // 1 / L_dec = Gamma_nu4
-                // expterm = exp(-L/(2 L_dec)) = exp(-L/2 Gamma_nu4) 
+                // expterm = exp(-L/(2 L_dec)) = exp(-L/2 Gamma_nu4)
                 //         = exp(-L/2 g_e^2/(16 pi) m_4^2/E_4)
                 //         = exp(-[m_4^2 L/4E] g_e^2/(8 pi))
                 //         = exp(-delta g_e^2/(8 pi))
@@ -2106,6 +2142,9 @@ class PRO3p1_decay_vis_model2 : public PROmodel {
 
                 size_t l_idx     = flat_dst / n_E;
                 size_t e_dst_idx = flat_dst % n_E;
+                // Accumulate the per-source density sums (units: events/GeV).  Multiplying by
+                // E_bin_width once at the end converts to a per-bin probability.
+                float mig_sum_mue = 0.0f, mig_sum_ee = 0.0f;
                 // looping over larger neutrino that could have possibly smeared down to this bin's energy in this L bin
                 for(size_t e_src_idx = e_dst_idx + 1; e_src_idx < n_E; ++e_src_idx) {
                     size_t flat_src = l_idx * n_E + e_src_idx;
@@ -2113,9 +2152,11 @@ class PRO3p1_decay_vis_model2 : public PROmodel {
                     float s_dec = 2.0f * E_dst / (E_src * E_src);
 
                     // no change to the no-osc or P_mu_mu calculations from decay to nu_e in this model
-                    counts(flat_dst, 2) += p_dec_mue * s_dec * N_truth_vals(flat_src, 2);
-                    counts(flat_dst, 3) += p_dec_ee  * s_dec * N_truth_vals(flat_src, 3);
+                    mig_sum_mue += s_dec * N_truth_vals(flat_src, 2);
+                    mig_sum_ee  += s_dec * N_truth_vals(flat_src, 3);
                 }
+                counts(flat_dst, 2) += p_dec_mue * E_bin_width * mig_sum_mue;
+                counts(flat_dst, 3) += p_dec_ee  * E_bin_width * mig_sum_ee;
             }
             return counts;
         }
