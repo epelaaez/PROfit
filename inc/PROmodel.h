@@ -1950,7 +1950,16 @@ class PRO3p1_decay_vis_model1 : public PROmodel {
             for(size_t flat_dst = 0; flat_dst < n_flat; ++flat_dst) {
                 float E_dst = E_arr[flat_dst];
                 float delta = freq * L_arr[flat_dst] / E_dst;
-                float expterm = std::exp(-g_phi * delta / (8.0f * 3.14159f));
+
+                // alpha_phi = g_phi^2/(4 pi)
+                // Gamma_nu4 = |Us4|^2 (1 - |Us4|^2) alpha_phi/4 m_4^2/E_4
+                //           = |Us4|^2 (1 - |Us4|^2) g_phi^2/(16 pi) m_4^2/E_4
+                // 1 / L_dec = Gamma_nu4
+                // expterm = exp(-L/(2 L_dec)) = exp(-L/2 Gamma_nu4) 
+                //         = exp(-L/2 |Us4|^2 (1 - |Us4|^2) g_phi^2/(16 pi) m_4^2/E_4)
+                //         = exp(-[m_4^2 L/4E] |Us4|^2 (1 - |Us4|^2) g_phi^2/(8 pi))
+                //         = exp(-delta |Us4|^2 * sum_active g_phi^2/(8 pi))
+                float expterm = std::exp(-delta * Us4sq * sum_active * g_phi * g_phi / (8.0f * 3.14159f));
                 float cos_mult_exp = std::cos(2.0f * delta) * expterm;
                 float osc_term = 1.0f - 2.0f*cos_mult_exp + expterm*expterm;
 
@@ -2066,7 +2075,16 @@ class PRO3p1_decay_vis_model2 : public PROmodel {
             for(size_t flat_dst = 0; flat_dst < n_flat; ++flat_dst) {
                 float E_dst = E_arr[flat_dst];
                 float delta = freq * L_arr[flat_dst] / E_dst;
-                float expterm = std::exp(-g_e * delta / (8.0f * 3.14159f));
+
+                // alpha_e = g_e^2/(4 pi)
+                // Gamma_nu4 = alpha_e / 4 m_4^2/E_4
+                //           = g_e^2/(16 pi) m_4^2/E_4
+                // 1 / L_dec = Gamma_nu4
+                // expterm = exp(-L/(2 L_dec)) = exp(-L/2 Gamma_nu4) 
+                //         = exp(-L/2 g_e^2/(16 pi) m_4^2/E_4)
+                //         = exp(-[m_4^2 L/4E] g_e^2/(8 pi))
+                //         = exp(-delta g_e^2/(8 pi))
+                float expterm = std::exp(-delta * g_e * g_e / (8.0f * 3.14159f));
                 float cos_mult_exp = std::cos(2.0f * delta) * expterm;
                 float osc_term = 1.0f - 2.0f*cos_mult_exp + expterm*expterm;
 
