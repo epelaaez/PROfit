@@ -1968,9 +1968,12 @@ class PRO3p1_decay_vis_model1 : public PROmodel {
                 // p_dec factors computed at destination.
                 float one_minus_expterm_sq = 1.0f - expterm*expterm;
 
-                float p_dec_mumu = Um4sq * Um4sq * Um4sq * Us4sq * one_minus_expterm_sq / sum_active;
-                float p_dec_mue  = Ue4sq * Um4sq * Um4sq * Us4sq * one_minus_expterm_sq / sum_active;
-                float p_dec_ee   = Ue4sq * Ue4sq * Ue4sq * Us4sq * one_minus_expterm_sq / sum_active;
+                // This matches https://github.com/kjkellyphys/muB_oscillation/blob/main/OscTools/sterile_tools.py#L261
+                // In https://journals.aps.org/prd/abstract/10.1103/PhysRevD.110.075002, just after equation 11,
+                // I believe they actually give the formula for the flavor projection squared, not the flavor projection.
+                float p_dec_mumu = Um4sq * Um4sq * Us4sq * one_minus_expterm_sq / sum_active;
+                float p_dec_mue  = Um4sq * Ue4sq * Us4sq * one_minus_expterm_sq / sum_active;
+                float p_dec_ee   = Ue4sq * Ue4sq * Us4sq * one_minus_expterm_sq / sum_active;
 
                 size_t l_idx    = flat_dst / n_E;
                 size_t e_dst_idx = flat_dst % n_E;
@@ -2080,7 +2083,7 @@ class PRO3p1_decay_vis_model2 : public PROmodel {
                 // Decay redistribution: in model2 (g_e coupling) only fullosc and nue are affected;
                 // numu disappearance (j=1) sees no decay contribution.
                 float one_minus_expterm_sq = 1.0f - expterm*expterm;
-                float p_dec_mue = Ue4sq * one_minus_expterm_sq;
+                float p_dec_mue = Um4sq * one_minus_expterm_sq;
                 float p_dec_ee  = Ue4sq * one_minus_expterm_sq;
 
                 size_t l_idx     = flat_dst / n_E;
