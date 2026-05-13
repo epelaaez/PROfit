@@ -1960,62 +1960,68 @@ class PRO3p1_decay_vis_model1 : public PROmodel {
                 }
             }
 
-            Eigen::MatrixXf counts(n_flat, 4);
-            // looping over flattened (L, E) bins
-            for(size_t flat_dst = 0; flat_dst < n_flat; ++flat_dst) {
-                float E_dst = E_arr[flat_dst];
-                float delta = freq * L_arr[flat_dst] / E_dst;
+            // alpha_phi = g_phi^2/(4 pi)
+            // Gamma_nu4 = |Us4|^2 (1 - |Us4|^2) alpha_phi/4 m_4^2/E_4
+            //           = |Us4|^2 (1 - |Us4|^2) g_phi^2/(16 pi) m_4^2/E_4
+            // 1 / L_dec = Gamma_nu4
+            // expterm = exp(-L/(2 L_dec)) = exp(-L/2 Gamma_nu4)
+            //         = exp(-L/2 |Us4|^2 (1 - |Us4|^2) g_phi^2/(16 pi) m_4^2/E_4)
+            //         = exp(-[m_4^2 L/4E] |Us4|^2 (1 - |Us4|^2) g_phi^2/(8 pi))
+            //         = exp(-delta |Us4|^2 * sum_active g_phi^2/(8 pi))
+            //         = exp(-delta * exp_prefactor)
+            const float exp_prefactor = Us4sq * sum_active * g_phi * g_phi / (8.0f * 3.14159f);
 
-                // alpha_phi = g_phi^2/(4 pi)
-                // Gamma_nu4 = |Us4|^2 (1 - |Us4|^2) alpha_phi/4 m_4^2/E_4
-                //           = |Us4|^2 (1 - |Us4|^2) g_phi^2/(16 pi) m_4^2/E_4
-                // 1 / L_dec = Gamma_nu4
-                // expterm = exp(-L/(2 L_dec)) = exp(-L/2 Gamma_nu4)
-                //         = exp(-L/2 |Us4|^2 (1 - |Us4|^2) g_phi^2/(16 pi) m_4^2/E_4)
-                //         = exp(-[m_4^2 L/4E] |Us4|^2 (1 - |Us4|^2) g_phi^2/(8 pi))
-                //         = exp(-delta |Us4|^2 * sum_active g_phi^2/(8 pi))
-                float expterm = std::exp(-delta * Us4sq * sum_active * g_phi * g_phi / (8.0f * 3.14159f));
+            // Mixing-only prefactors for the decay-migration term — see
+            // https://github.com/kjkellyphys/muB_oscillation/blob/main/OscTools/sterile_tools.py#L261
+            // In https://journals.aps.org/prd/abstract/10.1103/PhysRevD.110.075002, just after
+            // equation 11, I believe they actually give the formula for the flavor projection
+            // squared, not the flavor projection.
+            const float mix_mumu = Um4sq * Um4sq * Us4sq / sum_active;
+            const float mix_mue  = Um4sq * Ue4sq * Us4sq / sum_active;
+            const float mix_ee   = Ue4sq * Ue4sq * Us4sq / sum_active;
+
+            Eigen::MatrixXf counts = Eigen::MatrixXf::Zero(n_flat, 4);
+
+            // looping over flattened (L, E) bins — flat_par is the parent neutrino index
+            for(size_t flat_par = 0; flat_par < n_flat; ++flat_par) {
+                float E_par = E_arr[flat_par];
+                float L_par = L_arr[flat_par];
+                float delta = freq * L_par / E_par;
+                float expterm = std::exp(-delta * exp_prefactor);
                 float cos_mult_exp = std::cos(2.0f * delta) * expterm;
                 float osc_term = 1.0f - 2.0f*cos_mult_exp + expterm*expterm;
 
-                // Oscillation contribution: probability times truth-level count at destination bin
+                // Oscillation contribution at flat_par (parent = daughter for non-decayed events).
                 // no-osc
-                counts(flat_dst, 0) = N_truth_vals(flat_dst, 0);
+                counts(flat_par, 0) += N_truth_vals(flat_par, 0);
                 // P_mu_mu osc
-                counts(flat_dst, 1) = (1.0f - 2.0f*Um4sq*(1.0f - cos_mult_exp) + Um4sq*Um4sq*osc_term) * N_truth_vals(flat_dst, 1);
+                counts(flat_par, 1) += (1.0f - 2.0f*Um4sq*(1.0f - cos_mult_exp) + Um4sq*Um4sq*osc_term) * N_truth_vals(flat_par, 1);
                 // P_mu_e osc
-                counts(flat_dst, 2) = Ue4sq * Um4sq * osc_term * N_truth_vals(flat_dst, 2);
+                counts(flat_par, 2) += Ue4sq * Um4sq * osc_term * N_truth_vals(flat_par, 2);
                 // P_e_e osc
-                counts(flat_dst, 3) = (1.0f - 2.0f*Ue4sq*(1.0f - cos_mult_exp) + Ue4sq*Ue4sq*osc_term) * N_truth_vals(flat_dst, 3);
+                counts(flat_par, 3) += (1.0f - 2.0f*Ue4sq*(1.0f - cos_mult_exp) + Ue4sq*Ue4sq*osc_term) * N_truth_vals(flat_par, 3);
 
-                // Decay redistribution: add counts migrated from same-L higher-E source bins.
-                // p_dec factors computed at destination.
-                float one_minus_expterm_sq = 1.0f - expterm*expterm;
+                // Decay redistribution: this parent decays into daughters at lower truth-E
+                // within the same truth-L bin.  Everything that does not depend on the
+                // daughter's energy is collected into kernel_base_*; multiplying by
+                // s_dec(E_dst, E_par) inside the inner loop gives the contribution to each
+                // daughter bin.
+                float decay_frac = 1.0f - expterm * expterm;             // (1 - exp(-L/L_dec(E_par)))
+                float kernel_base_mumu = mix_mumu * E_bin_width * decay_frac * N_truth_vals(flat_par, 1);
+                float kernel_base_mue  = mix_mue  * E_bin_width * decay_frac * N_truth_vals(flat_par, 2);
+                float kernel_base_ee   = mix_ee   * E_bin_width * decay_frac * N_truth_vals(flat_par, 3);
 
-                // This matches https://github.com/kjkellyphys/muB_oscillation/blob/main/OscTools/sterile_tools.py#L261
-                // In https://journals.aps.org/prd/abstract/10.1103/PhysRevD.110.075002, just after equation 11,
-                // I believe they actually give the formula for the flavor projection squared, not the flavor projection.
-                float p_dec_mumu = Um4sq * Um4sq * Us4sq * one_minus_expterm_sq / sum_active;
-                float p_dec_mue  = Um4sq * Ue4sq * Us4sq * one_minus_expterm_sq / sum_active;
-                float p_dec_ee   = Ue4sq * Ue4sq * Us4sq * one_minus_expterm_sq / sum_active;
-
-                size_t l_idx    = flat_dst / n_E;
-                size_t e_dst_idx = flat_dst % n_E;
-                // Accumulate the per-source density sums (units: events/GeV).  Multiplying by
-                // E_bin_width once at the end converts to a per-bin probability.
-                float mig_sum_mumu = 0.0f, mig_sum_mue = 0.0f, mig_sum_ee = 0.0f;
-                // looping over larger neutrino that could have possibly smeared down to this bin's energy in this L bin
-                for(size_t e_src_idx = e_dst_idx + 1; e_src_idx < n_E; ++e_src_idx) {
-                    size_t flat_src = l_idx * n_E + e_src_idx;
-                    float E_src = E_arr[flat_src];
-                    float s_dec = 2.0f * E_dst / (E_src * E_src);
-                    mig_sum_mumu += s_dec * N_truth_vals(flat_src, 1);
-                    mig_sum_mue  += s_dec * N_truth_vals(flat_src, 2);
-                    mig_sum_ee   += s_dec * N_truth_vals(flat_src, 3);
+                size_t l_idx     = flat_par / n_E;
+                size_t e_par_idx = flat_par % n_E;
+                // looping over lower-E daughter bins at the same L
+                for(size_t e_dst_idx = 0; e_dst_idx < e_par_idx; ++e_dst_idx) {
+                    size_t flat_dst = l_idx * n_E + e_dst_idx;
+                    float E_dst = E_arr[flat_dst];
+                    float s_dec = 2.0f * E_dst / (E_par * E_par);        // dP/dE_d, 1/GeV
+                    counts(flat_dst, 1) += kernel_base_mumu * s_dec;
+                    counts(flat_dst, 2) += kernel_base_mue  * s_dec;
+                    counts(flat_dst, 3) += kernel_base_ee   * s_dec;
                 }
-                counts(flat_dst, 1) += p_dec_mumu * E_bin_width * mig_sum_mumu;
-                counts(flat_dst, 2) += p_dec_mue  * E_bin_width * mig_sum_mue;
-                counts(flat_dst, 3) += p_dec_ee   * E_bin_width * mig_sum_ee;
             }
             return counts;
         }
@@ -2107,56 +2113,57 @@ class PRO3p1_decay_vis_model2 : public PROmodel {
                 }
             }
 
-            Eigen::MatrixXf counts(n_flat, 4);
-            for(size_t flat_dst = 0; flat_dst < n_flat; ++flat_dst) {
-                float E_dst = E_arr[flat_dst];
-                float delta = freq * L_arr[flat_dst] / E_dst;
+            // alpha_e = g_e^2/(4 pi)
+            // Gamma_nu4 = alpha_e / 4 m_4^2/E_4
+            //           = g_e^2/(16 pi) m_4^2/E_4
+            // 1 / L_dec = Gamma_nu4
+            // expterm = exp(-L/(2 L_dec)) = exp(-L/2 Gamma_nu4)
+            //         = exp(-L/2 g_e^2/(16 pi) m_4^2/E_4)
+            //         = exp(-[m_4^2 L/4E] g_e^2/(8 pi))
+            //         = exp(-delta g_e^2/(8 pi))
+            const float exp_prefactor = g_e * g_e / (8.0f * 3.14159f);
 
-                // alpha_e = g_e^2/(4 pi)
-                // Gamma_nu4 = alpha_e / 4 m_4^2/E_4
-                //           = g_e^2/(16 pi) m_4^2/E_4
-                // 1 / L_dec = Gamma_nu4
-                // expterm = exp(-L/(2 L_dec)) = exp(-L/2 Gamma_nu4)
-                //         = exp(-L/2 g_e^2/(16 pi) m_4^2/E_4)
-                //         = exp(-[m_4^2 L/4E] g_e^2/(8 pi))
-                //         = exp(-delta g_e^2/(8 pi))
-                float expterm = std::exp(-delta * g_e * g_e / (8.0f * 3.14159f));
+            // Zero-initialize counts: each cell accumulates (a) the oscillation contribution
+            // when flat_par equals the cell, and (b) decay-migration from higher-E parents
+            // at the same L.
+            Eigen::MatrixXf counts = Eigen::MatrixXf::Zero(n_flat, 4);
+
+            // looping over flattened (L, E) bins — flat_par is the parent index
+            for(size_t flat_par = 0; flat_par < n_flat; ++flat_par) {
+                float E_par = E_arr[flat_par];
+                float L_par = L_arr[flat_par];
+                float delta = freq * L_par / E_par;
+                float expterm = std::exp(-delta * exp_prefactor);
                 float cos_mult_exp = std::cos(2.0f * delta) * expterm;
                 float osc_term = 1.0f - 2.0f*cos_mult_exp + expterm*expterm;
 
-                // Oscillation counts at destination bin (same as model1, g_e drives the damping)
-                // no-osc
-                counts(flat_dst, 0) = N_truth_vals(flat_dst, 0);
-                // P_mu_mu_osc
-                counts(flat_dst, 1) = (1.0f - 2.0f*Um4sq*(1.0f - cos_mult_exp) + Um4sq*Um4sq*osc_term) * N_truth_vals(flat_dst, 1);
-                // P_mu_e_osc
-                counts(flat_dst, 2) = Ue4sq * Um4sq * osc_term * N_truth_vals(flat_dst, 2);
+                // Oscillation contribution at flat_par (same as model1, g_e drives the damping)
+                counts(flat_par, 0) += N_truth_vals(flat_par, 0);
+                // P_mu_mu osc
+                counts(flat_par, 1) += (1.0f - 2.0f*Um4sq*(1.0f - cos_mult_exp) + Um4sq*Um4sq*osc_term) * N_truth_vals(flat_par, 1);
+                // P_mu_e osc
+                counts(flat_par, 2) += Ue4sq * Um4sq * osc_term * N_truth_vals(flat_par, 2);
                 // P_e_e osc
-                counts(flat_dst, 3) = (1.0f - 2.0f*Ue4sq*(1.0f - cos_mult_exp) + Ue4sq*Ue4sq*osc_term) * N_truth_vals(flat_dst, 3);
+                counts(flat_par, 3) += (1.0f - 2.0f*Ue4sq*(1.0f - cos_mult_exp) + Ue4sq*Ue4sq*osc_term) * N_truth_vals(flat_par, 3);
 
                 // Decay redistribution: in model2 (g_e coupling) only fullosc and nue are affected;
-                // numu disappearance (j=1) sees no decay contribution.
-                float one_minus_expterm_sq = 1.0f - expterm*expterm;
-                float p_dec_mue = Um4sq * one_minus_expterm_sq;
-                float p_dec_ee  = Ue4sq * one_minus_expterm_sq;
+                // numu disappearance (j=1) sees no decay contribution.  The decay damping
+                // (1 - exp(-L/L_dec)) is evaluated at the PARENT energy E_par.  Daughter-energy
+                // dependence enters only through s_dec(E_dst, E_par).
+                float decay_frac = 1.0f - expterm * expterm;             // (1 - exp(-L/L_dec(E_par)))
+                float kernel_base_mue = Um4sq * E_bin_width * decay_frac * N_truth_vals(flat_par, 2);
+                float kernel_base_ee  = Ue4sq * E_bin_width * decay_frac * N_truth_vals(flat_par, 3);
 
-                size_t l_idx     = flat_dst / n_E;
-                size_t e_dst_idx = flat_dst % n_E;
-                // Accumulate the per-source density sums (units: events/GeV).  Multiplying by
-                // E_bin_width once at the end converts to a per-bin probability.
-                float mig_sum_mue = 0.0f, mig_sum_ee = 0.0f;
-                // looping over larger neutrino that could have possibly smeared down to this bin's energy in this L bin
-                for(size_t e_src_idx = e_dst_idx + 1; e_src_idx < n_E; ++e_src_idx) {
-                    size_t flat_src = l_idx * n_E + e_src_idx;
-                    float E_src = E_arr[flat_src];
-                    float s_dec = 2.0f * E_dst / (E_src * E_src);
-
-                    // no change to the no-osc or P_mu_mu calculations from decay to nu_e in this model
-                    mig_sum_mue += s_dec * N_truth_vals(flat_src, 2);
-                    mig_sum_ee  += s_dec * N_truth_vals(flat_src, 3);
+                size_t l_idx     = flat_par / n_E;
+                size_t e_par_idx = flat_par % n_E;
+                // looping over lower-E daughter bins at the same L
+                for(size_t e_dst_idx = 0; e_dst_idx < e_par_idx; ++e_dst_idx) {
+                    size_t flat_dst = l_idx * n_E + e_dst_idx;
+                    float E_dst = E_arr[flat_dst];
+                    float s_dec = 2.0f * E_dst / (E_par * E_par);
+                    counts(flat_dst, 2) += kernel_base_mue * s_dec;
+                    counts(flat_dst, 3) += kernel_base_ee  * s_dec;
                 }
-                counts(flat_dst, 2) += p_dec_mue * E_bin_width * mig_sum_mue;
-                counts(flat_dst, 3) += p_dec_ee  * E_bin_width * mig_sum_ee;
             }
             return counts;
         }
