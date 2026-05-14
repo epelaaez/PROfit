@@ -107,7 +107,7 @@ namespace log_impl {
             formatted_log_t( log_level_t level, const wchar_t* msg ) : level(level), fmt(msg) {}
             ~formatted_log_t() {
                 static const int SUPPRESS_AFTER = 1000;
-                static std::unordered_map<std::wstring, int> msg_counts;
+                thread_local static std::unordered_map<std::wstring, int> msg_counts;
                 std::wstring formatted_msg = boost::str(fmt);
                 int& count = msg_counts[formatted_msg];
                 count++;
