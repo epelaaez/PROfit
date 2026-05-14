@@ -241,7 +241,7 @@ static void logLowPredictionBins(const PROconfig &config, const Eigen::VectorXf 
 
 int main(int argc, char* argv[])
 {
-    auto start_time = chrono::high_resolution_clock::now();
+    auto start_time = std::chronohigh_resolution_clock::now();
 
     gStyle->SetOptStat(0);
     CLI::App app{"PROfit: a PROfessional, PROductive fitting and oscillation framework. Together let's minimize PROfit!"}; 
@@ -2962,9 +2962,9 @@ int main(int argc, char* argv[])
     if(global_fit_out.is_open()) global_fit_out.close();
 
     delete metric;
-    auto stop_time = chrono::high_resolution_clock::now();
+    auto stop_time = std::chronohigh_resolution_clock::now();
     
-    auto duration = duration_cast<chrono::microseconds>(stop_time - start_time);
+    auto duration = duration_cast<std::chronomicroseconds>(stop_time - start_time);
     log<LOG_INFO>(L"%1% || Total run time: %2%") % __func__ % duration.count();
 
     return 0;
