@@ -1823,10 +1823,18 @@ int main(int argc, char* argv[])
                                         cv_total->SetFillColor(kWhite);
                                         cv_total->SetFillStyle(0);
                                         cv_total->SetTitle((config.m_mode_names[im] + " " + config.m_detector_names[id] + " " + config.m_channel_names[ic] + " DetVar (sec " + std::to_string(sec_idx) + ")").c_str());
-                                        if(binwidth_scale)
-                                            cv_total->GetYaxis()->SetTitle("Events/GeV");
-                                        else
-                                            cv_total->GetYaxis()->SetTitle("Events");
+                                        {
+                                            std::string chan_unit = config.GetChannelUnit(ic, config.i_prime);
+                                            std::string ytitle;
+                                            if(!binwidth_scale) {
+                                                ytitle = "Events";
+                                            } else if(chan_unit.empty()) {
+                                                ytitle = "Events/unit";
+                                            } else {
+                                                ytitle = "Events/" + chan_unit;
+                                            }
+                                            cv_total->GetYaxis()->SetTitle(ytitle.c_str());
+                                        }
 
                                         float ymax = cv_total->GetMaximum();
 
@@ -1951,8 +1959,18 @@ int main(int argc, char* argv[])
                                             cv_total_ov->SetMaximum(ymax_ov * 1.15);
                                             std::string ov_title = config.m_mode_names[im] + " " + config.m_detector_names[id] + " " + config.m_channel_names[ic] + " " + detvar_names[idv] + " (Matched)";
                                             cv_total_ov->SetTitle(ov_title.c_str());
-                                            if(binwidth_scale) cv_total_ov->GetYaxis()->SetTitle("Events/GeV");
-                                            else cv_total_ov->GetYaxis()->SetTitle("Events");
+                                            {
+                                                std::string chan_unit = config.GetChannelUnit(ic, config.i_prime);
+                                                std::string ytitle;
+                                                if(!binwidth_scale) {
+                                                    ytitle = "Events";
+                                                } else if(chan_unit.empty()) {
+                                                    ytitle = "Events/unit";
+                                                } else {
+                                                    ytitle = "Events/" + chan_unit;
+                                                }
+                                                cv_total_ov->GetYaxis()->SetTitle(ytitle.c_str());
+                                            }
 
                                             std::unique_ptr<TLegend> ov_leg = std::make_unique<TLegend>(0.55, 0.75, 0.89, 0.89);
                                             ov_leg->SetFillStyle(0);
@@ -2019,10 +2037,18 @@ int main(int argc, char* argv[])
                             }
                             ++global_subchannel_index;
                         }
-                        if(binwidth_scale )
-                            cv_hist->GetYaxis()->SetTitle("Events/GeV");
-                        else
-                            cv_hist->GetYaxis()->SetTitle("Events");
+                        {
+                            std::string chan_unit = config.GetChannelUnit(ic, config.i_prime);
+                            std::string ytitle;
+                            if(!binwidth_scale) {
+                                ytitle = "Events";
+                            } else if(chan_unit.empty()) {
+                                ytitle = "Events/unit";
+                            } else {
+                                ytitle = "Events/" + chan_unit;
+                            }
+                            cv_hist->GetYaxis()->SetTitle(ytitle.c_str());
+                        }
                         if(area_normalized) {
                             cv_hist->GetYaxis()->SetTitle("Area Normalized");
                             cv_hist->Scale(1.0 / cv_hist->Integral());
@@ -2234,7 +2260,7 @@ int main(int argc, char* argv[])
                     size_t sbi = config.GetSubchannelIndexFromVariableGlobalBin(bin,binning);
                     std::string nsubchannel = config.GetSubchannelName(sbi);
                     size_t local_channel_index = config.GetLocalChannelIndexFromGlobalSubchannelIndex(sbi);
-                    std::string chan_units = config.m_channel_variable_units[local_channel_index][binning];
+                    std::string chan_units = config.GetChannelXAxisTitle(local_channel_index, binning);
                     int edges_vec_sz = (int)config.m_variable_bin_to_edges[binning].size();
                     size_t safe_bin = (edges_vec_sz>0) ? std::min((size_t)bin, (size_t)edges_vec_sz-1) : 0;
                     std::pair<float,float> edg = config.m_variable_bin_to_edges[binning][safe_bin];

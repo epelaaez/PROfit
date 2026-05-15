@@ -359,10 +359,12 @@ namespace PROfit{
             std::vector<std::string> m_detector_names; 		
             std::vector<std::string> m_detector_plotnames; 		
 
-            std::vector<std::string> m_channel_names; 		
-            std::vector<std::string> m_channel_plotnames; 		
-            std::vector<std::string> m_channel_units; 		
+            std::vector<std::string> m_channel_names;
+            std::vector<std::string> m_channel_plotnames;
+            std::vector<std::string> m_channel_xaxis_labels;
+            std::vector<std::string> m_channel_units;
 
+            std::vector<std::vector<std::string>> m_channel_variable_xaxis_labels;
             std::vector<std::vector<std::string>> m_channel_variable_units;
             std::vector<std::vector<int>> m_channel_variable_dims;
 
@@ -515,6 +517,22 @@ namespace PROfit{
 
             /* Function: given channel index, return list of bin edges for this channel */
             const Binning& GetChannelVariableBins(size_t channel_index, size_t other_index) const;
+
+            /* Function: build the X-axis title for a channel as "label [unit]",
+             * omitting either part if empty. For 2D variables, the legacy
+             * combined "xtitle;ytitle" string in m_channel_variable_units is
+             * returned as-is.
+             */
+            std::string GetChannelXAxisTitle(size_t channel_index) const;
+            std::string GetChannelXAxisTitle(size_t channel_index, size_t other_index) const;
+
+            /* Function: return the unit string for a channel's variable
+             * (e.g. "MeV"), preferring the per-variable <bins unit="..."> entry
+             * and falling back to the channel-level <channel unit="..."> entry.
+             * Returns "" if neither is set, or for 2D variables (whose units
+             * field stores the legacy combined "xtitle;ytitle" string).
+             */
+            std::string GetChannelUnit(size_t channel_index, size_t other_index) const;
 
             /* Function: Hex to int*/
             int HexToROOTColor(const std::string& hexColor) const;
