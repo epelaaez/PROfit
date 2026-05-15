@@ -391,6 +391,15 @@ int main(int argc, char* argv[])
     //PROplot, plot things
     CLI::App *proplot_command = app.add_subcommand("plot", "Make plots of CV, or injected point with error bars and covariance.");
     proplot_command->add_flag("--with-splines", with_splines, "Include graphs of splines in output.");
+    std::string bkg_subtract_pattern = "";
+    proplot_command->add_option("--bkg-subtract", bkg_subtract_pattern,
+        "Wildcard (substring) matching one or more subchannel names; that "
+        "background's central-value prediction is subtracted from data, CV, "
+        "best-fit, and the error band points at plot time. The error band's "
+        "spread/covariance is unchanged (Var(X - constant) = Var(X)), so the "
+        "systematic uncertainty on the background continues to appear in the "
+        "band. Example: --bkg-subtract numu_bkg matches every "
+        "<detector>_numu_bkg subchannel.");
 
     //PROfc, Feldmand-Cousins
     CLI::App *profc_command = app.add_subcommand("fc", "Run Feldman-Cousins for this injected signal");
@@ -721,7 +730,7 @@ int main(int argc, char* argv[])
     std::vector<PROsyst> variable_systs;
     for(size_t i = 0; i < config.m_num_variables; ++i){
 
-        if(config.m_channel_variable_plot_bool.at(i)){ 
+        if(config.m_channel_variable_plot_bool.at(i) || i == config.i_prime){ 
             variable_systs.emplace_back(prop, config, systsstructs.at(i), shapeonly, i, model.get(), nullptr);
         }else{
             variable_systs.emplace_back();
@@ -1216,8 +1225,9 @@ int main(int argc, char* argv[])
 
         std::string hname = "#chi^{2}/nbins = " + to_string(fitres.chi2) + "/" + to_string(config.m_num_variable_bins_total_collapsed[config.i_prime]);
         PROspec bf = FillSpectra(config, prop, metric->GetSysts(), metric->GetModel(), fitres.fitter.best_fit, true,config.i_prime);
-        TH1D post_hist("ph", hname.c_str(), config.m_num_variable_bins_total_collapsed[config.i_prime], config.m_channel_variable_bins[config.i_prime][0].Edges().data());
-        TH1D pre_hist("prh", hname.c_str(), config.m_num_variable_bins_total_collapsed[config.i_prime], config.m_channel_variable_bins[config.i_prime][0].Edges().data());
+        // Concatenated bins across all channels share no common x-axis, so use bin-index axis.
+        TH1D post_hist("ph", hname.c_str(), config.m_num_variable_bins_total_collapsed[config.i_prime], 0, config.m_num_variable_bins_total_collapsed[config.i_prime]);
+        TH1D pre_hist("prh", hname.c_str(), config.m_num_variable_bins_total_collapsed[config.i_prime], 0, config.m_num_variable_bins_total_collapsed[config.i_prime]);
         for(size_t i = 0; i < config.m_num_variable_bins_total_collapsed[config.i_prime]; ++i) {
             post_hist.SetBinContent(i+1, bf.Spec()(i));
             pre_hist.SetBinContent(i+1, cv.Spec()(i));
@@ -1270,13 +1280,16 @@ int main(int argc, char* argv[])
         spline_cov.SetMinimum(-1);
 
         c.Print((final_output_tag+"_postfit_correlation_matrix_nuisance_only.pdf").c_str());
+
+        plot_mcmc_1sigma(final_output_tag+"_PROfile", config, metric->GetSysts(), metric->GetModel(), fitres.fitter.best_fit, fitres.post_param_lo, fitres.post_param_hi, !systs_only, fakedataparams);
+
         log<LOG_INFO>(L"%1% ||  Beginning full PROfile ") % __func__;
 
         if(progress_bar)scanFitConfig.progress_bar = true;
 
         std::vector<Eigen::VectorXf> seeds = fitres.fitter.freq_seed_points;//to be updated to v1.1.5 harmoincs [DONE]
         if(!seeds.size()) seeds.push_back(fitres.fitter.best_fit);
-        PROfile profile(config, metric->GetSysts(), metric->GetModel(), *metric, myseed, scanFitConfig, 
+        PROfile profile(config, metric->GetSysts(), metric->GetModel(), *metric, myseed, scanFitConfig,
                 final_output_tag+"_PROfile", fitres.chi2, !systs_only, nthread, seeds,
                 fakedataparams);
         log<LOG_INFO>(L"%1% || fakedataparams for Plot (true_params/red stars): %2%") % __func__ % fakedataparams;
@@ -1639,6 +1652,23 @@ int main(int argc, char* argv[])
         log<LOG_INFO>(L"%1% || Making a PROsyst thats full covariance for future error bar creation (might be slow) ")% __func__ ;
         PROsyst allcovsyst = variable_systs[config.i_prime].allsplines2cov(config, prop, *model, CVParams, dseed(PROseed::global_rng));
 
+        // --bkg-subtract: resolve the wildcard once. The same matched subchannel
+        // list is used for every variable in this block; bkg_full / bkg_collapsed
+        // are rebuilt per variable just before each plot_channels call. Empty
+        // bkg_subchannels short-circuits all subtraction below.
+        std::vector<size_t> bkg_subchannels;
+        if (!bkg_subtract_pattern.empty()) {
+            bkg_subchannels = find_subchannels_by_pattern(config, bkg_subtract_pattern);
+            if (bkg_subchannels.empty()) {
+                log<LOG_WARNING>(L"%1% || --bkg-subtract pattern '%2%' matched no subchannels; ignoring.")
+                    % __func__ % bkg_subtract_pattern.c_str();
+            } else {
+                log<LOG_INFO>(L"%1% || --bkg-subtract '%2%' matched %3% subchannel(s).")
+                    % __func__ % bkg_subtract_pattern.c_str() % bkg_subchannels.size();
+            }
+        }
+        const bool do_bkg_subtract = !bkg_subchannels.empty();
+
         PlotOptions opt = PlotOptions::CVasStack;
         std::vector<TPaveText> notext;
         if(binwidth_scale) opt |= PlotOptions::BinWidthScaled;
@@ -1647,7 +1677,18 @@ int main(int argc, char* argv[])
         for(size_t io = 0; io < config.m_num_variables; ++io) {
 
             variable_cvs.push_back(FillSpectra(config, prop, variable_systs[config.i_prime],*model,CVParams, !eventbyevent, io));
-            plot_channels(final_output_tag+"_PROplot_Variable_"+std::to_string(io)+"_CV.pdf", config, variable_cvs.back(), {}, {}, {}, {}, notext, pbounds, opt, io);
+
+            // Local subtracted copy for the CV plot. variable_cvs is preserved
+            // intact so downstream consumers (fractional-systematics breakdown,
+            // error-band plot at L2156) see the unsubtracted CV unless they
+            // also subtract.
+            PROspec cv_plot = variable_cvs.back();
+            if (do_bkg_subtract) {
+                Eigen::VectorXf bkg_full = build_subchannel_mask_spec(
+                    config, cv_plot, bkg_subchannels, io);
+                cv_plot.Spec() -= bkg_full;
+            }
+            plot_channels(final_output_tag+"_PROplot_Variable_"+std::to_string(io)+"_CV.pdf", config, cv_plot, {}, {}, {}, {}, notext, pbounds, opt, io);
         }
 
         std::string filename = final_output_tag+"_fractional_systematics.pdf";
@@ -1818,10 +1859,18 @@ int main(int argc, char* argv[])
                                         cv_total->SetFillColor(kWhite);
                                         cv_total->SetFillStyle(0);
                                         cv_total->SetTitle((config.m_mode_names[im] + " " + config.m_detector_names[id] + " " + config.m_channel_names[ic] + " DetVar (sec " + std::to_string(sec_idx) + ")").c_str());
-                                        if(binwidth_scale)
-                                            cv_total->GetYaxis()->SetTitle("Events/GeV");
-                                        else
-                                            cv_total->GetYaxis()->SetTitle("Events");
+                                        {
+                                            std::string chan_unit = config.GetChannelUnit(ic, config.i_prime);
+                                            std::string ytitle;
+                                            if(!binwidth_scale) {
+                                                ytitle = "Events";
+                                            } else if(chan_unit.empty()) {
+                                                ytitle = "Events/unit";
+                                            } else {
+                                                ytitle = "Events/" + chan_unit;
+                                            }
+                                            cv_total->GetYaxis()->SetTitle(ytitle.c_str());
+                                        }
 
                                         float ymax = cv_total->GetMaximum();
 
@@ -1946,8 +1995,18 @@ int main(int argc, char* argv[])
                                             cv_total_ov->SetMaximum(ymax_ov * 1.15);
                                             std::string ov_title = config.m_mode_names[im] + " " + config.m_detector_names[id] + " " + config.m_channel_names[ic] + " " + detvar_names[idv] + " (Matched)";
                                             cv_total_ov->SetTitle(ov_title.c_str());
-                                            if(binwidth_scale) cv_total_ov->GetYaxis()->SetTitle("Events/GeV");
-                                            else cv_total_ov->GetYaxis()->SetTitle("Events");
+                                            {
+                                                std::string chan_unit = config.GetChannelUnit(ic, config.i_prime);
+                                                std::string ytitle;
+                                                if(!binwidth_scale) {
+                                                    ytitle = "Events";
+                                                } else if(chan_unit.empty()) {
+                                                    ytitle = "Events/unit";
+                                                } else {
+                                                    ytitle = "Events/" + chan_unit;
+                                                }
+                                                cv_total_ov->GetYaxis()->SetTitle(ytitle.c_str());
+                                            }
 
                                             std::unique_ptr<TLegend> ov_leg = std::make_unique<TLegend>(0.55, 0.75, 0.89, 0.89);
                                             ov_leg->SetFillStyle(0);
@@ -2014,10 +2073,18 @@ int main(int argc, char* argv[])
                             }
                             ++global_subchannel_index;
                         }
-                        if(binwidth_scale )
-                            cv_hist->GetYaxis()->SetTitle("Events/GeV");
-                        else
-                            cv_hist->GetYaxis()->SetTitle("Events");
+                        {
+                            std::string chan_unit = config.GetChannelUnit(ic, config.i_prime);
+                            std::string ytitle;
+                            if(!binwidth_scale) {
+                                ytitle = "Events";
+                            } else if(chan_unit.empty()) {
+                                ytitle = "Events/unit";
+                            } else {
+                                ytitle = "Events/" + chan_unit;
+                            }
+                            cv_hist->GetYaxis()->SetTitle(ytitle.c_str());
+                        }
                         if(area_normalized) {
                             cv_hist->GetYaxis()->SetTitle("Area Normalized");
                             cv_hist->Scale(1.0 / cv_hist->Integral());
@@ -2176,8 +2243,33 @@ int main(int argc, char* argv[])
         for(size_t io = 0; io < config.m_num_variables; ++io) {
             if(!config.m_channel_variable_plot_bool.at(io)) continue; // For now skip the L/E 250 bin. 
             other_err_bands.push_back(getErrorBand(config, prop, variable_systs[io], *model, variable_cvs[io], CVParams, binwidth_scale, io));
-            plot_channels(final_output_tag+"_PROplot_Variable_"+std::to_string(io)+"_ErrorBand.pdf", config, variable_cvs[io], {}, variable_data[io], 
-                    other_err_bands.back(), {}, other_channel_chitexts[io], pbounds, opt | PlotOptions::DataMCRatio, io);
+
+            // --bkg-subtract: shift CV, data, and error band by the bkg CV.
+            // Var(X - const) = Var(X), so covariance / band width are unchanged;
+            // only the central positions slide. The bkg's systematic uncertainty
+            // remains embedded in `covariance` and therefore in error_up/down
+            // around the shifted point.
+            PROspec     cv_plot      = variable_cvs[io];
+            PROdata     data_plot    = variable_data[io];
+            PROerrorbar errband_plot = other_err_bands.back();
+            if (do_bkg_subtract) {
+                Eigen::VectorXf bkg_full      = build_subchannel_mask_spec(
+                    config, cv_plot, bkg_subchannels, io);
+                // Pass `io` explicitly: the 1-arg CollapseMatrix uses
+                // config.i_prime, which is wrong when this loop iterates over
+                // multiple plottable variables (io may differ from i_prime).
+                Eigen::VectorXf bkg_collapsed = CollapseMatrix(config, bkg_full, io);
+                cv_plot.Spec() -= bkg_full;
+                // PROdata holds a const spec; rebuild via the (spec, error) ctor.
+                data_plot = PROdata(Eigen::VectorXf(data_plot.Spec() - bkg_collapsed),
+                                    data_plot.Error());
+                errband_plot.error_point -= bkg_collapsed;
+                errband_plot.error_down  -= bkg_collapsed;
+                errband_plot.error_up    -= bkg_collapsed;
+                // errband_plot.covariance intentionally unchanged.
+            }
+            plot_channels(final_output_tag+"_PROplot_Variable_"+std::to_string(io)+"_ErrorBand.pdf", config, cv_plot, {}, data_plot,
+                    errband_plot, {}, other_channel_chitexts[io], pbounds, opt | PlotOptions::DataMCRatio, io);
         }
 
 
@@ -2204,7 +2296,7 @@ int main(int argc, char* argv[])
                     size_t sbi = config.GetSubchannelIndexFromVariableGlobalBin(bin,binning);
                     std::string nsubchannel = config.GetSubchannelName(sbi);
                     size_t local_channel_index = config.GetLocalChannelIndexFromGlobalSubchannelIndex(sbi);
-                    std::string chan_units = config.m_channel_variable_units[local_channel_index][binning];
+                    std::string chan_units = config.GetChannelXAxisTitle(local_channel_index, binning);
                     int edges_vec_sz = (int)config.m_variable_bin_to_edges[binning].size();
                     size_t safe_bin = (edges_vec_sz>0) ? std::min((size_t)bin, (size_t)edges_vec_sz-1) : 0;
                     std::pair<float,float> edg = config.m_variable_bin_to_edges[binning][safe_bin];
@@ -2552,8 +2644,9 @@ int main(int argc, char* argv[])
         std::string hname = "#chi^{2}/nbins = " + to_string(fitres.chi2) + "/" + to_string(config.m_num_variable_bins_total_collapsed[config.i_prime]);
         PROspec bf = FillSpectra(config, prop, metric->GetSysts(), metric->GetModel(), fitres.fitter.best_fit, true ,config.i_prime);
 
-        TH1D post_hist("ph", hname.c_str(), config.m_num_variable_bins_total_collapsed[config.i_prime], config.m_channel_variable_bins[config.i_prime][0].Edges().data());
-        TH1D pre_hist("prh", hname.c_str(), config.m_num_variable_bins_total_collapsed[config.i_prime], config.m_channel_variable_bins[config.i_prime][0].Edges().data());
+        // Concatenated bins across all channels share no common x-axis, so use bin-index axis.
+        TH1D post_hist("ph", hname.c_str(), config.m_num_variable_bins_total_collapsed[config.i_prime], 0, config.m_num_variable_bins_total_collapsed[config.i_prime]);
+        TH1D pre_hist("prh", hname.c_str(), config.m_num_variable_bins_total_collapsed[config.i_prime], 0, config.m_num_variable_bins_total_collapsed[config.i_prime]);
         for(size_t i = 0; i < config.m_num_variable_bins_total_collapsed[config.i_prime]; ++i) {
             post_hist.SetBinContent(i+1, bf.Spec()(i));
             pre_hist.SetBinContent(i+1, cv.Spec()(i));

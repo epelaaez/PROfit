@@ -45,7 +45,8 @@ namespace PROfit {
                 bool step() {
                     Eigen::VectorXf p = proposal(current);
                     float acceptance;
-                    acceptance = proposal.within_bound(p) ? std::min(1.0f, target(p)/target(current) * proposal.P(current, p)/proposal.P(p, current)) : 0;
+                    // Targets return log-density (e.g. -0.5*chi^2); subtract before exp to avoid float32 underflow when chi^2 is large.
+                    acceptance = proposal.within_bound(p) ? std::min(1.0f, std::exp(target(p) - target(current)) * proposal.P(current, p)/proposal.P(p, current)) : 0;
                     float u = uniform(rng);
 
                     if(u <= acceptance) {
@@ -192,9 +193,11 @@ namespace PROfit {
     struct simple_target {
         PROmetric &metric;
 
+        // Returns log-target (-0.5*chi^2). Metropolis::step does exp(target(p) - target(current))
+        // so the exp argument stays in safe float32 range even when chi^2 is large.
         float operator()(Eigen::VectorXf &value) {
             Eigen::VectorXf empty = value;
-            return std::exp(-0.5f*metric(value, empty, false));
+            return -0.5f*metric(value, empty, false);
         }
     };
 
@@ -203,7 +206,7 @@ namespace PROfit {
 
         float operator()(Eigen::VectorXf &value) {
             Eigen::VectorXf nuisance = value.segment(metric.GetModel().nparams, metric.GetSysts().GetNSplines());
-            return std::exp(-0.5f*metric.Pull(nuisance));
+            return -0.5f*metric.Pull(nuisance);
         }
     };
 
