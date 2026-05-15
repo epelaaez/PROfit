@@ -149,10 +149,11 @@ namespace PROfit {
             }
 
             else if(fit_preset == "sensitivity"){
+                
                 param.epsilon = 1e-5;
                 param.epsilon_rel = 1e-5;
-                param.max_iterations = 250;
-                param.max_linesearch = 30;
+                param.max_iterations = 100;
+                param.max_linesearch = 20;
                 param.delta = 1e-6;
                 param.wolfe = 0.90;
                 param.ftol = 1e-4;
