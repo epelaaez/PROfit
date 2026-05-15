@@ -1499,7 +1499,7 @@ namespace PROfit{
                         hsum->Reset();
                         std::vector<TH1F*> hvec;
                         int i = 0;
-			size_t channel_nbins_y = 1;// start with assumption of 1d
+                        size_t channel_nbins_y = 1;// start with assumption of 1d
                         size_t channel_nbins_x = config.m_channel_variable_bins[channel][other_index].NBinsAlong(0);
 
                         for(const auto & systname:vec){
@@ -1539,24 +1539,27 @@ namespace PROfit{
 
                             if(config.m_channel_variable_dims[channel][other_index] == 2)  channel_nbins_y = config.m_channel_variable_bins[channel][other_index].NBinsAlong(1);
 
-			    Eigen::VectorXf VarVec = Eigen::VectorXf::Zero(channel_nbins_x);
-			    Eigen::VectorXf diag1d = Eigen::VectorXf::Zero(channel_nbins_x);
-			    Eigen::MatrixXf channel_diag = collapsed_diag(channel_bins, channel_bins);
+                            Eigen::VectorXf VarVec = Eigen::VectorXf::Zero(channel_nbins_x);
+                            Eigen::VectorXf diag1d = Eigen::VectorXf::Zero(channel_nbins_x);
+                            Eigen::MatrixXf channel_diag = collapsed_diag(channel_bins, channel_bins);
 
                             for(int i = 0; i < (int)channel_nbins_x; i++){
-			        for(int j = (int)channel_nbins_y*i; j < (int)channel_nbins_y*(i+1); j++){
-				    diag1d(i) += channel_diag(j, j);
-			            for(int k = (int)channel_nbins_y*i; k < (int)channel_nbins_y*(i+1); k++){
-			                VarVec(i) += channel_cov(j, k);
-			            }
-			        }
-			    }
+                                for(int j = (int)channel_nbins_y*i; j < (int)channel_nbins_y*(i+1); j++){
+                                diag1d(i) += channel_diag(j, j);
+                                    for(int k = (int)channel_nbins_y*i; k < (int)channel_nbins_y*(i+1); k++){
+                                        VarVec(i) += channel_cov(j, k);
+                                    }
+                                }
+                            }
 
-			    float inv_diag1d;
+                            float inv_diag1d;
                             for (size_t i = 0; i < channel_nbins_x; ++i) {
-				inv_diag1d = 1/diag1d(i);
-                                h->SetBinContent(i+1, sqrt(inv_diag1d*VarVec(i)*inv_diag1d));
-                                hsum->SetBinContent(i+1, hsum->GetBinContent(i+1)+inv_diag1d*VarVec(i)*inv_diag1d);
+                                inv_diag1d = 1/diag1d(i);
+                                // clamp to >=0: covariance diagonals can be tiny-negative from float cancellation
+                                // in rat_frac_cov = Cov(d1,d1) + Cov(d2,d2) − Cov(d1,d2) − Cov(d2,d1)
+                                float var_i = std::max(0.0f, inv_diag1d*VarVec(i)*inv_diag1d);
+                                h->SetBinContent(i+1, sqrt(var_i));
+                                hsum->SetBinContent(i+1, hsum->GetBinContent(i+1)+var_i);
                             }
 
                             const std::string &plotname = config.m_mcgen_variation_plotname_map.at(systname);
@@ -1567,7 +1570,7 @@ namespace PROfit{
 
                         }//end syst
                         for (size_t i = 0; i < channel_nbins_x; ++i) {
-                            hsum->SetBinContent(i+1, sqrt(hsum->GetBinContent(i+1)));
+                            hsum->SetBinContent(i+1, sqrt(std::max(0.0, hsum->GetBinContent(i+1))));
                         }
                         leg->AddEntry(hsum,"Sum","l");
 
@@ -1898,13 +1901,15 @@ namespace PROfit{
                                     float inv_diag1d;
                                     for (size_t i = 0; i < channel_nbins_x; ++i) {
                                         inv_diag1d = 1/diag1d(i);
-                                        h->SetBinContent(i+1, sqrt(inv_diag1d*VarVec(i)*inv_diag1d));
-                                        hsum->SetBinContent(i+1, hsum->GetBinContent(i+1)+inv_diag1d*VarVec(i)*inv_diag1d);
+                                        float var_i = std::max(0.0f, inv_diag1d*VarVec(i)*inv_diag1d);
+                                        h->SetBinContent(i+1, sqrt(var_i));
+                                        hsum->SetBinContent(i+1, hsum->GetBinContent(i+1)+var_i);
                                     }
                                 } else {
                                     for(size_t i = 0; i < channel_bins.size(); ++i) {
-                                        h->SetBinContent(i+1, sqrt(rat_frac_cov(i,i)));
-                                        hsum->SetBinContent(i+1, hsum->GetBinContent(i+1)+rat_frac_cov(i,i));
+                                        float var_i = std::max(0.0f, rat_frac_cov(i,i));
+                                        h->SetBinContent(i+1, sqrt(var_i));
+                                        hsum->SetBinContent(i+1, hsum->GetBinContent(i+1)+var_i);
                                     }
                                 }
 
@@ -1916,7 +1921,7 @@ namespace PROfit{
 
                             }//end syst
                             for (size_t i = 0; i < channel_nbins_x; ++i) {
-                                hsum->SetBinContent(i+1, sqrt(hsum->GetBinContent(i+1)));
+                                hsum->SetBinContent(i+1, sqrt(std::max(0.0, hsum->GetBinContent(i+1))));
                             }
                             leg->AddEntry(hsum,"Sum","l");
 

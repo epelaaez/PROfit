@@ -204,6 +204,12 @@ namespace PROfit {
             /* Function: Fill splines assuming p_cv and p_multi_spec have been filled in the SystStruct*/
             void FillSpline(const SystStruct& syst, bool unmirrored);
 
+            /* Function: For a "covariance_to_spline" systematic, build the fractional covariance from the
+             * multi-universe spectra, eigendecompose it, and synthesize one linear spline per retained
+             * eigenpair. Knobs are named "<syst.systname>_decomp_knob_<i>" where i = 0 corresponds to the
+             * largest eigenvalue. If syst.num_decomp_knobs > 0, only the top N eigenpairs are kept. */
+            void FillSplinesFromCovariance(const SystStruct& syst);
+
             /* Function: Get weight for bin for a given shift using spline */
             float GetSplineShift(int syst_num, float shift, int bin) const;
             float GetSplineShift(std::string name, float shift, int bin) const;
