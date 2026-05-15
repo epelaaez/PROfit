@@ -23,6 +23,7 @@
 
 #include <Eigen/Eigen>
 
+#include <array>
 #include <cstdlib>
 #include <cmath>
 #include <functional>
@@ -1870,6 +1871,15 @@ class PRO3p1_decay_vis_model1 : public PROmodel {
         /// other than the destination (see get_counts).  Non-decay models don't build it.
         Eigen::MatrixXf N_truth;
 
+        /// Per-pair flat-grid index offsets mapping a parent bin in an osc subchannel
+        /// (rule 1/2/3) to the equivalent bin in its paired decay subchannel (rule
+        /// 4/5/6).  Indexed by `osc_rule - 1`: `decay_bin_offsets[0]` is the rule-1 -> 4
+        /// shift, `[1]` is rule-2 -> 5, `[2]` is rule-3 -> 6.  Each pair is allowed its
+        /// own shift, so the pair-ordering within the XML can differ between channels;
+        /// each individual pair must still be self-consistent across detectors (verified
+        /// at construction).  Computed from N_truth — no manual XML annotation needed.
+        std::array<long int, 3> decay_bin_offsets = {0, 0, 0};
+
         PRO3p1_decay_vis_model1(const PROpeller &prop, const std::map<std::string,int> &parameter_map) {
             // 3+1+decay to lower energy neutrinos
             // model 1 from https://journals.aps.org/prd/abstract/10.1103/PhysRevD.110.075002
@@ -1884,12 +1894,55 @@ class PRO3p1_decay_vis_model1 : public PROmodel {
             }
             ivars = {parameter_map.at("L"), parameter_map.at("E")};
 
-            prob_types = {0, 1, 2, 3};
+            // Rules 1/2/3 hold the same-bin (parent-bin) survival contribution for
+            // P_mumu / P_mue / P_ee.  Rules 4/5/6 hold the visible-decay contribution
+            // arriving at lower-E daughter bins from those same flavor channels.
+            prob_types = {0, 1, 2, 3, 4, 5, 6};
 
             model_constraint = [this](const Eigen::VectorXf &v){return this->UnitarityConstraint(v);};
 
             build_hists_and_combined(prop); // fills hists, H_combined, phys_grid_sizes
             N_truth = compute_N_truth(prop); // save N_truth, so it can be modified by flux-weighting in PROcess.cxx
+
+            // Detect per-pair flat-bin offsets between paired osc and decay subchannels from
+            // N_truth.  For each rule pair (osc r in {1,2,3}, decay r+3), the rule-(r+3)
+            // carriers live at a fixed shift from rule-r in the flat grid.  Each pair is
+            // allowed its own shift (so e.g. nue's osc-then-decay pair-order can differ
+            // from numu's); within a pair, the shift must be self-consistent across
+            // detectors — verified by checking that every non-zero rule-osc bin has a
+            // matching non-zero rule-decay bin at the detected shift.
+            auto first_nonzero_row = [](const Eigen::MatrixXf &M, int col) -> long int {
+                for(long int i = 0; i < M.rows(); ++i) if(M(i, col) > 0.0f) return i;
+                return -1;
+            };
+            for(int osc_r = 1; osc_r <= 3; ++osc_r) {
+                const int decay_r = osc_r + 3;
+                long int o = first_nonzero_row(N_truth, osc_r);
+                long int d = first_nonzero_row(N_truth, decay_r);
+                if(o < 0 || d < 0) {
+                    log<LOG_ERROR>(L"%1% || PRO3p1_decay_vis_model1: rule %2% or %3% has no MC carriers in N_truth — "
+                                   L"the XML must duplicate every rule-1/2/3 branch with a paired rule-4/5/6 branch.")
+                        % __func__ % osc_r % decay_r;
+                    exit(EXIT_FAILURE);
+                }
+                const long int shift = d - o;
+                // Verify the shift is self-consistent: every non-zero rule-osc bin must map
+                // to a non-zero rule-decay bin at the same offset.  Catches XML layouts that
+                // pair osc/decay subchannels inconsistently across detectors.
+                for(long int i = 0; i < N_truth.rows(); ++i) {
+                    if(N_truth(i, osc_r) <= 0.0f) continue;
+                    const long int j = i + shift;
+                    if(j < 0 || j >= N_truth.rows() || N_truth(j, decay_r) <= 0.0f) {
+                        log<LOG_ERROR>(L"%1% || PRO3p1_decay_vis_model1: rule %2%->%3% offset %4% is not "
+                                       L"self-consistent (bin %5% has rule-%2% events but bin %6% has no "
+                                       L"rule-%3% events). Each osc subchannel must be paired immediately "
+                                       L"with its decay partner using identical truth binning, in every detector.")
+                            % __func__ % osc_r % decay_r % shift % i % j;
+                        exit(EXIT_FAILURE);
+                    }
+                }
+                decay_bin_offsets[osc_r - 1] = shift;
+            }
 
             nparams = 4;
             param_names = {"dmsq", "Ue4^2", "Um4^2", "g_phi"};
@@ -1980,7 +2033,11 @@ class PRO3p1_decay_vis_model1 : public PROmodel {
             const float mix_mue  = Um4sq * Ue4sq * Us4sq / sum_active;
             const float mix_ee   = Ue4sq * Ue4sq * Us4sq / sum_active;
 
-            Eigen::MatrixXf counts = Eigen::MatrixXf::Zero(n_flat, 4);
+            // Column 0 holds the no-oscillation-no-decay prediction.
+            // Columns 1..3 hold the same-bin (parent-bin) oscillation contribution.
+            // Columns 4..6 hold the visible-decay daughter contribution for the
+            // P_mumu / P_mue / P_ee channels respectively, populated at lower-E bins.
+            Eigen::MatrixXf counts = Eigen::MatrixXf::Zero(n_flat, 7);
 
             // looping over flattened (L, E) bins — flat_par is the parent neutrino index
             for(size_t flat_par = 0; flat_par < n_flat; ++flat_par) {
@@ -2013,14 +2070,23 @@ class PRO3p1_decay_vis_model1 : public PROmodel {
 
                 size_t l_idx     = flat_par / n_E;
                 size_t e_par_idx = flat_par % n_E;
-                // looping over lower-E daughter bins at the same L
+                // looping over lower-E daughter bins at the same L.  flat_dst lives in the
+                // OSC subchannel's bin range (same as the parent); we shift it by the
+                // per-pair offset when writing to cols 4/5/6 so each decay daughter lands at
+                // its paired decay subchannel's bin, where the rule-4/5/6 carrier events
+                // actually live.  Out-of-range writes (from cross-subchannel iterations) are
+                // filtered: at those positions, N_truth for the decay rule is zero and
+                // probs = counts/N_truth clamps to zero.
                 for(size_t e_dst_idx = 0; e_dst_idx < e_par_idx; ++e_dst_idx) {
                     size_t flat_dst = l_idx * n_E + e_dst_idx;
                     float E_dst = E_arr[flat_dst];
                     float s_dec = 2.0f * E_dst / (E_par * E_par);        // dP/dE_d, 1/GeV
-                    counts(flat_dst, 1) += kernel_base_mumu * s_dec;
-                    counts(flat_dst, 2) += kernel_base_mue  * s_dec;
-                    counts(flat_dst, 3) += kernel_base_ee   * s_dec;
+                    const long int dst_mumu = (long int)flat_dst + decay_bin_offsets[0];
+                    const long int dst_mue  = (long int)flat_dst + decay_bin_offsets[1];
+                    const long int dst_ee   = (long int)flat_dst + decay_bin_offsets[2];
+                    if(dst_mumu >= 0 && dst_mumu < (long int)n_flat) counts(dst_mumu, 4) += kernel_base_mumu * s_dec;
+                    if(dst_mue  >= 0 && dst_mue  < (long int)n_flat) counts(dst_mue,  5) += kernel_base_mue  * s_dec;
+                    if(dst_ee   >= 0 && dst_ee   < (long int)n_flat) counts(dst_ee,   6) += kernel_base_ee   * s_dec;
                 }
             }
             return counts;
