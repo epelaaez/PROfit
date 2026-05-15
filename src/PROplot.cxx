@@ -36,6 +36,39 @@ namespace PROfit{
         gStyle->SetNumberContours(NCont);
     }
 
+    std::vector<size_t> find_subchannels_by_pattern(const PROconfig &config,
+                                                    const std::string &pattern) {
+        std::vector<size_t> matched;
+        if (pattern.empty()) return matched;
+        // Substring match, matching PROsyst's wildcard convention used in
+        // CreateFlatMatrix (src/PROsyst.cxx ~L397). m_fullnames is the canonical
+        // list of "<mode>_<detector>_<channel>_<subchannel>" names indexed by
+        // global subchannel index.
+        for (size_t i = 0; i < config.m_fullnames.size(); ++i) {
+            if (config.m_fullnames[i].find(pattern) != std::string::npos) {
+                matched.push_back(i);
+            }
+        }
+        return matched;
+    }
+
+    Eigen::VectorXf build_subchannel_mask_spec(const PROconfig &config,
+                                               const PROspec &spec,
+                                               const std::vector<size_t> &matched_subchannel_indices,
+                                               int var_index) {
+        Eigen::VectorXf mask = Eigen::VectorXf::Zero(spec.Spec().size());
+        for (size_t isub : matched_subchannel_indices) {
+            const size_t ic    = config.GetLocalChannelIndexFromGlobalSubchannelIndex(isub);
+            const size_t start = config.GetGlobalVariableBinStart(isub, var_index);
+            const size_t nbins = config.m_channel_variable_bins[ic][var_index].NBins();
+            for (size_t b = 0; b < nbins; ++b) {
+                const Eigen::Index idx = static_cast<Eigen::Index>(start + b);
+                mask(idx) = spec.Spec()(idx);
+            }
+        }
+        return mask;
+    }
+
     std::map<std::string, std::unique_ptr<TH1D>> getCV1DHists(const PROspec &spec, const PROconfig& inconfig, bool scale, int other_index) {
         std::map<std::string, std::unique_ptr<TH1D>> hists;  
 
