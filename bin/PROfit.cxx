@@ -241,7 +241,7 @@ static void logLowPredictionBins(const PROconfig &config, const Eigen::VectorXf 
 
 int main(int argc, char* argv[])
 {
-    auto start_time = std::chronohigh_resolution_clock::now();
+    auto start_time = std::chrono::high_resolution_clock::now();
 
     gStyle->SetOptStat(0);
     CLI::App app{"PROfit: a PROfessional, PROductive fitting and oscillation framework. Together let's minimize PROfit!"}; 
