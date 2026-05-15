@@ -359,10 +359,12 @@ namespace PROfit{
             std::vector<std::string> m_detector_names; 		
             std::vector<std::string> m_detector_plotnames; 		
 
-            std::vector<std::string> m_channel_names; 		
-            std::vector<std::string> m_channel_plotnames; 		
-            std::vector<std::string> m_channel_units; 		
+            std::vector<std::string> m_channel_names;
+            std::vector<std::string> m_channel_plotnames;
+            std::vector<std::string> m_channel_xaxis_labels;
+            std::vector<std::string> m_channel_units;
 
+            std::vector<std::vector<std::string>> m_channel_variable_xaxis_labels;
             std::vector<std::vector<std::string>> m_channel_variable_units;
             std::vector<std::vector<int>> m_channel_variable_dims;
 
@@ -380,7 +382,10 @@ namespace PROfit{
 
             std::vector<std::vector<std::pair<float,float>>> m_variable_bin_to_edges;
 
-            std::vector<Eigen::MatrixXf> variable_collapsing_matrices; 
+            std::vector<Eigen::MatrixXf> variable_collapsing_matrices;
+            // Sparse companions to variable_collapsing_matrices (one nonzero per row).
+            // Used by CollapseMatrix in the chi^2 inner loop; built once in construct_variable_collapsing_matrices.
+            std::vector<Eigen::SparseMatrix<float>> variable_collapsing_matrices_sparse;
             std::vector<Eigen::VectorXf> collapsed_bin_widths;
 
             //This section entirely for montecarlo generation of a covariance matrix or PROspec 
@@ -388,6 +393,7 @@ namespace PROfit{
             bool m_form_covariance;
             std::string m_write_out_tag;
             int m_num_variation_type_covariance = 0;
+            int m_num_variation_type_covariance_to_spline = 0;
             int m_num_variation_type_external_covariance = 0;
             int m_num_variation_type_spline = 0;
             int m_num_variation_type_spline_to_covariance = 0;
@@ -422,6 +428,7 @@ namespace PROfit{
             std::vector<std::string> m_mcgen_variation_allowlist;
             std::vector<std::string> m_mcgen_variation_denylist;
             std::vector<std::string> m_mcgen_variation_type;
+            std::set<std::string> m_mcgen_variation_unmirrored;
             std::map<std::string, std::string> m_mcgen_variation_external_filename_map;
             std::map<std::string, std::array<int, 2>> m_mcgen_variation_histaxisvars_map;
             std::map<std::string, TH1*> m_mcgen_variation_hist1d_map;
@@ -437,7 +444,9 @@ namespace PROfit{
             std::map<std::string, float> m_mcgen_variation_prior_centers;
             std::map<std::string, bool> m_mcgen_variation_force_0_cv; //map of systematics with force_0_cv=true (normalize shifts by shift at knob=0)
             std::map<std::string, std::vector<int>> m_mcgen_variation_include_only_weights; //map of systematics with include_only_weights (1-based indices of which weights to include in spline universes)
+            std::map<std::string, std::pair<float,float>> m_mcgen_variation_restrict; //map of systematics with restrict="lo, hi" (clamp knob value during evaluation and fitting)
             std::map<std::string, float> m_mcgen_variation_scale; //map of systematics with scale factor to apply to weights (e.g., 0.001 for weights stored as x1000)
+            std::map<std::string, int> m_mcgen_variation_num_decomp_knobs; //map of covariance_to_spline systematics to the number of eigenpairs to keep (-1 or missing = keep all)
       
             //FIX skepic
             std::vector<std::string> systematic_name;
@@ -459,10 +468,14 @@ namespace PROfit{
              * Note: To collapse a full matrix M, please do T.transpose() * M * T
              * 	     To collapse a full vector V, please do T.transpose() * V
              */
-            inline 
-                Eigen::MatrixXf GetCollapsingMatrix() const {return variable_collapsing_matrices[i_prime]; }
             inline
-                Eigen::MatrixXf GetCollapsingMatrix(int other_index) const {return variable_collapsing_matrices[other_index]; }
+                const Eigen::MatrixXf& GetCollapsingMatrix() const {return variable_collapsing_matrices[i_prime]; }
+            inline
+                const Eigen::MatrixXf& GetCollapsingMatrix(int other_index) const {return variable_collapsing_matrices[other_index]; }
+            inline
+                const Eigen::SparseMatrix<float>& GetCollapsingMatrixSparse() const {return variable_collapsing_matrices_sparse[i_prime]; }
+            inline
+                const Eigen::SparseMatrix<float>& GetCollapsingMatrixSparse(int other_index) const {return variable_collapsing_matrices_sparse[other_index]; }
 
             /* Function: Calculate how big each mode block and decector block are, for any given number of channels/subchannels, before and after the collapse
              * Note: only consider mode/detector/channel/subchannels that are actually used 
@@ -505,6 +518,22 @@ namespace PROfit{
             /* Function: given channel index, return list of bin edges for this channel */
             const Binning& GetChannelVariableBins(size_t channel_index, size_t other_index) const;
 
+            /* Function: build the X-axis title for a channel as "label [unit]",
+             * omitting either part if empty. For 2D variables, the legacy
+             * combined "xtitle;ytitle" string in m_channel_variable_units is
+             * returned as-is.
+             */
+            std::string GetChannelXAxisTitle(size_t channel_index) const;
+            std::string GetChannelXAxisTitle(size_t channel_index, size_t other_index) const;
+
+            /* Function: return the unit string for a channel's variable
+             * (e.g. "MeV"), preferring the per-variable <bins unit="..."> entry
+             * and falling back to the channel-level <channel unit="..."> entry.
+             * Returns "" if neither is set, or for 2D variables (whose units
+             * field stores the legacy combined "xtitle;ytitle" string).
+             */
+            std::string GetChannelUnit(size_t channel_index, size_t other_index) const;
+
             /* Function: Hex to int*/
             int HexToROOTColor(const std::string& hexColor) const;
 
@@ -528,11 +557,13 @@ namespace PROfit{
             //---- Detector Variation (DetVar) support ----
             struct DetVarFile {
                 std::string filename;
+                std::string treename;
                 std::string name;  // "cv" / "cv_N" or variation name like "Recomb2"
                 float pot;
                 float partial_load_frac = 1.0f;
                 bool is_cv;
                 size_t section_index;  // which DetVarSection this file belongs to
+                int knobval = 0;
             };
 
             bool m_has_detvar_section = false;

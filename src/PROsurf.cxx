@@ -234,8 +234,9 @@ std::vector<profOut> PROfile::PROfilePointHelper(const PROsyst *systs, const PRO
         }
         //upper lower bounds for splines
         for(int j = nphys; j < nparams; ++j) {
-            lb(j) = systs->spline_lo[j-nphys];
-            ub(j) = systs->spline_hi[j-nphys];
+            size_t si = j - nphys;
+            lb(j) = systs->spline_has_restrict[si] ? systs->spline_restrict_lo[si] : systs->spline_lo[si];
+            ub(j) = systs->spline_has_restrict[si] ? systs->spline_restrict_hi[si] : systs->spline_hi[si];
         }
     } else {
         // Syst-only mode: create full-size bounds but fix physics params at seed values
@@ -250,8 +251,9 @@ std::vector<profOut> PROfile::PROfilePointHelper(const PROsyst *systs, const PRO
         }
         // Spline bounds as normal
         for(int j = nphys; j < nparams; ++j) {
-            lb(j) = systs->spline_lo[j-nphys];
-            ub(j) = systs->spline_hi[j-nphys];
+            size_t si = j - nphys;
+            lb(j) = systs->spline_has_restrict[si] ? systs->spline_restrict_lo[si] : systs->spline_lo[si];
+            ub(j) = systs->spline_has_restrict[si] ? systs->spline_restrict_hi[si] : systs->spline_hi[si];
         }
     }
 
@@ -498,7 +500,7 @@ std::vector<profOut> PROfile::PROfilePointHelper(const PROsyst *systs, const PRO
 
 
 
-std::vector<surfOut> PROsurf::PointHelper(const PROfitterConfig &fitconfig, std::vector<surfOut> multi_physics_params, std::atomic<int> *point_counter, uint32_t seed, MultiPROgressBar* progressbar){
+std::vector<surfOut> PROsurf::PointHelper(const PROfitterConfig &fitconfig, std::vector<surfOut> multi_physics_params, std::atomic<int> *point_counter, uint32_t seed, const Eigen::VectorXf &seed_pt, MultiPROgressBar* progressbar){
 
     std::vector<surfOut> outs;
     const int total = (int)multi_physics_params.size();
@@ -544,11 +546,15 @@ std::vector<surfOut> PROsurf::PointHelper(const PROfitterConfig &fitconfig, std:
         local_metric->setBounds(lb,ub);
 
         PROfitter fitter(ub, lb, fitconfig, seed+(uint32_t)i);
-        // Warm-start from the most recent fit on this thread when available.
-        // With dynamic dispatch the previous fit may not be a grid neighbour, but
-        // it's still inside the explored region and is a useful seed.
+        // Warm-start: on this thread's first pulled point, seed from the global
+        // best-fit (seed_pt) when available; on subsequent points fall back to
+        // the most-recent fit's best_fit. With dynamic dispatch the previous
+        // fit may not be a grid neighbour, but it is still inside the explored
+        // region and is a useful seed.
         if(!outs.empty()){
             output.chi = fitter.Fit(*local_metric, outs.back().best_fit);
+        }else if(seed_pt.size() > 0){
+            output.chi = fitter.Fit(*local_metric, seed_pt);
         }else{
             output.chi = fitter.Fit(*local_metric);
         }
@@ -563,7 +569,7 @@ std::vector<surfOut> PROsurf::PointHelper(const PROfitterConfig &fitconfig, std:
 }
 
 
-void PROsurf::FillSurface(const PROfitterConfig &fitconfig, std::string filename, PROseed &proseed, int nThreads) {
+void PROsurf::FillSurface(const PROfitterConfig &fitconfig, std::string filename, PROseed &proseed, float min_chi, const Eigen::VectorXf &seed_pt, int nThreads) {
     std::ofstream chi_file;
     if(!filename.empty()){
         chi_file.open(filename);
@@ -604,7 +610,7 @@ void PROsurf::FillSurface(const PROfitterConfig &fitconfig, std::string filename
 
     for (int t = 0; t < nThreads; ++t) {
         futures.emplace_back(std::async(std::launch::async, [&, t]() {
-                    return this->PointHelper(fitconfig, grid, &point_counter, proseed.getThreadSeeds()->at(t), surf_pb_ptr);
+                    return this->PointHelper(fitconfig, grid, &point_counter, proseed.getThreadSeeds()->at(t), seed_pt, surf_pb_ptr);
                     }));
     }
 
@@ -626,9 +632,15 @@ void PROsurf::FillSurface(const PROfitterConfig &fitconfig, std::string filename
         for(size_t i = 0; i < metric.GetModel().nparams + metric.GetSysts().GetNSplines(); ++i)
             chi_file << " p" << i;
     }
-    float min_chi = 1e9;
+    float orig_chi = min_chi;
     for(const auto &item: combinedResults) {
-        if(item.chi < min_chi) min_chi = item.chi;
+        if(item.chi < orig_chi) {
+            log<LOG_WARNING>(L"%1% || Found a point in the surface, index (%2%, %3%) with value (%4%, %5%), with chi^2 %6% which is lower than the minimum chi^2 passed into the function %7%. We will use this new value or the lowest other value in the surface instead of the min_chi passed in.") 
+                % __func__ % item.grid_index[0] % item.grid_index[1] % item.grid_val[0] % item.grid_val[1] % item.chi % orig_chi;
+        }
+        if(item.chi < min_chi) {
+            min_chi = item.chi;
+        }
     }
     for (const auto& item : combinedResults) {
         log<LOG_INFO>(L"%1% || Finished  : %2% %3% %4%") % __func__ % item.grid_val[1] % item.grid_val[0] % (item.chi - min_chi);
@@ -644,7 +656,7 @@ void PROsurf::FillSurface(const PROfitterConfig &fitconfig, std::string filename
 
 
 
-std::vector<surfOut> PROsurf::FillCurve(const PROfitterConfig &fitconfig, PROseed &proseed, int nThreads, std::vector<float> &A, std::vector<float> &B, size_t n_points) {
+std::vector<surfOut> PROsurf::FillCurve(const PROfitterConfig &fitconfig, PROseed &proseed, float min_chi, const Eigen::VectorXf &seed_pt, int nThreads, std::vector<float> &A, std::vector<float> &B, size_t n_points) {
 
 
     std::vector<surfOut> grid;
@@ -682,7 +694,7 @@ std::vector<surfOut> PROsurf::FillCurve(const PROfitterConfig &fitconfig, PROsee
 
     for (int t = 0; t < nThreads; ++t) {
         futures.emplace_back(std::async(std::launch::async, [&, t]() {
-                    return this->PointHelper(fitconfig, grid, &point_counter, proseed.getThreadSeeds()->at(t), curve_pb_ptr);
+                    return this->PointHelper(fitconfig, grid, &point_counter, proseed.getThreadSeeds()->at(t), seed_pt, curve_pb_ptr);
                     }));
     }
 
@@ -693,10 +705,23 @@ std::vector<surfOut> PROsurf::FillCurve(const PROfitterConfig &fitconfig, PROsee
     }
     if (fitconfig.progress_bar) curve_progress.finish_all();
 
+    float orig_chi = min_chi;
+    for(const auto &item: combinedResults) {
+        if(item.chi < orig_chi) {
+            log<LOG_WARNING>(L"%1% || Found a point in the surface, index (%2%, %3%) with value (%4%, %5%), with chi^2 %6% which is lower than the minimum chi^2 passed into the function %7%. We will use this new value or the lowest other value in the surface instead of the min_chi passed in.") 
+                % __func__ % item.grid_index[0] % item.grid_index[1] % item.grid_val[0] % item.grid_val[1] % item.chi % orig_chi;
+        }
+        if(item.chi < min_chi) {
+            min_chi = item.chi;
+        }
+    }
+
+    for (auto& item : combinedResults) {
+        log<LOG_INFO>(L"%1% || Finished  : %2% %3% %4%") % __func__ % item.grid_val[1] % item.grid_val[0] % (item.chi - min_chi);
+        item.chi -= min_chi;
+    }
+
     return combinedResults;
-
-
-
 }
 
 
@@ -1426,7 +1451,7 @@ PROfile::PROfile(const PROconfig &config, const PROsyst &systs, const PROmodel &
 
 }
 
-void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel &model, [[maybe_unused]] PROmetric &metric, [[maybe_unused]] PROseed &proseed, std::string filename, bool with_osc, const Eigen::VectorXf& init_seed, const Eigen::VectorXf & true_params, bool mask_osc) {
+void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel &model, [[maybe_unused]] PROmetric &metric, [[maybe_unused]] PROseed &proseed, std::string filename, bool with_osc, const Eigen::VectorXf& init_seed, const Eigen::VectorXf & true_params, const Eigen::MatrixXf& spline_covariance, const Eigen::VectorXf& param_err_lo, const Eigen::VectorXf& param_err_hi, bool mask_osc) {
 
     int nparams = systs.GetNSplines() + model.nparams*with_osc;
     int nBins = nparams;
@@ -1700,11 +1725,25 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
     prior_band->SetLineWidth(1);
     prior_band->Draw("same");
 
-    // Post-fit ±1σ bars: blue; half-width shrinks for many bins
+    // Post-fit ±1σ bars (blue): centered on the global best-fit, width from MCMC
+    // 16th/84th percentile quantiles.  For oscillation physics parameters (no entry
+    // in param_err_lo/hi), fall back to the profile interval.
     TGraphAsymmErrors todraw = onesig;
     for(int i = 0; i < nBins; ++i) {
-        todraw.SetPointError(i, bar_halfwidth, bar_halfwidth,
-                             todraw.GetErrorYlow(i), todraw.GetErrorYhigh(i));
+        int vec_idx = with_osc ? i : (i + (int)model.nparams);
+        float center = (vec_idx < (int)init_seed.size()) ? (float)init_seed[vec_idx] : bfvalues[i];
+        int syst_idx = with_osc ? (i - (int)model.nparams) : i;
+        bool is_syst = !with_osc || (i >= (int)model.nparams);
+        float err_lo, err_hi;
+        if(is_syst && syst_idx >= 0 && syst_idx < param_err_lo.size() && syst_idx < param_err_hi.size()) {
+            err_lo = param_err_lo(syst_idx);
+            err_hi = param_err_hi(syst_idx);
+        } else {
+            err_lo = todraw.GetErrorYlow(i);
+            err_hi = todraw.GetErrorYhigh(i);
+        }
+        todraw.SetPoint(i, todraw.GetPointX(i), center);
+        todraw.SetPointError(i, bar_halfwidth, bar_halfwidth, err_lo, err_hi);
     }
     if(mask_osc) {
         for(size_t i = 0; i < model.nparams; ++i) {
@@ -1824,7 +1863,7 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
     leg->SetBorderSize(1);
     leg->SetTextSize(std::max(0.022f, std::min(0.030f, axis_label_size * 0.85f)));
     leg->AddEntry(prior_band,   "Pre-fit #pm1#sigma (prior)", "f");
-    leg->AddEntry(&todraw,      "Post-fit #pm1#sigma",        "f");
+    leg->AddEntry(&todraw,      "Post-fit #pm1#sigma (MCMC)", "f");
     leg->AddEntry(&profile_pts, "Profile scan #pm1#sigma", "pe");
     TGraph *leg_global = new TGraph(1);
     leg_global->SetPoint(0, 0, 0);

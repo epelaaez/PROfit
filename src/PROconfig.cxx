@@ -14,8 +14,49 @@
 #include "TFriendElement.h"
 using namespace PROfit;
 
+namespace {
+    // Trim trailing whitespace from a string (in place).
+    void RTrim(std::string &s) {
+        while(!s.empty() && std::isspace(static_cast<unsigned char>(s.back()))) s.pop_back();
+    }
 
-PROconfig::PROconfig(const std::string &xml, bool rate_only): 
+    // Resolve the (label, unit) pair from the optional `xaxislabel` and `unit`
+    // XML attributes. New form: both attributes are passed through. Legacy
+    // form (only `unit` set): if it ends with a trailing "[...]", split into
+    // label = everything before the bracket, unit = bracket contents;
+    // otherwise label = the whole string, unit = "".
+    void ResolveAxisLabelAndUnit(const char* xaxislabel_attr, const char* unit_attr,
+                                 std::string &label_out, std::string &unit_out) {
+        if(xaxislabel_attr != nullptr) {
+            label_out = xaxislabel_attr;
+            unit_out = unit_attr ? unit_attr : "";
+            return;
+        }
+        if(unit_attr == nullptr) {
+            label_out = "";
+            unit_out = "";
+            return;
+        }
+        std::string s(unit_attr);
+        std::string trimmed = s;
+        RTrim(trimmed);
+        if(!trimmed.empty() && trimmed.back() == ']') {
+            auto open = trimmed.rfind('[');
+            if(open != std::string::npos) {
+                std::string label = trimmed.substr(0, open);
+                RTrim(label);
+                unit_out = trimmed.substr(open + 1, trimmed.size() - open - 2);
+                label_out = label;
+                return;
+            }
+        }
+        label_out = s;
+        unit_out = "";
+    }
+}
+
+
+PROconfig::PROconfig(const std::string &xml, bool rate_only):
     m_xmlname(xml), 
     m_det_pot(),
     m_num_detectors(0),
@@ -65,6 +106,11 @@ bool PROconfig::SameChannels(const PROconfig &one, const PROconfig &two) {
         if(one.m_detector_names[i] != two.m_detector_names[i]) {
             log<LOG_WARNING>(L"%1% || Found different detector names %2% vs %3%")
                 % __func__ % one.m_detector_names[i].c_str() % two.m_detector_names[i].c_str();
+            return false;
+        }
+        if(one.m_det_pot[i] != two.m_det_pot[i]) {
+            log<LOG_WARNING>(L"%1% || Found different POTs for detector %2%, %3% vs %4%")
+                % __func__ % one.m_detector_names[i].c_str() % one.m_det_pot[i] % two.m_det_pot[i];
             return false;
         }
     }
@@ -276,7 +322,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
         exit(EXIT_FAILURE);
     }else{
 
-        std::vector<std::string> expected_attrs = {"name","plotname","use","unit"};
+        std::vector<std::string> expected_attrs = {"name","plotname","use","unit","xaxislabel"};
         for (const tinyxml2::XMLAttribute* attr = pChan->FirstAttribute(); attr; attr = attr->Next()) {
             std::string name = attr->Name();
             if (std::find(expected_attrs.begin(), expected_attrs.end(), name) == expected_attrs.end()) {
@@ -315,16 +361,19 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 m_channel_bool.push_back(false);
 
 
+            const char* channel_xaxislabel = pChan->Attribute("xaxislabel");
             const char* channel_unit= pChan->Attribute("unit");
-            if(channel_unit==NULL){
-                m_channel_units.push_back("");
-            }else{
-                m_channel_units.push_back(channel_unit);
+            {
+                std::string label, unit;
+                ResolveAxisLabelAndUnit(channel_xaxislabel, channel_unit, label, unit);
+                m_channel_xaxis_labels.push_back(label);
+                m_channel_units.push_back(unit);
             }
 
             log<LOG_DEBUG>(L"%1% || Loading Channel %2% with   ") % __func__ % m_channel_names.back().c_str() ;
 
             m_channel_variable_bins.push_back({});
+            m_channel_variable_xaxis_labels.push_back({});
             m_channel_variable_units.push_back({});
             m_channel_variable_dims.push_back({});
 
@@ -348,6 +397,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                         (omin_y == NULL && omax_y == NULL && onbins_y == NULL && oedges_y == NULL)) {
                     log<LOG_DEBUG>(L"%1% || This variable has a NO other binning (or attribute min,max,nbins)  ") % __func__ ;
                     m_channel_variable_bins.back().push_back(PROconfig::Binning());
+                    m_channel_variable_xaxis_labels.back().push_back("");
                     m_channel_variable_units.back().push_back("");
                     m_channel_variable_dims.back().push_back(2);
                     m_channel_variable_plot_bool.push_back(true);
@@ -405,6 +455,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                     }
 
                     m_channel_variable_bins.back().push_back(PROconfig::Binning(std::vector<std::vector<float>>({binedge_x, binedge_y})));
+                    m_channel_variable_xaxis_labels.back().push_back("");
                     m_channel_variable_units.back().push_back(ounits ? ounits : "");
                     m_channel_variable_dims.back().push_back(2);
                 }
@@ -414,7 +465,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
             tinyxml2::XMLElement *pBinO = pChan->FirstChildElement("bins"); // 1D Bins
             while(pBinO){
-                expected_attrs = {"min","max","nbins","edges","unit","plot"};
+                expected_attrs = {"min","max","nbins","edges","unit","xaxislabel","plot"};
                 for (const tinyxml2::XMLAttribute* attr = pBinO->FirstAttribute(); attr; attr = attr->Next()) {
                     std::string name = attr->Name();
                     if (std::find(expected_attrs.begin(), expected_attrs.end(), name) == expected_attrs.end()) {
@@ -429,10 +480,12 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 const char* onbins = pBinO->Attribute("nbins");
                 const char* oedges = pBinO->Attribute("edges");
                 const char* ounits = pBinO->Attribute("unit");
+                const char* oxaxislabel = pBinO->Attribute("xaxislabel");
                 const char* oplot = pBinO->Attribute("plot");
                 if(omin==NULL && omax==NULL && onbins==NULL && oedges == NULL) {
                     log<LOG_DEBUG>(L"%1% || This variable has a NO other binning (or attribute min,max,nbins)  ") % __func__ ;
                     m_channel_variable_bins.back().push_back(PROconfig::Binning());
+                    m_channel_variable_xaxis_labels.back().push_back("");
                     m_channel_variable_units.back().push_back("");
                     m_channel_variable_dims.back().push_back(1);
                     m_channel_variable_plot_bool.push_back(true);
@@ -469,7 +522,12 @@ int PROconfig::LoadFromXML(const std::string &filename){
                     }
 
                     m_channel_variable_bins.back().push_back({binedge});
-                    m_channel_variable_units.back().push_back(ounits ? ounits : "");
+                    {
+                        std::string label, unit;
+                        ResolveAxisLabelAndUnit(oxaxislabel, ounits, label, unit);
+                        m_channel_variable_xaxis_labels.back().push_back(label);
+                        m_channel_variable_units.back().push_back(unit);
+                    }
                     m_channel_variable_dims.back().push_back(1);
                 }
                 pBinO = pBinO->NextSiblingElement("bins");
@@ -920,10 +978,9 @@ int PROconfig::LoadFromXML(const std::string &filename){
             log<LOG_INFO>(L"%1% || Parsing <DetVarSection> index %2%") % __func__ % section_idx;
 
             const char* dv_treename = pDetVar->Attribute("treename");
-            if(!dv_treename) {
-                log<LOG_ERROR>(L"%1% || ERROR: <DetVarSection> must have a treename attribute") % __func__;
-                exit(EXIT_FAILURE);
-            }
+            bool have_tree = dv_treename;
+            const char* dv_filename = pDetVar->Attribute("filename");
+            bool have_file = dv_filename;
 
             const char* dv_scale_str = pDetVar->Attribute("scale");
             std::string dv_scale = dv_scale_str ? dv_scale_str : "1.0";
@@ -975,14 +1032,24 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 log<LOG_ERROR>(L"%1% || ERROR: <DetVarSection> must have a <cv> element") % __func__;
                 exit(EXIT_FAILURE);
             }
-            const char* cv_filename = pCV->Attribute("filename");
+            if(!have_file) dv_filename = pCV->Attribute("filename");
+            if(!dv_filename) {
+                log<LOG_ERROR>(L"%1% || ERROR: Require filename attribute in either DetVarSection or cv.") % __func__;
+                exit(EXIT_FAILURE);
+            }
             const char* cv_pot_str = pCV->Attribute("pot");
-            if(!cv_filename || !cv_pot_str) {
-                log<LOG_ERROR>(L"%1% || ERROR: <cv> must have filename and pot attributes") % __func__;
+            if(!cv_pot_str) {
+                log<LOG_ERROR>(L"%1% || ERROR: <cv> must have pot attribute") % __func__;
+                exit(EXIT_FAILURE);
+            }
+            if(!have_tree) dv_treename = pCV->Attribute("treename");
+            if(!dv_treename) {
+                log<LOG_ERROR>(L"%1% || ERROR: Require a treename in either the DetVarSection or cv elements.") % __func__;
                 exit(EXIT_FAILURE);
             }
             DetVarFile cv_file;
-            cv_file.filename = cv_filename;
+            cv_file.filename = dv_filename;
+            cv_file.treename = dv_treename;
             cv_file.name = (section_idx == 0) ? "cv" : ("cv_" + std::to_string(section_idx));
             cv_file.pot = strtod(cv_pot_str, &end);
             cv_file.is_cv = true;
@@ -990,29 +1057,41 @@ int PROconfig::LoadFromXML(const std::string &filename){
             { const char* frac = pCV->Attribute("partial_load_frac");
               cv_file.partial_load_frac = frac ? (float)strtod(frac, nullptr) : 1.0f; }
             m_detvar_files.push_back(cv_file);
-            log<LOG_INFO>(L"%1% || DetVar CV file (section %2%): %3%, POT: %4%") % __func__ % section_idx % cv_filename % cv_file.pot;
+            log<LOG_INFO>(L"%1% || DetVar CV file (section %2%): %3%, POT: %4%") % __func__ % section_idx % dv_filename % cv_file.pot;
 
             // Parse variation files
             tinyxml2::XMLElement *pVar = pDetVar->FirstChildElement("variation");
             while(pVar) {
-                const char* var_filename = pVar->Attribute("filename");
-                const char* var_name = pVar->Attribute("name");
-                const char* var_pot_str = pVar->Attribute("pot");
-                if(!var_filename || !var_name || !var_pot_str) {
-                    log<LOG_ERROR>(L"%1% || ERROR: <variation> must have filename, name, and pot attributes") % __func__;
+                if(!have_file) dv_filename = pVar->Attribute("filename");
+                if(!dv_filename) {
+                    log<LOG_ERROR>(L"%1% || ERROR: Require filename attribute in either DetVarSection or variation.") % __func__;
                     exit(EXIT_FAILURE);
                 }
+                const char* var_name = pVar->Attribute("name");
+                const char* var_pot_str = pVar->Attribute("pot");
+                if(!var_name || !var_pot_str) {
+                    log<LOG_ERROR>(L"%1% || ERROR: <variation> must have name and pot attributes") % __func__;
+                    exit(EXIT_FAILURE);
+                }
+                if(!have_tree) dv_treename = pVar->Attribute("treename");
+                if(!dv_treename) {
+                    log<LOG_ERROR>(L"%1% || ERROR: Require a treename in either the DetVarSection or variation elements.") % __func__;
+                    exit(EXIT_FAILURE);
+                }
+                const char *knobval = pVar->Attribute("knobval");
                 DetVarFile var_file;
-                var_file.filename = var_filename;
+                var_file.filename = dv_filename;
+                var_file.treename = dv_treename;
                 var_file.name = var_name;
                 var_file.pot = strtod(var_pot_str, &end);
                 var_file.is_cv = false;
+                var_file.knobval = knobval ? strtod(knobval, &end) : 1;
                 var_file.section_index = section_idx;
                 { const char* frac = pVar->Attribute("partial_load_frac");
                   var_file.partial_load_frac = frac ? (float)strtod(frac, nullptr) : 1.0f; }
                 m_detvar_files.push_back(var_file);
                 m_detvar_variation_names.insert(var_name);
-                log<LOG_INFO>(L"%1% || DetVar variation '%2%' file (section %3%): %4%, POT: %5%") % __func__ % var_name % section_idx % var_filename % var_file.pot;
+                log<LOG_INFO>(L"%1% || DetVar variation '%2%' file (section %3%): %4%, POT: %5%") % __func__ % var_name % section_idx % dv_filename % var_file.pot;
 
                 pVar = pVar->NextSiblingElement("variation");
             }
@@ -1083,7 +1162,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 }
 
                 // MCFile template with placeholders
-                dvXml << "<MCFile treename=\"" << dv_treename << "\" filename=\"__DETVAR_FILENAME__\" scale=\"" << dv_scale << "\" pot=\"__DETVAR_POT__\" partial_load_frac=\"__DETVAR_PARTIAL_LOAD_FRAC__\">\n";
+                dvXml << "<MCFile treename=\"__DETVAR_TREENAME__\" filename=\"__DETVAR_FILENAME__\" scale=\"" << dv_scale << "\" pot=\"__DETVAR_POT__\" partial_load_frac=\"__DETVAR_PARTIAL_LOAD_FRAC__\">\n";
 
                 // Serialize friend trees from this DetVarSection
                 tinyxml2::XMLElement *pDVFriend = pDetVar->FirstChildElement("friend");
@@ -1168,7 +1247,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 }
 
                 //check for known attributes
-                const std::vector<std::string> expected_attrs = {"name", "type", "plotname", "binning", "knobvals", "tag", "prior", "center", "force_0_cv", "include_only_weights", "scale","filename", "xvar", "yvar"};
+                const std::vector<std::string> expected_attrs = {"name", "type", "plotname", "binning", "knobvals", "tag", "prior", "center", "force_0_cv", "include_only_weights", "scale","filename", "xvar", "yvar", "restrict", "mirror", "num_decomp_knobs"};
                 for (const tinyxml2::XMLAttribute* attr = pAllowList->FirstAttribute(); attr; attr = attr->Next()) {
                     std::string name = attr->Name();
                     if (std::find(expected_attrs.begin(), expected_attrs.end(), name) == expected_attrs.end()) {
@@ -1187,10 +1266,13 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 const char *center = pAllowList->Attribute("center");
                 const char *force_0_cv = pAllowList->Attribute("force_0_cv");
                 const char *include_only_weights_str = pAllowList->Attribute("include_only_weights");
+                const char *restrict_str = pAllowList->Attribute("restrict");
                 const char *scale = pAllowList->Attribute("scale");
                 const char *filename = pAllowList->Attribute("filename");
                 const char *xvar = pAllowList->Attribute("xvar");
                 const char *yvar = pAllowList->Attribute("yvar");
+                const char *mirrored = pAllowList->Attribute("mirror");
+                const char *num_decomp_knobs = pAllowList->Attribute("num_decomp_knobs");
 
 
                 m_mcgen_variation_type.push_back(variation_type);
@@ -1303,9 +1385,27 @@ int PROconfig::LoadFromXML(const std::string &filename){
                     m_mcgen_variation_include_only_weights[wt] = iow_vec;
                     log<LOG_INFO>(L"%1% || Parsed include_only_weights for systematic %2%: %3% entries") % __func__ % wt.c_str() % iow_vec.size();
                 }
+                if(restrict_str) {
+                    char *end;
+                    float rlo = std::strtof(restrict_str, &end);
+                    if(end == restrict_str)
+                        throw std::invalid_argument(std::string("restrict attribute for systematic '") + wt + "' must be two numbers, e.g. restrict=\"-1, 1\"");
+                    while(*end == ' ' || *end == ',') ++end;
+                    float rhi = std::strtof(end, nullptr);
+                    m_mcgen_variation_restrict[wt] = {rlo, rhi};
+                    log<LOG_INFO>(L"%1% || Parsed restrict=[%2%, %3%] for systematic %4%") % __func__ % rlo % rhi % wt.c_str();
+                }
                 if(scale) {
                     m_mcgen_variation_scale[wt] = std::strtof(scale, NULL);
                     log<LOG_INFO>(L"%1% || Parsed scale=%2% for systematic %3%") % __func__ % m_mcgen_variation_scale[wt] % wt.c_str();
+                }
+                if(mirrored) {
+                    if(strcmp(mirrored, "false") == 0 || strcmp(mirrored, "no") == 0 || strcmp(mirrored, "0") == 0)
+                        m_mcgen_variation_unmirrored.insert(wt);
+                }
+                if(num_decomp_knobs) {
+                    m_mcgen_variation_num_decomp_knobs[wt] = atoi(num_decomp_knobs);
+                    log<LOG_INFO>(L"%1% || Parsed num_decomp_knobs=%2% for systematic %3%") % __func__ % m_mcgen_variation_num_decomp_knobs[wt] % wt.c_str();
                 }
                 log<LOG_DEBUG>(L"%1% || Allowlisting variations: %2%") % __func__ % wt.c_str() ;
                 tinyxml2::XMLElement *pNext = pAllowList->NextSiblingElement("allowlist");
@@ -1586,6 +1686,10 @@ int PROconfig::LoadFromXML(const std::string &filename){
             m_num_variation_type_covariance+=1;
         }
 
+        else if(m_mcgen_variation_type[i] == "covariance_to_spline"){
+            m_num_variation_type_covariance_to_spline+=1;
+        }
+
         else if(m_mcgen_variation_type[i] == "flat"){
             m_num_variation_type_flat+=1;
         }
@@ -1608,6 +1712,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
     }
 
     log<LOG_INFO>(L"%1% || num_variation_type_covariance: %2% ") % __func__ % m_num_variation_type_covariance;
+    log<LOG_INFO>(L"%1% || num_variation_type_covariance_to_spline: %2% ") % __func__ % m_num_variation_type_covariance_to_spline;
     log<LOG_INFO>(L"%1% || num_variation_type_external_ovariance: %2% ") % __func__ % m_num_variation_type_external_covariance;
     log<LOG_INFO>(L"%1% || num_variation_type_flat: %2% ") % __func__ % m_num_variation_type_flat;
     log<LOG_INFO>(L"%1% || num_variation_type_norm: %2% ") % __func__ % m_num_variation_type_norm;
@@ -1814,6 +1919,51 @@ const PROconfig::Binning& PROconfig::GetChannelVariableBins(size_t channel_index
     return m_channel_variable_bins[GetLocalChannelIndexFromGlobalChannelIndex(channel_index)][other_index];
 }
 
+namespace {
+    std::string FormatLabelUnit(const std::string &label, const std::string &unit) {
+        if(label.empty() && unit.empty()) return "";
+        if(unit.empty()) return label;
+        if(label.empty()) return "[" + unit + "]";
+        return label + " [" + unit + "]";
+    }
+}
+
+std::string PROconfig::GetChannelXAxisTitle(size_t channel_index) const {
+    if(channel_index >= m_channel_units.size()) return "";
+    return FormatLabelUnit(m_channel_xaxis_labels[channel_index], m_channel_units[channel_index]);
+}
+
+std::string PROconfig::GetChannelXAxisTitle(size_t channel_index, size_t other_index) const {
+    if(channel_index >= m_channel_variable_units.size()) return "";
+    if(other_index >= m_channel_variable_units[channel_index].size()) return "";
+    // 2D variables keep the legacy combined "xtitle;ytitle" string.
+    if(channel_index < m_channel_variable_dims.size() &&
+       other_index < m_channel_variable_dims[channel_index].size() &&
+       m_channel_variable_dims[channel_index][other_index] == 2) {
+        return m_channel_variable_units[channel_index][other_index];
+    }
+    return FormatLabelUnit(m_channel_variable_xaxis_labels[channel_index][other_index],
+                           m_channel_variable_units[channel_index][other_index]);
+}
+
+std::string PROconfig::GetChannelUnit(size_t channel_index, size_t other_index) const {
+    // 2D variables keep the legacy combined "xtitle;ytitle" string in their
+    // units slot, so it isn't a real unit -- skip straight to the channel-level.
+    bool is_2d = (channel_index < m_channel_variable_dims.size() &&
+                  other_index < m_channel_variable_dims[channel_index].size() &&
+                  m_channel_variable_dims[channel_index][other_index] == 2);
+    if(!is_2d &&
+       channel_index < m_channel_variable_units.size() &&
+       other_index < m_channel_variable_units[channel_index].size() &&
+       !m_channel_variable_units[channel_index][other_index].empty()) {
+        return m_channel_variable_units[channel_index][other_index];
+    }
+    if(channel_index < m_channel_units.size()) {
+        return m_channel_units[channel_index];
+    }
+    return "";
+}
+
 //------------ Start of private function ------------------
 //------------ Start of private function ------------------
 //------------ Start of private function ------------------
@@ -1867,15 +2017,19 @@ void PROconfig::remove_unused_channel(){
         std::vector<std::string> temp_channel_names(m_num_channels);
         std::vector<std::vector<int>> temp_variable_dims(m_num_channels);
         std::vector<std::string> temp_channel_plotnames(m_num_channels);
+        std::vector<std::string> temp_channel_xaxis_labels(m_num_channels);
         std::vector<std::string> temp_channel_units(m_num_channels);
+        std::vector<std::vector<std::string>> temp_channel_other_xaxis_labels(m_num_channels);
         std::vector<std::vector<std::string>> temp_channel_other_units(m_num_channels);
         for(size_t i=0, chan_index = 0; i< m_channel_bool.size(); ++i){
             if(m_channel_bool[i]){
                 temp_channel_names[chan_index] = m_channel_names[i];
                 temp_channel_plotnames[chan_index] = m_channel_plotnames[i];
+                temp_channel_xaxis_labels[chan_index] = m_channel_xaxis_labels[i];
                 temp_channel_units[chan_index] = m_channel_units[i];
 
                 temp_channel_other_bins[chan_index] = m_channel_variable_bins[i];
+                temp_channel_other_xaxis_labels[chan_index] = m_channel_variable_xaxis_labels[i];
                 temp_channel_other_units[chan_index] = m_channel_variable_units[i];
 
                 ++chan_index;
@@ -1884,6 +2038,7 @@ void PROconfig::remove_unused_channel(){
 
         m_channel_names = temp_channel_names;
         m_channel_plotnames = temp_channel_plotnames;
+        m_channel_xaxis_labels = temp_channel_xaxis_labels;
         m_channel_units = temp_channel_units;
     }
 
@@ -2201,6 +2356,14 @@ void PROconfig::construct_variable_collapsing_matrices(){
         }
 
     }
+
+    // Build sparse companions. Each row of T has exactly one 1.0, so nnz = m_num_variable_bins_total[io].
+    variable_collapsing_matrices_sparse.clear();
+    variable_collapsing_matrices_sparse.reserve(m_num_variables);
+    for(size_t io = 0; io < m_num_variables; ++io) {
+        variable_collapsing_matrices_sparse.emplace_back(variable_collapsing_matrices[io].sparseView());
+        variable_collapsing_matrices_sparse.back().makeCompressed();
+    }
     return;
 }
 
@@ -2354,6 +2517,12 @@ PROconfig PROconfig::BuildDetVarConfig(size_t file_index) const {
         auto pos = xml_str.find(fn_placeholder);
         if(pos != std::string::npos) {
             xml_str.replace(pos, fn_placeholder.size(), dvfile.filename);
+        }
+
+        std::string tr_placeholder = "__DETVAR_TREENAME__";
+        pos = xml_str.find(tr_placeholder);
+        if(pos != std::string::npos) {
+            xml_str.replace(pos, tr_placeholder.size(), dvfile.treename);
         }
 
         std::string pot_placeholder = "__DETVAR_POT__";

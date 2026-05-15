@@ -113,7 +113,7 @@ namespace PROfit {
 
             PROfile(const PROconfig &config, const PROsyst &systs, const PROmodel &model, PROmetric &metric, PROseed &proseed, const PROfitterConfig &fitconfig, std::string filename, float minchi = 0, bool with_osc = false, int nThreads = 1, const std::vector<Eigen::VectorXf> &seed_points = {}, const Eigen::VectorXf& true_params = Eigen::VectorXf(), bool use_probe = false, int n_physics_chunks = 1 ) ;
 
-            void Plot(const PROconfig &config, const PROsyst &systs, const PROmodel &model, PROmetric &metric, PROseed &proseed, std::string filename, bool with_osc = false, const Eigen::VectorXf& init_seed = Eigen::VectorXf(), const Eigen::VectorXf& true_params = Eigen::VectorXf(), bool mask_osc = false) ;
+            void Plot(const PROconfig &config, const PROsyst &systs, const PROmodel &model, PROmetric &metric, PROseed &proseed, std::string filename, bool with_osc = false, const Eigen::VectorXf& init_seed = Eigen::VectorXf(), const Eigen::VectorXf& true_params = Eigen::VectorXf(), const Eigen::MatrixXf& spline_covariance = Eigen::MatrixXf{}, const Eigen::VectorXf& param_err_lo = Eigen::VectorXf{}, const Eigen::VectorXf& param_err_hi = Eigen::VectorXf{}, bool mask_osc = false) ;
 
             std::vector<profOut> PROfilePointHelper(const PROsyst *systs, const PROfitterConfig &fitconfig, std::atomic<int> *task_counter, const std::vector<ScanTask> *tasks, float minchi, bool with_osc, MultiPROgressBar& progressbar, const std::vector<Eigen::VectorXf> &seed_points = {}, uint32_t seed=0, bool use_probe = false, std::atomic<int>* tasks_remaining = nullptr, int bar_index_offset = 0, std::atomic<uint64_t>* max_thread_wall_us = nullptr);
     };
@@ -160,10 +160,10 @@ namespace PROfit {
 
             PROsurf(PROmetric &metric, size_t x_idx, size_t y_idx, size_t nbinsx, LogLin llx, float x_lo, float x_hi, size_t nbinsy, LogLin lly, float y_lo, float y_hi);
 
-            std::vector<surfOut> PointHelper(const PROfitterConfig &fitconfig, std::vector<surfOut> multi_physics_params, std::atomic<int> *point_counter, uint32_t seed, MultiPROgressBar* progressbar = nullptr);
+            std::vector<surfOut> PointHelper(const PROfitterConfig &fitconfig, std::vector<surfOut> multi_physics_params, std::atomic<int> *point_counter, uint32_t seed, const Eigen::VectorXf &seed_pt, MultiPROgressBar* progressbar = nullptr);
 
             void FillSurfaceStat(const PROconfig &config, const PROfitterConfig &fitconfig, std::string filename, const Eigen::VectorXf &cv_params, uint32_t seed);
-            void FillSurface(const PROfitterConfig &fitconfig, std::string filename, PROseed & proseed, int nthreads = 1);
+            void FillSurface(const PROfitterConfig &fitconfig, std::string filename, PROseed & proseed, float min_chi, const Eigen::VectorXf &seed_pt, int nthreads = 1);
 
             /**
              * @brief Adaptive-mesh-refinement surface scan.
@@ -174,13 +174,6 @@ namespace PROfit {
              * (xphys, yphys, χ²) row per evaluated point), polyline contours are returned for
              * each level in `opts.contour_levels`, and the optional bilinear-reconstructed
              * dense matrix is copied into `surface(nbinsx, nbinsy)` for plot-compat.
-             * @param fitconfig    PROfitter configuration (Latin / PSO / LBFGS).
-             * @param filename     Output basename. ".txt" gets the sparse evaluation dump.
-             * @param proseed      Per-thread RNG seeds.
-             * @param nthreads     Number of AMR worker threads.
-             * @param caller_seeds Optional global-fit seed list (e.g., freq_seed_points) used as warm-start for the initial level-0 grid.
-             * @param opts         AMR tunables.
-             * @return             AMRResult with sparse map, polylines, dense matrix, and per-level diagnostic counts.
              */
             PROmesh::AMRResult FillSurfaceAMR(
                 const PROfitterConfig &fitconfig,
@@ -191,27 +184,15 @@ namespace PROfit {
                 const PROmesh::AMROptions &opts = {});
 
             /**
-             * @brief Render the AMR mesh as a classic "boxes shrinking around the contour" plot.
-             * @details Draws each leaf cell as a TBox at its physical (x, y) bounds.
-             * Cells are coloured by refinement level (deeper = more saturated) so
-             * the eye sees a coarse outer grid with progressively finer cells
-             * hugging the target contour. The contour polylines themselves are
-             * overlaid in red on top. Output is a single-page PDF named
-             * `<filename>_amr_mesh.pdf` written next to the other surface plots.
-             * @param amr        Result returned by FillSurfaceAMR.
-             * @param model      Used to apply log/lin axis transforms.
-             * @param filename   Output basename ("_amr_mesh.pdf" appended).
-             * @param logx       Render x-axis on log scale.
-             * @param logy       Render y-axis on log scale.
-             * @param xaxis_idx  Index of the x physics parameter (for is_log10 lookup and labels).
-             * @param yaxis_idx  Index of the y physics parameter.
+             * @brief Render the AMR mesh as a "boxes shrinking around the contour" plot.
              */
             void PlotAMRMesh(const PROmesh::AMRResult &amr,
                              const PROmodel &model,
                              std::string filename,
                              bool logx, bool logy,
                              size_t xaxis_idx, size_t yaxis_idx);
-            std::vector<surfOut> FillCurve(const PROfitterConfig &fitconfig, PROseed &proseed, int nThreads, std::vector<float> &A, std::vector<float> &B, size_t n_points);
+
+            std::vector<surfOut> FillCurve(const PROfitterConfig &fitconfig, PROseed &proseed, float min_chi, const Eigen::VectorXf &seed_pt, int nThreads, std::vector<float> &A, std::vector<float> &B, size_t n_points);
             void PlotCurve(const PROconfig &config, const PROmodel &model, const PROsyst &syst, const std::vector<surfOut> & cpoints, std::string final_output_tag, bool logx, bool logy,size_t xaxis_idx,size_t yaxis_idx,std::vector<float> &A, std::vector<float> &B, size_t n_points);
 
     };

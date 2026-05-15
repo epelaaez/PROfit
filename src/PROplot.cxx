@@ -1,5 +1,12 @@
 #include "PROplot.h"
 #include "TStyle.h"
+#include "TArrow.h"
+#include "TBox.h"
+#include "TH1F.h"
+#include "TLatex.h"
+#include "TLegend.h"
+#include "TMarker.h"
+#include "TText.h"
 #include <cmath>
 #include <Eigen/SVD>
 
@@ -29,6 +36,39 @@ namespace PROfit{
         gStyle->SetNumberContours(NCont);
     }
 
+    std::vector<size_t> find_subchannels_by_pattern(const PROconfig &config,
+                                                    const std::string &pattern) {
+        std::vector<size_t> matched;
+        if (pattern.empty()) return matched;
+        // Substring match, matching PROsyst's wildcard convention used in
+        // CreateFlatMatrix (src/PROsyst.cxx ~L397). m_fullnames is the canonical
+        // list of "<mode>_<detector>_<channel>_<subchannel>" names indexed by
+        // global subchannel index.
+        for (size_t i = 0; i < config.m_fullnames.size(); ++i) {
+            if (config.m_fullnames[i].find(pattern) != std::string::npos) {
+                matched.push_back(i);
+            }
+        }
+        return matched;
+    }
+
+    Eigen::VectorXf build_subchannel_mask_spec(const PROconfig &config,
+                                               const PROspec &spec,
+                                               const std::vector<size_t> &matched_subchannel_indices,
+                                               int var_index) {
+        Eigen::VectorXf mask = Eigen::VectorXf::Zero(spec.Spec().size());
+        for (size_t isub : matched_subchannel_indices) {
+            const size_t ic    = config.GetLocalChannelIndexFromGlobalSubchannelIndex(isub);
+            const size_t start = config.GetGlobalVariableBinStart(isub, var_index);
+            const size_t nbins = config.m_channel_variable_bins[ic][var_index].NBins();
+            for (size_t b = 0; b < nbins; ++b) {
+                const Eigen::Index idx = static_cast<Eigen::Index>(start + b);
+                mask(idx) = spec.Spec()(idx);
+            }
+        }
+        return mask;
+    }
+
     std::map<std::string, std::unique_ptr<TH1D>> getCV1DHists(const PROspec &spec, const PROconfig& inconfig, bool scale, int other_index) {
         std::map<std::string, std::unique_ptr<TH1D>> hists;  
 
@@ -42,6 +82,7 @@ namespace PROfit{
                         const std::string& color = inconfig.m_subchannel_colors[ic][sc];
                         int rcolor = color == "NONE" ? kRed - 7 : inconfig.HexToROOTColor(color);
                         std::unique_ptr<TH1D> htmp = std::make_unique<TH1D>(spec.toTH1D(inconfig, global_subchannel_index, other_index));
+                        htmp->SetDirectory(nullptr);  // copy ctor re-registers with gDirectory; detach to avoid name-collision warnings on repeated calls.
                         htmp->SetLineWidth(1);
                         htmp->SetLineColor(kBlack);
                         htmp->SetFillColor(rcolor);
@@ -49,6 +90,7 @@ namespace PROfit{
                         hists[subchannel_name] = std::move(htmp);
                         std::unique_ptr<TH1D> htmp_slc = std::make_unique<TH1D>(spec.toTH1DSlices(inconfig, global_subchannel_index, other_index));
                         if(htmp_slc){
+                            htmp_slc->SetDirectory(nullptr);
                             hists[subchannel_name+"slc"] = std::move(htmp_slc);
                         }
                         ++global_subchannel_index;
@@ -69,6 +111,7 @@ namespace PROfit{
                     for(size_t sc = 0; sc < inconfig.m_num_subchannels[ic]; sc++){
                         const std::string& subchannel_name  = inconfig.m_fullnames[global_subchannel_index];
                         std::unique_ptr<TH2D> htmp = std::make_unique<TH2D>(spec.toTH2D(inconfig, global_subchannel_index, other_index));
+                        htmp->SetDirectory(nullptr);  // copy ctor re-registers with gDirectory; detach to avoid name-collision warnings on repeated calls.
                         if(scale) htmp->Scale(1,"width");
                         hists[subchannel_name] = std::move(htmp);
                         ++global_subchannel_index;
@@ -930,12 +973,6 @@ namespace PROfit{
         log<LOG_DEBUG>(L"%1% || Starting plot_channels") % __func__;
         std::string rat_y_title = bool(opt&PlotOptions::DataMCRatio) ? "Data/MC" : "Data/Best-Fit";
 
-        std::string ytitle = bool(opt&PlotOptions::AreaNormalized)
-            ? "Area Normalized"
-            : bool(opt&PlotOptions::BinWidthScaled) 
-            ? "Events/GeV" 
-            : "Events";
-
         TCanvas c;
         c.Print((filename+"[").c_str());
 
@@ -968,8 +1005,22 @@ namespace PROfit{
 
                     log<LOG_DEBUG>(L"%1% || channel %2%") % __func__ % channel;
 
-                    std::string xtitle = config.m_channel_variable_units[channel][other_index];
+                    std::string xtitle = config.GetChannelXAxisTitle(channel, other_index);
                     std::string ratio_titles = ";"+xtitle+";"+rat_y_title;
+
+                    std::string chan_unit = config.GetChannelUnit(channel, other_index);
+                    std::string ytitle;
+                    if(bool(opt&PlotOptions::AreaNormalized)) {
+                        ytitle = "Area Normalized";
+                    } else if(bool(opt&PlotOptions::BinWidthScaled)) {
+                        if(chan_unit.empty()) {
+                            ytitle = "Events/unit";
+                        } else {
+                            ytitle = "Events/" + chan_unit;
+                        }
+                    } else {
+                        ytitle = "Events";
+                    }
 
                     size_t channel_nbins_x = config.m_channel_variable_bins[channel][other_index].NBinsAlong(0);
 
@@ -1456,7 +1507,7 @@ namespace PROfit{
                         hsum->Reset();
                         std::vector<TH1F*> hvec;
                         int i = 0;
-			size_t channel_nbins_y = 1;// start with assumption of 1d
+                        size_t channel_nbins_y = 1;// start with assumption of 1d
                         size_t channel_nbins_x = config.m_channel_variable_bins[channel][other_index].NBinsAlong(0);
 
                         for(const auto & systname:vec){
@@ -1496,24 +1547,27 @@ namespace PROfit{
 
                             if(config.m_channel_variable_dims[channel][other_index] == 2)  channel_nbins_y = config.m_channel_variable_bins[channel][other_index].NBinsAlong(1);
 
-			    Eigen::VectorXf VarVec = Eigen::VectorXf::Zero(channel_nbins_x);
-			    Eigen::VectorXf diag1d = Eigen::VectorXf::Zero(channel_nbins_x);
-			    Eigen::MatrixXf channel_diag = collapsed_diag(channel_bins, channel_bins);
+                            Eigen::VectorXf VarVec = Eigen::VectorXf::Zero(channel_nbins_x);
+                            Eigen::VectorXf diag1d = Eigen::VectorXf::Zero(channel_nbins_x);
+                            Eigen::MatrixXf channel_diag = collapsed_diag(channel_bins, channel_bins);
 
                             for(int i = 0; i < (int)channel_nbins_x; i++){
-			        for(int j = (int)channel_nbins_y*i; j < (int)channel_nbins_y*(i+1); j++){
-				    diag1d(i) += channel_diag(j, j);
-			            for(int k = (int)channel_nbins_y*i; k < (int)channel_nbins_y*(i+1); k++){
-			                VarVec(i) += channel_cov(j, k);
-			            }
-			        }
-			    }
+                                for(int j = (int)channel_nbins_y*i; j < (int)channel_nbins_y*(i+1); j++){
+                                diag1d(i) += channel_diag(j, j);
+                                    for(int k = (int)channel_nbins_y*i; k < (int)channel_nbins_y*(i+1); k++){
+                                        VarVec(i) += channel_cov(j, k);
+                                    }
+                                }
+                            }
 
-			    float inv_diag1d;
+                            float inv_diag1d;
                             for (size_t i = 0; i < channel_nbins_x; ++i) {
-				inv_diag1d = 1/diag1d(i);
-                                h->SetBinContent(i+1, sqrt(inv_diag1d*VarVec(i)*inv_diag1d));
-                                hsum->SetBinContent(i+1, hsum->GetBinContent(i+1)+inv_diag1d*VarVec(i)*inv_diag1d);
+                                inv_diag1d = 1/diag1d(i);
+                                // clamp to >=0: covariance diagonals can be tiny-negative from float cancellation
+                                // in rat_frac_cov = Cov(d1,d1) + Cov(d2,d2) − Cov(d1,d2) − Cov(d2,d1)
+                                float var_i = std::max(0.0f, inv_diag1d*VarVec(i)*inv_diag1d);
+                                h->SetBinContent(i+1, sqrt(var_i));
+                                hsum->SetBinContent(i+1, hsum->GetBinContent(i+1)+var_i);
                             }
 
                             const std::string &plotname = config.m_mcgen_variation_plotname_map.at(systname);
@@ -1524,7 +1578,7 @@ namespace PROfit{
 
                         }//end syst
                         for (size_t i = 0; i < channel_nbins_x; ++i) {
-                            hsum->SetBinContent(i+1, sqrt(hsum->GetBinContent(i+1)));
+                            hsum->SetBinContent(i+1, sqrt(std::max(0.0, hsum->GetBinContent(i+1))));
                         }
                         leg->AddEntry(hsum,"Sum","l");
 
@@ -1835,7 +1889,7 @@ namespace PROfit{
                                 int color_idx = i % colors.size();
                                 int style_idx = (i / 4) % line_styles.size();  
                                 i++;
-                                TH1F* h = new TH1F((tag+"_Channel_"+std::to_string(global_channel_index)+"_"+std::to_string(i)).c_str(), (tag + ";" + config.m_channel_variable_units[channel][other_index]).c_str(), bin_edges.size()-1, bin_edges.data());
+                                TH1F* h = new TH1F((tag+"_Channel_"+std::to_string(global_channel_index)+"_"+std::to_string(i)).c_str(), (tag + ";" + config.GetChannelXAxisTitle(channel, other_index)).c_str(), bin_edges.size()-1, bin_edges.data());
 
                                 if(config.m_channel_variable_dims[channel][other_index] == 2) {
                                     channel_nbins_y = config.m_channel_variable_bins[channel][other_index].NBinsAlong(1);
@@ -1855,13 +1909,15 @@ namespace PROfit{
                                     float inv_diag1d;
                                     for (size_t i = 0; i < channel_nbins_x; ++i) {
                                         inv_diag1d = 1/diag1d(i);
-                                        h->SetBinContent(i+1, sqrt(inv_diag1d*VarVec(i)*inv_diag1d));
-                                        hsum->SetBinContent(i+1, hsum->GetBinContent(i+1)+inv_diag1d*VarVec(i)*inv_diag1d);
+                                        float var_i = std::max(0.0f, inv_diag1d*VarVec(i)*inv_diag1d);
+                                        h->SetBinContent(i+1, sqrt(var_i));
+                                        hsum->SetBinContent(i+1, hsum->GetBinContent(i+1)+var_i);
                                     }
                                 } else {
                                     for(size_t i = 0; i < channel_bins.size(); ++i) {
-                                        h->SetBinContent(i+1, sqrt(rat_frac_cov(i,i)));
-                                        hsum->SetBinContent(i+1, hsum->GetBinContent(i+1)+rat_frac_cov(i,i));
+                                        float var_i = std::max(0.0f, rat_frac_cov(i,i));
+                                        h->SetBinContent(i+1, sqrt(var_i));
+                                        hsum->SetBinContent(i+1, hsum->GetBinContent(i+1)+var_i);
                                     }
                                 }
 
@@ -1873,7 +1929,7 @@ namespace PROfit{
 
                             }//end syst
                             for (size_t i = 0; i < channel_nbins_x; ++i) {
-                                hsum->SetBinContent(i+1, sqrt(hsum->GetBinContent(i+1)));
+                                hsum->SetBinContent(i+1, sqrt(std::max(0.0, hsum->GetBinContent(i+1))));
                             }
                             leg->AddEntry(hsum,"Sum","l");
 
@@ -1893,7 +1949,7 @@ namespace PROfit{
                             log<LOG_INFO>(L"%1% || hsum for tag '%2%': nbins=%3%, max=%4%, integral=%5%")
                                 % __func__ % tag.c_str() % hsum->GetNbinsX() % hsum->GetMaximum() % hsum->Integral();
 
-                            hsum->SetXTitle((config.m_detector_plotnames[det]+"/"+config.m_detector_plotnames[det2]+" "+config.m_channel_variable_units[channel][other_index]).c_str());
+                            hsum->SetXTitle((config.m_detector_plotnames[det]+"/"+config.m_detector_plotnames[det2]+" "+config.GetChannelXAxisTitle(channel, other_index)).c_str());
                             hsum->SetYTitle("Fractional Uncertainty");
                             hsum->SetLineColor(kBlack);
                             hsum->SetLineWidth(2);
@@ -1948,7 +2004,7 @@ namespace PROfit{
                             hsum->SetBinContent(i+1, sqrt(hsum->GetBinContent(i+1)));
                         }
                         leg->AddEntry(hsum,"Sum","l");
-                        hsum->SetXTitle((config.m_detector_plotnames[det]+"/"+config.m_detector_plotnames[det2]+" "+config.m_channel_variable_units[channel][other_index]).c_str());
+                        hsum->SetXTitle((config.m_detector_plotnames[det]+"/"+config.m_detector_plotnames[det2]+" "+config.GetChannelXAxisTitle(channel, other_index)).c_str());
                         hsum->SetTitle(("Summary: "+name).c_str());
                         hsum->SetYTitle("Fractional Uncertainty");
                         hsum->SetLineColor(kBlack);
@@ -1984,4 +2040,179 @@ namespace PROfit{
         c.Print((filename+"]").c_str());
         return 0;
     };
+
+    void plot_mcmc_1sigma(const std::string &filename, const PROconfig &config, const PROsyst &systs, const PROmodel &model, const Eigen::VectorXf &best_fit, const Eigen::VectorXf &param_err_lo, const Eigen::VectorXf &param_err_hi, bool with_osc, const Eigen::VectorXf &true_params) {
+        const int nBins = (int)systs.GetNSplines() + (with_osc ? (int)model.nparams : 0);
+        if(nBins == 0) {
+            log<LOG_WARNING>(L"%1% || No parameters to plot, skipping _1sigmaMCMC.pdf") % __func__;
+            return;
+        }
+
+        std::vector<std::string> names;
+        if(with_osc) for(const auto &n: model.pretty_param_names) names.push_back(n);
+        for(const auto &n: systs.spline_names) names.push_back(n);
+
+        std::vector<float> bfvalues(nBins, 0.0f);
+        for(int i = 0; i < nBins; ++i) {
+            int vec_idx = with_osc ? i : (i + (int)model.nparams);
+            if(vec_idx < (int)best_fit.size()) bfvalues[i] = (float)best_fit(vec_idx);
+        }
+
+        // Y range: cover post-fit bars, always show ±1
+        float minVal = -1.2f, maxVal = 1.2f;
+        for(int i = 0; i < nBins; ++i) {
+            int syst_idx = with_osc ? (i - (int)model.nparams) : i;
+            if(syst_idx >= 0 && syst_idx < (int)param_err_lo.size() && syst_idx < (int)param_err_hi.size()) {
+                minVal = std::min(minVal, bfvalues[i] - param_err_lo(syst_idx));
+                maxVal = std::max(maxVal, bfvalues[i] + param_err_hi(syst_idx));
+            }
+        }
+        // Clamp to ±5 so a runaway bar doesn't squash everything
+        minVal = std::max(minVal, -5.0f);
+        maxVal = std::min(maxVal,  5.0f);
+        const float y_axis_min = minVal * 1.15f;
+        const float y_axis_max = maxVal * 1.15f;
+        const float y_range_size = y_axis_max - y_axis_min;
+        const float arrow_margin = y_range_size * 0.07f;
+        const float arrow_length = y_range_size * 0.05f;
+
+        const int c_width  = std::max(600, std::min(5000, 50 * nBins));
+        const int c_height = 500;
+        const float axis_label_size = std::max(0.030f, std::min(0.045f, 1.8f / nBins));
+        const float x_label_size    = std::max(0.015f, std::min(0.030f, 1.2f / nBins));
+        const float bar_halfwidth   = std::max(0.08f, std::min(0.4f,  4.0f / nBins));
+        const float marker_offset   = bar_halfwidth * 0.6f;
+        const float marker_size     = std::max(0.5f, std::min(1.4f, 6.0f / std::sqrt((float)nBins)));
+
+        TCanvas *c = new TCanvas((filename+"1sigmaMCMC").c_str(), (filename+"1sigmaMCMC").c_str(), c_width, c_height);
+        c->cd();
+        c->SetLeftMargin(0.09);
+        c->SetBottomMargin(0.30);
+        c->SetRightMargin(0.28);
+        c->SetTopMargin(0.08);
+
+        TH1F *frame = new TH1F((filename+"_frame_mcmc1s").c_str(), "", nBins, 0, nBins);
+        frame->SetMinimum(y_axis_min);
+        frame->SetMaximum(y_axis_max);
+        frame->SetStats(0);
+        frame->GetXaxis()->SetLabelSize(0);
+        frame->GetXaxis()->SetTickLength(0);
+        frame->GetYaxis()->SetTitle("Parameter value (prior #kern[0.3]{} #sigma = 1)");
+        frame->GetYaxis()->SetTitleSize(axis_label_size);
+        frame->GetYaxis()->SetLabelSize(axis_label_size);
+        frame->GetYaxis()->SetTitleOffset(1.0);
+        frame->Draw("AXIS");
+
+        TBox *prior_band = new TBox(0.0f, -1.0f, (float)nBins, 1.0f);
+        prior_band->SetFillColor(kGray);
+        prior_band->SetFillStyle(1001);
+        prior_band->SetLineColor(kGray+1);
+        prior_band->SetLineWidth(1);
+        prior_band->Draw("same");
+
+        TGraphAsymmErrors *postbars = new TGraphAsymmErrors(nBins);
+        for(int i = 0; i < nBins; ++i) {
+            int syst_idx = with_osc ? (i - (int)model.nparams) : i;
+            float err_lo = 0.0f, err_hi = 0.0f;
+            if(syst_idx >= 0 && syst_idx < (int)param_err_lo.size() && syst_idx < (int)param_err_hi.size()) {
+                err_lo = param_err_lo(syst_idx);
+                err_hi = param_err_hi(syst_idx);
+            }
+            postbars->SetPoint(i, i + 0.5f, bfvalues[i]);
+            postbars->SetPointError(i, bar_halfwidth, bar_halfwidth, err_lo, err_hi);
+        }
+        postbars->SetFillColor(kBlue-7);
+        postbars->SetFillStyle(1001);
+        postbars->SetLineColor(kBlue-8);
+        postbars->SetLineWidth(1);
+        postbars->Draw("2 same");
+
+        TLine *l_zero = new TLine(0, 0, nBins, 0);
+        l_zero->SetLineStyle(2); l_zero->SetLineColor(kGray+2); l_zero->SetLineWidth(1);
+        l_zero->Draw();
+        TLine *l_pm1 = new TLine(0, 1, nBins, 1);
+        l_pm1->SetLineStyle(3); l_pm1->SetLineColor(kGray+2); l_pm1->SetLineWidth(1);
+        l_pm1->Draw();
+        TLine *l_mm1 = new TLine(0, -1, nBins, -1);
+        l_mm1->SetLineStyle(3); l_mm1->SetLineColor(kGray+2); l_mm1->SetLineWidth(1);
+        l_mm1->Draw();
+
+        auto drawMarkerWithArrow = [&](float x, float y, int color, int marker_style, float msize) {
+            bool clamp_below = y < -5.0f;
+            bool clamp_above = y >  5.0f;
+            if(!clamp_below && !clamp_above && (y < y_axis_min || y > y_axis_max)) return;
+            float draw_y = clamp_below ? y_axis_min + arrow_margin : (clamp_above ? y_axis_max - arrow_margin : y);
+            TMarker *m = new TMarker(x, draw_y, marker_style);
+            m->SetMarkerSize(msize); m->SetMarkerColor(color); m->Draw();
+            if(clamp_below) {
+                TArrow *a = new TArrow(x, draw_y - arrow_length*0.3f, x, y_axis_min + arrow_length*0.2f, 0.008, "|>");
+                a->SetLineColor(color); a->SetFillColor(color); a->SetLineWidth(1); a->Draw();
+            } else if(clamp_above) {
+                TArrow *a = new TArrow(x, draw_y + arrow_length*0.3f, x, y_axis_max - arrow_length*0.2f, 0.008, "|>");
+                a->SetLineColor(color); a->SetFillColor(color); a->SetLineWidth(1); a->Draw();
+            }
+        };
+
+        for(int i = 0; i < nBins; ++i) {
+            int vec_idx = with_osc ? i : (i + (int)model.nparams);
+            float x_center = i + 0.5f;
+            if(vec_idx < (int)best_fit.size()) {
+                drawMarkerWithArrow(x_center - marker_offset, (float)best_fit(vec_idx), kRed, 21, marker_size);
+            }
+            if(vec_idx < (int)true_params.size()) {
+                drawMarkerWithArrow(x_center + marker_offset, (float)true_params(vec_idx), kOrange+7, 33, marker_size * 1.1f);
+            }
+        }
+
+        const float label_y = y_axis_min - y_range_size * 0.04f;
+        for(int i = 0; i < nBins; ++i) {
+            std::string label;
+            if(with_osc && i < (int)model.nparams) {
+                label = "Log_{10}(" + model.pretty_param_names[i] + ")";
+            } else {
+                auto it = config.m_mcgen_variation_plotname_map.find(names[i]);
+                label = (it != config.m_mcgen_variation_plotname_map.end()) ? it->second : names[i];
+            }
+            TLatex *t = new TLatex(i + 0.5f, label_y, label.c_str());
+            t->SetTextAlign(13);
+            t->SetTextSize(x_label_size);
+            t->SetTextAngle(-45);
+            t->Draw();
+        }
+
+        TLegend *leg = new TLegend(0.73, 0.60, 0.99, 0.92);
+        leg->SetFillStyle(1001);
+        leg->SetBorderSize(1);
+        leg->SetTextSize(std::max(0.022f, std::min(0.030f, axis_label_size * 0.85f)));
+        leg->AddEntry(prior_band, "Pre-fit #pm1#sigma (prior)", "f");
+        leg->AddEntry(postbars,    "Post-fit #pm1#sigma (MCMC)", "f");
+        TGraph *leg_bf = new TGraph(1);
+        leg_bf->SetPoint(0, 0, 0);
+        leg_bf->SetMarkerStyle(21);
+        leg_bf->SetMarkerColor(kRed);
+        leg_bf->SetMarkerSize(marker_size);
+        leg->AddEntry(leg_bf, "Global best-fit", "p");
+        TGraph *leg_tp = nullptr;
+        if(true_params.size() > 0) {
+            leg_tp = new TGraph(1);
+            leg_tp->SetPoint(0, 0, 0);
+            leg_tp->SetMarkerStyle(33);
+            leg_tp->SetMarkerColor(kOrange+7);
+            leg_tp->SetMarkerSize(marker_size * 1.1f);
+            leg->AddEntry(leg_tp, "Injected values", "p");
+        }
+        leg->Draw();
+
+        TText *vt = new TText();
+        vt->SetNDC();
+        vt->SetTextFont(42);
+        vt->SetTextSize(0.028f);
+        vt->SetTextAlign(33);
+        std::string pv = "PROfit v" + std::string(PROJECT_VERSION_STR);
+        vt->DrawText(0.96, 0.97, pv.c_str());
+
+        c->Update();
+        c->SaveAs((filename+"_1sigmaMCMC.pdf").c_str(), "pdf");
+        delete c;
+    }
 }

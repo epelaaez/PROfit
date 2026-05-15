@@ -194,6 +194,37 @@ namespace PROfit{
     void plot_channels(const std::string &filename, const PROconfig &config, std::optional<PROspec> cv, std::optional<PROspec> best_fit, std::optional<PROdata> data, std::optional<PROerrorbar> errband, std::optional<PROerrorbar> posterrband, std::vector<TPaveText> &texts, PlotBounds &bounds, PlotOptions opt = PlotOptions::Default, int var_index = 0, bool ratio_bool = false);
 
     /**
+     * @brief Return global subchannel indices whose `m_fullnames[i]` contains `pattern` as a substring.
+     * @details Matches PROsyst's wildcard convention — substring match used by
+     * CreateFlatMatrix in src/PROsyst.cxx. Useful for picking out a set of
+     * "background" subchannels by name (e.g. "numu_bkg" matches every
+     * detector's *_numu_bkg subchannel). Empty pattern returns an empty list.
+     * @param config   Analysis configuration (uses config.m_fullnames).
+     * @param pattern  Substring to match against each full subchannel name.
+     * @return Vector of global subchannel indices matching the pattern; empty if none.
+     */
+    std::vector<size_t> find_subchannels_by_pattern(const PROconfig &config,
+                                                    const std::string &pattern);
+
+    /**
+     * @brief Build a full-bin vector that copies `spec`'s values only in the bins
+     * owned by `matched_subchannel_indices`, zero elsewhere.
+     * @details Used by the --bkg-subtract plot path to mask out only the bkg
+     * subchannel bins on the full-bin PROspec. The returned vector has size
+     * config.m_num_variable_bins_total[var_index]. Variable index controls
+     * bin-start lookup via config.GetGlobalVariableBinStart.
+     * @param config                       Analysis configuration.
+     * @param spec                         Source full-bin spectrum.
+     * @param matched_subchannel_indices   Global subchannel indices to retain.
+     * @param var_index                    Variable index for bin-range lookup.
+     * @return Full-bin vector with spec's values in the matched subchannels' bins, 0 elsewhere.
+     */
+    Eigen::VectorXf build_subchannel_mask_spec(const PROconfig &config,
+                                               const PROspec &spec,
+                                               const std::vector<size_t> &matched_subchannel_indices,
+                                               int var_index);
+
+    /**
      * @brief Return a map of subchannel-name to 1D ROOT histogram from a PROspec.
      * @param spec       Input spectrum.
      * @param inconfig   Analysis configuration.
@@ -289,13 +320,13 @@ namespace PROfit{
      * @return PROerrorbar with per-bin asymmetric uncertainties and the histogram covariance.
      */
     template<class T, class P>
-        PROerrorbar getMCMCErrorBand(Metropolis<T, P> met, size_t burnin, size_t iterations, const PROconfig &config, const PROpeller &prop, PROmetric &metric, const Eigen::VectorXf &best_fit, std::vector<TH1D> &posteriors, Eigen::MatrixXf &post_covar,  bool scale = false,int var_index=0) {
+        PROerrorbar getMCMCErrorBand(Metropolis<T, P> met, size_t burnin, size_t iterations, const PROconfig &config, const PROpeller &prop, PROmetric &metric, const Eigen::VectorXf &best_fit, std::vector<TH1D> &posteriors, Eigen::MatrixXf &post_covar, Eigen::VectorXf &param_err_lo, Eigen::VectorXf &param_err_hi, bool scale = false, int var_index=0, PROgressBar *pbar = nullptr) {
             for(size_t i = 0; i < metric.GetSysts().GetNSplines(); ++i)
                 posteriors.emplace_back("", (";"+config.m_mcgen_variation_plotname_map.at(metric.GetSysts().spline_names[i])).c_str(), 60, -3, 3);
 
             Eigen::VectorXf cv = FillSpectra(config, prop, metric.GetSysts(), metric.GetModel(), best_fit, true, var_index).Spec();
             Eigen::VectorXf cv_coll = CollapseMatrix(config, cv);
-            Eigen::MatrixXf L; 
+            Eigen::MatrixXf L;
             if(metric.GetSysts().GetNCovar() > 0) L = metric.GetSysts().DecomposeFractionalCovariance(config, cv);
             else L = Eigen::MatrixXf::Zero(config.m_num_variable_bins_total_collapsed[var_index], config.m_num_variable_bins_total_collapsed[var_index]);
             std::normal_distribution<float> nd;
@@ -305,25 +336,38 @@ namespace PROfit{
             int nphys = metric.GetModel().nparams;
             Eigen::VectorXf splines_bf = best_fit.segment(nphys, nspline);
             post_covar = Eigen::MatrixXf::Constant(nspline, nspline, 0);
-	    Eigen::MatrixXf post_hist_covar = Eigen::MatrixXf::Constant(cv_coll.size(), cv_coll.size(), 0);
+            Eigen::MatrixXf post_hist_covar = Eigen::MatrixXf::Constant(cv_coll.size(), cv_coll.size(), 0);
             size_t nsteps = 0;
             std::vector<Eigen::VectorXf> specs;
+            std::vector<std::vector<float>> param_samples(nspline);
             const auto action = [&](const Eigen::VectorXf &value) {
                 nsteps += 1;
                 for(size_t i = 0; i < config.m_num_variable_bins_total_collapsed[var_index]; ++i)
                     throws(i) = nd(PROseed::global_rng);
                 specs.push_back(CollapseMatrix(config, FillSpectra(config, prop, metric.GetSysts(), metric.GetModel(), value, true,var_index).Spec())+L*throws);
-                for(size_t i = 0; i < metric.GetSysts().GetNSplines(); ++i)
+                for(int i = 0; i < nspline; ++i) {
                     posteriors[i].Fill(value(i+nphys));
+                    param_samples[i].push_back(value(i+nphys));
+                }
                 Eigen::VectorXf splines = value.segment(nphys, nspline);
                 Eigen::VectorXf diff = splines-splines_bf;
                 Eigen::VectorXf diff_hist = specs.back() - cv_coll;
                 post_covar += diff * diff.transpose();
                 post_hist_covar += diff_hist * diff_hist.transpose();
             };
-            met.run(burnin, iterations, action);
+            met.run(burnin, iterations, action, pbar);
             post_hist_covar /= nsteps;
             post_covar /= nsteps;
+
+            param_err_lo = Eigen::VectorXf::Zero(nspline);
+            param_err_hi = Eigen::VectorXf::Zero(nspline);
+            for(int i = 0; i < nspline; ++i) {
+                auto &v = param_samples[i];
+                std::sort(v.begin(), v.end());
+                float bf_val = best_fit(nphys + i);
+                param_err_lo(i) = std::abs(bf_val - v[int(0.160f * v.size())]);
+                param_err_hi(i) = std::abs(v[int(0.840f * v.size())] - bf_val);
+            }
             log<LOG_INFO>(L"%1% || Acceptance rate %2%") % __func__ % ((float)met.naccept / iterations);
 
             cv = CollapseMatrix(config, cv);
@@ -365,6 +409,24 @@ namespace PROfit{
             return ebar;
         }
 
+    /**
+     * @brief Produce a 1-sigma summary plot from MCMC results only (no profile scan).
+     * @details Mirrors the post-MCMC pieces of PROfile::Plot's "_1sigma_detailed.pdf":
+     * a gray ±1 prior band, blue post-fit MCMC bars centered on @p best_fit (widths
+     * from @p param_err_lo / @p param_err_hi), red squares for the global best-fit, and
+     * orange diamonds for any injected truth values. Intended to be called between the
+     * MCMC error-band step and the (slow) profile scan.
+     * @param filename     Output prefix; final file is @p filename + "_1sigmaMCMC.pdf".
+     * @param config       Analysis configuration (used for parameter pretty names).
+     * @param systs        PROsyst (provides spline names and count).
+     * @param model        Physics model.
+     * @param best_fit     Best-fit parameter vector (length nphys + nspline).
+     * @param param_err_lo Per-spline lower 1σ from MCMC quantiles (length nspline).
+     * @param param_err_hi Per-spline upper 1σ from MCMC quantiles (length nspline).
+     * @param with_osc     If true, also plot physics parameters; if false, splines only.
+     * @param true_params  Optional injected truth values.
+     */
+    void plot_mcmc_1sigma(const std::string &filename, const PROconfig &config, const PROsyst &systs, const PROmodel &model, const Eigen::VectorXf &best_fit, const Eigen::VectorXf &param_err_lo, const Eigen::VectorXf &param_err_hi, bool with_osc = false, const Eigen::VectorXf &true_params = Eigen::VectorXf());
 
 };
 

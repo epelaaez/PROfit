@@ -2,6 +2,7 @@
 #define PROMCMC_H
 
 #include "PROmetric.h"
+#include "PROgress.h"
 #include <Eigen/Eigen>
 
 #include <algorithm>
@@ -44,7 +45,8 @@ namespace PROfit {
                 bool step() {
                     Eigen::VectorXf p = proposal(current);
                     float acceptance;
-                    acceptance = proposal.within_bound(p) ? std::min(1.0f, target(p)/target(current) * proposal.P(current, p)/proposal.P(p, current)) : 0;
+                    // Targets return log-density (e.g. -0.5*chi^2); subtract before exp to avoid float32 underflow when chi^2 is large.
+                    acceptance = proposal.within_bound(p) ? std::min(1.0f, std::exp(target(p) - target(current)) * proposal.P(current, p)/proposal.P(p, current)) : 0;
                     float u = uniform(rng);
 
                     if(u <= acceptance) {
@@ -58,19 +60,26 @@ namespace PROfit {
                     return false;
                 }
 
-                void run(size_t burnin, size_t steps, std::optional<std::function<void(const Eigen::VectorXf&)>> action = {}) {
+                void run(size_t burnin, size_t steps, std::optional<std::function<void(const Eigen::VectorXf&)>> action = {}, PROgressBar *pbar = nullptr) {
+                    const size_t pbar_stride = std::max<size_t>(1, (burnin + steps) / 1000);
                     for(size_t i = 0; i < burnin; i++) {
                         if constexpr(Proposal_FN::has_tune) {
                             proposal.tune(step());
                         } else {
                             step();
                         }
+                        if(pbar && (i + 1) % pbar_stride == 0) pbar->set_progress(i + 1);
                     }
-                    proposal.tune_mode = false; 
+                    proposal.tune_mode = false;
                     for(size_t i = 0; i < steps; i++) {
                         step();
                         if(save_chain) chain.push_back(current);
                         if(action) (*action)(current);
+                        if(pbar && (i + 1) % pbar_stride == 0) pbar->set_progress(burnin + i + 1);
+                    }
+                    if(pbar) {
+                        pbar->finish();
+                        std::cerr << std::endl;
                     }
                 }
 
@@ -184,9 +193,11 @@ namespace PROfit {
     struct simple_target {
         PROmetric &metric;
 
+        // Returns log-target (-0.5*chi^2). Metropolis::step does exp(target(p) - target(current))
+        // so the exp argument stays in safe float32 range even when chi^2 is large.
         float operator()(Eigen::VectorXf &value) {
             Eigen::VectorXf empty = value;
-            return std::exp(-0.5f*metric(value, empty, false));
+            return -0.5f*metric(value, empty, false);
         }
     };
 
@@ -195,7 +206,7 @@ namespace PROfit {
 
         float operator()(Eigen::VectorXf &value) {
             Eigen::VectorXf nuisance = value.segment(metric.GetModel().nparams, metric.GetSysts().GetNSplines());
-            return std::exp(-0.5f*metric.Pull(nuisance));
+            return -0.5f*metric.Pull(nuisance);
         }
     };
 
@@ -286,11 +297,19 @@ namespace PROfit {
                 if(i < nparams) {
                     if(value(i) > metric.GetModel().ub(i) || value(i) < metric.GetModel().lb(i) || value(i) < -5.0f)
                         return false;
-                } else if(metric.GetSysts().spline_hi[i-nparams] == 1.0) {
-                    if(value(i) < -1 || value(i) > 1) return false;
                 } else {
-                    if(value(i) < metric.GetSysts().spline_lo[i-nparams] || value(i) > metric.GetSysts().spline_hi[i-nparams])
-                        return false;
+                    size_t si = i - nparams;
+                    float lo, hi;
+                    if(metric.GetSysts().spline_has_restrict[si]) {
+                        lo = metric.GetSysts().spline_restrict_lo[si];
+                        hi = metric.GetSysts().spline_restrict_hi[si];
+                    } else if(metric.GetSysts().spline_hi[si] == 1.0f) {
+                        lo = -1.0f; hi = 1.0f;
+                    } else {
+                        lo = metric.GetSysts().spline_lo[si];
+                        hi = metric.GetSysts().spline_hi[si];
+                    }
+                    if(value(i) < lo || value(i) > hi) return false;
                 }
             }
             return true;
@@ -343,8 +362,8 @@ namespace PROfit {
         // Adaptive scaling state
         std::vector<bool> accept_history;
         size_t adapt_window = 1000;  // window size for adaptation
-        float target_accept = 0.234; 
-        float adapt_factor = 1.02;   
+        float target_accept = 0.234;
+        float adapt_factor = 1.1;
 
 
         Eigen::MatrixXf sub_L;
@@ -407,11 +426,19 @@ namespace PROfit {
                 if(i < nparams) {
                     if(value(i) > metric.GetModel().ub(i) || value(i) < std::max(metric.GetModel().lb(i),-5.0f))
                         return false;
-                } else if(metric.GetSysts().spline_hi[i-nparams] == 1.0) {
-                    if(value(i) < -1 || value(i) > 1) return false;
                 } else {
-                    if(value(i) < metric.GetSysts().spline_lo[i-nparams] || value(i) > metric.GetSysts().spline_hi[i-nparams])
-                        return false;
+                    size_t si = i - nparams;
+                    float lo, hi;
+                    if(metric.GetSysts().spline_has_restrict[si]) {
+                        lo = metric.GetSysts().spline_restrict_lo[si];
+                        hi = metric.GetSysts().spline_restrict_hi[si];
+                    } else if(metric.GetSysts().spline_hi[si] == 1.0f) {
+                        lo = -1.0f; hi = 1.0f;
+                    } else {
+                        lo = metric.GetSysts().spline_lo[si];
+                        hi = metric.GetSysts().spline_hi[si];
+                    }
+                    if(value(i) < lo || value(i) > hi) return false;
                 }
             }
             return true;

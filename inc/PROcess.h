@@ -27,6 +27,56 @@
 namespace PROfit{
 
     /**
+     * @brief Single-slot cache for the binned FillSpectra path, splitting the work into
+     *        independently keyed physics and systematic halves.
+     * @details The binned FillSpectra factors as `final_spec = systw .* result` where
+     *   - `result` (physics half) depends only on @p phys, @p inmodel, @p inprop, and @p var_index;
+     *   - `systw`  (syst half)    depends only on @p shifts, @p insyst, @p inprop, and @p var_index.
+     *
+     * On each call the cached overload compares the new phys/shifts subvectors against the cached
+     * keys and recomputes only the half that changed. The cache is invalidated when the model or
+     * syst pointer or var_index changes (via `invalidate()` or context check). The cache is NOT
+     * thread-safe; each thread should hold its own (PROfile/PROsurf already Clone() metrics per
+     * thread, so per-metric caches are naturally per-thread).
+     *
+     * @note Only the binned FillSpectra path is cached. The unbinned (event-by-event) path
+     *       invalidates the cache and falls back to the non-cached overload.
+     */
+    struct FillSpectraCache {
+        Eigen::VectorXf last_phys;            ///< Cached physics subvector for last_result.
+        Eigen::VectorXf last_shifts;          ///< Cached spline subvector for last_systw.
+        Eigen::VectorXf last_result;          ///< Cached H_combined * probs (or trivial-model result).
+        Eigen::VectorXf last_systw;           ///< Cached per-bin systematic-weight vector.
+
+        /// Per-spline factors at the cached "central" point, shape (nbins_var, nsplines).
+        /// central_factors(k, i) = spline i's multiplicative contribution to systw at bin k.
+        /// systw_central(k) = product over i of central_factors(k, i). Used by the Tier 1.3
+        /// incremental update path (single-spline-shift gradient calls) so we can divide
+        /// out the old contribution and multiply in the new one without rerunning the full
+        /// spline loop. Empty/zero-sized when the cache has not yet been populated by a
+        /// full recompute.
+        Eigen::MatrixXf central_factors;
+
+        int last_var_index = -1;              ///< var_index for which the cache is valid.
+        const PROsyst *last_syst_ptr = nullptr;
+        const PROmodel *last_model_ptr = nullptr;
+
+        /// Mark cache contents stale; next call recomputes both halves.
+        void invalidate() {
+            last_var_index = -1;
+            last_syst_ptr = nullptr;
+            last_model_ptr = nullptr;
+        }
+    };
+
+    /**
+     * @brief Cached overload of the binned FillSpectra. See FillSpectraCache.
+     * @param cache  Single-slot cache; reuses physics or systematic half whose subvector matches.
+     * @return Same value as the non-cached FillSpectra; cache is updated as a side effect.
+     */
+    PROspec FillSpectra(const PROconfig &inconfig, const PROpeller &inprop, const PROsyst &insyst, const PROmodel &inmodel, const Eigen::VectorXf &params, FillSpectraCache &cache, bool binned = true, size_t var_index = 0);
+
+    /**
      * @brief Master spectrum-filling function combining oscillation weights and systematic spline weights.
      * @details Iterates over MC events (or uses pre-binned histograms when @p binned is true),
      * computes oscillation probabilities via @p inmodel, applies spline shifts from @p insyst,

@@ -142,11 +142,8 @@ float PROfitter::Fit(PROmetric &metric, const Eigen::VectorXf &seed_pt ) {
 
 float PROfitter::Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed_points ) {
 
-    // Scan-mode timing instrumentation. When the global flag is off, all of these
-    // chrono calls compile to a constant-false branch + no-op (the compiler will
-    // elide the `now()` calls behind the `if`). When on, we accumulate per-phase
-    // microseconds into the global ScanTimingStats. See PROfile constructor for
-    // how the totals are read and reported.
+    metric.setGradientMode(fitconfig.gradient_mode);
+
     const bool tim_on = PROfit::GetScanTimingEnabled();
     auto fit_t0 = tim_on ? std::chrono::steady_clock::now()
                          : std::chrono::steady_clock::time_point{};
@@ -653,8 +650,9 @@ int PROfitter::calcFreqSeedPoints(PROmetric &metric) {
             ub(i) = metric.GetModel().ub(i);
         }
         for(size_t i = nphys; i < nparams; ++i) {
-            lb(i) = metric.GetSysts().spline_lo[i-nphys];
-            ub(i) = metric.GetSysts().spline_hi[i-nphys];
+            size_t si = i - nphys;
+            lb(i) = metric.GetSysts().spline_has_restrict[si] ? metric.GetSysts().spline_restrict_lo[si] : metric.GetSysts().spline_lo[si];
+            ub(i) = metric.GetSysts().spline_has_restrict[si] ? metric.GetSysts().spline_restrict_hi[si] : metric.GetSysts().spline_hi[si];
         }
 
         //fix dm at minima
