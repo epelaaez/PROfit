@@ -194,6 +194,37 @@ namespace PROfit{
     void plot_channels(const std::string &filename, const PROconfig &config, std::optional<PROspec> cv, std::optional<PROspec> best_fit, std::optional<PROdata> data, std::optional<PROerrorbar> errband, std::optional<PROerrorbar> posterrband, std::vector<TPaveText> &texts, PlotBounds &bounds, PlotOptions opt = PlotOptions::Default, int var_index = 0, bool ratio_bool = false);
 
     /**
+     * @brief Return global subchannel indices whose `m_fullnames[i]` contains `pattern` as a substring.
+     * @details Matches PROsyst's wildcard convention — substring match used by
+     * CreateFlatMatrix in src/PROsyst.cxx. Useful for picking out a set of
+     * "background" subchannels by name (e.g. "numu_bkg" matches every
+     * detector's *_numu_bkg subchannel). Empty pattern returns an empty list.
+     * @param config   Analysis configuration (uses config.m_fullnames).
+     * @param pattern  Substring to match against each full subchannel name.
+     * @return Vector of global subchannel indices matching the pattern; empty if none.
+     */
+    std::vector<size_t> find_subchannels_by_pattern(const PROconfig &config,
+                                                    const std::string &pattern);
+
+    /**
+     * @brief Build a full-bin vector that copies `spec`'s values only in the bins
+     * owned by `matched_subchannel_indices`, zero elsewhere.
+     * @details Used by the --bkg-subtract plot path to mask out only the bkg
+     * subchannel bins on the full-bin PROspec. The returned vector has size
+     * config.m_num_variable_bins_total[var_index]. Variable index controls
+     * bin-start lookup via config.GetGlobalVariableBinStart.
+     * @param config                       Analysis configuration.
+     * @param spec                         Source full-bin spectrum.
+     * @param matched_subchannel_indices   Global subchannel indices to retain.
+     * @param var_index                    Variable index for bin-range lookup.
+     * @return Full-bin vector with spec's values in the matched subchannels' bins, 0 elsewhere.
+     */
+    Eigen::VectorXf build_subchannel_mask_spec(const PROconfig &config,
+                                               const PROspec &spec,
+                                               const std::vector<size_t> &matched_subchannel_indices,
+                                               int var_index);
+
+    /**
      * @brief Return a map of subchannel-name to 1D ROOT histogram from a PROspec.
      * @param spec       Input spectrum.
      * @param inconfig   Analysis configuration.
