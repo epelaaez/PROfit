@@ -73,7 +73,7 @@ namespace PRObe {
         float target_dchi2          = 1.0f;     ///< Δχ² level to find crossings at (1 → 1σ; 4 → 2σ).
         bool  may_have_spikes       = false;    ///< If true, run Phase-0 coarse exploration before anchors.
         int   coarse_n              = 10;        ///< Phase-0 point count (uniform across [lb, ub]).
-        std::vector<float> anchor_sigmas = {0.0f, -0.f, 0.4f, -0.8f, 0.8f, -1.45f, 1.45f}; ///< Anchor offsets in σ. Default gives ~11 fits in smooth mode for legible TGraphs.
+        std::vector<float> anchor_sigmas = {0.0f, -0.4f, 0.4f, -0.8f, 0.8f, -1.45f, 1.45f}; ///< Anchor offsets in σ. Default gives ~11 fits in smooth mode for legible TGraphs.
         float sigma_init            = 1.0f;     ///< Caller-provided initial σ scale for the parameter.
         float boundary_tol_chi2     = 0.10f;    ///< Bisection stop tolerance on |χ² - target|. Loosened from 0.05 to skip secondary refinement when surrogate confirmation already lands within 0.1 chi² — saves ~75 fits per run with no visible band-quality impact for ±1σ.
         int   max_fits              = 25;       ///< Hard cap on total fits per scan.
