@@ -2267,9 +2267,6 @@ int main(int argc, char* argv[])
                 data_plot = PROdata(Eigen::VectorXf(data_plot.Spec() - bkg_collapsed),
                                     data_plot.Error());
                 errband_plot.error_point -= bkg_collapsed;
-                errband_plot.error_down  -= bkg_collapsed;
-                errband_plot.error_up    -= bkg_collapsed;
-                // errband_plot.covariance intentionally unchanged.
             }
             plot_channels(final_output_tag+"_PROplot_Variable_"+std::to_string(io)+"_ErrorBand.pdf", config, cv_plot, {}, data_plot,
                     errband_plot, {}, other_channel_chitexts[io], pbounds, opt | PlotOptions::DataMCRatio, io);
