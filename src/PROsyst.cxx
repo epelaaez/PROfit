@@ -828,6 +828,8 @@ namespace PROfit {
 
     void PROsyst::FillSplinesFromCovariance(const SystStruct& syst) {
         Eigen::MatrixXf frac_cov = PROsyst::GenerateFracCovarMatrix(syst);
+        // Capture pre-symmetrization asymmetry as a sanity number for debug plots.
+        const float pre_symm_asymmetry = (frac_cov - frac_cov.transpose()).norm();
         // symmetrize to kill any float-asymmetry before eigendecomposition
         frac_cov = 0.5f * (frac_cov + frac_cov.transpose());
 
@@ -855,12 +857,23 @@ namespace PROfit {
             log<LOG_WARNING>(L"%1% || covariance_to_spline systematic %2% has no positive-eigenvalue modes; skipping.") % __func__ % syst.systname.c_str();
             return;
         }
+        // Truncate kept_indices to the actual retained set so debug plots reflect the user's choice.
+        kept_indices.resize(K);
 
         log<LOG_INFO>(L"%1% || covariance_to_spline %2%: keeping %3% of %4% eigenvectors (largest eigenvalue=%5%, smallest kept=%6%)")
             % __func__ % syst.systname.c_str() % K % nbins % eigvals(nbins - 1) % eigvals(kept_indices[K - 1]);
 
         const float lo = -3.0f, hi = 3.0f;
         const int n_segments = 6; // knots at -3, -2, -1, 0, 1, 2
+
+        Cov2SplineDebugInfo dbg;
+        dbg.original_frac_cov = frac_cov;
+        dbg.pre_symm_asymmetry = pre_symm_asymmetry;
+        dbg.eigenvalues = eigvals;
+        dbg.eigenvectors = eigvecs;
+        dbg.kept_indices = kept_indices;
+        dbg.binning = syst.binning;
+        dbg.knob_names.reserve(K);
 
         for(int k = 0; k < K; ++k) {
             const int ev_idx = kept_indices[k];
@@ -892,8 +905,11 @@ namespace PROfit {
             spline_lo.push_back(lo);
             spline_hi.push_back(hi);
             spline_binnings.push_back(syst.binning);
+            dbg.knob_names.push_back(knob_name);
             ++n_splines;
         }
+
+        cov2spline_debug_info[syst.systname] = std::move(dbg);
     }
 
     float PROsyst::GetSplineShift(std::string name, float shift, int bin) const {

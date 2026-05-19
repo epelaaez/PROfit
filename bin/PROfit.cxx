@@ -2334,6 +2334,13 @@ int main(int argc, char* argv[])
 
         }
 
+        // Debug PDF for covariance_to_spline systematics — only emitted if at least one is present.
+        if(!variable_systs[config.i_prime].cov2spline_debug_info.empty()) {
+            const std::string cov2spline_pdf = final_output_tag + "_covariance_to_spline_checks.pdf";
+            plotCov2SplineChecks(config, variable_cvs[config.i_prime], variable_systs[config.i_prime], cov2spline_pdf, config.i_prime);
+            log<LOG_INFO>(L"%1% || covariance_to_spline diagnostics written to %2%") % __func__ % cov2spline_pdf.c_str();
+        }
+
         //now onto root files
         TFile fout((final_output_tag+"_PROplot.root").c_str(), "RECREATE");
 
