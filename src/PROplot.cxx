@@ -2316,10 +2316,12 @@ namespace PROfit{
                 const Eigen::VectorXf v = dbg.eigenvectors.col(idx);
                 recon.noalias() += lam * (v * v.transpose());
             }
-            const Eigen::MatrixXf residual = dbg.original_frac_cov - recon;
-            const float resid_frob = residual.norm();
+            // "difference" = what the rank-K splines alone fail to capture (distinct from the
+            // "residual covariance" feature, which folds the un-kept eigenpairs back in).
+            const Eigen::MatrixXf difference = dbg.original_frac_cov - recon;
+            const float diff_frob = difference.norm();
             const float orig_frob = dbg.original_frac_cov.norm();
-            const float resid_max_abs = residual.cwiseAbs().maxCoeff();
+            const float diff_max_abs = difference.cwiseAbs().maxCoeff();
 
             // ---- Page 1: summary text ----
             int n_pos = 0, n_zero = 0, n_neg = 0;
@@ -2350,14 +2352,31 @@ namespace PROfit{
                     pt.AddText(Form("Largest eigenvalue: %.4g    Smallest kept eigenvalue: %.4g", lam_max, lam_min_kept));
                 }
                 pt.AddText(Form("Pre-symmetrization asymmetry (||C - C^T||_F): %.4g", dbg.pre_symm_asymmetry));
-                pt.AddText(Form("Residual ||C_orig - C_recon||_F: %.4g   (relative: %.4g)", resid_frob, orig_frob > 0 ? resid_frob/orig_frob : 0.0f));
-                pt.AddText(Form("Max |residual element|: %.4g", resid_max_abs));
+                pt.AddText(Form("Difference ||C_orig - C_recon||_F: %.4g   (relative: %.4g)", diff_frob, orig_frob > 0 ? diff_frob/orig_frob : 0.0f));
+                pt.AddText(Form("Max |difference element|: %.4g", diff_max_abs));
+                pt.AddText("");
+                if(dbg.has_residual) {
+                    const float resid_cov_frob = dbg.residual_cov.norm();
+                    TText *rt = pt.AddText(Form("Residual covariance: ON  -  %d un-kept mode(s) retained as '%s'",
+                                                dbg.n_residual_modes, dbg.residual_cov_name.c_str()));
+                    if(rt) rt->SetTextColor(kGreen + 3);
+                    pt.AddText(Form("   ||C_resid_cov||_F: %.4g   (relative to original: %.4g)",
+                                    resid_cov_frob, orig_frob > 0 ? resid_cov_frob/orig_frob : 0.0f));
+                    pt.AddText("   The K splines plus this covariance reproduce the full systematic;");
+                    pt.AddText("   only negative-eigenvalue numerical noise is discarded.");
+                } else if(K < n_pos) {
+                    TText *rt = pt.AddText(Form("Residual covariance: OFF  -  %d smaller mode(s) DROPPED (include_resid_cov=false)", n_pos - K));
+                    if(rt) rt->SetTextColor(kRed + 1);
+                    pt.AddText("   The rank-K model underestimates the systematic by the difference shown above.");
+                } else {
+                    pt.AddText("Residual covariance: n/a  -  all positive eigenpairs kept as splines.");
+                }
                 pt.Draw();
                 draw_version_stamp();
                 c.Print(filename.c_str(), "pdf");
             }
 
-            // ---- Page 2: original, reconstructed, residual covariance heatmaps ----
+            // ---- Page 2: original, rank-K reconstruction, and their difference ----
             auto fill_th2 = [&](const Eigen::MatrixXf &M, const std::string &name, const std::string &title) {
                 auto h = std::make_unique<TH2D>(name.c_str(), title.c_str(), nbins, 0, nbins, nbins, 0, nbins);
                 h->SetDirectory(nullptr);
@@ -2372,31 +2391,59 @@ namespace PROfit{
             {
                 auto h_orig  = fill_th2(dbg.original_frac_cov, "h_cov_orig_"+systname,  (display+" original frac cov;Bin index;Bin index").c_str());
                 auto h_recon = fill_th2(recon,                  "h_cov_recon_"+systname, (display+Form(" reconstructed (rank %d);Bin index;Bin index", K)).c_str());
-                auto h_resid = fill_th2(residual,               "h_cov_resid_"+systname, (display+" residual = orig - recon;Bin index;Bin index").c_str());
+                auto h_diff  = fill_th2(difference,             "h_cov_diff_"+systname,  (display+" difference = orig - recon;Bin index;Bin index").c_str());
                 c.Clear();
                 c.Divide(3, 1);
                 c.cd(1); gPad->SetRightMargin(0.14); gPad->SetTopMargin(0.13); h_orig->Draw("colz");  draw_channel_dividers_2d(spans, nbins);
                 c.cd(2); gPad->SetRightMargin(0.14); gPad->SetTopMargin(0.13); h_recon->Draw("colz"); draw_channel_dividers_2d(spans, nbins);
-                c.cd(3); gPad->SetRightMargin(0.14); gPad->SetTopMargin(0.13); h_resid->Draw("colz"); draw_channel_dividers_2d(spans, nbins);
+                c.cd(3); gPad->SetRightMargin(0.14); gPad->SetTopMargin(0.13); h_diff->Draw("colz");  draw_channel_dividers_2d(spans, nbins);
                 c.cd(0);
                 draw_version_stamp();
                 c.Print(filename.c_str(), "pdf");
             }
 
-            // ---- Page 3: sqrt(diag) per bin, original vs reconstructed ----
+            // ---- Page 2b: closure check when include_resid_cov is on ----
+            // Compare the original against the actual model used in the fit (K splines + residual
+            // covariance). Their difference should be ~0 (only negative-eigenvalue noise remains),
+            // which is the meaningful check now that the un-kept eigenpairs are retained.
+            if(dbg.has_residual) {
+                const Eigen::MatrixXf full_model = recon + dbg.residual_cov;
+                const Eigen::MatrixXf closure = dbg.original_frac_cov - full_model;
+                const float closure_frob = closure.norm();
+                auto h_orig  = fill_th2(dbg.original_frac_cov, "h_cov_orig2_"+systname, (display+" original frac cov;Bin index;Bin index").c_str());
+                auto h_model = fill_th2(full_model,            "h_cov_model_"+systname, (display+Form(" K=%d splines + residual cov;Bin index;Bin index", K)).c_str());
+                auto h_clos  = fill_th2(closure,               "h_cov_clos_"+systname,  (display+Form(" difference (||.||_F=%.2g);Bin index;Bin index", closure_frob)).c_str());
+                c.Clear();
+                c.Divide(3, 1);
+                // Titles read left-to-right as: [original] vs [splines + residual cov] -> [difference ~ 0].
+                c.cd(1); gPad->SetRightMargin(0.14); gPad->SetTopMargin(0.13); h_orig->Draw("colz");  draw_channel_dividers_2d(spans, nbins);
+                c.cd(2); gPad->SetRightMargin(0.14); gPad->SetTopMargin(0.13); h_model->Draw("colz"); draw_channel_dividers_2d(spans, nbins);
+                c.cd(3); gPad->SetRightMargin(0.14); gPad->SetTopMargin(0.13); h_clos->Draw("colz");  draw_channel_dividers_2d(spans, nbins);
+                c.cd(0);
+                draw_version_stamp();
+                c.Print(filename.c_str(), "pdf");
+            }
+
+            // ---- Page 3: sqrt(diag) per bin, original vs reconstructed (+ splines+resid when on) ----
             {
                 auto h_d_orig  = std::make_unique<TH1D>(("h_diag_orig_"+systname).c_str(), (display+" fractional uncertainty per bin;Bin index;#sqrt{diag}").c_str(), nbins, 0, nbins);
                 auto h_d_recon = std::make_unique<TH1D>(("h_diag_recon_"+systname).c_str(), "", nbins, 0, nbins);
-                h_d_orig->SetDirectory(nullptr); h_d_recon->SetDirectory(nullptr);
+                auto h_d_sum   = std::make_unique<TH1D>(("h_diag_sum_"+systname).c_str(), "", nbins, 0, nbins);
+                h_d_orig->SetDirectory(nullptr); h_d_recon->SetDirectory(nullptr); h_d_sum->SetDirectory(nullptr);
                 for(int b = 0; b < nbins; ++b) {
                     h_d_orig ->SetBinContent(b+1, std::sqrt(std::max(0.0f, dbg.original_frac_cov(b,b))));
                     h_d_recon->SetBinContent(b+1, std::sqrt(std::max(0.0f, recon(b,b))));
+                    if(dbg.has_residual)
+                        h_d_sum->SetBinContent(b+1, std::sqrt(std::max(0.0f, recon(b,b) + dbg.residual_cov(b,b))));
                 }
                 h_d_orig->SetLineColor(kBlack);
                 h_d_orig->SetLineWidth(2);
                 h_d_recon->SetLineColor(kRed);
                 h_d_recon->SetLineWidth(2);
                 h_d_recon->SetLineStyle(2);
+                h_d_sum->SetLineColor(kGreen + 2);
+                h_d_sum->SetLineWidth(2);
+                h_d_sum->SetLineStyle(3);
                 const double ymax = 1.15 * std::max(h_d_orig->GetMaximum(), h_d_recon->GetMaximum());
                 h_d_orig->SetMaximum(ymax);
                 h_d_orig->SetMinimum(0.0);
@@ -2404,12 +2451,14 @@ namespace PROfit{
                 gPad->SetTopMargin(0.13);
                 h_d_orig->Draw("hist");
                 h_d_recon->Draw("hist same");
+                if(dbg.has_residual) h_d_sum->Draw("hist same");
                 draw_channel_dividers_1d(spans, 0.0, ymax);
-                auto *leg = new TLegend(0.7, 0.78, 0.92, 0.9);
+                auto *leg = new TLegend(0.62, 0.74, 0.92, 0.9);
                 leg->SetBorderSize(0);
                 leg->SetFillStyle(0);
                 leg->AddEntry(h_d_orig.get(), "Original (multisim)", "l");
-                leg->AddEntry(h_d_recon.get(), Form("Reconstructed (K=%d)", K), "l");
+                leg->AddEntry(h_d_recon.get(), Form("K=%d splines only", K), "l");
+                if(dbg.has_residual) leg->AddEntry(h_d_sum.get(), "Splines + residual cov", "l");
                 leg->Draw();
                 draw_version_stamp();
                 c.Print(filename.c_str(), "pdf");
@@ -2611,18 +2660,26 @@ namespace PROfit{
                 auto h_odn = std::make_unique<TH1D>(("h_aggodn_"+systname).c_str(), "", nbins, 0, nbins);
                 auto h_kup = std::make_unique<TH1D>(("h_aggkup_"+systname).c_str(), "", nbins, 0, nbins);
                 auto h_kdn = std::make_unique<TH1D>(("h_aggkdn_"+systname).c_str(), "", nbins, 0, nbins);
-                h_cv->SetDirectory(nullptr); h_oup->SetDirectory(nullptr); h_odn->SetDirectory(nullptr); h_kup->SetDirectory(nullptr); h_kdn->SetDirectory(nullptr);
+                auto h_sup = std::make_unique<TH1D>(("h_aggsup_"+systname).c_str(), "", nbins, 0, nbins);
+                auto h_sdn = std::make_unique<TH1D>(("h_aggsdn_"+systname).c_str(), "", nbins, 0, nbins);
+                h_cv->SetDirectory(nullptr); h_oup->SetDirectory(nullptr); h_odn->SetDirectory(nullptr);
+                h_kup->SetDirectory(nullptr); h_kdn->SetDirectory(nullptr); h_sup->SetDirectory(nullptr); h_sdn->SetDirectory(nullptr);
                 double ymax = 0;
                 for(int b = 0; b < nbins; ++b) {
                     const double y0 = cv_full(b);
                     const double sigma_orig  = std::sqrt(std::max(0.0f, dbg.original_frac_cov(b,b))) * y0;
                     const double sigma_recon = std::sqrt(std::max(0.0f, recon(b,b))) * y0;
+                    // Combined model = K splines (in quadrature) + residual covariance diagonal.
+                    const double var_comb = recon(b,b) + (dbg.has_residual ? dbg.residual_cov(b,b) : 0.0f);
+                    const double sigma_comb = std::sqrt(std::max(0.0, var_comb)) * y0;
                     h_cv->SetBinContent(b+1, y0);
                     h_oup->SetBinContent(b+1, y0 + sigma_orig);
                     h_odn->SetBinContent(b+1, y0 - sigma_orig);
                     h_kup->SetBinContent(b+1, y0 + sigma_recon);
                     h_kdn->SetBinContent(b+1, y0 - sigma_recon);
-                    ymax = std::max({ymax, y0 + sigma_orig, y0 + sigma_recon});
+                    h_sup->SetBinContent(b+1, y0 + sigma_comb);
+                    h_sdn->SetBinContent(b+1, y0 - sigma_comb);
+                    ymax = std::max({ymax, y0 + sigma_orig, y0 + sigma_recon, y0 + sigma_comb});
                 }
                 h_cv->SetLineColor(kBlack);
                 h_cv->SetLineWidth(2);
@@ -2630,23 +2687,28 @@ namespace PROfit{
                 h_oup->SetLineStyle(2); h_odn->SetLineStyle(2);
                 h_kup->SetLineColor(kRed + 1); h_kdn->SetLineColor(kRed + 1);
                 h_kup->SetLineStyle(1); h_kdn->SetLineStyle(1);
+                h_sup->SetLineColor(kGreen + 2); h_sdn->SetLineColor(kGreen + 2);
+                h_sup->SetLineStyle(1); h_sdn->SetLineStyle(1);
+                h_sup->SetLineWidth(2); h_sdn->SetLineWidth(2);
                 h_cv->SetMaximum(1.15 * ymax);
                 h_cv->SetMinimum(0.0);
                 c.Clear();
                 gPad->SetTopMargin(0.13);
                 h_cv->Draw("hist");
-                // Draw rank-K band first, then original-multisim dashed lines on top so they
-                // remain visible when the two overlap.
+                // Draw rank-K band first, then the combined (splines+resid) band, then the
+                // original-multisim dashed lines on top so each stays visible where they overlap.
                 h_kup->Draw("hist same");
                 h_kdn->Draw("hist same");
+                if(dbg.has_residual) { h_sup->Draw("hist same"); h_sdn->Draw("hist same"); }
                 h_oup->Draw("hist same");
                 h_odn->Draw("hist same");
                 draw_channel_dividers_1d(spans, 0.0, 1.15 * ymax);
-                auto *leg = new TLegend(0.68, 0.76, 0.92, 0.9);
+                auto *leg = new TLegend(0.6, 0.72, 0.92, 0.9);
                 leg->SetBorderSize(0); leg->SetFillStyle(0);
                 leg->AddEntry(h_cv.get(),  "CV", "l");
                 leg->AddEntry(h_oup.get(), "CV #pm 1#sigma (original multisim)", "l");
-                leg->AddEntry(h_kup.get(), Form("CV #pm 1#sigma (rank-%d knobs)", K), "l");
+                leg->AddEntry(h_kup.get(), Form("CV #pm 1#sigma (K=%d splines only)", K), "l");
+                if(dbg.has_residual) leg->AddEntry(h_sup.get(), "CV #pm 1#sigma (splines + residual cov)", "l");
                 leg->Draw();
                 draw_version_stamp();
                 c.Print(filename.c_str(), "pdf");

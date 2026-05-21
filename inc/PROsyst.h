@@ -67,6 +67,10 @@ namespace PROfit {
         std::vector<int> kept_indices;       ///< Indices into eigenvalues/eigenvectors for retained modes, descending eigenvalue.
         std::vector<std::string> knob_names; ///< Names of synthesized spline knobs, same order as kept_indices.
         int binning = -1;                    ///< Binning index the covariance lives on.
+        bool has_residual = false;           ///< True if the un-kept eigenpairs were retained as a residual covariance.
+        int n_residual_modes = 0;            ///< Number of positive eigenpairs folded into the residual covariance.
+        Eigen::MatrixXf residual_cov;        ///< Residual fractional covariance from un-kept positive eigenpairs (empty if has_residual is false).
+        std::string residual_cov_name;       ///< Name under which the residual covariance was registered ("<systname>_resid_cov").
     };
 
     /**
