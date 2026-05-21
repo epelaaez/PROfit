@@ -1194,7 +1194,7 @@ namespace PROfit {
                         if(var_syst_objs.front()->knobval[u] == var_syst_objs.front()->knob_index[is]) break;
                     
                     float w = static_cast<float>(map_iter->second->at(is));
-                    if(std::isnan(w) || std::isinf(w)) w = 1;
+                    if(std::isnan(w) || std::isinf(w) || (w > 10)) w = 1;
                     for(auto so: var_syst_objs){
                         if (!so->include_only_weights.empty()) {
                             // Compute weight using only the included weights (avoids divide-by-zero)
