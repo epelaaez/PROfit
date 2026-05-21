@@ -51,7 +51,7 @@ TH1D PROdata::toTH1D(const PROconfig &inconfig, int global_channel_index, int ot
     int nbins_dim = inconfig.m_channel_variable_bins[local_channel_index][other_index].NBinsAlong(dim);
     std::vector<float> bin_edges =  inconfig.m_channel_variable_bins[local_channel_index][other_index].Edges();
     std::string hist_name = inconfig.m_channel_names[local_channel_index] + " Data";
-    std::string xaxis_title =  inconfig.m_channel_variable_units[local_channel_index][other_index];
+    std::string xaxis_title =  inconfig.GetChannelXAxisTitle(local_channel_index, other_index);
 
 
     //fill 1D hist
@@ -258,7 +258,7 @@ void PROdata::plotSpectrum(const PROconfig& inconfig, const std::string& output_
                 }
 
                 hists.back()->SetTitle((inconfig.m_mode_names[im]  +" "+ inconfig.m_detector_names[id]+" "+ inconfig.m_channel_names[ic]).c_str());
-                hists.back()->GetXaxis()->SetTitle(inconfig.m_channel_units[ic].c_str());
+                hists.back()->GetXaxis()->SetTitle(inconfig.GetChannelXAxisTitle(ic).c_str());
                 hists.back()->GetYaxis()->SetTitle("Events");
                 hists.back()->Draw("hist");
                 ++global_channel_index;

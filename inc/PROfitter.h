@@ -73,6 +73,13 @@ namespace PROfit {
 
         bool progress_bar = false; ///< If true, display a progress bar during fitting.
 
+        /// Gradient evaluation strategy applied to the PROmetric used by this fitter.
+        /// Default mirrors the historical behaviour (central FD on full chi²); set to
+        /// GradientOneSidedFull for ~2× speedup, or to one of the *Lin variants for
+        /// the Gauss-Newton-style linearised gradient (5–20× speedup, exact at minimum).
+        /// See PROmetric::GradientMode for the full mode matrix.
+        PROmetric::GradientMode gradient_mode = PROmetric::GradientCentralFull;
+
         /** @brief Default constructor — leaves all parameters at their default values. */
         PROfitterConfig(){};
 
@@ -142,10 +149,11 @@ namespace PROfit {
             }
 
             else if(fit_preset == "sensitivity"){
+                
                 param.epsilon = 1e-5;
                 param.epsilon_rel = 1e-5;
-                param.max_iterations = 250;
-                param.max_linesearch = 30;
+                param.max_iterations = 100;
+                param.max_linesearch = 20;
                 param.delta = 1e-6;
                 param.wolfe = 0.90;
                 param.ftol = 1e-4;

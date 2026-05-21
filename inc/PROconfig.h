@@ -359,10 +359,12 @@ namespace PROfit{
             std::vector<std::string> m_detector_names; 		
             std::vector<std::string> m_detector_plotnames; 		
 
-            std::vector<std::string> m_channel_names; 		
-            std::vector<std::string> m_channel_plotnames; 		
-            std::vector<std::string> m_channel_units; 		
+            std::vector<std::string> m_channel_names;
+            std::vector<std::string> m_channel_plotnames;
+            std::vector<std::string> m_channel_xaxis_labels;
+            std::vector<std::string> m_channel_units;
 
+            std::vector<std::vector<std::string>> m_channel_variable_xaxis_labels;
             std::vector<std::vector<std::string>> m_channel_variable_units;
             std::vector<std::vector<int>> m_channel_variable_dims;
 
@@ -391,6 +393,7 @@ namespace PROfit{
             bool m_form_covariance;
             std::string m_write_out_tag;
             int m_num_variation_type_covariance = 0;
+            int m_num_variation_type_covariance_to_spline = 0;
             int m_num_variation_type_external_covariance = 0;
             int m_num_variation_type_spline = 0;
             int m_num_variation_type_spline_to_covariance = 0;
@@ -443,6 +446,7 @@ namespace PROfit{
             std::map<std::string, std::vector<int>> m_mcgen_variation_include_only_weights; //map of systematics with include_only_weights (1-based indices of which weights to include in spline universes)
             std::map<std::string, std::pair<float,float>> m_mcgen_variation_restrict; //map of systematics with restrict="lo, hi" (clamp knob value during evaluation and fitting)
             std::map<std::string, float> m_mcgen_variation_scale; //map of systematics with scale factor to apply to weights (e.g., 0.001 for weights stored as x1000)
+            std::map<std::string, int> m_mcgen_variation_num_decomp_knobs; //map of covariance_to_spline systematics to the number of eigenpairs to keep (-1 or missing = keep all)
       
             //FIX skepic
             std::vector<std::string> systematic_name;
@@ -513,6 +517,22 @@ namespace PROfit{
 
             /* Function: given channel index, return list of bin edges for this channel */
             const Binning& GetChannelVariableBins(size_t channel_index, size_t other_index) const;
+
+            /* Function: build the X-axis title for a channel as "label [unit]",
+             * omitting either part if empty. For 2D variables, the legacy
+             * combined "xtitle;ytitle" string in m_channel_variable_units is
+             * returned as-is.
+             */
+            std::string GetChannelXAxisTitle(size_t channel_index) const;
+            std::string GetChannelXAxisTitle(size_t channel_index, size_t other_index) const;
+
+            /* Function: return the unit string for a channel's variable
+             * (e.g. "MeV"), preferring the per-variable <bins unit="..."> entry
+             * and falling back to the channel-level <channel unit="..."> entry.
+             * Returns "" if neither is set, or for 2D variables (whose units
+             * field stores the legacy combined "xtitle;ytitle" string).
+             */
+            std::string GetChannelUnit(size_t channel_index, size_t other_index) const;
 
             /* Function: Hex to int*/
             int HexToROOTColor(const std::string& hexColor) const;
