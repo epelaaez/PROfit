@@ -329,7 +329,6 @@ int main(int argc, char* argv[])
     std::string afc_xvar = "sinsq2thmm", afc_yvar = "dmsq";
     float afc_xlo = 1e-4f, afc_xhi = 1.0f, afc_ylo = 1e-2f, afc_yhi = 1e2f;
     bool  afc_logx = true, afc_logy = true;
-    std::string afc_bank_path = "";
     std::vector<float> afc_cl_targets = {0.683f, 0.90f, 0.954f};
     float afc_wilson_eps = 0.05f;
     int   afc_n_pe_min = 30;
@@ -449,13 +448,16 @@ int main(int argc, char* argv[])
 
     // PROAdaptiveFC, adaptive FC pipeline. Slice 1: Wilks prepass + meta-mesh + diagnostics.
     CLI::App *afc_command = app.add_subcommand("fc-adaptive",
-        "Adaptive Feldman-Cousins (slice 1: Wilks pre-pass over N throws, meta-mesh "
-        "aggregation, diagnostic ROOT artifact). PE bank, sequential stopping, and "
-        "data classification follow in slice 2.");
+        "Adaptive Feldman-Cousins. Sub-modes (--mode): build-mesh, init-bank, "
+        "print-bank, asimov. Each mode reads/writes <output_tag>-prefixed artifacts. "
+        "Typical workflow: build-mesh -> init-bank -> print-bank / asimov.");
     afc_command->add_option("--mode", afc_mode_str,
-        "Pipeline mode: init-bank (default), print-bank, asimov, brazil, classify. "
-        "Slice 2a honours init-bank and print-bank.")
-        ->default_str("init-bank");
+        "Pipeline mode: build-mesh, init-bank, print-bank, asimov. "
+        "build-mesh: Wilks prepass -> <tag>_mesh.bin + diagnostic PDFs. "
+        "init-bank: requires <tag>_mesh.bin, generates <tag>_bank.bin. "
+        "print-bank: load <tag>_bank.bin and write summary PDFs. "
+        "asimov: load <tag>_bank.bin and write FC contour + verdict PDFs.")
+        ->default_str("build-mesh");
     afc_command->add_option("--throws", afc_n_throws,
         "Number of Wilks pre-pass throws (each produces one AMR mesh).")->default_val(200);
     afc_command->add_option("--prepass-amr-initial", afc_prepass_initial,
@@ -472,10 +474,6 @@ int main(int argc, char* argv[])
         "Levels strictly below baseline-level are always kept in the meta-mesh.")->default_val(2);
     afc_command->add_flag("--stat-only-throws", afc_stat_only_throws,
         "Use only statistical throws (no systematic throws).");
-    bool afc_rebuild_mesh = false;
-    afc_command->add_flag("--rebuild-mesh", afc_rebuild_mesh,
-        "Ignore any cached <output_tag>_mesh.bin and re-run the Wilks prepass + meta-mesh build. "
-        "Without this flag, an existing mesh cache is loaded and the slow prepass step is skipped.");
     afc_command->add_option("--xvar", afc_xvar, "Name of x-axis variable.")->default_str("sinsq2thmm");
     afc_command->add_option("--yvar", afc_yvar, "Name of y-axis variable.")->default_str("dmsq");
     afc_command->add_option("--xlo", afc_xlo, "Lower x-axis limit.")->default_val(1e-4f);
@@ -484,13 +482,12 @@ int main(int argc, char* argv[])
     afc_command->add_option("--yhi", afc_yhi, "Upper y-axis limit.")->default_val(1e2f);
     afc_command->add_flag("--logx,!--linx", afc_logx, "x-axis log/linear (default log).");
     afc_command->add_flag("--logy,!--liny", afc_logy, "y-axis log/linear (default log).");
-    // Slice-2 forward-compat flags (accepted but unused in slice 1).
-    afc_command->add_option("--bank", afc_bank_path, "PEBank artifact path (slice 2).");
-    afc_command->add_option("--cl", afc_cl_targets, "Target CLs (slice 2).");
-    afc_command->add_option("--wilson-eps", afc_wilson_eps, "Wilson half-width target (slice 2).");
-    afc_command->add_option("--n-pe-min", afc_n_pe_min, "Floor on PEs per cell (slice 2).");
-    afc_command->add_option("--n-pe-max", afc_n_pe_max, "Cap on PEs per cell (slice 2).");
-    afc_command->add_option("--roi-band", afc_roi_band, "ROI Delta-chi^2 band (slice 2).");
+    // PE-bank generation knobs (used by --mode init-bank; consumed by asimov/classify too).
+    afc_command->add_option("--cl", afc_cl_targets, "Target CLs (one or more).");
+    afc_command->add_option("--wilson-eps", afc_wilson_eps, "Wilson half-width stop target.");
+    afc_command->add_option("--n-pe-min", afc_n_pe_min, "Floor on PEs per cell.");
+    afc_command->add_option("--n-pe-max", afc_n_pe_max, "Cap on PEs per cell.");
+    afc_command->add_option("--roi-band", afc_roi_band, "ROI Delta-chi^2 band (slice 2c).");
 
     //PROglobal
     CLI::App *proglobal_command = app.add_subcommand("global", "Just do a single global fit.");
@@ -2708,15 +2705,16 @@ int main(int argc, char* argv[])
     //***********************************************************************
     if(*afc_command) {
         PROfit::AdaptiveFCConfig acfg;
-        if (afc_mode_str == "init-bank")      acfg.mode = PROfit::AdaptiveFCMode::InitBank;
+        if      (afc_mode_str == "build-mesh") acfg.mode = PROfit::AdaptiveFCMode::BuildMesh;
+        else if (afc_mode_str == "init-bank")  acfg.mode = PROfit::AdaptiveFCMode::InitBank;
         else if (afc_mode_str == "print-bank") acfg.mode = PROfit::AdaptiveFCMode::PrintBank;
-        else if (afc_mode_str == "asimov")    acfg.mode = PROfit::AdaptiveFCMode::Asimov;
-        else if (afc_mode_str == "brazil")    acfg.mode = PROfit::AdaptiveFCMode::Brazil;
-        else if (afc_mode_str == "classify")  acfg.mode = PROfit::AdaptiveFCMode::Classify;
+        else if (afc_mode_str == "asimov")     acfg.mode = PROfit::AdaptiveFCMode::Asimov;
+        else if (afc_mode_str == "brazil")     acfg.mode = PROfit::AdaptiveFCMode::Brazil;
+        else if (afc_mode_str == "classify")   acfg.mode = PROfit::AdaptiveFCMode::Classify;
         else {
-            log<LOG_WARNING>(L"%1% || fc-adaptive: unknown --mode '%2%', defaulting to init-bank.")
+            log<LOG_WARNING>(L"%1% || fc-adaptive: unknown --mode '%2%', defaulting to build-mesh.")
                 % __func__ % afc_mode_str.c_str();
-            acfg.mode = PROfit::AdaptiveFCMode::InitBank;
+            acfg.mode = PROfit::AdaptiveFCMode::BuildMesh;
         }
         acfg.n_throws = afc_n_throws;
         if (afc_prepass_initial.size() == 1) {
@@ -2732,7 +2730,6 @@ int main(int argc, char* argv[])
         acfg.p_thresh        = afc_p_thresh;
         acfg.baseline_level  = afc_baseline_level;
         acfg.stat_only_throws = afc_stat_only_throws;
-        acfg.rebuild_mesh    = afc_rebuild_mesh;
         acfg.xvar = afc_xvar;
         acfg.yvar = afc_yvar;
         acfg.x_lo = afc_xlo; acfg.x_hi = afc_xhi;
@@ -2741,7 +2738,6 @@ int main(int argc, char* argv[])
         acfg.output_tag = final_output_tag;
         acfg.chi2 = chi2;
         acfg.binned = !eventbyevent;
-        acfg.bank_path = afc_bank_path;
         acfg.cl_targets = afc_cl_targets;
         acfg.wilson_eps = afc_wilson_eps;
         acfg.n_pe_min = afc_n_pe_min;

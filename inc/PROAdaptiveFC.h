@@ -41,11 +41,12 @@ namespace PROfit {
     /// meta-mesh is built and diagnostics are written). Others are placeholders
     /// reserved for follow-up slices.
     enum class AdaptiveFCMode {
-        InitBank,
-        PrintBank, ///< Slice 2a: load --bank and write a summary PDF. No fitting.
-        Asimov,
-        Brazil,
-        Classify,
+        BuildMesh, ///< Wilks prepass + meta-mesh build + diagnostics, then save <tag>_mesh.bin and exit.
+        InitBank,  ///< Load <tag>_mesh.bin, generate PE bank, save <tag>_bank.bin. Errors if mesh missing.
+        PrintBank, ///< Load <tag>_bank.bin and write summary PDF(s). No fitting.
+        Asimov,    ///< Load <tag>_bank.bin, classify the asimov dataset, produce contour PDF + ROOT.
+        Brazil,    ///< (deferred) Brazil-band loop with bank top-up.
+        Classify,  ///< (deferred) classify real data against bank.
     };
 
     /**
@@ -77,7 +78,6 @@ namespace PROfit {
         // Meta-mesh build.
         float p_thresh       = 0.05f;   ///< Refine cell if fraction of throws refining it ≥ p_thresh.
         int   baseline_level = 2;       ///< Levels < baseline_level are kept regardless of p_thresh.
-        bool  rebuild_mesh   = false;   ///< If true, ignore any cached <output_tag>_mesh.bin and re-run the prepass.
 
         // Output naming.
         std::string output_tag = "afc_slice1";
@@ -87,13 +87,12 @@ namespace PROfit {
         std::string chi2 = "PROchi";
         bool        binned = true;
 
-        // ---- Slice-2 placeholders (declared, not used in slice 1). ----
-        std::string bank_path = "";
+        // ---- PE-bank generation knobs ----
         std::vector<float> cl_targets = {0.683f, 0.90f, 0.954f};
         float wilson_eps = 0.05f;
         int   n_pe_min = 30;
         int   n_pe_max = 1000;
-        float roi_band = 8.0f;
+        float roi_band = 8.0f; ///< (slice-2c, unused for now)
     };
 
     /**

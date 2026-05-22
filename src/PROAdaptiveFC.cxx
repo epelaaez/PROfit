@@ -2200,9 +2200,7 @@ AdaptiveFCResult run_adaptive_fc(
     // ---- Mode: print-bank ---------------------------------------------------
     // Loads an existing bank artifact and writes a summary PDF. No fitting.
     if (acfg.mode == AdaptiveFCMode::PrintBank) {
-        const std::string bank_in = acfg.bank_path.empty()
-            ? (acfg.output_tag + "_bank.bin")
-            : acfg.bank_path;
+        const std::string bank_in = acfg.output_tag + "_bank.bin";
         PEBank bank;
         if (!load_bank(bank, bank_in)) {
             log<LOG_ERROR>(L"%1% || print-bank: failed to load %2%.") % __func__ % bank_in.c_str();
@@ -2241,9 +2239,7 @@ AdaptiveFCResult run_adaptive_fc(
     // per-cell critical Δχ² at each requested CL, and writes a verdict PDF.
     // No PE generation. Bank is read-only.
     if (acfg.mode == AdaptiveFCMode::Asimov) {
-        const std::string bank_in = acfg.bank_path.empty()
-            ? (acfg.output_tag + "_bank.bin")
-            : acfg.bank_path;
+        const std::string bank_in = acfg.output_tag + "_bank.bin";
         PEBank bank;
         if (!load_bank(bank, bank_in)) {
             log<LOG_ERROR>(L"%1% || asimov: failed to load %2%.") % __func__ % bank_in.c_str();
@@ -2337,29 +2333,14 @@ AdaptiveFCResult run_adaptive_fc(
         return res;
     }
 
-    // Slice 2b (partial): init-bank + asimov are wired; brazil / classify
-    // remain placeholders.
-    if (acfg.mode != AdaptiveFCMode::InitBank) {
-        log<LOG_WARNING>(L"%1% || mode '%2%' not yet implemented; treating as init-bank.")
-            % __func__ % (int)acfg.mode;
-    }
-
-    // ---- Slice 1: prepass + meta-mesh + diagnostics. ------------------------
-    // Cache check: if <output_tag>_mesh.bin exists and --rebuild-mesh wasn't
-    // passed, skip the slow prepass+aggregation+diagnostics step entirely.
     const std::string mesh_path = acfg.output_tag + "_mesh.bin";
-    MetaMesh mm;
-    bool mesh_loaded_from_cache = false;
-    if (!acfg.rebuild_mesh && load_mesh(mm, mesh_path)) {
-        mesh_loaded_from_cache = true;
-        log<LOG_INFO>(L"%1% || using cached meta-mesh from %2% (cells=%3%); "
-                      L"skipping prepass + diagnostics. Pass --rebuild-mesh to force rebuild.")
-            % __func__ % mesh_path.c_str() % (int)mm.cells.size();
-        res.n_throws_done    = 0;
-        res.n_meta_cells     = (int)mm.cells.size();
-        res.n_baseline_cells = mm.n_baseline_cells;
-        res.n_refined_cells  = mm.n_refined_cells;
-    } else {
+    const std::string bank_path = acfg.output_tag + "_bank.bin";
+
+    // ---- Mode: build-mesh ---------------------------------------------------
+    // Wilks prepass + meta-mesh + diagnostics. Saves <tag>_mesh.bin and the
+    // slice-1 PDFs. Does NOT generate PEs. Always rebuilds — running this mode
+    // is the explicit request to (re)compute the mesh.
+    if (acfg.mode == AdaptiveFCMode::BuildMesh) {
         std::vector<PROmesh::AMRResult> per_throw_meshes =
             generate_throws(config, prop, systs, *model, fitconfig, proseed,
                             fakeDataParams, acfg, nthreads, xaxis_idx, yaxis_idx, progress);
@@ -2367,114 +2348,126 @@ AdaptiveFCResult run_adaptive_fc(
         res.leaves_per_throw.reserve(per_throw_meshes.size());
         for (const auto &amr : per_throw_meshes) res.leaves_per_throw.push_back((int)amr.leaves.size());
 
-        mm = build_meta_mesh(per_throw_meshes, acfg.p_thresh, acfg.baseline_level);
+        MetaMesh mm = build_meta_mesh(per_throw_meshes, acfg.p_thresh, acfg.baseline_level);
         res.n_meta_cells     = (int)mm.cells.size();
         res.n_baseline_cells = mm.n_baseline_cells;
         res.n_refined_cells  = mm.n_refined_cells;
 
         write_slice1_diagnostics(per_throw_meshes, mm, *model, systs, acfg,
                                  xaxis_idx, yaxis_idx, res);
-
-        // Persist the fresh mesh so future invocations can skip the prepass.
         save_mesh(mm, mesh_path);
-    }
-    (void)mesh_loaded_from_cache; // currently informational only
 
-    // ---- Slice 2a: per-cell PE bank generation + save. ----------------------
-    if (mm.cells.empty()) {
-        log<LOG_WARNING>(L"%1% || empty meta-mesh; skipping PE-bank generation.") % __func__;
+        progress.finish_all(true);
+        log<LOG_INFO>(L"%1% || build-mesh done: cells=%2% (baseline=%3%, refined=%4%), saved %5%. "
+                      L"Next step: --mode init-bank.")
+            % __func__ % (int)mm.cells.size() % mm.n_baseline_cells % mm.n_refined_cells
+            % mesh_path.c_str();
         return res;
     }
 
-    // Determine per-axis log10 flag the same way the diagnostic plotter does
-    // (model overrides CLI when in conflict).
-    const bool xlog = (xaxis_idx < model->is_log10.size()) ? model->is_log10[xaxis_idx] : acfg.logx;
-    const bool ylog = (yaxis_idx < model->is_log10.size()) ? model->is_log10[yaxis_idx] : acfg.logy;
+    // ---- Mode: init-bank ----------------------------------------------------
+    // Loads <tag>_mesh.bin and generates the PE bank. Errors out if the mesh
+    // doesn't exist — the user is expected to run --mode build-mesh first.
+    if (acfg.mode == AdaptiveFCMode::InitBank) {
+        MetaMesh mm;
+        if (!load_mesh(mm, mesh_path)) {
+            log<LOG_ERROR>(L"%1% || init-bank: required mesh artifact %2% not found. "
+                           L"Run --mode build-mesh first.") % __func__ % mesh_path.c_str();
+            progress.finish_all(true);
+            return res;
+        }
+        log<LOG_INFO>(L"%1% || init-bank: loaded meta-mesh from %2% (cells=%3%).")
+            % __func__ % mesh_path.c_str() % (int)mm.cells.size();
+        res.n_meta_cells     = (int)mm.cells.size();
+        res.n_baseline_cells = mm.n_baseline_cells;
+        res.n_refined_cells  = mm.n_refined_cells;
 
-    std::vector<float> cell_x_model, cell_y_model;
-    compute_cell_centers(mm, xlog, ylog, cell_x_model, cell_y_model);
+        if (mm.cells.empty()) {
+            log<LOG_WARNING>(L"%1% || empty meta-mesh; nothing to bank.") % __func__;
+            progress.finish_all(true);
+            return res;
+        }
 
-    // Cholesky factor of the total covariance — built once, reused across all
-    // cells and all PEs. Same construction as the brazil-band path
-    // (bin/PROfit.cxx:1586) and the existing fc block (bin/PROfit.cxx:2511).
-    PROspec cv = FillSpectra(config, prop, systs, *model, fakeDataParams,
-                             acfg.binned, config.i_prime);
-    Eigen::MatrixXf L = systs.DecomposeFractionalCovariance(config, cv.Spec());
+        const bool xlog = (xaxis_idx < model->is_log10.size()) ? model->is_log10[xaxis_idx] : acfg.logx;
+        const bool ylog = (yaxis_idx < model->is_log10.size()) ? model->is_log10[yaxis_idx] : acfg.logy;
 
-    log<LOG_INFO>(L"%1% || init-bank: starting PE generation for %2% cells "
-                  L"(n_pe_min=%3%, n_pe_max=%4%, wilson_eps=%5%).")
-        % __func__ % (int)mm.cells.size() % acfg.n_pe_min % acfg.n_pe_max % acfg.wilson_eps;
+        std::vector<float> cell_x_model, cell_y_model;
+        compute_cell_centers(mm, xlog, ylog, cell_x_model, cell_y_model);
 
-    // Dedicated progress bar tracking cells. We piggyback on the same
-    // MultiPROgressBar already in flight (the throws bar at index 0) — add a
-    // second slot via a new instance is harder, so for slice 2a we reuse bar 0
-    // and the caller's progress display continues. (If you want a separate
-    // bar, plumb a second MultiPROgressBar through.)
-    PEBank bank;
-    bank.finest_nx = mm.finest_nx;
-    bank.finest_ny = mm.finest_ny;
-    bank.max_levels = mm.max_levels;
-    bank.x_lo = mm.x_lo; bank.x_hi = mm.x_hi;
-    bank.y_lo = mm.y_lo; bank.y_hi = mm.y_hi;
-    bank.n_cells = (int)mm.cells.size();
-    bank.cell_center_x = cell_x_model;
-    bank.cell_center_y = cell_y_model;
-    bank.cell_i_bl.reserve(mm.cells.size());
-    bank.cell_j_bl.reserve(mm.cells.size());
-    bank.cell_step.reserve(mm.cells.size());
-    bank.cell_level.reserve(mm.cells.size());
-    for (const auto &c : mm.cells) {
-        bank.cell_i_bl.push_back(c.i_bl);
-        bank.cell_j_bl.push_back(c.j_bl);
-        bank.cell_step.push_back(c.step);
-        bank.cell_level.push_back(c.level);
+        // Cholesky factor of the total covariance — built once, reused across all
+        // cells and all PEs. Same construction as the brazil-band path
+        // (bin/PROfit.cxx:1586) and the existing fc block (bin/PROfit.cxx:2511).
+        PROspec cv = FillSpectra(config, prop, systs, *model, fakeDataParams,
+                                 acfg.binned, config.i_prime);
+        Eigen::MatrixXf L = systs.DecomposeFractionalCovariance(config, cv.Spec());
+
+        log<LOG_INFO>(L"%1% || init-bank: starting PE generation for %2% cells "
+                      L"(n_pe_min=%3%, n_pe_max=%4%, wilson_eps=%5%).")
+            % __func__ % (int)mm.cells.size() % acfg.n_pe_min % acfg.n_pe_max % acfg.wilson_eps;
+
+        PEBank bank;
+        bank.finest_nx = mm.finest_nx;
+        bank.finest_ny = mm.finest_ny;
+        bank.max_levels = mm.max_levels;
+        bank.x_lo = mm.x_lo; bank.x_hi = mm.x_hi;
+        bank.y_lo = mm.y_lo; bank.y_hi = mm.y_hi;
+        bank.n_cells = (int)mm.cells.size();
+        bank.cell_center_x = cell_x_model;
+        bank.cell_center_y = cell_y_model;
+        bank.cell_i_bl.reserve(mm.cells.size());
+        bank.cell_j_bl.reserve(mm.cells.size());
+        bank.cell_step.reserve(mm.cells.size());
+        bank.cell_level.reserve(mm.cells.size());
+        for (const auto &c : mm.cells) {
+            bank.cell_i_bl.push_back(c.i_bl);
+            bank.cell_j_bl.push_back(c.j_bl);
+            bank.cell_step.push_back(c.step);
+            bank.cell_level.push_back(c.level);
+        }
+
+        // Stop the throws progress bar (never used in init-bank) and launch
+        // the cells one, sized for the actual cell count.
+        progress.finish_all(true);
+        std::vector<std::pair<int, std::string>> cells_bar_cfg;
+        cells_bar_cfg.push_back({(int)mm.cells.size(), "AFC cells (PEs)"});
+        MultiPROgressBar cells_progress(cells_bar_cfg);
+        cells_progress.initialize_display();
+        cells_progress.start_display_thread();
+
+        schedule_pes(acfg, config, prop, systs, *model, fitconfig, proseed, L,
+                     xaxis_idx, yaxis_idx, cell_x_model, cell_y_model,
+                     bank, nthreads, cells_progress, 0, res);
+
+        cells_progress.finish_all(true);
+
+        if (save_bank(bank, bank_path)) {
+            res.bank_path = bank_path;
+        }
+
+        // Auto-print bank summary + per-cell PDFs.
+        {
+            const std::string summary_pdf = acfg.output_tag + "_bank_summary.pdf";
+            const bool xlog_axis = xlog;
+            const bool ylog_axis = ylog;
+            const std::string xlabel = xaxis_idx < model->nparams
+                ? model->pretty_param_names.at(xaxis_idx) : std::string("x");
+            const std::string ylabel = yaxis_idx < model->nparams
+                ? model->pretty_param_names.at(yaxis_idx) : std::string("y");
+            plot_pebank_summary_pdf(bank, summary_pdf, bank_path, xlabel, ylabel,
+                                    acfg.logx, acfg.logy, xlog_axis, ylog_axis);
+
+            const std::string per_cell_pdf = acfg.output_tag + "_bank_per_cell.pdf";
+            plot_pebank_pes_multipage_pdf(bank, per_cell_pdf, xlabel, ylabel,
+                                          xlog_axis, ylog_axis);
+        }
+
+        return res;
     }
 
-    // Stop the throws progress bar before launching the cells one, so the two
-    // ANSI cursor-driven refresh loops don't fight. finish_all() rounds the
-    // throws bar to 100% (true regardless of whether it ran or was cached).
+    // Brazil / Classify / unknown — slice 2c+ territory.
+    log<LOG_ERROR>(L"%1% || mode '%2%' is not yet implemented in slice 2b.")
+        % __func__ % (int)acfg.mode;
     progress.finish_all(true);
-
-    // Cells progress bar — sized for the actual number of cells, not n_throws.
-    std::vector<std::pair<int, std::string>> cells_bar_cfg;
-    cells_bar_cfg.push_back({(int)mm.cells.size(), "AFC cells (PEs)"});
-    MultiPROgressBar cells_progress(cells_bar_cfg);
-    cells_progress.initialize_display();
-    cells_progress.start_display_thread();
-
-    schedule_pes(acfg, config, prop, systs, *model, fitconfig, proseed, L,
-                 xaxis_idx, yaxis_idx, cell_x_model, cell_y_model,
-                 bank, nthreads, cells_progress, 0, res);
-
-    cells_progress.finish_all(true);
-
-    // Persist the bank. Default path is <output_tag>_bank.bin unless
-    // --bank explicitly set.
-    const std::string bank_path = acfg.bank_path.empty()
-        ? (acfg.output_tag + "_bank.bin")
-        : acfg.bank_path;
-    if (save_bank(bank, bank_path)) {
-        res.bank_path = bank_path;
-    }
-
-    // Auto-print the bank summary PDF as a side effect of init-bank. The same
-    // helper is invoked standalone from --mode print-bank for later inspection.
-    {
-        const std::string summary_pdf = acfg.output_tag + "_bank_summary.pdf";
-        const bool xlog_axis = (xaxis_idx < model->is_log10.size()) ? model->is_log10[xaxis_idx] : acfg.logx;
-        const bool ylog_axis = (yaxis_idx < model->is_log10.size()) ? model->is_log10[yaxis_idx] : acfg.logy;
-        const std::string xlabel = xaxis_idx < model->nparams
-            ? model->pretty_param_names.at(xaxis_idx) : std::string("x");
-        const std::string ylabel = yaxis_idx < model->nparams
-            ? model->pretty_param_names.at(yaxis_idx) : std::string("y");
-        plot_pebank_summary_pdf(bank, summary_pdf, bank_path, xlabel, ylabel,
-                                acfg.logx, acfg.logy, xlog_axis, ylog_axis);
-
-        const std::string per_cell_pdf = acfg.output_tag + "_bank_per_cell.pdf";
-        plot_pebank_pes_multipage_pdf(bank, per_cell_pdf, xlabel, ylabel,
-                                      xlog_axis, ylog_axis);
-    }
-
     return res;
 }
 
