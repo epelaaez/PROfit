@@ -832,9 +832,9 @@ static void plot_pebank_summary_pdf(const PEBank &bank,
         box->Draw();
     }
 
-    // ---- Right pad: bank stats -----------------------------------------------
+    // ---- Right pad: bank stats only ------------------------------------------
     right_pad.cd();
-    TPaveText *info = new TPaveText(0.02, 0.55, 0.98, 0.97, "NDC");
+    TPaveText *info = new TPaveText(0.02, 0.05, 0.98, 0.97, "NDC");
     info->SetFillColor(kWhite);
     info->SetBorderSize(1);
     info->SetTextSize(0.038);
@@ -852,27 +852,131 @@ static void plot_pebank_summary_pdf(const PEBank &bank,
     info->AddText(Form("Max AMR level: %d", bank.max_levels));
     info->Draw();
 
-    TPaveText *legend = new TPaveText(0.02, 0.05, 0.98, 0.50, "NDC");
-    legend->SetFillColor(kWhite);
-    legend->SetBorderSize(1);
-    legend->SetTextSize(0.036);
-    legend->SetTextAlign(12);
-    legend->AddText("Legend");
-    legend->AddText("");
-    legend->AddText("Heatmap = #PEs banked at each cell");
-    legend->AddText("  (painted across cell footprint)");
-    legend->AddText("Black borders = MetaMesh cell boundaries");
-    legend->AddText("");
-    legend->AddText("Cells with low N stopped early via");
-    legend->AddText("the Wilson half-width rule;");
-    legend->AddText("cells at N=max hit the n_pe_max cap");
-    legend->AddText("without converging.");
-    legend->Draw();
-
     c.cd();
     c.Print(filename.c_str());
     log<LOG_INFO>(L"%1% || PE-bank summary written to %2% (cells=%3%, total_pes=%4%).")
         % __func__ % filename.c_str() % bank.n_cells % (long long)total_pes;
+}
+
+// Multi-page PDF: one page per meta-mesh cell, three histograms per page —
+// χ²_syst / χ²_osc / Δχ² for the PEs banked at that cell. Uses the same
+// open/append/close pattern as plot_amr_throws_multipage_pdf (mirroring the
+// *_PROplot_Covar.pdf idiom at bin/PROfit.cxx:2282/2296/2312).
+static void plot_pebank_pes_multipage_pdf(const PEBank &bank,
+                                          const std::string &filename,
+                                          const std::string &xlabel,
+                                          const std::string &ylabel,
+                                          bool xlog_axis, bool ylog_axis)
+{
+    if (bank.n_cells <= 0) {
+        log<LOG_WARNING>(L"%1% || plot_pebank_pes_multipage_pdf: empty bank, skipping.") % __func__;
+        return;
+    }
+
+    TCanvas c("pebank_pes_multipage", "PE-bank per-cell histograms", 1500, 550);
+    c.Print((filename + "[").c_str(), "pdf");
+
+    int pages_written = 0;
+    int skipped_empty = 0;
+
+    for (int idx = 0; idx < bank.n_cells; ++idx) {
+        const auto &pes = bank.cell_pes[(size_t)idx];
+        if (pes.empty()) { ++skipped_empty; continue; }
+
+        c.Clear();
+
+        // Pad layout: thin header strip on top (10%), three equal panels below.
+        TPad *top = new TPad("hdr", "", 0.0, 0.88, 1.0, 1.00);
+        TPad *p1  = new TPad("p1",  "", 0.000, 0.00, 0.333, 0.88);
+        TPad *p2  = new TPad("p2",  "", 0.333, 0.00, 0.666, 0.88);
+        TPad *p3  = new TPad("p3",  "", 0.666, 0.00, 1.000, 0.88);
+        top->Draw(); p1->Draw(); p2->Draw(); p3->Draw();
+
+        // Find min/max of each variable for auto-binned histograms.
+        float syst_lo =  std::numeric_limits<float>::infinity();
+        float syst_hi = -std::numeric_limits<float>::infinity();
+        float osc_lo  =  std::numeric_limits<float>::infinity();
+        float osc_hi  = -std::numeric_limits<float>::infinity();
+        float dch_lo  =  std::numeric_limits<float>::infinity();
+        float dch_hi  = -std::numeric_limits<float>::infinity();
+        for (const auto &r : pes) {
+            syst_lo = std::min(syst_lo, r.chi2_syst);
+            syst_hi = std::max(syst_hi, r.chi2_syst);
+            osc_lo  = std::min(osc_lo,  r.chi2_osc);
+            osc_hi  = std::max(osc_hi,  r.chi2_osc);
+            dch_lo  = std::min(dch_lo,  r.dchi2);
+            dch_hi  = std::max(dch_hi,  r.dchi2);
+        }
+        // Pad the ranges so histogram doesn't clip at the edges.
+        auto pad_range = [](float &lo, float &hi) {
+            if (hi <= lo) { hi = lo + 1.0f; }
+            const float w = hi - lo;
+            lo -= 0.05f * w;
+            hi += 0.05f * w;
+        };
+        pad_range(syst_lo, syst_hi);
+        pad_range(osc_lo,  osc_hi);
+        pad_range(dch_lo,  dch_hi);
+
+        const int n_bins = std::max(20, (int)pes.size() / 5);
+
+        // Histograms — allocated with new; ROOT will free them when canvas clears.
+        TH1F *h_syst = new TH1F(Form("h_syst_%d", idx),
+                                (std::string(";#chi^{2}_{syst};entries")).c_str(),
+                                n_bins, syst_lo, syst_hi);
+        TH1F *h_osc  = new TH1F(Form("h_osc_%d",  idx),
+                                (std::string(";#chi^{2}_{osc};entries")).c_str(),
+                                n_bins, osc_lo, osc_hi);
+        TH1F *h_dch  = new TH1F(Form("h_dch_%d",  idx),
+                                (std::string(";#Delta#chi^{2};entries")).c_str(),
+                                n_bins, dch_lo, dch_hi);
+        h_syst->SetFillColorAlpha(kAzure + 1, 0.4f);
+        h_osc ->SetFillColorAlpha(kGreen + 2, 0.4f);
+        h_dch ->SetFillColorAlpha(kRed   + 1, 0.4f);
+        h_syst->SetLineColor(kAzure + 1);
+        h_osc ->SetLineColor(kGreen + 2);
+        h_dch ->SetLineColor(kRed   + 1);
+
+        for (const auto &r : pes) {
+            h_syst->Fill(r.chi2_syst);
+            h_osc ->Fill(r.chi2_osc);
+            h_dch ->Fill(r.dchi2);
+        }
+
+        // ---- Header: cell metadata --------------------------------------------
+        top->cd();
+        const float xphys = xlog_axis ? std::pow(10.0f, bank.cell_center_x[(size_t)idx])
+                                      : bank.cell_center_x[(size_t)idx];
+        const float yphys = ylog_axis ? std::pow(10.0f, bank.cell_center_y[(size_t)idx])
+                                      : bank.cell_center_y[(size_t)idx];
+        TPaveText *hdr = new TPaveText(0.02, 0.10, 0.98, 0.95, "NDC");
+        hdr->SetFillColor(kWhite);
+        hdr->SetBorderSize(0);
+        hdr->SetTextAlign(12);
+        hdr->SetTextSize(0.45);
+        hdr->AddText(Form("Cell %d / %d   level %d   step %d   N_{PE}=%d   "
+                          "%s=%.4g   %s=%.4g",
+                          idx, bank.n_cells,
+                          bank.cell_level[(size_t)idx],
+                          bank.cell_step[(size_t)idx],
+                          (int)pes.size(),
+                          xlabel.c_str(), xphys,
+                          ylabel.c_str(), yphys));
+        hdr->Draw();
+
+        // ---- Three histograms -------------------------------------------------
+        p1->cd(); h_syst->Draw();
+        p2->cd(); h_osc ->Draw();
+        p3->cd(); h_dch ->Draw();
+
+        c.cd();
+        c.Print(filename.c_str(), "pdf");
+        ++pages_written;
+    }
+
+    c.Print((filename + "]").c_str(), "pdf");
+    log<LOG_INFO>(L"%1% || wrote per-cell PE histograms PDF %2% (%3% pages; skipped %4% empty cells).")
+        % __func__ % filename.c_str() % pages_written % skipped_empty;
 }
 
 // Build a TH2D from a dense reconstructed Δχ² matrix, with physical-coord
@@ -1582,6 +1686,10 @@ AdaptiveFCResult run_adaptive_fc(
         plot_pebank_summary_pdf(bank, out_pdf, bank_in, xlabel, ylabel,
                                 acfg.logx, acfg.logy, xlog_axis, ylog_axis);
 
+        const std::string per_cell_pdf = acfg.output_tag + "_bank_per_cell.pdf";
+        plot_pebank_pes_multipage_pdf(bank, per_cell_pdf, xlabel, ylabel,
+                                      xlog_axis, ylog_axis);
+
         // Populate result for the caller (no PE generation in this mode).
         res.bank_path        = bank_in;
         res.n_meta_cells     = bank.n_cells;
@@ -1724,6 +1832,10 @@ AdaptiveFCResult run_adaptive_fc(
             ? model->pretty_param_names.at(yaxis_idx) : std::string("y");
         plot_pebank_summary_pdf(bank, summary_pdf, bank_path, xlabel, ylabel,
                                 acfg.logx, acfg.logy, xlog_axis, ylog_axis);
+
+        const std::string per_cell_pdf = acfg.output_tag + "_bank_per_cell.pdf";
+        plot_pebank_pes_multipage_pdf(bank, per_cell_pdf, xlabel, ylabel,
+                                      xlog_axis, ylog_axis);
     }
 
     return res;
