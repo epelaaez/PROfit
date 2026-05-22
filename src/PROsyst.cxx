@@ -95,27 +95,30 @@ namespace PROfit {
                 ++n_covar;
             } else if(syst.mode == "covariance_to_spline") {
                 size_t n_before = splines.size();
+                size_t n_covar_before = covar_names.size();
                 FillSplinesFromCovariance(syst);
                 size_t n_after = splines.size();
+                size_t n_covar_after = covar_names.size();
 
                 // Propagate parent tag + plotname to the synthesized knob entries so downstream
                 // plotting code (PROplot.cxx) can group them under the same tag.
                 // The maps are populated by the XML parser; here we append entries for the
-                // dynamically-generated decomposition knobs.
+                // dynamically-generated decomposition knobs and the optional residual covariance.
                 PROconfig& mut_config = const_cast<PROconfig&>(config);
                 auto parent_tags_it = mut_config.m_mcgen_variation_tags.find(syst.systname);
                 auto parent_plotname_it = mut_config.m_mcgen_variation_plotname_map.find(syst.systname);
-                for(size_t si = n_before; si < n_after; ++si) {
-                    const std::string& knob_name = spline_names[si];
+                auto propagate = [&](const std::string& child_name) {
                     if(parent_tags_it != mut_config.m_mcgen_variation_tags.end()) {
-                        mut_config.m_mcgen_variation_tags[knob_name] = parent_tags_it->second;
+                        mut_config.m_mcgen_variation_tags[child_name] = parent_tags_it->second;
                     }
                     if(parent_plotname_it != mut_config.m_mcgen_variation_plotname_map.end()) {
-                        // Append "_decomp_knob_<i>" suffix onto parent plotname for readability
-                        const std::string suffix = knob_name.substr(syst.systname.size());
-                        mut_config.m_mcgen_variation_plotname_map[knob_name] = parent_plotname_it->second + suffix;
+                        // Append the "_decomp_knob_<i>" / "_resid_cov" suffix onto the parent plotname.
+                        const std::string suffix = child_name.substr(syst.systname.size());
+                        mut_config.m_mcgen_variation_plotname_map[child_name] = parent_plotname_it->second + suffix;
                     }
-                }
+                };
+                for(size_t si = n_before; si < n_after; ++si) propagate(spline_names[si]);
+                for(size_t ci = n_covar_before; ci < n_covar_after; ++ci) propagate(covar_names[ci]);
             }else if(syst.mode == "flat"){
                 this->CreateFlatMatrix(config, syst); 
                 covar_names.push_back(syst.systname); 
@@ -828,6 +831,8 @@ namespace PROfit {
 
     void PROsyst::FillSplinesFromCovariance(const SystStruct& syst) {
         Eigen::MatrixXf frac_cov = PROsyst::GenerateFracCovarMatrix(syst);
+        // Capture pre-symmetrization asymmetry as a sanity number for debug plots.
+        const float pre_symm_asymmetry = (frac_cov - frac_cov.transpose()).norm();
         // symmetrize to kill any float-asymmetry before eigendecomposition
         frac_cov = 0.5f * (frac_cov + frac_cov.transpose());
 
@@ -841,26 +846,40 @@ namespace PROfit {
         const Eigen::MatrixXf eigvecs = solver.eigenvectors(); // columns
 
         const int nbins = frac_cov.rows();
-        // Count strictly-positive eigenvalues (clamp near-zero/negative to 0)
+        // List strictly-positive eigenvalues in descending order (near-zero/negative are noise).
         const float tol = 10.0f * Eigen::NumTraits<float>::dummy_precision();
-        std::vector<int> kept_indices; // indices into eigvals, in descending-eigenvalue order
+        std::vector<int> positive_indices; // indices into eigvals, descending eigenvalue
         for(int i = nbins - 1; i >= 0; --i) {
-            if(eigvals(i) > tol) kept_indices.push_back(i);
+            if(eigvals(i) > tol) positive_indices.push_back(i);
         }
-        int K = static_cast<int>(kept_indices.size());
-        if(syst.num_decomp_knobs > 0 && syst.num_decomp_knobs < K) {
+        const int n_pos = static_cast<int>(positive_indices.size());
+        int K = n_pos;
+        if(syst.num_decomp_knobs > 0 && syst.num_decomp_knobs < n_pos) {
             K = syst.num_decomp_knobs;
         }
         if(K == 0) {
             log<LOG_WARNING>(L"%1% || covariance_to_spline systematic %2% has no positive-eigenvalue modes; skipping.") % __func__ % syst.systname.c_str();
             return;
         }
+        // Top-K positive eigenpairs become spline knobs; the remaining positive eigenpairs
+        // (if any, and if requested) are folded into a residual covariance.
+        std::vector<int> kept_indices(positive_indices.begin(), positive_indices.begin() + K);
+        std::vector<int> residual_indices(positive_indices.begin() + K, positive_indices.end());
 
-        log<LOG_INFO>(L"%1% || covariance_to_spline %2%: keeping %3% of %4% eigenvectors (largest eigenvalue=%5%, smallest kept=%6%)")
-            % __func__ % syst.systname.c_str() % K % nbins % eigvals(nbins - 1) % eigvals(kept_indices[K - 1]);
+        log<LOG_INFO>(L"%1% || covariance_to_spline %2%: keeping %3% of %4% eigenvectors as splines (largest eigenvalue=%5%, smallest kept=%6%), %7% residual mode(s)")
+            % __func__ % syst.systname.c_str() % K % nbins % eigvals(nbins - 1) % eigvals(kept_indices[K - 1]) % static_cast<int>(residual_indices.size());
 
         const float lo = -3.0f, hi = 3.0f;
         const int n_segments = 6; // knots at -3, -2, -1, 0, 1, 2
+
+        Cov2SplineDebugInfo dbg;
+        dbg.original_frac_cov = frac_cov;
+        dbg.pre_symm_asymmetry = pre_symm_asymmetry;
+        dbg.eigenvalues = eigvals;
+        dbg.eigenvectors = eigvecs;
+        dbg.kept_indices = kept_indices;
+        dbg.binning = syst.binning;
+        dbg.knob_names.reserve(K);
 
         for(int k = 0; k < K; ++k) {
             const int ev_idx = kept_indices[k];
@@ -891,9 +910,54 @@ namespace PROfit {
             spline_names.push_back(knob_name);
             spline_lo.push_back(lo);
             spline_hi.push_back(hi);
+            spline_has_restrict.push_back(false);
+            spline_restrict_lo.push_back(0.0f);
+            spline_restrict_hi.push_back(0.0f);
             spline_binnings.push_back(syst.binning);
+            dbg.knob_names.push_back(knob_name);
             ++n_splines;
         }
+
+        // Fold the un-kept (smaller) positive eigenpairs into a residual covariance so the
+        // rank-K truncation does not throw away variance. Default on; disabled with
+        // include_resid_cov="false" in the XML.
+        // Only register the matrix when this PROsyst's binning matches the systematic's binning,
+        // mirroring external_covariance: covmat entries are summed assuming a common dimension,
+        // while the splines above stay binning-tagged and are safe across variables.
+        if(syst.include_resid_cov && !residual_indices.empty() && other_index == syst.binning) {
+            Eigen::MatrixXf residual_cov = Eigen::MatrixXf::Zero(nbins, nbins);
+            for(int idx : residual_indices) {
+                const float lambda = eigvals(idx);
+                const Eigen::VectorXf vec = eigvecs.col(idx);
+                residual_cov.noalias() += lambda * (vec * vec.transpose());
+            }
+            toFiniteMatrix(residual_cov);
+
+            const std::string resid_name = syst.systname + "_resid_cov";
+            syst_map[resid_name] = {covmat.size(), SystType::Covariance};
+            covmat.push_back(residual_cov);
+            corrmat.push_back(GenerateCorrMatrix(residual_cov));
+            covar_names.push_back(resid_name);
+            ++n_covar;
+
+            dbg.has_residual = true;
+            dbg.n_residual_modes = static_cast<int>(residual_indices.size());
+            dbg.residual_cov = std::move(residual_cov);
+            dbg.residual_cov_name = resid_name;
+
+            log<LOG_INFO>(L"%1% || covariance_to_spline %2%: retained %3% residual mode(s) as covariance %4%")
+                % __func__ % syst.systname.c_str() % dbg.n_residual_modes % resid_name.c_str();
+        } else if(!residual_indices.empty()) {
+            if(!syst.include_resid_cov) {
+                log<LOG_INFO>(L"%1% || covariance_to_spline %2%: dropping %3% residual mode(s) (include_resid_cov=false)")
+                    % __func__ % syst.systname.c_str() % static_cast<int>(residual_indices.size());
+            } else {
+                log<LOG_INFO>(L"%1% || covariance_to_spline %2%: residual covariance not registered for binning %3% (built only at the systematic's binning %4%)")
+                    % __func__ % syst.systname.c_str() % other_index % syst.binning;
+            }
+        }
+
+        cov2spline_debug_info[syst.systname] = std::move(dbg);
     }
 
     float PROsyst::GetSplineShift(std::string name, float shift, int bin) const {

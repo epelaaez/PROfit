@@ -518,6 +518,11 @@ namespace PROfit {
                         sv.back().num_decomp_knobs = it_nk->second;
                         log<LOG_INFO>(L"%1% || Setting num_decomp_knobs=%2% for systematic %3%") % __func__ % sv.back().num_decomp_knobs % sys_name.c_str();
                     }
+                    auto it_rc = inconfig.m_mcgen_variation_include_resid_cov.find(sys_name);
+                    if(it_rc != inconfig.m_mcgen_variation_include_resid_cov.end()) {
+                        sv.back().include_resid_cov = it_rc->second;
+                    }
+                    log<LOG_INFO>(L"%1% || Setting include_resid_cov=%2% for systematic %3%") % __func__ % sv.back().include_resid_cov % sys_name.c_str();
                     log<LOG_INFO>(L"%1% || Systematic variation %2% is a match for a covariance_to_spline systematic. Processing as such. ") % __func__ % sys_name.c_str();
                 }
                 if(sys_mode == "flat"){
