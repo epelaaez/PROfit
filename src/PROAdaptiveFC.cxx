@@ -1630,6 +1630,290 @@ static void compute_cell_centers(const MetaMesh &mm,
     }
 }
 
+// --------------------------------------------------------------------
+//  Asimov-mode helpers (slice 2b, asimov only).
+// --------------------------------------------------------------------
+
+// Observed Δχ² on the asimov dataset at every meta-mesh cell.
+//
+// The global (syst+osc) fit is computed once — physics floats freely, so the
+// result is μ-independent. Per-cell fits then re-pin the two scanned axes at
+// each cell center and run a syst-only fit (splines float; non-scanned
+// physics params pinned at model->default_val(i)).
+struct AsimovObs {
+    float chi2_osc_global = 0.0f;        ///< Single global best fit.
+    std::vector<float> chi2_syst;        ///< Per-cell syst-only chi^2.
+    std::vector<float> dchi2_obs;        ///< chi2_syst[c] - chi2_osc_global per cell.
+};
+
+static AsimovObs compute_asimov_obs(
+    const PROconfig &config,
+    const PROpeller &prop,
+    const PROsyst   &systs,
+    const PROmodel  &model,
+    const PROfitterConfig &fitconfig,
+    const PROdata   &asimov_data,
+    const std::string &chi2_kind,
+    bool binned,
+    size_t xaxis_idx, size_t yaxis_idx,
+    const std::vector<float> &cell_x_model,
+    const std::vector<float> &cell_y_model,
+    PROseed &proseed,
+    int nthreads,
+    MultiPROgressBar &progress,
+    int bar_idx)
+{
+    AsimovObs obs;
+    const int n_cells = (int)cell_x_model.size();
+    obs.chi2_syst.assign(n_cells, 0.0f);
+    obs.dchi2_obs.assign(n_cells, 0.0f);
+    if (n_cells == 0) return obs;
+
+    const size_t nphys   = model.nparams;
+    const size_t nspline = systs.GetNSplines();
+    const size_t nparams = nphys + nspline;
+
+    auto make_metric = [&](const PROdata &d) -> std::unique_ptr<PROmetric> {
+        PROmetric::EvalStrategy mstrat = binned ? PROmetric::BinnedChi2 : PROmetric::EventByEvent;
+        if (chi2_kind == "PROchi")    return std::unique_ptr<PROmetric>(new PROchi   ("", config, prop, &systs, model, d, mstrat));
+        if (chi2_kind == "PROCNP")    return std::unique_ptr<PROmetric>(new PROCNP   ("", config, prop, &systs, model, d, mstrat));
+        if (chi2_kind == "Poisson")   return std::unique_ptr<PROmetric>(new PROpoisson("", config, prop, &systs, model, d, mstrat));
+        log<LOG_ERROR>(L"%1% || compute_asimov_obs: unknown chi2 kind '%2%'.") % __func__ % chi2_kind.c_str();
+        return nullptr;
+    };
+
+    std::uniform_int_distribution<uint32_t> dseed(0, std::numeric_limits<uint32_t>::max());
+
+    // ---- 1. Global (syst + physics) fit, once. -------------------------------
+    {
+        auto metric = make_metric(asimov_data);
+        if (!metric) return obs;
+        Eigen::VectorXf lb_osc((int)nparams), ub_osc((int)nparams);
+        for (size_t j = 0; j < nphys; ++j) {
+            lb_osc((int)j) = model.lb(j);
+            ub_osc((int)j) = model.ub(j);
+        }
+        for (size_t j = nphys; j < nparams; ++j) {
+            const size_t si = j - nphys;
+            const float lo = systs.spline_has_restrict[si] ? systs.spline_restrict_lo[si] : systs.spline_lo[si];
+            const float hi = systs.spline_has_restrict[si] ? systs.spline_restrict_hi[si] : systs.spline_hi[si];
+            lb_osc((int)j) = lo; ub_osc((int)j) = hi;
+        }
+        metric->setBounds(lb_osc, ub_osc);
+        std::mt19937 main_rng((*proseed.getThreadSeeds())[0]);
+        PROfitter fitter_osc(ub_osc, lb_osc, fitconfig, dseed(main_rng));
+        obs.chi2_osc_global = fitter_osc.Fit(*metric);
+        // Try the freq-seed alternatives — same trick as fc_worker.
+        fitter_osc.calcFreqSeedPoints(*metric);
+        for (size_t i = 0; i < fitter_osc.freq_seed_points.size(); ++i) {
+            const float c = fitter_osc.freq_seed_values.at(i);
+            if (c < obs.chi2_osc_global) obs.chi2_osc_global = c;
+        }
+        log<LOG_INFO>(L"%1% || asimov global fit: chi2_osc=%2%.") % __func__ % obs.chi2_osc_global;
+    }
+
+    // ---- 2. Per-cell syst-only fits, parallel. -------------------------------
+    std::atomic<int> next_cell{0};
+
+    auto worker = [&](int thread_idx) {
+        std::mt19937 thread_rng((*proseed.getThreadSeeds())[thread_idx]);
+        auto metric = make_metric(asimov_data);
+        if (!metric) return;
+
+        // Pre-build the spline bounds once (same for every cell).
+        Eigen::VectorXf lb((int)nparams), ub((int)nparams);
+        for (size_t j = 0; j < nphys; ++j) {
+            lb((int)j) = model.default_val(j);
+            ub((int)j) = model.default_val(j);
+        }
+        for (size_t j = nphys; j < nparams; ++j) {
+            const size_t si = j - nphys;
+            const float lo = systs.spline_has_restrict[si] ? systs.spline_restrict_lo[si] : systs.spline_lo[si];
+            const float hi = systs.spline_has_restrict[si] ? systs.spline_restrict_hi[si] : systs.spline_hi[si];
+            lb((int)j) = lo; ub((int)j) = hi;
+        }
+
+        while (true) {
+            int c = next_cell.fetch_add(1);
+            if (c >= n_cells) break;
+
+            // Pin the two scanned axes at this cell's center.
+            lb((int)xaxis_idx) = cell_x_model[(size_t)c];
+            ub((int)xaxis_idx) = cell_x_model[(size_t)c];
+            lb((int)yaxis_idx) = cell_y_model[(size_t)c];
+            ub((int)yaxis_idx) = cell_y_model[(size_t)c];
+
+            metric->setBounds(lb, ub);
+            PROfitter fitter(ub, lb, fitconfig, dseed(thread_rng));
+            const float chi2_s = fitter.Fit(*metric);
+            obs.chi2_syst[(size_t)c] = chi2_s;
+            obs.dchi2_obs[(size_t)c] = chi2_s - obs.chi2_osc_global;
+            progress.increment_bar(bar_idx);
+        }
+    };
+
+    std::vector<std::thread> tpool;
+    tpool.reserve((size_t)std::max(1, nthreads));
+    for (int t = 0; t < std::max(1, nthreads); ++t) tpool.emplace_back(worker, t);
+    for (auto &th : tpool) th.join();
+
+    return obs;
+}
+
+// Per-cell, per-CL verdict map produced by classify_against_bank.
+struct CellVerdict {
+    float crit_dchi2 = 0.0f;  ///< Empirical critical Δχ² at the bank's α-quantile.
+    bool  included  = false;  ///< dchi2_obs ≤ crit_dchi2 at this CL.
+    bool  decidable = false;  ///< Bank had enough PEs to give a stable quantile.
+};
+
+// Classify every cell at every requested CL, given asimov observations and a
+// bank. Returns verdicts indexed by [cl_idx][cell_idx]. A cell with fewer than
+// `min_pes_for_decision` PEs in the bank is marked `decidable = false`.
+static std::vector<std::vector<CellVerdict>> classify_against_bank(
+    const PEBank &bank,
+    const AsimovObs &obs,
+    const std::vector<float> &cl_targets,
+    int min_pes_for_decision)
+{
+    const int n_cells = bank.n_cells;
+    std::vector<std::vector<CellVerdict>> verdicts(cl_targets.size());
+    for (auto &v : verdicts) v.assign(n_cells, CellVerdict{});
+
+    for (int c = 0; c < n_cells; ++c) {
+        const auto &pes = bank.cell_pes[(size_t)c];
+        if ((int)pes.size() < min_pes_for_decision) continue; // leave decidable = false
+
+        std::vector<float> sorted;
+        sorted.reserve(pes.size());
+        for (const auto &r : pes) sorted.push_back(r.dchi2);
+        std::sort(sorted.begin(), sorted.end());
+
+        for (size_t k = 0; k < cl_targets.size(); ++k) {
+            const float crit = SequentialFCTest::crit_dchi2_at_cl(sorted, cl_targets[k]);
+            CellVerdict v;
+            v.crit_dchi2 = crit;
+            v.included   = (obs.dchi2_obs[(size_t)c] <= crit);
+            v.decidable  = true;
+            verdicts[k][(size_t)c] = v;
+        }
+    }
+    return verdicts;
+}
+
+// Multipage PDF: one page per CL. Left pad shows the meta-mesh with cells
+// coloured by verdict (green = included, red = excluded, grey = undecidable).
+// Right pad shows per-CL stats. Same idiom as plot_pebank_summary_pdf.
+static void plot_asimov_verdict_pdf(
+    const PEBank &bank,
+    const AsimovObs &obs,
+    const std::vector<float> &cl_targets,
+    const std::vector<std::vector<CellVerdict>> &verdicts,
+    const std::string &filename,
+    const std::string &bank_path,
+    const std::string &xlabel,
+    const std::string &ylabel,
+    bool logx, bool logy,
+    bool xlog_axis, bool ylog_axis)
+{
+    if (bank.n_cells <= 0 || cl_targets.empty()) {
+        log<LOG_WARNING>(L"%1% || plot_asimov_verdict_pdf: empty input, skipping.") % __func__;
+        return;
+    }
+    AxisXform A{bank.x_lo, bank.x_hi, bank.y_lo, bank.y_hi,
+                bank.finest_nx, bank.finest_ny, xlog_axis, ylog_axis};
+
+    TCanvas c("asimov_verdict", "Asimov verdict", 1400, 800);
+    c.Print((filename + "[").c_str(), "pdf");
+
+    for (size_t k = 0; k < cl_targets.size(); ++k) {
+        const float cl = cl_targets[k];
+        const auto &verd = verdicts[k];
+
+        c.Clear();
+        TPad left("av_left",  "", 0.00, 0.00, 0.66, 1.00);
+        TPad right("av_right","", 0.66, 0.00, 1.00, 1.00);
+        left .SetLeftMargin(0.13);
+        left .SetRightMargin(0.03);
+        left .SetTopMargin(0.08);
+        left .SetBottomMargin(0.12);
+        if (logx) left.SetLogx();
+        if (logy) left.SetLogy();
+        right.SetLeftMargin(0.02);
+        right.SetRightMargin(0.02);
+        right.SetTopMargin(0.04);
+        right.SetBottomMargin(0.04);
+        left.Draw(); right.Draw();
+
+        // ---- Left pad: cells coloured by verdict ----
+        left.cd();
+        const float xmin = A.i_to_x(0);
+        const float xmax = A.i_to_x(bank.finest_nx);
+        const float ymin = A.j_to_y(0);
+        const float ymax = A.j_to_y(bank.finest_ny);
+        TH1F *frame = new TH1F(Form("av_frame_%zu", k),
+                               (std::string("Asimov verdict, CL=") + Form("%.3f", cl) +
+                                ";" + xlabel + ";" + ylabel).c_str(),
+                               1, xmin, xmax);
+        frame->SetMinimum(ymin);
+        frame->SetMaximum(ymax);
+        frame->SetStats(0);
+        frame->Draw();
+
+        int n_in = 0, n_out = 0, n_undec = 0;
+        for (int idx = 0; idx < bank.n_cells; ++idx) {
+            const int i0 = bank.cell_i_bl[(size_t)idx];
+            const int j0 = bank.cell_j_bl[(size_t)idx];
+            const int sp = bank.cell_step [(size_t)idx];
+            const float xlo = A.i_to_x(i0);
+            const float xhi = A.i_to_x(i0 + sp);
+            const float ylo = A.j_to_y(j0);
+            const float yhi = A.j_to_y(j0 + sp);
+            TBox *box = new TBox(xlo, ylo, xhi, yhi);
+            const auto &v = verd[(size_t)idx];
+            if (!v.decidable) {
+                box->SetFillColorAlpha(kGray + 1, 0.30f);
+                ++n_undec;
+            } else if (v.included) {
+                box->SetFillColorAlpha(kGreen + 2, 0.45f);
+                ++n_in;
+            } else {
+                box->SetFillColorAlpha(kRed   + 1, 0.45f);
+                ++n_out;
+            }
+            box->SetLineColor(kBlack);
+            box->SetLineWidth(1);
+            box->Draw();
+        }
+
+        // ---- Right pad: stats ----
+        right.cd();
+        TPaveText *info = new TPaveText(0.02, 0.05, 0.98, 0.97, "NDC");
+        info->SetFillColor(kWhite);
+        info->SetBorderSize(1);
+        info->SetTextSize(0.038);
+        info->SetTextAlign(12);
+        info->AddText("Asimov verdict");
+        info->AddText("");
+        info->AddText(Form("Bank: %s", bank_path.c_str()));
+        info->AddText(Form("CL: %.4f", cl));
+        info->AddText(Form("Total cells: %d", bank.n_cells));
+        info->AddText(Form("  inside  (green): %d", n_in));
+        info->AddText(Form("  outside (red)  : %d", n_out));
+        info->AddText(Form("  undecidable    : %d", n_undec));
+        info->AddText("");
+        info->AddText(Form("global #chi^{2}_{osc}: %.4f", obs.chi2_osc_global));
+        info->Draw();
+
+        c.cd();
+        c.Print(filename.c_str(), "pdf");
+    }
+
+    c.Print((filename + "]").c_str(), "pdf");
+    log<LOG_INFO>(L"%1% || asimov verdict PDF written to %2% (%3% CL pages).")
+        % __func__ % filename.c_str() % (int)cl_targets.size();
+}
+
 } // anonymous
 
 // ====================================================================
@@ -1700,11 +1984,93 @@ AdaptiveFCResult run_adaptive_fc(
         return res;
     }
 
-    // Slice 2a: init-bank is the only fitting mode wired; asimov/brazil/classify
-    // are slice 2b.
+    // ---- Mode: asimov -------------------------------------------------------
+    // Loads an existing bank, builds the asimov dataset from fakeDataParams
+    // (noise-free expected counts under the injected truth — same convention
+    // as surface/fc/profile), classifies every cell against the bank's
+    // per-cell critical Δχ² at each requested CL, and writes a verdict PDF.
+    // No PE generation. Bank is read-only.
+    if (acfg.mode == AdaptiveFCMode::Asimov) {
+        const std::string bank_in = acfg.bank_path.empty()
+            ? (acfg.output_tag + "_bank.bin")
+            : acfg.bank_path;
+        PEBank bank;
+        if (!load_bank(bank, bank_in)) {
+            log<LOG_ERROR>(L"%1% || asimov: failed to load %2%.") % __func__ % bank_in.c_str();
+            return res;
+        }
+
+        // Build the asimov dataset: noise-free expected counts under
+        // fakeDataParams. CVParams flows through the metric automatically via
+        // the existing PROfit infrastructure (same as surface / fc).
+        PROspec asimov_spec = FillSpectra(config, prop, systs, *model,
+                                          fakeDataParams, acfg.binned, config.i_prime);
+        PROspec asimov_collapsed = PROspec(CollapseMatrix(config, asimov_spec.Spec()),
+                                           CollapseMatrix(config, asimov_spec.Error()));
+        PROdata asimov_data(asimov_collapsed.Spec(), asimov_collapsed.Error());
+
+        log<LOG_INFO>(L"%1% || asimov: built data from fakeDataParams (no throws), classifying %2% cells against %3%.")
+            % __func__ % bank.n_cells % bank_in.c_str();
+
+        // Stop the outer throws progress bar (it was set up by PROfit.cxx for
+        // a phase we don't run) and launch a cells bar for the per-cell fits.
+        progress.finish_all(true);
+        std::vector<std::pair<int, std::string>> ab_cfg;
+        ab_cfg.push_back({bank.n_cells, "AFC asimov cells"});
+        MultiPROgressBar asimov_progress(ab_cfg);
+        asimov_progress.initialize_display();
+        asimov_progress.start_display_thread();
+
+        AsimovObs obs = compute_asimov_obs(
+            config, prop, systs, *model, fitconfig, asimov_data,
+            acfg.chi2, acfg.binned, xaxis_idx, yaxis_idx,
+            bank.cell_center_x, bank.cell_center_y,
+            proseed, nthreads, asimov_progress, 0);
+
+        asimov_progress.finish_all(true);
+
+        // Classify against the bank for every requested CL.
+        const int min_pes_for_decision = std::max(10, acfg.n_pe_min);
+        std::vector<std::vector<CellVerdict>> verdicts =
+            classify_against_bank(bank, obs, acfg.cl_targets, min_pes_for_decision);
+
+        // PDF (multipage, one page per CL).
+        const std::string out_pdf = acfg.output_tag + "_asimov_verdict.pdf";
+        const bool xlog_axis = (xaxis_idx < model->is_log10.size()) ? model->is_log10[xaxis_idx] : acfg.logx;
+        const bool ylog_axis = (yaxis_idx < model->is_log10.size()) ? model->is_log10[yaxis_idx] : acfg.logy;
+        const std::string xlabel = xaxis_idx < model->nparams
+            ? model->pretty_param_names.at(xaxis_idx) : std::string("x");
+        const std::string ylabel = yaxis_idx < model->nparams
+            ? model->pretty_param_names.at(yaxis_idx) : std::string("y");
+        plot_asimov_verdict_pdf(bank, obs, acfg.cl_targets, verdicts, out_pdf, bank_in,
+                                xlabel, ylabel, acfg.logx, acfg.logy, xlog_axis, ylog_axis);
+
+        // Populate result.
+        res.bank_path     = bank_in;
+        res.n_meta_cells  = bank.n_cells;
+        int64_t total_pes = 0;
+        for (const auto &v : bank.cell_pes) total_pes += (int64_t)v.size();
+        res.total_pes_generated = total_pes;
+        res.mean_pes_per_cell   = bank.n_cells > 0 ? (float)total_pes / (float)bank.n_cells : 0.0f;
+        // Summary log lines per CL.
+        for (size_t k = 0; k < acfg.cl_targets.size(); ++k) {
+            int n_in = 0, n_out = 0, n_undec = 0;
+            for (const auto &v : verdicts[k]) {
+                if (!v.decidable) ++n_undec;
+                else if (v.included) ++n_in;
+                else ++n_out;
+            }
+            log<LOG_INFO>(L"%1% || asimov verdict CL=%2%: inside=%3%, outside=%4%, undecidable=%5%.")
+                % __func__ % acfg.cl_targets[k] % n_in % n_out % n_undec;
+        }
+        return res;
+    }
+
+    // Slice 2b (partial): init-bank + asimov are wired; brazil / classify
+    // remain placeholders.
     if (acfg.mode != AdaptiveFCMode::InitBank) {
-        log<LOG_WARNING>(L"%1% || slice 2a only implements --mode {init-bank, print-bank}; treating as init-bank.")
-            % __func__;
+        log<LOG_WARNING>(L"%1% || mode '%2%' not yet implemented; treating as init-bank.")
+            % __func__ % (int)acfg.mode;
     }
 
     // ---- Slice 1: prepass + meta-mesh + diagnostics. ------------------------
