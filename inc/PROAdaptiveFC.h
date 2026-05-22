@@ -42,6 +42,7 @@ namespace PROfit {
     /// reserved for follow-up slices.
     enum class AdaptiveFCMode {
         InitBank,
+        PrintBank, ///< Slice 2a: load --bank and write a summary PDF. No fitting.
         Asimov,
         Brazil,
         Classify,
@@ -246,7 +247,9 @@ namespace PROfit {
      */
     struct PEBank {
         static constexpr uint32_t MAGIC = 0x41464342;  ///< 'AFCB' (Adaptive FC Bank).
-        static constexpr uint16_t VERSION = 1;
+        static constexpr uint16_t VERSION = 2;
+        ///< v2: added cell footprint arrays (i_bl, j_bl, step, level) so the
+        ///<     bank is self-describing without needing the MetaMesh sidecar.
 
         // Mesh footprint the bank was generated against. Used as a provenance
         // check at load time so we can refuse a (bank, mesh) mismatch.
@@ -261,12 +264,18 @@ namespace PROfit {
         // inner vector = PEs thrown at that cell in generation order.
         std::vector<std::vector<PEBankRecord>> cell_pes;
 
-        // Per-cell physical coordinates where the PEs were generated (each
-        // cell's center, transformed to physical / log10 space matching the
-        // model's per-axis log flags). Carried along so classification can be
-        // done without the originating MetaMesh.
+        // Per-cell coordinates in *model space* (log10 of physical for
+        // log-axis params; linear otherwise). Slice-2b classify code applies
+        // pow(10) when mapping back to physical for plotting.
         std::vector<float> cell_center_x;
         std::vector<float> cell_center_y;
+
+        // Per-cell footprint copied from MetaMesh::cells. Lets the bank be
+        // plotted / inspected without re-loading the mesh sidecar.
+        std::vector<int> cell_i_bl;
+        std::vector<int> cell_j_bl;
+        std::vector<int> cell_step;
+        std::vector<int> cell_level;
     };
 
     /**

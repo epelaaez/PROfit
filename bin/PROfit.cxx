@@ -453,7 +453,8 @@ int main(int argc, char* argv[])
         "aggregation, diagnostic ROOT artifact). PE bank, sequential stopping, and "
         "data classification follow in slice 2.");
     afc_command->add_option("--mode", afc_mode_str,
-        "Pipeline mode: init-bank (default), asimov, brazil, classify. Slice 1 only honours init-bank.")
+        "Pipeline mode: init-bank (default), print-bank, asimov, brazil, classify. "
+        "Slice 2a honours init-bank and print-bank.")
         ->default_str("init-bank");
     afc_command->add_option("--throws", afc_n_throws,
         "Number of Wilks pre-pass throws (each produces one AMR mesh).")->default_val(200);
@@ -2708,6 +2709,7 @@ int main(int argc, char* argv[])
     if(*afc_command) {
         PROfit::AdaptiveFCConfig acfg;
         if (afc_mode_str == "init-bank")      acfg.mode = PROfit::AdaptiveFCMode::InitBank;
+        else if (afc_mode_str == "print-bank") acfg.mode = PROfit::AdaptiveFCMode::PrintBank;
         else if (afc_mode_str == "asimov")    acfg.mode = PROfit::AdaptiveFCMode::Asimov;
         else if (afc_mode_str == "brazil")    acfg.mode = PROfit::AdaptiveFCMode::Brazil;
         else if (afc_mode_str == "classify")  acfg.mode = PROfit::AdaptiveFCMode::Classify;

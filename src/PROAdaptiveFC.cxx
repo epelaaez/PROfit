@@ -28,6 +28,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <climits>
 #include <cmath>
 #include <condition_variable>
 #include <cstdint>
@@ -698,12 +699,12 @@ static void plot_metamesh_pdf(const MetaMesh &mm,
         box->Draw();
     }
 
-    // ---- Right pad: info + legend, no axes. ----------------------------------
+    // ---- Right pad: info only, no axes. --------------------------------------
     right_pad.cd();
-    TPaveText *info = new TPaveText(0.02, 0.55, 0.98, 0.97, "NDC");
+    TPaveText *info = new TPaveText(0.02, 0.05, 0.98, 0.97, "NDC");
     info->SetFillColor(kWhite);
     info->SetBorderSize(1);
-    info->SetTextSize(0.040);
+    info->SetTextSize(0.038);
     info->SetTextAlign(12);
     info->AddText("Meta-mesh summary");
     info->AddText("");
@@ -719,25 +720,159 @@ static void plot_metamesh_pdf(const MetaMesh &mm,
     info->AddText(Form("Finest grid: %d x %d", mm.finest_nx, mm.finest_ny));
     info->Draw();
 
-    TPaveText *legend = new TPaveText(0.02, 0.05, 0.98, 0.50, "NDC");
-    legend->SetFillColor(kWhite);
-    legend->SetBorderSize(1);
-    legend->SetTextSize(0.038);
-    legend->SetTextAlign(12);
-    legend->AddText("Legend");
-    legend->AddText("");
-    legend->AddText("Fill colour = refinement level");
-    legend->AddText("  (Azure shallow #rightarrow Violet/Red deep)");
-    legend->AddText("Opacity = throw agreement at level");
-    legend->AddText("  (#geq threshold ... all-throws-agree)");
-    legend->AddText("Grey = baseline fallback");
-    legend->AddText("  (kept regardless of p_{thresh})");
-    legend->Draw();
-
     c.cd();
     c.Print(filename.c_str());
     log<LOG_INFO>(L"%1% || meta-mesh plot written to %2% (%3% cells, max level %4%).")
         % __func__ % filename.c_str() % (int)mm.cells.size() % max_lvl;
+}
+
+// One-PDF summary of a PEBank. Left pad: a TH2D heatmap (colz) at finest-grid
+// resolution where the colour is the number of PEs banked at each cell,
+// painted across that cell's footprint. Cell borders overlaid in black so the
+// adaptive structure remains visible. Right pad: text panel with bank stats.
+static void plot_pebank_summary_pdf(const PEBank &bank,
+                                    const std::string &filename,
+                                    const std::string &bank_path,
+                                    const std::string &xlabel,
+                                    const std::string &ylabel,
+                                    bool logx, bool logy,
+                                    bool xlog_axis, bool ylog_axis)
+{
+    if (bank.n_cells <= 0 || bank.finest_nx <= 0 || bank.finest_ny <= 0) {
+        log<LOG_WARNING>(L"%1% || plot_pebank_summary_pdf: empty bank, skipping.") % __func__;
+        return;
+    }
+
+    AxisXform A{bank.x_lo, bank.x_hi, bank.y_lo, bank.y_hi,
+                bank.finest_nx, bank.finest_ny, xlog_axis, ylog_axis};
+
+    // ---- Stats over the bank --------------------------------------------------
+    int64_t total_pes = 0;
+    int     min_pe = INT_MAX, max_pe = 0;
+    std::vector<int> per_cell_counts;
+    per_cell_counts.reserve((size_t)bank.n_cells);
+    for (const auto &v : bank.cell_pes) {
+        const int n = (int)v.size();
+        total_pes += (int64_t)n;
+        min_pe = std::min(min_pe, n);
+        max_pe = std::max(max_pe, n);
+        per_cell_counts.push_back(n);
+    }
+    if (per_cell_counts.empty()) { min_pe = max_pe = 0; }
+    const float mean_pe = bank.n_cells > 0
+        ? (float)total_pes / (float)bank.n_cells : 0.0f;
+    int median_pe = 0;
+    if (!per_cell_counts.empty()) {
+        std::vector<int> sorted_counts = per_cell_counts;
+        std::sort(sorted_counts.begin(), sorted_counts.end());
+        median_pe = sorted_counts[sorted_counts.size() / 2];
+    }
+    int cells_at_max = 0;
+    for (int n : per_cell_counts) if (n == max_pe) ++cells_at_max;
+
+    // ---- Side-by-side layout: left mesh+heatmap, right info ------------------
+    TCanvas c("pebank_summary", "PE-bank summary", 1400, 800);
+    TPad left_pad("pb_left", "", 0.00, 0.00, 0.66, 1.00);
+    TPad right_pad("pb_right", "", 0.66, 0.00, 1.00, 1.00);
+    left_pad.SetLeftMargin(0.13);
+    left_pad.SetRightMargin(0.14); // leave room for colz Z-axis
+    left_pad.SetTopMargin(0.08);
+    left_pad.SetBottomMargin(0.12);
+    if (logx) left_pad.SetLogx();
+    if (logy) left_pad.SetLogy();
+    right_pad.SetLeftMargin(0.02);
+    right_pad.SetRightMargin(0.02);
+    right_pad.SetTopMargin(0.04);
+    right_pad.SetBottomMargin(0.04);
+    left_pad.Draw();
+    right_pad.Draw();
+
+    // ---- Left pad: PE-count heatmap + cell-border overlay --------------------
+    left_pad.cd();
+    gStyle->SetPalette(kBird); // standard ROOT modern palette (cool→warm).
+    gStyle->SetOptStat(0);
+
+    const int W = bank.finest_nx;
+    const int H = bank.finest_ny;
+    std::vector<double> ex(W + 1), ey(H + 1);
+    for (int i = 0; i <= W; ++i) ex[(size_t)i] = (double)A.i_to_x(i);
+    for (int j = 0; j <= H; ++j) ey[(size_t)j] = (double)A.j_to_y(j);
+    TH2D *hmap = new TH2D("pebank_heatmap",
+                          (std::string("PE-bank counts;") + xlabel + ";" + ylabel + ";N_{PE}").c_str(),
+                          W, ex.data(), H, ey.data());
+    hmap->SetStats(0);
+
+    // Paint each cell's PE-count across its footprint.
+    for (int c_idx = 0; c_idx < bank.n_cells; ++c_idx) {
+        const int i0 = bank.cell_i_bl[(size_t)c_idx];
+        const int j0 = bank.cell_j_bl[(size_t)c_idx];
+        const int sp = bank.cell_step [(size_t)c_idx];
+        const int cnt = per_cell_counts[(size_t)c_idx];
+        for (int ii = i0; ii < i0 + sp && ii < W; ++ii) {
+            for (int jj = j0; jj < j0 + sp && jj < H; ++jj) {
+                hmap->SetBinContent(ii + 1, jj + 1, (double)cnt);
+            }
+        }
+    }
+    hmap->Draw("colz");
+
+    // Overlay cell borders so the adaptive structure stays readable.
+    for (int c_idx = 0; c_idx < bank.n_cells; ++c_idx) {
+        const int i0 = bank.cell_i_bl[(size_t)c_idx];
+        const int j0 = bank.cell_j_bl[(size_t)c_idx];
+        const int sp = bank.cell_step [(size_t)c_idx];
+        const float xlo = A.i_to_x(i0);
+        const float xhi = A.i_to_x(i0 + sp);
+        const float ylo = A.j_to_y(j0);
+        const float yhi = A.j_to_y(j0 + sp);
+        TBox *box = new TBox(xlo, ylo, xhi, yhi);
+        box->SetFillStyle(0);      // transparent
+        box->SetLineColor(kBlack);
+        box->SetLineWidth(1);
+        box->Draw();
+    }
+
+    // ---- Right pad: bank stats -----------------------------------------------
+    right_pad.cd();
+    TPaveText *info = new TPaveText(0.02, 0.55, 0.98, 0.97, "NDC");
+    info->SetFillColor(kWhite);
+    info->SetBorderSize(1);
+    info->SetTextSize(0.038);
+    info->SetTextAlign(12);
+    info->AddText("PE-bank summary");
+    info->AddText("");
+    info->AddText(Form("Source: %s", bank_path.c_str()));
+    info->AddText(Form("Cells in bank: %d", bank.n_cells));
+    info->AddText(Form("Total PEs: %lld", (long long)total_pes));
+    info->AddText(Form("PEs/cell  mean : %.1f", mean_pe));
+    info->AddText(Form("          median: %d", median_pe));
+    info->AddText(Form("          min/max: %d / %d", min_pe, max_pe));
+    info->AddText(Form("Cells at max (%d): %d", max_pe, cells_at_max));
+    info->AddText(Form("Finest grid: %d x %d", bank.finest_nx, bank.finest_ny));
+    info->AddText(Form("Max AMR level: %d", bank.max_levels));
+    info->Draw();
+
+    TPaveText *legend = new TPaveText(0.02, 0.05, 0.98, 0.50, "NDC");
+    legend->SetFillColor(kWhite);
+    legend->SetBorderSize(1);
+    legend->SetTextSize(0.036);
+    legend->SetTextAlign(12);
+    legend->AddText("Legend");
+    legend->AddText("");
+    legend->AddText("Heatmap = #PEs banked at each cell");
+    legend->AddText("  (painted across cell footprint)");
+    legend->AddText("Black borders = MetaMesh cell boundaries");
+    legend->AddText("");
+    legend->AddText("Cells with low N stopped early via");
+    legend->AddText("the Wilson half-width rule;");
+    legend->AddText("cells at N=max hit the n_pe_max cap");
+    legend->AddText("without converging.");
+    legend->Draw();
+
+    c.cd();
+    c.Print(filename.c_str());
+    log<LOG_INFO>(L"%1% || PE-bank summary written to %2% (cells=%3%, total_pes=%4%).")
+        % __func__ % filename.c_str() % bank.n_cells % (long long)total_pes;
 }
 
 // Build a TH2D from a dense reconstructed Δχ² matrix, with physical-coord
@@ -947,6 +1082,10 @@ void serialize(Archive &ar, PROfit::PEBank &b, [[maybe_unused]] const unsigned i
     ar & b.cell_pes;
     ar & b.cell_center_x;
     ar & b.cell_center_y;
+    ar & b.cell_i_bl;
+    ar & b.cell_j_bl;
+    ar & b.cell_step;
+    ar & b.cell_level;
 }
 
 template <class Archive>
@@ -1091,8 +1230,10 @@ bool load_mesh(MetaMesh &mm_out, const std::string &path) {
 //      the scheduler so a per-cell stop flag can interrupt mid-batch.
 //    • Uses std::unique_ptr<PROmetric> instead of raw new/delete so an
 //      early break doesn't leak.
-//    • Pinned coordinates: phy_params = (cell_center_x, cell_center_y)
-//      with all other physics params set to model->default_val(i).
+//    • Pinned coordinates: phy_params[xaxis_idx] = cell_x_model,
+//      phy_params[yaxis_idx] = cell_y_model — both in *model space*
+//      (log10 of the physical value for log-axis params). Other physics
+//      params set to model->default_val(i).
 // --------------------------------------------------------------------
 
 namespace {
@@ -1108,7 +1249,7 @@ struct AdaptivePEArgs {
     std::string chi2_kind;       ///< "PROchi" | "PROCNP" | "Poisson"
     bool   binned;
     size_t xaxis_idx, yaxis_idx;
-    float  cell_x_phys, cell_y_phys; ///< Physical (transformed) coords pinned at this PE.
+    float  cell_x_model, cell_y_model; ///< Cell-center coords in *model space* (log10(phys) for log-axis params).
     uint32_t seed;
 };
 
@@ -1138,8 +1279,8 @@ static PEBankRecord run_one_pe(const AdaptivePEArgs &args)
     // axis params pinned to the cell center.
     Eigen::VectorXf throws = Eigen::VectorXf::Zero((int)nparams);
     for (size_t i = 0; i < nphys; ++i) throws((int)i) = model.default_val(i);
-    throws((int)args.xaxis_idx) = args.cell_x_phys;
-    throws((int)args.yaxis_idx) = args.cell_y_phys;
+    throws((int)args.xaxis_idx) = args.cell_x_model;
+    throws((int)args.yaxis_idx) = args.cell_y_model;
 
     // Bounds for the syst-only fit: pin all physics params; let splines vary.
     Eigen::VectorXf lb_syst = Eigen::VectorXf::Constant((int)nparams, -3.0f);
@@ -1249,15 +1390,15 @@ static void schedule_pes(const AdaptiveFCConfig &acfg,
                          PROseed &proseed,
                          const Eigen::MatrixXf &L,
                          size_t xaxis_idx, size_t yaxis_idx,
-                         const std::vector<float> &cell_x_phys,
-                         const std::vector<float> &cell_y_phys,
+                         const std::vector<float> &cell_x_model,
+                         const std::vector<float> &cell_y_model,
                          PEBank &bank_out,
                          int nthreads,
                          MultiPROgressBar &progress,
                          int progress_bar_idx,
                          AdaptiveFCResult &result_out)
 {
-    const int n_cells = (int)cell_x_phys.size();
+    const int n_cells = (int)cell_x_model.size();
     if (n_cells == 0) return;
 
     bank_out.cell_pes.assign(n_cells, {});
@@ -1303,8 +1444,8 @@ static void schedule_pes(const AdaptiveFCConfig &acfg,
                 args.binned    = acfg.binned;
                 args.xaxis_idx = xaxis_idx;
                 args.yaxis_idx = yaxis_idx;
-                args.cell_x_phys = cell_x_phys[c];
-                args.cell_y_phys = cell_y_phys[c];
+                args.cell_x_model = cell_x_model[c];
+                args.cell_y_model = cell_y_model[c];
                 args.seed = dseed(thread_rng);
 
                 PEBankRecord rec = run_one_pe(args);
@@ -1356,11 +1497,19 @@ static void schedule_pes(const AdaptiveFCConfig &acfg,
         % result_out.mean_pes_per_cell % (int)cells_capped.load();
 }
 
-// Compute per-cell (x, y) physical coords for every MetaCell — Option A:
-// PE bank at each cell center. Honours per-axis log10 flag from the model
-// (centers in the *transformed* axis space, then mapped to physical).
+// Compute per-cell (x, y) coords for every MetaCell — Option A: PE bank at
+// each cell center.
+//
+// Returns values in *model space* — i.e. log10(physical) for log-axis params
+// and linear for lin-axis params. This matches the convention used by
+// FillSpectra / fc_worker / PROsurf::FillSurfaceAMR's EvalFn: the model
+// always wants log10(sinsq2thmm) for a log-axis sinsq2thmm. Display code
+// (slice-1 diagnostic plots) applies pow(10) when needed for ROOT axes.
+//
+// The xlog/ylog arguments are unused now but kept in the signature for
+// readability — if we ever need physical-coord output again it goes here.
 static void compute_cell_centers(const MetaMesh &mm,
-                                 bool xlog, bool ylog,
+                                 bool /*xlog*/, bool /*ylog*/,
                                  std::vector<float> &cx_out,
                                  std::vector<float> &cy_out)
 {
@@ -1372,10 +1521,8 @@ static void compute_cell_centers(const MetaMesh &mm,
     for (const auto &c : mm.cells) {
         const float fi = (float)c.i_bl + 0.5f * (float)c.step;
         const float fj = (float)c.j_bl + 0.5f * (float)c.step;
-        const float tx = mm.x_lo + fi / (float)W * (mm.x_hi - mm.x_lo);
-        const float ty = mm.y_lo + fj / (float)H * (mm.y_hi - mm.y_lo);
-        cx_out.push_back(xlog ? std::pow(10.0f, tx) : tx);
-        cy_out.push_back(ylog ? std::pow(10.0f, ty) : ty);
+        cx_out.push_back(mm.x_lo + fi / (float)W * (mm.x_hi - mm.x_lo));
+        cy_out.push_back(mm.y_lo + fj / (float)H * (mm.y_hi - mm.y_lo));
     }
 }
 
@@ -1412,10 +1559,43 @@ AdaptiveFCResult run_adaptive_fc(
     log<LOG_INFO>(L"%1% || resolved xvar='%2%' -> idx=%3%; yvar='%4%' -> idx=%5%.")
         % __func__ % acfg.xvar.c_str() % (int)xaxis_idx % acfg.yvar.c_str() % (int)yaxis_idx;
 
-    // Slice 2a: only init-bank is wired beyond slice 1; asimov/brazil/classify
+    // ---- Mode: print-bank ---------------------------------------------------
+    // Loads an existing bank artifact and writes a summary PDF. No fitting.
+    if (acfg.mode == AdaptiveFCMode::PrintBank) {
+        const std::string bank_in = acfg.bank_path.empty()
+            ? (acfg.output_tag + "_bank.bin")
+            : acfg.bank_path;
+        PEBank bank;
+        if (!load_bank(bank, bank_in)) {
+            log<LOG_ERROR>(L"%1% || print-bank: failed to load %2%.") % __func__ % bank_in.c_str();
+            return res;
+        }
+
+        const std::string out_pdf = acfg.output_tag + "_bank_summary.pdf";
+        const bool xlog_axis = (xaxis_idx < model->is_log10.size()) ? model->is_log10[xaxis_idx] : acfg.logx;
+        const bool ylog_axis = (yaxis_idx < model->is_log10.size()) ? model->is_log10[yaxis_idx] : acfg.logy;
+        const std::string xlabel = xaxis_idx < model->nparams
+            ? model->pretty_param_names.at(xaxis_idx) : std::string("x");
+        const std::string ylabel = yaxis_idx < model->nparams
+            ? model->pretty_param_names.at(yaxis_idx) : std::string("y");
+
+        plot_pebank_summary_pdf(bank, out_pdf, bank_in, xlabel, ylabel,
+                                acfg.logx, acfg.logy, xlog_axis, ylog_axis);
+
+        // Populate result for the caller (no PE generation in this mode).
+        res.bank_path        = bank_in;
+        res.n_meta_cells     = bank.n_cells;
+        int64_t total_pes = 0;
+        for (const auto &v : bank.cell_pes) total_pes += (int64_t)v.size();
+        res.total_pes_generated = total_pes;
+        res.mean_pes_per_cell   = bank.n_cells > 0 ? (float)total_pes / (float)bank.n_cells : 0.0f;
+        return res;
+    }
+
+    // Slice 2a: init-bank is the only fitting mode wired; asimov/brazil/classify
     // are slice 2b.
     if (acfg.mode != AdaptiveFCMode::InitBank) {
-        log<LOG_WARNING>(L"%1% || slice 2a only implements --mode init-bank; treating as init-bank.")
+        log<LOG_WARNING>(L"%1% || slice 2a only implements --mode {init-bank, print-bank}; treating as init-bank.")
             % __func__;
     }
 
@@ -1466,8 +1646,8 @@ AdaptiveFCResult run_adaptive_fc(
     const bool xlog = (xaxis_idx < model->is_log10.size()) ? model->is_log10[xaxis_idx] : acfg.logx;
     const bool ylog = (yaxis_idx < model->is_log10.size()) ? model->is_log10[yaxis_idx] : acfg.logy;
 
-    std::vector<float> cell_x_phys, cell_y_phys;
-    compute_cell_centers(mm, xlog, ylog, cell_x_phys, cell_y_phys);
+    std::vector<float> cell_x_model, cell_y_model;
+    compute_cell_centers(mm, xlog, ylog, cell_x_model, cell_y_model);
 
     // Cholesky factor of the total covariance — built once, reused across all
     // cells and all PEs. Same construction as the brazil-band path
@@ -1492,12 +1672,36 @@ AdaptiveFCResult run_adaptive_fc(
     bank.x_lo = mm.x_lo; bank.x_hi = mm.x_hi;
     bank.y_lo = mm.y_lo; bank.y_hi = mm.y_hi;
     bank.n_cells = (int)mm.cells.size();
-    bank.cell_center_x = cell_x_phys;
-    bank.cell_center_y = cell_y_phys;
+    bank.cell_center_x = cell_x_model;
+    bank.cell_center_y = cell_y_model;
+    bank.cell_i_bl.reserve(mm.cells.size());
+    bank.cell_j_bl.reserve(mm.cells.size());
+    bank.cell_step.reserve(mm.cells.size());
+    bank.cell_level.reserve(mm.cells.size());
+    for (const auto &c : mm.cells) {
+        bank.cell_i_bl.push_back(c.i_bl);
+        bank.cell_j_bl.push_back(c.j_bl);
+        bank.cell_step.push_back(c.step);
+        bank.cell_level.push_back(c.level);
+    }
+
+    // Stop the throws progress bar before launching the cells one, so the two
+    // ANSI cursor-driven refresh loops don't fight. finish_all() rounds the
+    // throws bar to 100% (true regardless of whether it ran or was cached).
+    progress.finish_all(true);
+
+    // Cells progress bar — sized for the actual number of cells, not n_throws.
+    std::vector<std::pair<int, std::string>> cells_bar_cfg;
+    cells_bar_cfg.push_back({(int)mm.cells.size(), "AFC cells (PEs)"});
+    MultiPROgressBar cells_progress(cells_bar_cfg);
+    cells_progress.initialize_display();
+    cells_progress.start_display_thread();
 
     schedule_pes(acfg, config, prop, systs, *model, fitconfig, proseed, L,
-                 xaxis_idx, yaxis_idx, cell_x_phys, cell_y_phys,
-                 bank, nthreads, progress, 0, res);
+                 xaxis_idx, yaxis_idx, cell_x_model, cell_y_model,
+                 bank, nthreads, cells_progress, 0, res);
+
+    cells_progress.finish_all(true);
 
     // Persist the bank. Default path is <output_tag>_bank.bin unless
     // --bank explicitly set.
@@ -1506,6 +1710,20 @@ AdaptiveFCResult run_adaptive_fc(
         : acfg.bank_path;
     if (save_bank(bank, bank_path)) {
         res.bank_path = bank_path;
+    }
+
+    // Auto-print the bank summary PDF as a side effect of init-bank. The same
+    // helper is invoked standalone from --mode print-bank for later inspection.
+    {
+        const std::string summary_pdf = acfg.output_tag + "_bank_summary.pdf";
+        const bool xlog_axis = (xaxis_idx < model->is_log10.size()) ? model->is_log10[xaxis_idx] : acfg.logx;
+        const bool ylog_axis = (yaxis_idx < model->is_log10.size()) ? model->is_log10[yaxis_idx] : acfg.logy;
+        const std::string xlabel = xaxis_idx < model->nparams
+            ? model->pretty_param_names.at(xaxis_idx) : std::string("x");
+        const std::string ylabel = yaxis_idx < model->nparams
+            ? model->pretty_param_names.at(yaxis_idx) : std::string("y");
+        plot_pebank_summary_pdf(bank, summary_pdf, bank_path, xlabel, ylabel,
+                                acfg.logx, acfg.logy, xlog_axis, ylog_axis);
     }
 
     return res;
