@@ -2,10 +2,15 @@
  * @file PROAdaptiveFC.h
  * @brief Adaptive Feldman-Cousins pipeline — public surface.
  *
- * Slice 1 (current): Wilks pre-pass over N independent throws + aggregated meta-mesh
- * + diagnostic ROOT artifact. Subsequent slices will add the sequential per-cell PE
- * bank, the data-classification step, and the bank-top-up loop during Brazil-band
- * construction.
+ * Slice 1 (done): Wilks pre-pass over N independent throws + aggregated meta-mesh
+ * + diagnostic ROOT artifact.
+ *
+ * Slice 2a (current): bookkeeping (PEBank + boost serialisation), sequential
+ * Wilson stopping rule, and the `--mode init-bank` end-to-end path that throws
+ * PEs at each MetaCell center, stops via the sequential rule, and saves a
+ * versioned bank artifact.
+ *
+ * Slice 2b (deferred): asimov / brazil / classify modes.
  *
  * The implementation lives entirely in src/PROAdaptiveFC.cxx and is kept *parallel*
  * to src/PROfc.cxx (the existing brute-force FC). Code duplicated from there or
@@ -24,6 +29,9 @@
 
 #include <Eigen/Eigen>
 
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -68,6 +76,7 @@ namespace PROfit {
         // Meta-mesh build.
         float p_thresh       = 0.05f;   ///< Refine cell if fraction of throws refining it ≥ p_thresh.
         int   baseline_level = 2;       ///< Levels < baseline_level are kept regardless of p_thresh.
+        bool  rebuild_mesh   = false;   ///< If true, ignore any cached <output_tag>_mesh.bin and re-run the prepass.
 
         // Output naming.
         std::string output_tag = "afc_slice1";
@@ -108,6 +117,9 @@ namespace PROfit {
      * identical across every per-throw AMRResult that contributed.
      */
     struct MetaMesh {
+        static constexpr uint32_t MAGIC = 0x41464D45;  ///< 'AFME' (Adaptive FC MEsh).
+        static constexpr uint16_t VERSION = 1;
+
         std::vector<MetaCell> cells;
         int   finest_nx = 0;
         int   finest_ny = 0;
@@ -121,15 +133,175 @@ namespace PROfit {
     };
 
     /**
-     * @brief Output bundle from run_adaptive_fc (slice-1 fields).
+     * @brief Persist a MetaMesh to disk via Boost binary archive.
+     *
+     * Sibling artifact to the PEBank — meant as a dev-time cache so the
+     * prepass+meta-mesh build doesn't have to re-run when iterating on PE-bank
+     * parameters. Same magic+version layout as save_bank.
+     */
+    bool save_mesh(const MetaMesh &mm, const std::string &path);
+
+    /// Inverse of save_mesh. Returns false (and leaves `mm_out` indeterminate)
+    /// on missing file, bad magic, or version mismatch.
+    bool load_mesh(MetaMesh &mm_out, const std::string &path);
+
+    /**
+     * @brief Wilson-interval sequential stopping rule. Pure utility — no PROfit deps.
+     *
+     * Slice-2a v1 rule: stop when the Wilson 95% half-width on the Bernoulli
+     * proportion estimate falls below `eps`. The spec-faithful rule (Wilson CI
+     * vs target alpha with Bonferroni-corrected milestones) is deferred to
+     * slice 2b's validation pass.
+     *
+     * All methods are constexpr-free but inlined so the helper has no link
+     * dependency on the .cxx (useful for unit-testing).
+     */
+    struct SequentialFCTest {
+        float z = 1.959963984540054f; ///< Wilson z-score; 1.96 for 95% nominal coverage.
+
+        /**
+         * @brief Wilson score interval on a Bernoulli proportion p = k/n.
+         * @return (lo, hi) bounds with nominal coverage 1 - alpha controlled by `z`.
+         */
+        std::pair<float, float> wilson_interval(int n, int k) const {
+            if (n <= 0) return {0.0f, 1.0f};
+            const float nf = (float)n;
+            const float p = (float)k / nf;
+            const float z2 = z * z;
+            const float denom = 1.0f + z2 / nf;
+            const float center = (p + z2 / (2.0f * nf)) / denom;
+            const float radical = std::sqrt(std::max(0.0f, p * (1.0f - p) / nf + z2 / (4.0f * nf * nf)));
+            const float half = (z * radical) / denom;
+            return {center - half, center + half};
+        }
+
+        /**
+         * @brief Half-width of the Wilson interval (handy for the v1 stop rule).
+         */
+        float wilson_halfwidth(int n, int k) const {
+            const auto [lo, hi] = wilson_interval(n, k);
+            return 0.5f * (hi - lo);
+        }
+
+        /**
+         * @brief Slice-2a stop rule: stop when half-width below `eps`.
+         *
+         * `k` is the count of PEs with Δχ²(syst) − Δχ²(syst+osc) ≥ Δχ²_obs(μ).
+         * `n` is the total PEs thrown at this cell so far.
+         */
+        bool should_stop(int n, int k, float eps) const {
+            if (n <= 0) return false;
+            return wilson_halfwidth(n, k) < eps;
+        }
+
+        /**
+         * @brief Empirical Δχ² critical value at a given confidence level.
+         *
+         * Returns the `cl`-quantile of the supplied (sorted) sample. Used by
+         * the classify path to convert a per-cell PE distribution into a
+         * critical Δχ²_c against which the observed Δχ² is compared.
+         *
+         * @param sorted_samples  Δχ² values in ascending order.
+         * @param cl              Target confidence level in (0, 1).
+         */
+        static float crit_dchi2_at_cl(const std::vector<float> &sorted_samples, float cl) {
+            if (sorted_samples.empty()) return 0.0f;
+            const float p = std::min(1.0f, std::max(0.0f, cl));
+            // Linear-interpolated quantile (type-7 in R's parlance).
+            const float pos = p * ((float)sorted_samples.size() - 1.0f);
+            const int   lo  = (int)std::floor(pos);
+            const int   hi  = (int)std::ceil(pos);
+            if (lo == hi) return sorted_samples[lo];
+            const float frac = pos - (float)lo;
+            return (1.0f - frac) * sorted_samples[lo] + frac * sorted_samples[hi];
+        }
+    };
+
+    /**
+     * @brief One pseudo-experiment record in the PE bank.
+     *
+     * Mirrors fc_out (inc/PROfc.h:34) but keeps only the fields slice-2a needs
+     * to drive classification (the syst-only and syst+osc chi^2s and their
+     * difference). Best-fit vectors are dropped to keep the bank small; they
+     * can be re-derived if ever needed by re-running the throw with the same seed.
+     */
+    struct PEBankRecord {
+        float    chi2_syst = 0.0f; ///< Best-fit chi^2 from the syst-only minimisation.
+        float    chi2_osc  = 0.0f; ///< Best-fit chi^2 from the full (syst + osc) minimisation.
+        float    dchi2     = 0.0f; ///< chi2_syst - chi2_osc.
+        uint32_t seed      = 0;    ///< RNG seed used to generate this PE (for reproducibility).
+    };
+
+    /**
+     * @brief Pseudo-experiment bank attached to a meta-mesh.
+     *
+     * One slot per MetaCell (Option A: PE bank at each cell center). Cell index
+     * is the position of the MetaCell in `MetaMesh::cells`. Each slot holds the
+     * raw Δχ² outcomes from `n_pes_at_cell[c]` PEs thrown at that cell.
+     *
+     * The bank is the pre-unblinding artifact: classification at any threshold
+     * is a sort+search over the per-cell vector, so the *same* bank serves the
+     * Asimov sensitivity, Brazil-band, and real-data analyses without
+     * regenerating PEs.
+     */
+    struct PEBank {
+        static constexpr uint32_t MAGIC = 0x41464342;  ///< 'AFCB' (Adaptive FC Bank).
+        static constexpr uint16_t VERSION = 1;
+
+        // Mesh footprint the bank was generated against. Used as a provenance
+        // check at load time so we can refuse a (bank, mesh) mismatch.
+        int   finest_nx = 0;
+        int   finest_ny = 0;
+        int   max_levels = 0;
+        float x_lo = 0.0f, x_hi = 0.0f;
+        float y_lo = 0.0f, y_hi = 0.0f;
+        int   n_cells = 0;
+
+        // Per-cell PE storage. Outer index = cell index into MetaMesh::cells;
+        // inner vector = PEs thrown at that cell in generation order.
+        std::vector<std::vector<PEBankRecord>> cell_pes;
+
+        // Per-cell physical coordinates where the PEs were generated (each
+        // cell's center, transformed to physical / log10 space matching the
+        // model's per-axis log flags). Carried along so classification can be
+        // done without the originating MetaMesh.
+        std::vector<float> cell_center_x;
+        std::vector<float> cell_center_y;
+    };
+
+    /**
+     * @brief Persist a PEBank to disk via Boost binary archive.
+     *
+     * On-disk layout: magic + version + the serialised PEBank. Mirrors the
+     * pattern in src/PROcreate.cxx:25-69.
+     * @return true on success, false on any I/O or serialisation error.
+     */
+    bool save_bank(const PEBank &bank, const std::string &path);
+
+    /**
+     * @brief Inverse of save_bank. Verifies magic + version on the way in.
+     * @return true on success and `bank_out` populated; false otherwise (and
+     *         `bank_out` left in an indeterminate state).
+     */
+    bool load_bank(PEBank &bank_out, const std::string &path);
+
+    /**
+     * @brief Output bundle from run_adaptive_fc.
      */
     struct AdaptiveFCResult {
+        // Slice 1 fields.
         int  n_throws_done   = 0;
         int  n_meta_cells    = 0;
         int  n_baseline_cells = 0;
         int  n_refined_cells = 0;
         std::vector<int> leaves_per_throw;
         std::string diag_root_path;
+
+        // Slice 2a fields (populated by --mode init-bank).
+        std::string bank_path;        ///< Path of the saved PEBank artifact, if any.
+        int64_t     total_pes_generated = 0;
+        int         cells_hit_n_pe_max  = 0; ///< Number of cells that reached n_pe_max without Wilson-stopping.
+        float       mean_pes_per_cell   = 0.0f;
     };
 
     /**

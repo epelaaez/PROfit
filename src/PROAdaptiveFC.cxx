@@ -22,16 +22,27 @@
 #include "PROspec.h"
 #include "PROcess.h"
 #include "PROtocall.h"
+#include "PROserial.h"
 
 #include <Eigen/Eigen>
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
+#include <condition_variable>
 #include <cstdint>
+#include <fstream>
 #include <memory>
+#include <mutex>
 #include <random>
 #include <string>
+#include <thread>
 #include <vector>
+
+#include <boost/archive/binary_iarchive.hpp>
+#include <boost/archive/binary_oarchive.hpp>
+#include <boost/serialization/serialization.hpp>
+#include <boost/serialization/vector.hpp>
 
 #include "TBox.h"
 #include "TCanvas.h"
@@ -908,7 +919,470 @@ static void write_slice1_diagnostics(
 }
 
 // ====================================================================
-//  Section 5 — run_adaptive_fc (top-level dispatcher)
+//  Section 5 — Slice 2a: PEBank boost serialisation, worker, scheduler,
+//  and the --mode init-bank driver.
+//
+//  Layout note: boost::serialization overloads must live in the boost
+//  namespace, so we close PROfit, declare the overloads, then reopen.
+// ====================================================================
+
+} // namespace PROfit
+namespace boost { namespace serialization {
+
+template <class Archive>
+void serialize(Archive &ar, PROfit::PEBankRecord &r, [[maybe_unused]] const unsigned int v) {
+    ar & r.chi2_syst;
+    ar & r.chi2_osc;
+    ar & r.dchi2;
+    ar & r.seed;
+}
+
+template <class Archive>
+void serialize(Archive &ar, PROfit::PEBank &b, [[maybe_unused]] const unsigned int v) {
+    ar & b.finest_nx;
+    ar & b.finest_ny;
+    ar & b.max_levels;
+    ar & b.x_lo & b.x_hi & b.y_lo & b.y_hi;
+    ar & b.n_cells;
+    ar & b.cell_pes;
+    ar & b.cell_center_x;
+    ar & b.cell_center_y;
+}
+
+template <class Archive>
+void serialize(Archive &ar, PROfit::MetaCell &c, [[maybe_unused]] const unsigned int v) {
+    ar & c.i_bl;
+    ar & c.j_bl;
+    ar & c.step;
+    ar & c.level;
+    ar & c.per_level_refine_count;
+}
+
+template <class Archive>
+void serialize(Archive &ar, PROfit::MetaMesh &m, [[maybe_unused]] const unsigned int v) {
+    ar & m.cells;
+    ar & m.finest_nx;
+    ar & m.finest_ny;
+    ar & m.max_levels;
+    ar & m.x_lo & m.x_hi & m.y_lo & m.y_hi;
+    ar & m.n_baseline_cells;
+    ar & m.n_refined_cells;
+}
+
+}} // namespace boost::serialization
+
+namespace PROfit {
+
+bool save_bank(const PEBank &bank, const std::string &path) {
+    std::ofstream ofs(path, std::ios::binary);
+    if (!ofs.is_open()) {
+        log<LOG_ERROR>(L"%1% || save_bank: could not open %2% for writing.") % __func__ % path.c_str();
+        return false;
+    }
+    try {
+        boost::archive::binary_oarchive oa(ofs);
+        uint32_t magic = PEBank::MAGIC;
+        uint16_t version = PEBank::VERSION;
+        oa & magic;
+        oa & version;
+        oa & const_cast<PEBank &>(bank); // boost serialize() takes non-const ref
+    } catch (const std::exception &e) {
+        log<LOG_ERROR>(L"%1% || save_bank: serialisation error: %2%") % __func__ % e.what();
+        return false;
+    }
+    int64_t total_pes = 0;
+    for (const auto &v : bank.cell_pes) total_pes += (int64_t)v.size();
+    log<LOG_INFO>(L"%1% || save_bank: wrote %2% (cells=%3%, total_pes=%4%).")
+        % __func__ % path.c_str() % bank.n_cells % total_pes;
+    return true;
+}
+
+bool load_bank(PEBank &bank_out, const std::string &path) {
+    std::ifstream ifs(path, std::ios::binary);
+    if (!ifs.is_open()) {
+        log<LOG_ERROR>(L"%1% || load_bank: could not open %2% for reading.") % __func__ % path.c_str();
+        return false;
+    }
+    try {
+        boost::archive::binary_iarchive ia(ifs);
+        uint32_t magic = 0;
+        uint16_t version = 0;
+        ia & magic;
+        ia & version;
+        if (magic != PEBank::MAGIC) {
+            log<LOG_ERROR>(L"%1% || load_bank: bad magic in %2% (got 0x%3$08x, expected 0x%4$08x).")
+                % __func__ % path.c_str() % magic % (uint32_t)PEBank::MAGIC;
+            return false;
+        }
+        if (version != PEBank::VERSION) {
+            log<LOG_ERROR>(L"%1% || load_bank: version mismatch in %2% (got %3%, expected %4%).")
+                % __func__ % path.c_str() % (int)version % (int)PEBank::VERSION;
+            return false;
+        }
+        ia & bank_out;
+    } catch (const std::exception &e) {
+        log<LOG_ERROR>(L"%1% || load_bank: deserialisation error: %2%") % __func__ % e.what();
+        return false;
+    }
+    int64_t total_pes = 0;
+    for (const auto &v : bank_out.cell_pes) total_pes += (int64_t)v.size();
+    log<LOG_INFO>(L"%1% || load_bank: read %2% (cells=%3%, total_pes=%4%).")
+        % __func__ % path.c_str() % bank_out.n_cells % total_pes;
+    return true;
+}
+
+bool save_mesh(const MetaMesh &mm, const std::string &path) {
+    std::ofstream ofs(path, std::ios::binary);
+    if (!ofs.is_open()) {
+        log<LOG_ERROR>(L"%1% || save_mesh: could not open %2% for writing.") % __func__ % path.c_str();
+        return false;
+    }
+    try {
+        boost::archive::binary_oarchive oa(ofs);
+        uint32_t magic = MetaMesh::MAGIC;
+        uint16_t version = MetaMesh::VERSION;
+        oa & magic;
+        oa & version;
+        oa & const_cast<MetaMesh &>(mm);
+    } catch (const std::exception &e) {
+        log<LOG_ERROR>(L"%1% || save_mesh: serialisation error: %2%") % __func__ % e.what();
+        return false;
+    }
+    log<LOG_INFO>(L"%1% || save_mesh: wrote %2% (cells=%3%, finest=%4%x%5%).")
+        % __func__ % path.c_str() % (int)mm.cells.size() % mm.finest_nx % mm.finest_ny;
+    return true;
+}
+
+bool load_mesh(MetaMesh &mm_out, const std::string &path) {
+    std::ifstream ifs(path, std::ios::binary);
+    if (!ifs.is_open()) return false; // Silent: caller decides whether the absence is an error.
+    try {
+        boost::archive::binary_iarchive ia(ifs);
+        uint32_t magic = 0;
+        uint16_t version = 0;
+        ia & magic;
+        ia & version;
+        if (magic != MetaMesh::MAGIC) {
+            log<LOG_ERROR>(L"%1% || load_mesh: bad magic in %2% (got 0x%3$08x, expected 0x%4$08x).")
+                % __func__ % path.c_str() % magic % (uint32_t)MetaMesh::MAGIC;
+            return false;
+        }
+        if (version != MetaMesh::VERSION) {
+            log<LOG_ERROR>(L"%1% || load_mesh: version mismatch in %2% (got %3%, expected %4%).")
+                % __func__ % path.c_str() % (int)version % (int)MetaMesh::VERSION;
+            return false;
+        }
+        ia & mm_out;
+    } catch (const std::exception &e) {
+        log<LOG_ERROR>(L"%1% || load_mesh: deserialisation error: %2%") % __func__ % e.what();
+        return false;
+    }
+    log<LOG_INFO>(L"%1% || load_mesh: read %2% (cells=%3%, finest=%4%x%5%).")
+        % __func__ % path.c_str() % (int)mm_out.cells.size() % mm_out.finest_nx % mm_out.finest_ny;
+    return true;
+}
+
+// --------------------------------------------------------------------
+//  Per-cell PE worker — *duplicated* from src/PROfc.cxx::fc_worker
+//  (lines 5-134). Kept parallel until adaptive pipeline is validated.
+//
+//  Differences from fc_worker:
+//    • Throws *one* PE per call (not args.todo) — outer loop lives in
+//      the scheduler so a per-cell stop flag can interrupt mid-batch.
+//    • Uses std::unique_ptr<PROmetric> instead of raw new/delete so an
+//      early break doesn't leak.
+//    • Pinned coordinates: phy_params = (cell_center_x, cell_center_y)
+//      with all other physics params set to model->default_val(i).
+// --------------------------------------------------------------------
+
+namespace {
+
+// Bundle of inputs to one adaptive PE call.
+struct AdaptivePEArgs {
+    const PROconfig *config;
+    const PROpeller *prop;
+    const PROsyst   *systs;
+    const PROmodel  *model;
+    const Eigen::MatrixXf *L;    ///< Cholesky factor of total covariance.
+    const PROfitterConfig *fitconfig;
+    std::string chi2_kind;       ///< "PROchi" | "PROCNP" | "Poisson"
+    bool   binned;
+    size_t xaxis_idx, yaxis_idx;
+    float  cell_x_phys, cell_y_phys; ///< Physical (transformed) coords pinned at this PE.
+    uint32_t seed;
+};
+
+// Run a single PE at the pinned cell coords. Returns the PEBankRecord with
+// chi2_syst, chi2_osc, dchi2, and the seed used.
+//
+// Adapted body of fc_worker's per-PE loop (PROfc.cxx:40-131). Each call here
+// is one iteration of that loop, with phy_params pinned to the cell.
+static PEBankRecord run_one_pe(const AdaptivePEArgs &args)
+{
+    PEBankRecord rec;
+    rec.seed = args.seed;
+    std::mt19937 rng{args.seed};
+    std::uniform_int_distribution<uint32_t> dseed(0, std::numeric_limits<uint32_t>::max());
+    std::normal_distribution<float> d;
+
+    const PROmodel &model = *args.model;
+    const PROsyst  &systs = *args.systs;
+    const PROconfig &config = *args.config;
+    const PROpeller &prop = *args.prop;
+
+    const size_t nphys   = model.nparams;
+    const size_t nspline = systs.GetNSplines();
+    const size_t nparams = nphys + nspline;
+
+    // Build throw vector. Physics params: all at default, *except* the two
+    // axis params pinned to the cell center.
+    Eigen::VectorXf throws = Eigen::VectorXf::Zero((int)nparams);
+    for (size_t i = 0; i < nphys; ++i) throws((int)i) = model.default_val(i);
+    throws((int)args.xaxis_idx) = args.cell_x_phys;
+    throws((int)args.yaxis_idx) = args.cell_y_phys;
+
+    // Bounds for the syst-only fit: pin all physics params; let splines vary.
+    Eigen::VectorXf lb_syst = Eigen::VectorXf::Constant((int)nparams, -3.0f);
+    Eigen::VectorXf ub_syst = Eigen::VectorXf::Constant((int)nparams,  3.0f);
+    for (size_t j = 0; j < nphys; ++j) {
+        lb_syst((int)j) = throws((int)j);
+        ub_syst((int)j) = throws((int)j);
+    }
+    Eigen::VectorXf lb_osc(lb_syst), ub_osc(ub_syst);
+    for (size_t j = 0; j < nphys; ++j) {
+        lb_osc((int)j) = model.lb(j);
+        ub_osc((int)j) = model.ub(j);
+    }
+    for (size_t j = nphys; j < nparams; ++j) {
+        const size_t si = j - nphys;
+        const float lo = systs.spline_has_restrict[si] ? systs.spline_restrict_lo[si] : systs.spline_lo[si];
+        const float hi = systs.spline_has_restrict[si] ? systs.spline_restrict_hi[si] : systs.spline_hi[si];
+        lb_syst((int)j) = lo; ub_syst((int)j) = hi;
+        lb_osc((int)j)  = lo; ub_osc((int)j)  = hi;
+    }
+
+    // Throw splines (Gaussian, respecting restrict ranges).
+    for (size_t i = 0; i < nspline; ++i) {
+        const float tlo = systs.spline_has_restrict[i] ? systs.spline_restrict_lo[i] : systs.spline_lo[i];
+        const float thi = systs.spline_has_restrict[i] ? systs.spline_restrict_hi[i] : systs.spline_hi[i];
+        do {
+            throws((int)(i + nphys)) = d(rng);
+        } while (throws((int)(i + nphys)) < tlo || throws((int)(i + nphys)) > thi);
+    }
+
+    // Stat throw vector.
+    const int nbins_coll = config.m_num_variable_bins_total_collapsed[config.i_prime];
+    Eigen::VectorXf throwC(nbins_coll);
+    for (int i = 0; i < nbins_coll; ++i) throwC(i) = d(rng);
+
+    // Build fake-data spectrum.
+    PROchi::EvalStrategy strat = args.binned ? PROchi::BinnedChi2 : PROchi::EventByEvent;
+    PROspec shifted = FillSpectra(config, prop, systs, model, throws, strat);
+    PROspec newSpec = PROspec::PoissonVariation(
+        PROspec(CollapseMatrix(config, shifted.Spec()) + (*args.L) * throwC,
+                CollapseMatrix(config, shifted.Error())),
+        dseed(rng));
+    PROdata data(newSpec.Spec(), newSpec.Error());
+
+    // Build metric (unique_ptr — early-stop safe).
+    PROmetric::EvalStrategy mstrat = args.binned ? PROmetric::BinnedChi2 : PROmetric::EventByEvent;
+    std::unique_ptr<PROmetric> metric;
+    if (args.chi2_kind == "PROchi") {
+        metric.reset(new PROchi("", config, prop, &systs, model, data, mstrat));
+    } else if (args.chi2_kind == "PROCNP") {
+        metric.reset(new PROCNP("", config, prop, &systs, model, data, mstrat));
+    } else if (args.chi2_kind == "Poisson") {
+        metric.reset(new PROpoisson("", config, prop, &systs, model, data, mstrat));
+    } else {
+        log<LOG_ERROR>(L"%1% || run_one_pe: unknown chi2 kind '%2%'.") % __func__ % args.chi2_kind.c_str();
+        return rec;
+    }
+
+    // Syst-only fit (physics params pinned at cell center).
+    PROfitter fitter_syst(ub_syst, lb_syst, *args.fitconfig, dseed(rng));
+    metric->setBounds(lb_syst, ub_syst);
+    rec.chi2_syst = fitter_syst.Fit(*metric);
+    metric->freeParams();
+
+    // Full (syst + osc) fit.
+    PROfitter fitter_osc(ub_osc, lb_osc, *args.fitconfig, dseed(rng));
+    metric->setBounds(lb_osc, ub_osc);
+    std::vector<Eigen::VectorXf> seed_pts = {fitter_syst.best_fit};
+    rec.chi2_osc = fitter_osc.Fit(*metric, seed_pts);
+    fitter_osc.calcFreqSeedPoints(*metric);
+    for (size_t i = 0; i < fitter_osc.freq_seed_points.size(); ++i) {
+        const float c = fitter_osc.freq_seed_values.at(i);
+        if (c < rec.chi2_osc) rec.chi2_osc = c;
+    }
+
+    rec.dchi2 = rec.chi2_syst - rec.chi2_osc;
+    return rec;
+}
+
+// --------------------------------------------------------------------
+//  schedule_pes — owns a threadpool, hands out cell-jobs to workers,
+//  polls SequentialFCTest on every completed PE, stops cells once
+//  Wilson half-width < eps, caps at n_pe_max.
+// --------------------------------------------------------------------
+
+struct CellState {
+    int     cell_idx;
+    int     n_done = 0;
+    int     n_above_obs = 0;
+    bool    stopped = false;
+    std::vector<PEBankRecord> records; // local accumulator; copied into PEBank when stopped or capped
+};
+
+// Drive PE generation for every MetaCell. Slice-2a stopping rule: Wilson
+// half-width < acfg.wilson_eps, with a floor of acfg.n_pe_min and a cap of
+// acfg.n_pe_max. The Δχ²_obs threshold against which `n_above_obs` is
+// counted is, for init-bank mode, the *median* Δχ² of PEs already at this
+// cell — i.e. we're asking "is the sample stable enough to call the median
+// to within wilson_eps?" Later modes (asimov/brazil/classify) supply a
+// specific Δχ²_obs and re-run the classification.
+static void schedule_pes(const AdaptiveFCConfig &acfg,
+                         const PROconfig &config,
+                         const PROpeller &prop,
+                         const PROsyst   &systs,
+                         const PROmodel  &model,
+                         const PROfitterConfig &fitconfig,
+                         PROseed &proseed,
+                         const Eigen::MatrixXf &L,
+                         size_t xaxis_idx, size_t yaxis_idx,
+                         const std::vector<float> &cell_x_phys,
+                         const std::vector<float> &cell_y_phys,
+                         PEBank &bank_out,
+                         int nthreads,
+                         MultiPROgressBar &progress,
+                         int progress_bar_idx,
+                         AdaptiveFCResult &result_out)
+{
+    const int n_cells = (int)cell_x_phys.size();
+    if (n_cells == 0) return;
+
+    bank_out.cell_pes.assign(n_cells, {});
+
+    std::uniform_int_distribution<uint32_t> dseed(0, std::numeric_limits<uint32_t>::max());
+
+    // Cell-job queue: simple atomic index + mutexed cell state map. For
+    // n_cells ~ hundreds this is plenty; revisit if we ever go to N_cells > 10k.
+    std::atomic<int> next_cell{0};
+    std::mutex log_mutex;
+    std::atomic<int64_t> total_pes{0};
+    std::atomic<int> cells_capped{0};
+
+    SequentialFCTest stop_rule;
+
+    auto worker = [&](int thread_idx) {
+        std::mt19937 thread_rng((*proseed.getThreadSeeds())[thread_idx]);
+        while (true) {
+            int c = next_cell.fetch_add(1);
+            if (c >= n_cells) break;
+
+            std::vector<PEBankRecord> local_pes;
+            local_pes.reserve((size_t)acfg.n_pe_min);
+
+            // Per-PE loop with Wilson-stop polling. The Bernoulli statistic
+            // used for stopping is "fraction of PEs with dchi2 >= sample
+            // median" — a stable proxy when we don't yet have a specific
+            // Δχ²_obs to classify against.
+            int n_above = 0;
+            float running_median = 0.0f;
+            std::vector<float> sorted_buf;
+            sorted_buf.reserve((size_t)acfg.n_pe_max);
+
+            for (int i = 0; i < acfg.n_pe_max; ++i) {
+                AdaptivePEArgs args{};
+                args.config = &config;
+                args.prop   = &prop;
+                args.systs  = &systs;
+                args.model  = &model;
+                args.L      = &L;
+                args.fitconfig = &fitconfig;
+                args.chi2_kind = acfg.chi2;
+                args.binned    = acfg.binned;
+                args.xaxis_idx = xaxis_idx;
+                args.yaxis_idx = yaxis_idx;
+                args.cell_x_phys = cell_x_phys[c];
+                args.cell_y_phys = cell_y_phys[c];
+                args.seed = dseed(thread_rng);
+
+                PEBankRecord rec = run_one_pe(args);
+                local_pes.push_back(rec);
+
+                // Insert into sorted buffer (for running median).
+                auto it = std::upper_bound(sorted_buf.begin(), sorted_buf.end(), rec.dchi2);
+                sorted_buf.insert(it, rec.dchi2);
+                running_median = sorted_buf[sorted_buf.size() / 2];
+                n_above = 0;
+                for (float v : sorted_buf) if (v >= running_median) ++n_above;
+
+                const int n_done = i + 1;
+                if (n_done >= acfg.n_pe_min) {
+                    if (stop_rule.should_stop(n_done, n_above, acfg.wilson_eps)) {
+                        std::lock_guard<std::mutex> lg(log_mutex);
+                        log<LOG_INFO>(L"%1% || cell %2%/%3% stopped: n=%4%, halfwidth=%5%.")
+                            % __func__ % c % n_cells % n_done
+                            % stop_rule.wilson_halfwidth(n_done, n_above);
+                        break;
+                    }
+                }
+            }
+
+            if ((int)local_pes.size() >= acfg.n_pe_max) {
+                cells_capped.fetch_add(1);
+                std::lock_guard<std::mutex> lg(log_mutex);
+                log<LOG_WARNING>(L"%1% || cell %2%/%3% hit n_pe_max=%4% without Wilson-stopping.")
+                    % __func__ % c % n_cells % acfg.n_pe_max;
+            }
+
+            total_pes.fetch_add((int64_t)local_pes.size());
+            bank_out.cell_pes[c] = std::move(local_pes);
+            progress.increment_bar(progress_bar_idx);
+        }
+    };
+
+    std::vector<std::thread> tpool;
+    tpool.reserve((size_t)std::max(1, nthreads));
+    for (int t = 0; t < std::max(1, nthreads); ++t) tpool.emplace_back(worker, t);
+    for (auto &th : tpool) th.join();
+
+    result_out.total_pes_generated = total_pes.load();
+    result_out.cells_hit_n_pe_max  = cells_capped.load();
+    result_out.mean_pes_per_cell   = n_cells > 0 ? (float)total_pes.load() / (float)n_cells : 0.0f;
+
+    log<LOG_INFO>(L"%1% || schedule_pes done: cells=%2%, total_pes=%3%, mean=%4%, capped=%5%.")
+        % __func__ % n_cells % (int64_t)total_pes.load()
+        % result_out.mean_pes_per_cell % (int)cells_capped.load();
+}
+
+// Compute per-cell (x, y) physical coords for every MetaCell — Option A:
+// PE bank at each cell center. Honours per-axis log10 flag from the model
+// (centers in the *transformed* axis space, then mapped to physical).
+static void compute_cell_centers(const MetaMesh &mm,
+                                 bool xlog, bool ylog,
+                                 std::vector<float> &cx_out,
+                                 std::vector<float> &cy_out)
+{
+    const int W = mm.finest_nx;
+    const int H = mm.finest_ny;
+    cx_out.clear(); cy_out.clear();
+    cx_out.reserve(mm.cells.size());
+    cy_out.reserve(mm.cells.size());
+    for (const auto &c : mm.cells) {
+        const float fi = (float)c.i_bl + 0.5f * (float)c.step;
+        const float fj = (float)c.j_bl + 0.5f * (float)c.step;
+        const float tx = mm.x_lo + fi / (float)W * (mm.x_hi - mm.x_lo);
+        const float ty = mm.y_lo + fj / (float)H * (mm.y_hi - mm.y_lo);
+        cx_out.push_back(xlog ? std::pow(10.0f, tx) : tx);
+        cy_out.push_back(ylog ? std::pow(10.0f, ty) : ty);
+    }
+}
+
+} // anonymous
+
+// ====================================================================
+//  Section 6 — run_adaptive_fc (top-level dispatcher)
 // ====================================================================
 
 AdaptiveFCResult run_adaptive_fc(
@@ -938,26 +1412,101 @@ AdaptiveFCResult run_adaptive_fc(
     log<LOG_INFO>(L"%1% || resolved xvar='%2%' -> idx=%3%; yvar='%4%' -> idx=%5%.")
         % __func__ % acfg.xvar.c_str() % (int)xaxis_idx % acfg.yvar.c_str() % (int)yaxis_idx;
 
-    // Slice 1: Wilks prepass over N throws, then meta-mesh, then diagnostics.
+    // Slice 2a: only init-bank is wired beyond slice 1; asimov/brazil/classify
+    // are slice 2b.
     if (acfg.mode != AdaptiveFCMode::InitBank) {
-        log<LOG_WARNING>(L"%1% || slice 1 only implements --mode init-bank; treating as init-bank.")
+        log<LOG_WARNING>(L"%1% || slice 2a only implements --mode init-bank; treating as init-bank.")
             % __func__;
     }
 
-    std::vector<PROmesh::AMRResult> per_throw_meshes =
-        generate_throws(config, prop, systs, *model, fitconfig, proseed,
-                        fakeDataParams, acfg, nthreads, xaxis_idx, yaxis_idx, progress);
-    res.n_throws_done = (int)per_throw_meshes.size();
-    res.leaves_per_throw.reserve(per_throw_meshes.size());
-    for (const auto &amr : per_throw_meshes) res.leaves_per_throw.push_back((int)amr.leaves.size());
+    // ---- Slice 1: prepass + meta-mesh + diagnostics. ------------------------
+    // Cache check: if <output_tag>_mesh.bin exists and --rebuild-mesh wasn't
+    // passed, skip the slow prepass+aggregation+diagnostics step entirely.
+    const std::string mesh_path = acfg.output_tag + "_mesh.bin";
+    MetaMesh mm;
+    bool mesh_loaded_from_cache = false;
+    if (!acfg.rebuild_mesh && load_mesh(mm, mesh_path)) {
+        mesh_loaded_from_cache = true;
+        log<LOG_INFO>(L"%1% || using cached meta-mesh from %2% (cells=%3%); "
+                      L"skipping prepass + diagnostics. Pass --rebuild-mesh to force rebuild.")
+            % __func__ % mesh_path.c_str() % (int)mm.cells.size();
+        res.n_throws_done    = 0;
+        res.n_meta_cells     = (int)mm.cells.size();
+        res.n_baseline_cells = mm.n_baseline_cells;
+        res.n_refined_cells  = mm.n_refined_cells;
+    } else {
+        std::vector<PROmesh::AMRResult> per_throw_meshes =
+            generate_throws(config, prop, systs, *model, fitconfig, proseed,
+                            fakeDataParams, acfg, nthreads, xaxis_idx, yaxis_idx, progress);
+        res.n_throws_done = (int)per_throw_meshes.size();
+        res.leaves_per_throw.reserve(per_throw_meshes.size());
+        for (const auto &amr : per_throw_meshes) res.leaves_per_throw.push_back((int)amr.leaves.size());
 
-    MetaMesh mm = build_meta_mesh(per_throw_meshes, acfg.p_thresh, acfg.baseline_level);
-    res.n_meta_cells     = (int)mm.cells.size();
-    res.n_baseline_cells = mm.n_baseline_cells;
-    res.n_refined_cells  = mm.n_refined_cells;
+        mm = build_meta_mesh(per_throw_meshes, acfg.p_thresh, acfg.baseline_level);
+        res.n_meta_cells     = (int)mm.cells.size();
+        res.n_baseline_cells = mm.n_baseline_cells;
+        res.n_refined_cells  = mm.n_refined_cells;
 
-    write_slice1_diagnostics(per_throw_meshes, mm, *model, systs, acfg,
-                             xaxis_idx, yaxis_idx, res);
+        write_slice1_diagnostics(per_throw_meshes, mm, *model, systs, acfg,
+                                 xaxis_idx, yaxis_idx, res);
+
+        // Persist the fresh mesh so future invocations can skip the prepass.
+        save_mesh(mm, mesh_path);
+    }
+    (void)mesh_loaded_from_cache; // currently informational only
+
+    // ---- Slice 2a: per-cell PE bank generation + save. ----------------------
+    if (mm.cells.empty()) {
+        log<LOG_WARNING>(L"%1% || empty meta-mesh; skipping PE-bank generation.") % __func__;
+        return res;
+    }
+
+    // Determine per-axis log10 flag the same way the diagnostic plotter does
+    // (model overrides CLI when in conflict).
+    const bool xlog = (xaxis_idx < model->is_log10.size()) ? model->is_log10[xaxis_idx] : acfg.logx;
+    const bool ylog = (yaxis_idx < model->is_log10.size()) ? model->is_log10[yaxis_idx] : acfg.logy;
+
+    std::vector<float> cell_x_phys, cell_y_phys;
+    compute_cell_centers(mm, xlog, ylog, cell_x_phys, cell_y_phys);
+
+    // Cholesky factor of the total covariance — built once, reused across all
+    // cells and all PEs. Same construction as the brazil-band path
+    // (bin/PROfit.cxx:1586) and the existing fc block (bin/PROfit.cxx:2511).
+    PROspec cv = FillSpectra(config, prop, systs, *model, fakeDataParams,
+                             acfg.binned, config.i_prime);
+    Eigen::MatrixXf L = systs.DecomposeFractionalCovariance(config, cv.Spec());
+
+    log<LOG_INFO>(L"%1% || init-bank: starting PE generation for %2% cells "
+                  L"(n_pe_min=%3%, n_pe_max=%4%, wilson_eps=%5%).")
+        % __func__ % (int)mm.cells.size() % acfg.n_pe_min % acfg.n_pe_max % acfg.wilson_eps;
+
+    // Dedicated progress bar tracking cells. We piggyback on the same
+    // MultiPROgressBar already in flight (the throws bar at index 0) — add a
+    // second slot via a new instance is harder, so for slice 2a we reuse bar 0
+    // and the caller's progress display continues. (If you want a separate
+    // bar, plumb a second MultiPROgressBar through.)
+    PEBank bank;
+    bank.finest_nx = mm.finest_nx;
+    bank.finest_ny = mm.finest_ny;
+    bank.max_levels = mm.max_levels;
+    bank.x_lo = mm.x_lo; bank.x_hi = mm.x_hi;
+    bank.y_lo = mm.y_lo; bank.y_hi = mm.y_hi;
+    bank.n_cells = (int)mm.cells.size();
+    bank.cell_center_x = cell_x_phys;
+    bank.cell_center_y = cell_y_phys;
+
+    schedule_pes(acfg, config, prop, systs, *model, fitconfig, proseed, L,
+                 xaxis_idx, yaxis_idx, cell_x_phys, cell_y_phys,
+                 bank, nthreads, progress, 0, res);
+
+    // Persist the bank. Default path is <output_tag>_bank.bin unless
+    // --bank explicitly set.
+    const std::string bank_path = acfg.bank_path.empty()
+        ? (acfg.output_tag + "_bank.bin")
+        : acfg.bank_path;
+    if (save_bank(bank, bank_path)) {
+        res.bank_path = bank_path;
+    }
 
     return res;
 }

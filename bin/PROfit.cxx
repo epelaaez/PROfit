@@ -471,6 +471,10 @@ int main(int argc, char* argv[])
         "Levels strictly below baseline-level are always kept in the meta-mesh.")->default_val(2);
     afc_command->add_flag("--stat-only-throws", afc_stat_only_throws,
         "Use only statistical throws (no systematic throws).");
+    bool afc_rebuild_mesh = false;
+    afc_command->add_flag("--rebuild-mesh", afc_rebuild_mesh,
+        "Ignore any cached <output_tag>_mesh.bin and re-run the Wilks prepass + meta-mesh build. "
+        "Without this flag, an existing mesh cache is loaded and the slow prepass step is skipped.");
     afc_command->add_option("--xvar", afc_xvar, "Name of x-axis variable.")->default_str("sinsq2thmm");
     afc_command->add_option("--yvar", afc_yvar, "Name of y-axis variable.")->default_str("dmsq");
     afc_command->add_option("--xlo", afc_xlo, "Lower x-axis limit.")->default_val(1e-4f);
@@ -2726,6 +2730,7 @@ int main(int argc, char* argv[])
         acfg.p_thresh        = afc_p_thresh;
         acfg.baseline_level  = afc_baseline_level;
         acfg.stat_only_throws = afc_stat_only_throws;
+        acfg.rebuild_mesh    = afc_rebuild_mesh;
         acfg.xvar = afc_xvar;
         acfg.yvar = afc_yvar;
         acfg.x_lo = afc_xlo; acfg.x_hi = afc_xhi;
@@ -2753,9 +2758,12 @@ int main(int argc, char* argv[])
             myseed, fakeDataParams, acfg, nthread, afc_progress);
 
         afc_progress.finish_all();
-        log<LOG_INFO>(L"%1% || fc-adaptive slice-1 done: throws=%2%, meta_cells=%3% (baseline=%4%, refined=%5%), diag=%6%.")
+        log<LOG_INFO>(L"%1% || fc-adaptive done: throws=%2%, meta_cells=%3% (baseline=%4%, refined=%5%), "
+                      L"diag=%6%, bank=%7% (pes=%8%, mean/cell=%9%, capped=%10%).")
             % __func__ % ares.n_throws_done % ares.n_meta_cells
-            % ares.n_baseline_cells % ares.n_refined_cells % ares.diag_root_path.c_str();
+            % ares.n_baseline_cells % ares.n_refined_cells % ares.diag_root_path.c_str()
+            % (ares.bank_path.empty() ? "<not written>" : ares.bank_path.c_str())
+            % (int64_t)ares.total_pes_generated % ares.mean_pes_per_cell % ares.cells_hit_n_pe_max;
     }
 
     //***********************************************************************
