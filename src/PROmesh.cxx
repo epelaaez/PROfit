@@ -82,26 +82,10 @@ AMRResult run_amr(EvalFn eval,
     const int nthreads    = std::max(1, opts.nthreads);
 
     // ----- Shared state -----
-    // All shared mesh state lives under a single mutex `state_mu`. Earlier
-    // versions split this into a state_mu (chi2/bestfit) + state_mu (cells +
-    // corner_to_cells), but that introduced a race: a worker could insert
-    // chi2_map[X] under state_mu, then before it acquired state_mu, register_cell
-    // (running on another thread under state_mu) saw X already in chi2_map and
-    // counted pending = N-1 *while also* pushing the new cell idx into
-    // corner_to_cells[X]. The worker's later corner_to_cells[X] lookup found
-    // the just-pushed idx and decremented its counter again → counter
-    // double-decremented. Consolidating under one mutex makes "insert χ² +
-    // look up corner_to_cells" atomic w.r.t. "count pending + push to
-    // corner_to_cells". Per-fit cost dwarfs map ops so the contention cost is
-    // negligible.
+    // All shared mesh state lives under a single mutex `state_mu`. 
     std::unordered_map<uint64_t, float>           chi2_map;
     std::unordered_map<uint64_t, Eigen::VectorXf> bestfit_map;
     std::vector<Cell>                             cells;
-    // Pending-corner counts, parallel to cells. atomic so worker-thread completion
-    // can decrement without taking state_mu. We use std::deque (NOT vector) so
-    // push_back never invalidates references to existing elements — workers
-    // dereference corner_counts[cidx] outside the lock and rely on its address
-    // being stable across concurrent register_cell calls.
     std::deque<std::unique_ptr<std::atomic<int>>> corner_counts;
     // Map from (i, j) → list of cell indices that include (i, j) as a corner.
     std::unordered_map<uint64_t, std::vector<int>> corner_to_cells;
@@ -446,14 +430,6 @@ AMRResult run_amr(EvalFn eval,
             EvalResult r = eval(req);
             total_fits.fetch_add(1, std::memory_order_relaxed);
 
-            // CRITICAL (B2 fix): chi2_map insert AND corner_to_cells lookup must
-            // happen under the SAME state_mu region. If they were separate
-            // critical sections, register_cell on another thread could observe
-            // the chi2_map entry but push the new cell idx into corner_to_cells
-            // *after* this worker took its earlier snapshot — leading to a
-            // double-decrement of the cell's pending-corner counter (once by
-            // register_cell counting "pending=N-1" and once by this worker's
-            // later decrement). One critical section closes that window.
             std::vector<int> affected_cells;
             {
                 std::lock_guard<std::mutex> lk(state_mu);

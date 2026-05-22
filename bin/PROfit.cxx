@@ -12,6 +12,7 @@
 #include "PROcess.h"
 #include "PROsurf.h"
 #include "PROfc.h"
+#include "PROAdaptiveFC.h"
 #include "PROfitter.h"
 #include "PROmodel.h"
 #include "PROMCMC.h"
@@ -315,6 +316,26 @@ int main(int argc, char* argv[])
     bool gof_pvalue = false;
     bool pvalue = false;
 
+    // fc-adaptive (slice 1: Wilks prepass + meta-mesh + diagnostics).
+    std::string afc_mode_str = "init-bank";
+    int   afc_n_throws = 200;
+    std::vector<int> afc_prepass_initial = {10, 10};
+    int   afc_prepass_levels = 3;
+    float afc_prepass_delta  = 0.5f;
+    std::vector<float> afc_prepass_contour_levels = {2.30f, 5.99f};
+    float afc_p_thresh = 0.05f;
+    int   afc_baseline_level = 2;
+    bool  afc_stat_only_throws = false;
+    std::string afc_xvar = "sinsq2thmm", afc_yvar = "dmsq";
+    float afc_xlo = 1e-4f, afc_xhi = 1.0f, afc_ylo = 1e-2f, afc_yhi = 1e2f;
+    bool  afc_logx = true, afc_logy = true;
+    std::string afc_bank_path = "";
+    std::vector<float> afc_cl_targets = {0.683f, 0.90f, 0.954f};
+    float afc_wilson_eps = 0.05f;
+    int   afc_n_pe_min = 30;
+    int   afc_n_pe_max = 1000;
+    float afc_roi_band = 8.0f;
+
 
     //Global Arguments for all PROfit enables subcommands.
     app.add_option("-x,--xml", xmlname, "Input PROfit XML configuration file.")->required();
@@ -425,6 +446,46 @@ int main(int argc, char* argv[])
     profc_command->add_option("-u,--universes", nuniv, "Number of Feldman Cousins universes to throw")->default_val(1000);
     profc_command->add_flag("--gof", gof_pvalue, "Get GOF pvalue");
     profc_command->add_flag("--pval", pvalue, "Get FC pvalue")->excludes("--gof");
+
+    // PROAdaptiveFC, adaptive FC pipeline. Slice 1: Wilks prepass + meta-mesh + diagnostics.
+    CLI::App *afc_command = app.add_subcommand("fc-adaptive",
+        "Adaptive Feldman-Cousins (slice 1: Wilks pre-pass over N throws, meta-mesh "
+        "aggregation, diagnostic ROOT artifact). PE bank, sequential stopping, and "
+        "data classification follow in slice 2.");
+    afc_command->add_option("--mode", afc_mode_str,
+        "Pipeline mode: init-bank (default), asimov, brazil, classify. Slice 1 only honours init-bank.")
+        ->default_str("init-bank");
+    afc_command->add_option("--throws", afc_n_throws,
+        "Number of Wilks pre-pass throws (each produces one AMR mesh).")->default_val(200);
+    afc_command->add_option("--prepass-amr-initial", afc_prepass_initial,
+        "AMR coarsest grid size (one or two ints; default 10 10).")->expected(0, 2);
+    afc_command->add_option("--prepass-amr-levels", afc_prepass_levels,
+        "AMR refinement depth for the Wilks pre-pass.")->default_val(3);
+    afc_command->add_option("--prepass-delta-widen", afc_prepass_delta,
+        "AMR straddle-band widening (chi^2 units).")->default_val(0.5f);
+    afc_command->add_option("--prepass-contour-levels", afc_prepass_contour_levels,
+        "Wilks Delta-chi^2 targets per CL (default 2.30 5.99 for 1sigma, 2sigma at 2 dof).");
+    afc_command->add_option("--p-thresh", afc_p_thresh,
+        "Refine cell in meta-mesh if fraction of throws refining it >= p_thresh.")->default_val(0.05f);
+    afc_command->add_option("--baseline-level", afc_baseline_level,
+        "Levels strictly below baseline-level are always kept in the meta-mesh.")->default_val(2);
+    afc_command->add_flag("--stat-only-throws", afc_stat_only_throws,
+        "Use only statistical throws (no systematic throws).");
+    afc_command->add_option("--xvar", afc_xvar, "Name of x-axis variable.")->default_str("sinsq2thmm");
+    afc_command->add_option("--yvar", afc_yvar, "Name of y-axis variable.")->default_str("dmsq");
+    afc_command->add_option("--xlo", afc_xlo, "Lower x-axis limit.")->default_val(1e-4f);
+    afc_command->add_option("--xhi", afc_xhi, "Upper x-axis limit.")->default_val(1.0f);
+    afc_command->add_option("--ylo", afc_ylo, "Lower y-axis limit.")->default_val(1e-2f);
+    afc_command->add_option("--yhi", afc_yhi, "Upper y-axis limit.")->default_val(1e2f);
+    afc_command->add_flag("--logx,!--linx", afc_logx, "x-axis log/linear (default log).");
+    afc_command->add_flag("--logy,!--liny", afc_logy, "y-axis log/linear (default log).");
+    // Slice-2 forward-compat flags (accepted but unused in slice 1).
+    afc_command->add_option("--bank", afc_bank_path, "PEBank artifact path (slice 2).");
+    afc_command->add_option("--cl", afc_cl_targets, "Target CLs (slice 2).");
+    afc_command->add_option("--wilson-eps", afc_wilson_eps, "Wilson half-width target (slice 2).");
+    afc_command->add_option("--n-pe-min", afc_n_pe_min, "Floor on PEs per cell (slice 2).");
+    afc_command->add_option("--n-pe-max", afc_n_pe_max, "Cap on PEs per cell (slice 2).");
+    afc_command->add_option("--roi-band", afc_roi_band, "ROI Delta-chi^2 band (slice 2).");
 
     //PROglobal
     CLI::App *proglobal_command = app.add_subcommand("global", "Just do a single global fit.");
@@ -2634,6 +2695,68 @@ int main(int argc, char* argv[])
         }
     }
 
+
+    //***********************************************************************
+    //***********************************************************************
+    //********************  Adaptive Feldman-Cousins (slice 1)  *************
+    //***********************************************************************
+    //***********************************************************************
+    if(*afc_command) {
+        PROfit::AdaptiveFCConfig acfg;
+        if (afc_mode_str == "init-bank")      acfg.mode = PROfit::AdaptiveFCMode::InitBank;
+        else if (afc_mode_str == "asimov")    acfg.mode = PROfit::AdaptiveFCMode::Asimov;
+        else if (afc_mode_str == "brazil")    acfg.mode = PROfit::AdaptiveFCMode::Brazil;
+        else if (afc_mode_str == "classify")  acfg.mode = PROfit::AdaptiveFCMode::Classify;
+        else {
+            log<LOG_WARNING>(L"%1% || fc-adaptive: unknown --mode '%2%', defaulting to init-bank.")
+                % __func__ % afc_mode_str.c_str();
+            acfg.mode = PROfit::AdaptiveFCMode::InitBank;
+        }
+        acfg.n_throws = afc_n_throws;
+        if (afc_prepass_initial.size() == 1) {
+            acfg.prepass_amr_initial_x = afc_prepass_initial[0];
+            acfg.prepass_amr_initial_y = afc_prepass_initial[0];
+        } else if (afc_prepass_initial.size() >= 2) {
+            acfg.prepass_amr_initial_x = afc_prepass_initial[0];
+            acfg.prepass_amr_initial_y = afc_prepass_initial[1];
+        }
+        acfg.prepass_amr_levels    = afc_prepass_levels;
+        acfg.prepass_delta_widen   = afc_prepass_delta;
+        acfg.prepass_contour_levels = afc_prepass_contour_levels;
+        acfg.p_thresh        = afc_p_thresh;
+        acfg.baseline_level  = afc_baseline_level;
+        acfg.stat_only_throws = afc_stat_only_throws;
+        acfg.xvar = afc_xvar;
+        acfg.yvar = afc_yvar;
+        acfg.x_lo = afc_xlo; acfg.x_hi = afc_xhi;
+        acfg.y_lo = afc_ylo; acfg.y_hi = afc_yhi;
+        acfg.logx = afc_logx; acfg.logy = afc_logy;
+        acfg.output_tag = final_output_tag;
+        acfg.chi2 = chi2;
+        acfg.binned = !eventbyevent;
+        acfg.bank_path = afc_bank_path;
+        acfg.cl_targets = afc_cl_targets;
+        acfg.wilson_eps = afc_wilson_eps;
+        acfg.n_pe_min = afc_n_pe_min;
+        acfg.n_pe_max = afc_n_pe_max;
+        acfg.roi_band = afc_roi_band;
+
+        // One progress bar tracking the throw loop.
+        std::vector<std::pair<int, std::string>> afc_PB_configs;
+        afc_PB_configs.push_back({acfg.n_throws, "AFC throws"});
+        MultiPROgressBar afc_progress(afc_PB_configs);
+        afc_progress.initialize_display();
+        afc_progress.start_display_thread();
+
+        PROfit::AdaptiveFCResult ares = PROfit::run_adaptive_fc(
+            config, prop, variable_systs[config.i_prime], scanFitConfig,
+            myseed, fakeDataParams, acfg, nthread, afc_progress);
+
+        afc_progress.finish_all();
+        log<LOG_INFO>(L"%1% || fc-adaptive slice-1 done: throws=%2%, meta_cells=%3% (baseline=%4%, refined=%5%), diag=%6%.")
+            % __func__ % ares.n_throws_done % ares.n_meta_cells
+            % ares.n_baseline_cells % ares.n_refined_cells % ares.diag_root_path.c_str();
+    }
 
     //***********************************************************************
     //***********************************************************************

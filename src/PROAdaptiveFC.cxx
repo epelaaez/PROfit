@@ -1,0 +1,965 @@
+/**
+ * @file PROAdaptiveFC.cxx
+ * @brief Adaptive Feldman-Cousins pipeline implementation. Slice 1 only.
+ *
+ * Slice 1 covers: Wilks pre-pass over N independent throws + meta-mesh
+ * aggregation + diagnostic ROOT artifact. The PE bank, sequential stopping
+ * rule, scheduler, and data-classification step are deferred to slice 2.
+ *
+ * This file deliberately *duplicates* code from src/PROfc.cxx and from
+ * src/PROsurf.cxx::FillSurfaceAMR rather than refactoring shared helpers out
+ * of either. The per-PE worker body and the AMR EvalFn lambda are both copied
+ * with banner comments marking the duplication.
+ */
+#include "PROAdaptiveFC.h"
+
+#include "PROlog.h"
+#include "PROmodel.h"
+#include "PROchi.h"
+#include "PROCNP.h"
+#include "PROpoisson.h"
+#include "PROmetric.h"
+#include "PROspec.h"
+#include "PROcess.h"
+#include "PROtocall.h"
+
+#include <Eigen/Eigen>
+
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <memory>
+#include <random>
+#include <string>
+#include <vector>
+
+#include "TBox.h"
+#include "TCanvas.h"
+#include "TDirectory.h"
+#include "TFile.h"
+#include "TGraph.h"
+#include "TH1F.h"
+#include "TH2D.h"
+#include "TLine.h"
+#include "TPad.h"
+#include "TPaveText.h"
+#include "TStyle.h"
+#include "TTree.h"
+
+namespace PROfit {
+
+// ====================================================================
+//  Helpers — axis name → parameter/spline index resolution.
+//  Mirrors the lookup at bin/PROfit.cxx:1425-1457 used by the `surface`
+//  command. Kept local because the parent function is large and not yet
+//  factored out.
+// ====================================================================
+
+static size_t resolve_axis_index(const std::string &name,
+                                 const PROmodel &model,
+                                 const PROsyst  &systs,
+                                 const PROconfig &config,
+                                 size_t fallback)
+{
+    if (auto loc = std::find(model.param_names.begin(), model.param_names.end(), name);
+        loc != model.param_names.end()) {
+        return std::distance(model.param_names.begin(), loc);
+    }
+    if (auto loc = std::find(systs.spline_names.begin(), systs.spline_names.end(), name);
+        loc != systs.spline_names.end()) {
+        return std::distance(systs.spline_names.begin(), loc);
+    }
+    for (const auto &[xml_name, plot_name] : config.m_mcgen_variation_plotname_map) {
+        if (name == plot_name) {
+            if (auto loc = std::find(systs.spline_names.begin(), systs.spline_names.end(), xml_name);
+                loc != systs.spline_names.end()) {
+                return std::distance(systs.spline_names.begin(), loc);
+            }
+        }
+    }
+    log<LOG_WARNING>(L"%1% || resolve_axis_index: axis variable '%2%' not found; falling back to %3%.")
+        % __func__ % name.c_str() % fallback;
+    return fallback;
+}
+
+// ====================================================================
+//  Section 1 — run_wilks_prepass
+//
+//  Copied/adapted from PROsurf::FillSurfaceAMR EvalFn (src/PROsurf.cxx:758-795).
+//  Keep parallel until the adaptive pipeline is validated, then refactor.
+//
+//  The only structural difference from PROsurf's version: this one closes over
+//  a *PROdata* (the per-throw fake dataset) and builds a fresh PROmetric per
+//  thread from it, since PROsurf takes the metric pre-built from outside.
+// ====================================================================
+
+static PROmesh::AMRResult run_wilks_prepass(
+    const PROconfig &config,
+    const PROpeller &prop,
+    const PROsyst   &systs,
+    const PROmodel  &model,
+    const PROdata   &data,
+    const PROfitterConfig &fitconfig,
+    const std::string &chi2_kind,
+    bool eventbyevent,
+    size_t xaxis_idx,
+    size_t yaxis_idx,
+    float x_lo, float x_hi,
+    float y_lo, float y_hi,
+    const PROmesh::AMROptions &opts_in,
+    int nthreads)
+{
+    PROmesh::AMROptions opts = opts_in;
+    opts.nthreads = nthreads;
+
+    // Thread-local metric clones. The first call on each thread allocates;
+    // subsequent calls reuse. Mirrors PROsurf.cxx:761-764.
+    auto eval_fn = [&config, &prop, &systs, &model, &data, &fitconfig,
+                    chi2_kind, eventbyevent, xaxis_idx, yaxis_idx]
+        (const PROmesh::EvalRequest &req) -> PROmesh::EvalResult
+    {
+        thread_local std::unique_ptr<PROmetric> tls_metric;
+        if (!tls_metric) {
+            // Construct a per-thread metric matching the chi2_kind choice.
+            // The lifetime of `data`, `systs`, etc. is the lifetime of
+            // run_wilks_prepass — fine because the AMR scheduler joins all
+            // workers before run_amr returns.
+            PROmetric::EvalStrategy strat = eventbyevent
+                ? PROmetric::EventByEvent : PROmetric::BinnedChi2;
+            if (chi2_kind == "PROchi") {
+                tls_metric.reset(new PROchi("", config, prop, &systs, model, data, strat));
+            } else if (chi2_kind == "PROCNP") {
+                tls_metric.reset(new PROCNP("", config, prop, &systs, model, data, strat));
+            } else if (chi2_kind == "Poisson") {
+                tls_metric.reset(new PROpoisson("", config, prop, &systs, model, data, strat));
+            } else {
+                log<LOG_ERROR>(L"%1% || run_wilks_prepass: unknown chi2 kind '%2%'.")
+                    % __func__ % chi2_kind.c_str();
+                abort();
+            }
+        }
+        PROmetric *m = tls_metric.get();
+        m->reset();
+
+        const int nphys   = (int)m->GetModel().nparams;
+        const int nspline = (int)m->GetSysts().GetNSplines();
+        const int n_full  = nphys + nspline;
+        Eigen::VectorXf lb(n_full), ub(n_full);
+        lb << m->GetModel().lb,
+              Eigen::VectorXf::Map(m->GetSysts().spline_lo.data(), m->GetSysts().spline_lo.size());
+        ub << m->GetModel().ub,
+              Eigen::VectorXf::Map(m->GetSysts().spline_hi.data(), m->GetSysts().spline_hi.size());
+
+        // Pin the two scanned coords, optimise the rest.
+        lb((int)xaxis_idx) = req.x_phys;
+        ub((int)xaxis_idx) = req.x_phys;
+        lb((int)yaxis_idx) = req.y_phys;
+        ub((int)yaxis_idx) = req.y_phys;
+        m->setBounds(lb, ub);
+
+        const uint32_t fseed = static_cast<uint32_t>(req.key & 0xffffffffu);
+        PROfitter fitter(ub, lb, fitconfig, fseed);
+
+        PROmesh::EvalResult out;
+        if (req.seeds.empty()) {
+            out.chi2 = fitter.Fit(*m);
+        } else {
+            out.chi2 = fitter.Fit(*m, req.seeds);
+        }
+        out.best_fit = fitter.best_fit;
+        return out;
+    };
+
+    log<LOG_INFO>(L"%1% || run_wilks_prepass starting AMR on [%2%, %3%] x [%4%, %5%], "
+                  L"initial=%6%x%7%, levels=%8%, nthreads=%9%.")
+        % __func__ % x_lo % x_hi % y_lo % y_hi
+        % opts.initial_nx % opts.initial_ny % opts.max_levels % opts.nthreads;
+
+    PROmesh::AMRResult amr = PROmesh::run_amr(eval_fn, x_lo, x_hi, y_lo, y_hi, opts);
+
+    log<LOG_INFO>(L"%1% || AMR done: %2% fits across %3% levels, min_chi2=%4%, %5% leaves, %6% contour levels.")
+        % __func__ % amr.total_fits % opts.max_levels % amr.min_chi2
+        % (int)amr.leaves.size() % (int)amr.polylines.size();
+
+    return amr;
+}
+
+// ====================================================================
+//  Section 2 — generate_throws
+//
+//  Mirrors the brazil-band throw loop at bin/PROfit.cxx:1582-1620 but writes
+//  each throw's result into our own vector of AMRResults instead of into
+//  PROsurf::surface. Honours `stat_only_throws`.
+// ====================================================================
+
+static std::vector<PROmesh::AMRResult> generate_throws(
+    const PROconfig &config,
+    const PROpeller &prop,
+    const PROsyst   &systs,
+    const PROmodel  &model,
+    const PROfitterConfig &fitconfig,
+    PROseed &proseed,
+    const Eigen::VectorXf &fakeDataParams,
+    const AdaptiveFCConfig &acfg,
+    int nthreads,
+    size_t xaxis_idx, size_t yaxis_idx,
+    MultiPROgressBar &progress)
+{
+    const size_t N_phys_params = model.nparams;
+    const size_t nbins_collapsed = (size_t)config.m_num_variable_bins_total_collapsed[config.i_prime];
+
+    // Build the CV spectrum and the Cholesky factor once — both are throw-independent.
+    PROspec cv = FillSpectra(config, prop, systs, model, fakeDataParams, !acfg.binned ? false : true, config.i_prime);
+    PROspec collapsed_cv = PROspec(CollapseMatrix(config, cv.Spec()),
+                                   CollapseMatrix(config, cv.Error()));
+    Eigen::MatrixXf L = systs.DecomposeFractionalCovariance(config, cv.Spec());
+
+    // Convert acfg axis bounds back to *transformed* (log/lin) space — that's
+    // what PROmesh expects and what PROsurf::FillSurfaceAMR uses (see line
+    // 747-750 of PROsurf.cxx).
+    const float x_lo_t = acfg.logx ? std::log10(acfg.x_lo) : acfg.x_lo;
+    const float x_hi_t = acfg.logx ? std::log10(acfg.x_hi) : acfg.x_hi;
+    const float y_lo_t = acfg.logy ? std::log10(acfg.y_lo) : acfg.y_lo;
+    const float y_hi_t = acfg.logy ? std::log10(acfg.y_hi) : acfg.y_hi;
+
+    PROmesh::AMROptions opts;
+    opts.initial_nx     = acfg.prepass_amr_initial_x;
+    opts.initial_ny     = acfg.prepass_amr_initial_y;
+    opts.max_levels     = acfg.prepass_amr_levels;
+    opts.delta_widen    = acfg.prepass_delta_widen;
+    opts.contour_levels = acfg.prepass_contour_levels;
+    opts.produce_dense  = true;
+
+    std::vector<PROmesh::AMRResult> results;
+    results.reserve(acfg.n_throws);
+
+    // RNG plumbing — mirrors fc_worker's pattern (PROfc.cxx:36-37).
+    std::uniform_int_distribution<uint32_t> dseed(0, std::numeric_limits<uint32_t>::max());
+
+    std::normal_distribution<float> d;
+
+    for (int t = 0; t < acfg.n_throws; ++t) {
+        // Build this throw's parameter vector and stat-throw vector.
+        Eigen::VectorXf throwp = fakeDataParams;
+        Eigen::VectorXf throwC = Eigen::VectorXf::Constant((int)nbins_collapsed, 0);
+
+        if (!acfg.stat_only_throws) {
+            for (size_t i = 0; i < systs.GetNSplines(); ++i) {
+                throwp((int)(i + N_phys_params)) = d(PROseed::global_rng);
+            }
+        }
+        for (size_t i = 0; i < nbins_collapsed; ++i) {
+            throwC((int)i) = d(PROseed::global_rng);
+        }
+
+        const bool binned_flag = acfg.binned;
+        PROspec shifted = FillSpectra(config, prop, systs, model, throwp, binned_flag, config.i_prime);
+
+        PROspec newSpec = acfg.stat_only_throws
+            ? PROspec::PoissonVariation(collapsed_cv, dseed(proseed.global_rng))
+            : PROspec::PoissonVariation(
+                  PROspec(CollapseMatrix(config, shifted.Spec()) + L * throwC,
+                          CollapseMatrix(config, shifted.Error())),
+                  dseed(proseed.global_rng));
+        PROdata data(newSpec.Spec(), newSpec.Error());
+
+        log<LOG_INFO>(L"%1% || throw %2%/%3%: stat_only=%4%, n_splines_thrown=%5%, n_stat_bins=%6%.")
+            % __func__ % t % acfg.n_throws % (int)acfg.stat_only_throws
+            % (int)(acfg.stat_only_throws ? 0 : systs.GetNSplines()) % (int)nbins_collapsed;
+
+        PROmesh::AMRResult amr = run_wilks_prepass(
+            config, prop, systs, model, data, fitconfig,
+            acfg.chi2, !acfg.binned ? true : false,
+            xaxis_idx, yaxis_idx,
+            x_lo_t, x_hi_t, y_lo_t, y_hi_t,
+            opts, nthreads);
+
+        results.push_back(std::move(amr));
+        progress.increment_bar(0);
+    }
+
+    return results;
+}
+
+// ====================================================================
+//  Section 3 — build_meta_mesh
+//
+//  Aggregates per-throw AMRResults into a MetaMesh by counting, at each
+//  finest-grid coordinate, how many throws produced a leaf containing that
+//  coordinate at refinement depth ≥ L for each L.
+//
+//  A cell at level L is "kept" in the meta-mesh if either
+//    (a) L < baseline_level (always kept — uniform baseline), OR
+//    (b) refine_count[L] / n_throws ≥ p_thresh.
+// ====================================================================
+
+static MetaMesh build_meta_mesh(const std::vector<PROmesh::AMRResult> &throws,
+                                float p_thresh,
+                                int baseline_level)
+{
+    MetaMesh mm;
+    if (throws.empty()) {
+        log<LOG_WARNING>(L"%1% || build_meta_mesh: empty throw list.") % __func__;
+        return mm;
+    }
+
+    // Sanity: all throws must share the same finest grid + AMR depth + bounds.
+    mm.finest_nx  = throws.front().finest_nx;
+    mm.finest_ny  = throws.front().finest_ny;
+    mm.x_lo = throws.front().x_lo;  mm.x_hi = throws.front().x_hi;
+    mm.y_lo = throws.front().y_lo;  mm.y_hi = throws.front().y_hi;
+    int max_level_seen = 0;
+    for (const auto &amr : throws) {
+        if (amr.finest_nx != mm.finest_nx || amr.finest_ny != mm.finest_ny) {
+            log<LOG_ERROR>(L"%1% || build_meta_mesh: throws disagree on finest grid (%2%x%3% vs %4%x%5%).")
+                % __func__ % amr.finest_nx % amr.finest_ny % mm.finest_nx % mm.finest_ny;
+            return mm;
+        }
+        for (const auto &leaf : amr.leaves) max_level_seen = std::max(max_level_seen, leaf.level);
+    }
+    mm.max_levels = max_level_seen;
+    const int n_levels = max_level_seen + 1;
+    const int n_throws = (int)throws.size();
+
+    // For each finest-grid point (i, j), count refinement-depth tallies across throws.
+    // Storage: dense grid (finest_nx * finest_ny) of vector<int> with n_levels slots.
+    // For SBN-class grids (typical finest=80x80 with max_levels=3, n_levels=4) this is
+    // 80*80*4 = 25600 ints = ~100 KB. Acceptable.
+    const size_t W = (size_t)mm.finest_nx;
+    const size_t H = (size_t)mm.finest_ny;
+    std::vector<std::vector<int>> tally(W * H, std::vector<int>(n_levels, 0));
+
+    // Each leaf in a throw covers a square region in finest-integer coords from
+    // (i_bl, j_bl) to (i_bl + step, j_bl + step). For depth tallying, we credit
+    // every finest-grid point inside that square with "refined to depth = leaf.level".
+    // A cell at depth L was produced because the throw's AMR refined depth (L-1),
+    // (L-2), ..., 0 to reach this point — so we credit all levels ≤ leaf.level.
+    for (const auto &amr : throws) {
+        for (const auto &leaf : amr.leaves) {
+            const int i0 = std::max(0, leaf.i_bl);
+            const int j0 = std::max(0, leaf.j_bl);
+            const int i1 = std::min((int)W, leaf.i_bl + leaf.step);
+            const int j1 = std::min((int)H, leaf.j_bl + leaf.step);
+            for (int i = i0; i < i1; ++i) {
+                for (int j = j0; j < j1; ++j) {
+                    auto &v = tally[(size_t)i * H + (size_t)j];
+                    for (int L = 0; L <= leaf.level && L < n_levels; ++L) v[L] += 1;
+                }
+            }
+        }
+    }
+
+    // Build MetaCells. A cell at level L is described by its bottom-left
+    // finest-integer coord and its step = 2^(max_levels - L). We sweep the
+    // finest grid by step at level L and decide inclusion based on the
+    // tally count for the top-left (i_bl, j_bl) of each candidate cell.
+    // For mixed-level meta-meshes, the rule is: a cell at level L exists iff
+    //   (a) L < baseline_level, OR
+    //   (b) tally[L][center] / n_throws ≥ p_thresh, AND no cell at deeper
+    //       level covering the same area also passes (b).
+    //
+    // For slice 1 we keep the policy simple: emit cells at the *finest* level
+    // that passes the threshold at each finest-grid coordinate. If no level
+    // passes and L < baseline_level coverage applies, fall back to baseline.
+    //
+    // We materialise this by sweeping the finest grid and, for each finest
+    // coordinate, finding the deepest level L* where either condition holds.
+    // Then we deduplicate by the (i_bl, j_bl, step) coordinate of the cell
+    // that contains that finest coordinate at level L*.
+    const int threshold_count = std::max(1, (int)std::ceil(p_thresh * (float)n_throws));
+
+    std::vector<MetaCell> emitted;
+    emitted.reserve(W * H / 4);
+    std::vector<uint8_t> seen_finest(W * H, 0); // marks finest points already covered by an emitted deeper cell
+
+    // First pass: emit deep (refined) cells where p_thresh is met.
+    // Walk from deepest level outward.
+    for (int level = mm.max_levels; level >= baseline_level; --level) {
+        const int step = 1 << std::max(0, mm.max_levels - level);
+        for (int i = 0; i < (int)W; i += step) {
+            for (int j = 0; j < (int)H; j += step) {
+                if (seen_finest[(size_t)i * H + (size_t)j]) continue;
+                const int count = tally[(size_t)i * H + (size_t)j][std::min(level, n_levels - 1)];
+                if (count >= threshold_count) {
+                    MetaCell c;
+                    c.i_bl = i; c.j_bl = j; c.step = step; c.level = level;
+                    c.per_level_refine_count.assign(n_levels, 0);
+                    // Aggregate per-level counts across the cell footprint (max).
+                    for (int L = 0; L < n_levels; ++L) {
+                        int peak = 0;
+                        for (int ii = i; ii < i + step && ii < (int)W; ++ii) {
+                            for (int jj = j; jj < j + step && jj < (int)H; ++jj) {
+                                peak = std::max(peak, tally[(size_t)ii * H + (size_t)jj][L]);
+                            }
+                        }
+                        c.per_level_refine_count[L] = peak;
+                    }
+                    emitted.push_back(std::move(c));
+                    mm.n_refined_cells++;
+                    // Mark this whole footprint as already covered.
+                    for (int ii = i; ii < i + step && ii < (int)W; ++ii) {
+                        for (int jj = j; jj < j + step && jj < (int)H; ++jj) {
+                            seen_finest[(size_t)ii * H + (size_t)jj] = 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Second pass: fill remaining area with baseline-level cells.
+    {
+        const int level = std::max(0, baseline_level - 1);
+        const int step = 1 << std::max(0, mm.max_levels - level);
+        for (int i = 0; i < (int)W; i += step) {
+            for (int j = 0; j < (int)H; j += step) {
+                bool any_covered = false;
+                for (int ii = i; ii < i + step && ii < (int)W && !any_covered; ++ii) {
+                    for (int jj = j; jj < j + step && jj < (int)H && !any_covered; ++jj) {
+                        if (seen_finest[(size_t)ii * H + (size_t)jj]) any_covered = true;
+                    }
+                }
+                if (any_covered) continue;
+
+                MetaCell c;
+                c.i_bl = i; c.j_bl = j; c.step = step; c.level = level;
+                c.per_level_refine_count.assign(n_levels, 0);
+                for (int L = 0; L < n_levels; ++L) {
+                    int peak = 0;
+                    for (int ii = i; ii < i + step && ii < (int)W; ++ii) {
+                        for (int jj = j; jj < j + step && jj < (int)H; ++jj) {
+                            peak = std::max(peak, tally[(size_t)ii * H + (size_t)jj][L]);
+                        }
+                    }
+                    c.per_level_refine_count[L] = peak;
+                }
+                emitted.push_back(std::move(c));
+                mm.n_baseline_cells++;
+                for (int ii = i; ii < i + step && ii < (int)W; ++ii) {
+                    for (int jj = j; jj < j + step && jj < (int)H; ++jj) {
+                        seen_finest[(size_t)ii * H + (size_t)jj] = 1;
+                    }
+                }
+            }
+        }
+    }
+
+    mm.cells = std::move(emitted);
+
+    log<LOG_INFO>(L"%1% || build_meta_mesh: aggregated %2% throws, finest=%3%x%4%, "
+                  L"meta_cells=%5% (baseline=%6%, refined=%7%), threshold_count=%8%/%9%.")
+        % __func__ % n_throws % mm.finest_nx % mm.finest_ny
+        % (int)mm.cells.size() % mm.n_baseline_cells % mm.n_refined_cells
+        % threshold_count % n_throws;
+
+    return mm;
+}
+
+// ====================================================================
+//  Section 4 — write_slice1_diagnostics
+//
+//  Writes one ROOT file containing per-throw and aggregate diagnostics.
+//  The per-throw mesh visualisation mirrors PROsurf::PlotAMRMesh
+//  (src/PROsurf.cxx:856-957) — *copied* as a free helper to avoid
+//  constructing a temporary PROsurf instance.
+// ====================================================================
+
+namespace {
+
+// Coordinate transform from finest-integer (i, j) to physical (x, y), honouring
+// per-axis log10 flag from the model.
+struct AxisXform {
+    float x_lo, x_hi, y_lo, y_hi;
+    int   finest_nx, finest_ny;
+    bool  xlog, ylog;
+
+    float i_to_x(int i) const {
+        const float t = x_lo + (float)i / (float)finest_nx * (x_hi - x_lo);
+        return xlog ? std::pow(10.0f, t) : t;
+    }
+    float j_to_y(int j) const {
+        const float t = y_lo + (float)j / (float)finest_ny * (y_hi - y_lo);
+        return ylog ? std::pow(10.0f, t) : t;
+    }
+};
+
+// Draw one AMR mesh into the given canvas. Adapted from PROsurf::PlotAMRMesh
+// (src/PROsurf.cxx:856-957) — pulled apart so the same body can be reused as
+// the per-page draw routine in the multipage throws PDF.
+//
+// Does NOT call Print(); the caller owns the canvas lifecycle.
+static void draw_amr_mesh_on_canvas(TCanvas &c,
+                                    const PROmesh::AMRResult &amr,
+                                    const PROmodel &model,
+                                    bool logx, bool logy,
+                                    size_t xaxis_idx, size_t yaxis_idx,
+                                    const std::string &title_prefix = "AMR mesh")
+{
+    if (amr.leaves.empty() || amr.finest_nx <= 0 || amr.finest_ny <= 0) return;
+
+    c.Clear();
+    if (logx) c.SetLogx(); else c.SetLogx(0);
+    if (logy) c.SetLogy(); else c.SetLogy(0);
+
+    const bool xlog = (xaxis_idx < model.is_log10.size()) ? model.is_log10[xaxis_idx] : false;
+    const bool ylog = (yaxis_idx < model.is_log10.size()) ? model.is_log10[yaxis_idx] : false;
+    AxisXform A{amr.x_lo, amr.x_hi, amr.y_lo, amr.y_hi, amr.finest_nx, amr.finest_ny, xlog, ylog};
+
+    const float xmin = A.i_to_x(0);
+    const float xmax = A.i_to_x(amr.finest_nx);
+    const float ymin = A.j_to_y(0);
+    const float ymax = A.j_to_y(amr.finest_ny);
+
+    int max_lvl = 0;
+    for (const auto &leaf : amr.leaves) max_lvl = std::max(max_lvl, leaf.level);
+
+    std::string xlabel = xaxis_idx < model.nparams ? model.pretty_param_names.at(xaxis_idx) : std::string("x");
+    std::string ylabel = yaxis_idx < model.nparams ? model.pretty_param_names.at(yaxis_idx) : std::string("y");
+    const std::string title = title_prefix + ";" + xlabel + ";" + ylabel;
+    // Canvas-owned frame: heap-allocated, ROOT cleans up when canvas is cleared/destroyed.
+    TH1F *frame = new TH1F("amr_frame", title.c_str(), 1, xmin, xmax);
+    frame->SetMinimum(ymin);
+    frame->SetMaximum(ymax);
+    frame->SetStats(0);
+    frame->Draw();
+
+    const int level_palette[6] = { kAzure - 9, kAzure - 4, kAzure + 1, kViolet - 4, kViolet + 1, kRed + 1 };
+    for (const auto &leaf : amr.leaves) {
+        const float xlo = A.i_to_x(leaf.i_bl);
+        const float xhi = A.i_to_x(leaf.i_bl + leaf.step);
+        const float ylo = A.j_to_y(leaf.j_bl);
+        const float yhi = A.j_to_y(leaf.j_bl + leaf.step);
+        TBox *box = new TBox(xlo, ylo, xhi, yhi);
+        const int idx = std::min(leaf.level, 5);
+        box->SetFillColorAlpha(level_palette[idx], 0.25f);
+        box->SetLineColor(kBlack);
+        box->SetLineWidth(1);
+        box->Draw();
+    }
+
+    const int contour_colors[5] = { kRed + 1, kOrange + 7, kGreen + 2, kMagenta, kBlack };
+    for (size_t k = 0; k < amr.polylines.size(); ++k) {
+        const int col = contour_colors[k % 5];
+        for (const auto &seg : amr.polylines[k]) {
+            float x0 = seg.p0.first,  x1 = seg.p1.first;
+            float y0 = seg.p0.second, y1 = seg.p1.second;
+            if (xlog) { x0 = std::pow(10.0f, x0); x1 = std::pow(10.0f, x1); }
+            if (ylog) { y0 = std::pow(10.0f, y0); y1 = std::pow(10.0f, y1); }
+            TLine *line = new TLine(x0, y0, x1, y1);
+            line->SetLineColor(col);
+            line->SetLineWidth(2);
+            line->Draw();
+        }
+    }
+
+    TPaveText *info = new TPaveText(0.1, 0.1, 0.3, 0.3, "NDC");
+    info->SetFillColor(kWhite);
+    info->SetBorderSize(1);
+    info->SetTextSize(0.025);
+    info->SetTextAlign(12);
+    info->AddText(Form("AMR levels: 0..%d", max_lvl));
+    info->AddText(Form("Total fits: %d", amr.total_fits));
+    info->AddText(Form("Leaf cells: %d", (int)amr.leaves.size()));
+    info->Draw();
+
+    c.Update();
+}
+
+// Multi-page PDF of every per-throw AMR mesh, one page per throw. Uses the
+// same open/append/close pattern as the *_Covar.pdf output in bin/PROfit.cxx
+// (lines 2282/2296/2310/2312): single TCanvas reused across pages with
+// c.Print(path + "[", "pdf") / c.Print(path, "pdf") / c.Print(path + "]", "pdf").
+static void plot_amr_throws_multipage_pdf(
+    const std::vector<PROmesh::AMRResult> &throws,
+    const PROmodel &model,
+    const std::string &filename,
+    bool logx, bool logy,
+    size_t xaxis_idx, size_t yaxis_idx)
+{
+    if (throws.empty()) return;
+
+    TCanvas c("amr_mesh_multipage", "AMR Mesh Throws", 800, 700);
+    c.Print((filename + "[").c_str(), "pdf");
+    for (size_t t = 0; t < throws.size(); ++t) {
+        const std::string page_title = "AMR mesh - throw " + std::to_string(t);
+        draw_amr_mesh_on_canvas(c, throws[t], model, logx, logy,
+                                xaxis_idx, yaxis_idx, page_title);
+        c.Print(filename.c_str(), "pdf");
+    }
+    c.Print((filename + "]").c_str(), "pdf");
+    log<LOG_INFO>(L"%1% || wrote multipage throw PDF %2% (%3% pages).")
+        % __func__ % filename.c_str() % (int)throws.size();
+}
+
+// One-PDF visualisation of the *merged* meta-mesh. Same visual idiom as
+// plot_amr_mesh_pdf: TBox per cell with the level palette + black borders.
+// Difference: alpha is modulated by agreement strength (how many throws
+// refined this cell at its assigned level), so cells where the throws
+// strongly agreed appear saturated and cells that barely cleared p_thresh
+// appear translucent — at a glance you see *where* the throws gathered.
+static void plot_metamesh_pdf(const MetaMesh &mm,
+                              const PROmodel &model,
+                              const std::string &filename,
+                              int n_throws,
+                              float p_thresh,
+                              int baseline_level,
+                              bool logx, bool logy,
+                              size_t xaxis_idx, size_t yaxis_idx)
+{
+    if (mm.cells.empty() || mm.finest_nx <= 0 || mm.finest_ny <= 0) {
+        log<LOG_WARNING>(L"%1% || plot_metamesh_pdf: empty mesh, skipping.") % __func__;
+        return;
+    }
+
+    const bool xlog = (xaxis_idx < model.is_log10.size()) ? model.is_log10[xaxis_idx] : false;
+    const bool ylog = (yaxis_idx < model.is_log10.size()) ? model.is_log10[yaxis_idx] : false;
+    AxisXform A{mm.x_lo, mm.x_hi, mm.y_lo, mm.y_hi, mm.finest_nx, mm.finest_ny, xlog, ylog};
+
+    const float xmin = A.i_to_x(0);
+    const float xmax = A.i_to_x(mm.finest_nx);
+    const float ymin = A.j_to_y(0);
+    const float ymax = A.j_to_y(mm.finest_ny);
+
+    int max_lvl = 0;
+    for (const auto &c : mm.cells) max_lvl = std::max(max_lvl, c.level);
+
+    // Side-by-side layout: left pad = mesh, right pad = info panel.
+    TCanvas c("metamesh", "Meta-Mesh", 1400, 800);
+    TPad left_pad("mm_left", "", 0.00, 0.00, 0.66, 1.00);
+    TPad right_pad("mm_right", "", 0.66, 0.00, 1.00, 1.00);
+    left_pad.SetLeftMargin(0.13);
+    left_pad.SetRightMargin(0.03);
+    left_pad.SetTopMargin(0.08);
+    left_pad.SetBottomMargin(0.12);
+    if (logx) left_pad.SetLogx();
+    if (logy) left_pad.SetLogy();
+    right_pad.SetLeftMargin(0.02);
+    right_pad.SetRightMargin(0.02);
+    right_pad.SetTopMargin(0.04);
+    right_pad.SetBottomMargin(0.04);
+    left_pad.Draw();
+    right_pad.Draw();
+
+    // ---- Left pad: the mesh itself, no overlays. -----------------------------
+    left_pad.cd();
+
+    std::string xlabel = xaxis_idx < model.nparams ? model.pretty_param_names.at(xaxis_idx) : std::string("x");
+    std::string ylabel = yaxis_idx < model.nparams ? model.pretty_param_names.at(yaxis_idx) : std::string("y");
+    const std::string title = std::string("Meta-mesh (merged over throws);") + xlabel + ";" + ylabel;
+    TH1F frame("mm_frame", title.c_str(), 1, xmin, xmax);
+    frame.SetMinimum(ymin);
+    frame.SetMaximum(ymax);
+    frame.SetStats(0);
+    frame.GetXaxis()->SetTitleSize(0.045);
+    frame.GetYaxis()->SetTitleSize(0.045);
+    frame.Draw();
+
+    // Level → colour. Same palette as the per-throw plots.
+    const int level_palette[6] = { kAzure - 9, kAzure - 4, kAzure + 1, kViolet - 4, kViolet + 1, kRed + 1 };
+
+    // Draw shallowest-first so deeper cells overlay cleanly on shared edges.
+    std::vector<const MetaCell*> sorted_cells;
+    sorted_cells.reserve(mm.cells.size());
+    for (const auto &mc : mm.cells) sorted_cells.push_back(&mc);
+    std::sort(sorted_cells.begin(), sorted_cells.end(),
+              [](const MetaCell *a, const MetaCell *b){ return a->level < b->level; });
+
+    for (const MetaCell *mc : sorted_cells) {
+        const float xlo = A.i_to_x(mc->i_bl);
+        const float xhi = A.i_to_x(mc->i_bl + mc->step);
+        const float ylo = A.j_to_y(mc->j_bl);
+        const float yhi = A.j_to_y(mc->j_bl + mc->step);
+
+        const int palette_idx = std::min(mc->level, 5);
+        int refine_count_at_level = (mc->level < (int)mc->per_level_refine_count.size())
+            ? mc->per_level_refine_count[mc->level] : 0;
+        const float agreement = std::min(1.0f, (float)refine_count_at_level / (float)std::max(1, n_throws));
+
+        TBox *box = new TBox(xlo, ylo, xhi, yhi);
+        if (mc->level < baseline_level) {
+            box->SetFillColorAlpha(kGray + 1, 0.15f);
+        } else {
+            const float alpha = std::min(1.0f, std::max(0.35f, agreement));
+            box->SetFillColorAlpha(level_palette[palette_idx], alpha);
+        }
+        box->SetLineColor(kBlack);
+        box->SetLineWidth(1);
+        box->Draw();
+    }
+
+    // ---- Right pad: info + legend, no axes. ----------------------------------
+    right_pad.cd();
+    TPaveText *info = new TPaveText(0.02, 0.55, 0.98, 0.97, "NDC");
+    info->SetFillColor(kWhite);
+    info->SetBorderSize(1);
+    info->SetTextSize(0.040);
+    info->SetTextAlign(12);
+    info->AddText("Meta-mesh summary");
+    info->AddText("");
+    info->AddText(Form("Throws merged: %d", n_throws));
+    info->AddText(Form("p_{thresh}: %.3f", p_thresh));
+    info->AddText(Form("  threshold count: #geq %d / %d throws",
+                        std::max(1, (int)std::ceil(p_thresh * (float)n_throws)), n_throws));
+    info->AddText(Form("Baseline level: %d", baseline_level));
+    info->AddText(Form("Levels present: 0..%d", max_lvl));
+    info->AddText(Form("Total cells: %d", (int)mm.cells.size()));
+    info->AddText(Form("  refined : %d", mm.n_refined_cells));
+    info->AddText(Form("  baseline: %d", mm.n_baseline_cells));
+    info->AddText(Form("Finest grid: %d x %d", mm.finest_nx, mm.finest_ny));
+    info->Draw();
+
+    TPaveText *legend = new TPaveText(0.02, 0.05, 0.98, 0.50, "NDC");
+    legend->SetFillColor(kWhite);
+    legend->SetBorderSize(1);
+    legend->SetTextSize(0.038);
+    legend->SetTextAlign(12);
+    legend->AddText("Legend");
+    legend->AddText("");
+    legend->AddText("Fill colour = refinement level");
+    legend->AddText("  (Azure shallow #rightarrow Violet/Red deep)");
+    legend->AddText("Opacity = throw agreement at level");
+    legend->AddText("  (#geq threshold ... all-throws-agree)");
+    legend->AddText("Grey = baseline fallback");
+    legend->AddText("  (kept regardless of p_{thresh})");
+    legend->Draw();
+
+    c.cd();
+    c.Print(filename.c_str());
+    log<LOG_INFO>(L"%1% || meta-mesh plot written to %2% (%3% cells, max level %4%).")
+        % __func__ % filename.c_str() % (int)mm.cells.size() % max_lvl;
+}
+
+// Build a TH2D from a dense reconstructed Δχ² matrix, with physical-coord
+// (log10-aware) bin edges. Used for the per-throw χ² heatmap.
+static TH2D make_th2d_from_dense(const Eigen::MatrixXf &dense,
+                                 const AxisXform &A,
+                                 const std::string &name,
+                                 const std::string &title)
+{
+    const int nx = (int)dense.cols();
+    const int ny = (int)dense.rows();
+    std::vector<double> ex(nx + 1), ey(ny + 1);
+    for (int i = 0; i <= nx; ++i) ex[(size_t)i] = (double)A.i_to_x(i * A.finest_nx / std::max(1, nx));
+    for (int j = 0; j <= ny; ++j) ey[(size_t)j] = (double)A.j_to_y(j * A.finest_ny / std::max(1, ny));
+    TH2D h(name.c_str(), title.c_str(), nx, ex.data(), ny, ey.data());
+    for (int ix = 0; ix < nx; ++ix) {
+        for (int iy = 0; iy < ny; ++iy) {
+            h.SetBinContent(ix + 1, iy + 1, (double)dense(iy, ix));
+        }
+    }
+    return h;
+}
+
+} // anonymous
+
+static void write_slice1_diagnostics(
+    const std::vector<PROmesh::AMRResult> &throws,
+    const MetaMesh &mm,
+    const PROmodel &model,
+    const PROsyst  & /*systs*/,
+    const AdaptiveFCConfig &acfg,
+    size_t xaxis_idx, size_t yaxis_idx,
+    AdaptiveFCResult &result_out)
+{
+    const std::string root_path = acfg.output_tag + "_afc_slice1.root";
+    TFile fout(root_path.c_str(), "RECREATE");
+    if (fout.IsZombie()) {
+        log<LOG_ERROR>(L"%1% || write_slice1_diagnostics: could not open %2% for writing.")
+            % __func__ % root_path.c_str();
+        return;
+    }
+
+    const bool xlog = (xaxis_idx < model.is_log10.size()) ? model.is_log10[xaxis_idx] : acfg.logx;
+    const bool ylog = (yaxis_idx < model.is_log10.size()) ? model.is_log10[yaxis_idx] : acfg.logy;
+
+    // ---- Per-throw subdirectory ------------------------------------------------
+    TTree summary("summary", "per-throw AMR summary");
+    int t_idx = 0, t_total_fits = 0, t_leaves = 0, t_contour_segs = 0;
+    float t_min_chi2 = 0.0f;
+    summary.Branch("throw_idx", &t_idx);
+    summary.Branch("total_fits", &t_total_fits);
+    summary.Branch("leaves", &t_leaves);
+    summary.Branch("contour_segs", &t_contour_segs);
+    summary.Branch("min_chi2", &t_min_chi2);
+
+    for (size_t t = 0; t < throws.size(); ++t) {
+        const auto &amr = throws[t];
+        std::string dname = "throw_" + std::to_string(t);
+        TDirectory *d = fout.mkdir(dname.c_str());
+        d->cd();
+
+        AxisXform A{amr.x_lo, amr.x_hi, amr.y_lo, amr.y_hi, amr.finest_nx, amr.finest_ny, xlog, ylog};
+
+        if (amr.reconstructed_dense.size() > 0) {
+            TH2D h = make_th2d_from_dense(amr.reconstructed_dense, A,
+                                          "chi2_dense", "throw " + std::to_string(t) + " #Delta#chi^{2}");
+            h.Write();
+        }
+
+        // Leaves overlay as one TGraph per cell (closed rectangle).
+        for (size_t k = 0; k < amr.leaves.size(); ++k) {
+            const auto &leaf = amr.leaves[k];
+            const float xlo = A.i_to_x(leaf.i_bl);
+            const float xhi = A.i_to_x(leaf.i_bl + leaf.step);
+            const float ylo = A.j_to_y(leaf.j_bl);
+            const float yhi = A.j_to_y(leaf.j_bl + leaf.step);
+            const double xs[5] = {xlo, xhi, xhi, xlo, xlo};
+            const double ys[5] = {ylo, ylo, yhi, yhi, ylo};
+            TGraph g(5, xs, ys);
+            g.SetName(("leaf_" + std::to_string(k)).c_str());
+            g.SetTitle(("level " + std::to_string(leaf.level)).c_str());
+            g.Write();
+        }
+
+        // Contour polylines per CL level (one TGraph per segment).
+        for (size_t cl = 0; cl < amr.polylines.size(); ++cl) {
+            for (size_t s = 0; s < amr.polylines[cl].size(); ++s) {
+                const auto &seg = amr.polylines[cl][s];
+                float x0 = seg.p0.first, x1 = seg.p1.first;
+                float y0 = seg.p0.second, y1 = seg.p1.second;
+                if (xlog) { x0 = std::pow(10.0f, x0); x1 = std::pow(10.0f, x1); }
+                if (ylog) { y0 = std::pow(10.0f, y0); y1 = std::pow(10.0f, y1); }
+                const double xs[2] = {x0, x1};
+                const double ys[2] = {y0, y1};
+                TGraph g(2, xs, ys);
+                g.SetName(Form("contour_cl%zu_seg%zu", cl, s));
+                g.Write();
+            }
+        }
+
+        fout.cd();
+        t_idx          = (int)t;
+        t_total_fits   = amr.total_fits;
+        t_leaves       = (int)amr.leaves.size();
+        t_contour_segs = 0;
+        for (const auto &poly : amr.polylines) t_contour_segs += (int)poly.size();
+        t_min_chi2     = amr.min_chi2;
+        summary.Fill();
+    }
+    summary.Write();
+
+    // ---- Aggregate (meta-mesh) subdirectory ------------------------------------
+    TDirectory *mdir = fout.mkdir("metamesh");
+    mdir->cd();
+
+    AxisXform Ag{mm.x_lo, mm.x_hi, mm.y_lo, mm.y_hi, mm.finest_nx, mm.finest_ny, xlog, ylog};
+
+    // Per-level refine-count heatmap at the finest grid resolution.
+    if (mm.finest_nx > 0 && mm.finest_ny > 0) {
+        const int W = mm.finest_nx;
+        const int H = mm.finest_ny;
+        std::vector<double> ex(W + 1), ey(H + 1);
+        for (int i = 0; i <= W; ++i) ex[(size_t)i] = (double)Ag.i_to_x(i);
+        for (int j = 0; j <= H; ++j) ey[(size_t)j] = (double)Ag.j_to_y(j);
+        for (int L = 0; L <= mm.max_levels; ++L) {
+            TH2D h(Form("refine_count_level%d", L),
+                   Form("throws refining to level #geq %d;%s;%s", L,
+                        model.pretty_param_names.size() > xaxis_idx ? model.pretty_param_names[xaxis_idx].c_str() : "x",
+                        model.pretty_param_names.size() > yaxis_idx ? model.pretty_param_names[yaxis_idx].c_str() : "y"),
+                   W, ex.data(), H, ey.data());
+            // Each meta-cell carries its peak per-level refine count over its footprint;
+            // paint that value across the cell.
+            for (const auto &c : mm.cells) {
+                const int cnt = (L < (int)c.per_level_refine_count.size()) ? c.per_level_refine_count[L] : 0;
+                for (int ii = c.i_bl; ii < c.i_bl + c.step && ii < W; ++ii) {
+                    for (int jj = c.j_bl; jj < c.j_bl + c.step && jj < H; ++jj) {
+                        h.SetBinContent(ii + 1, jj + 1, (double)cnt);
+                    }
+                }
+            }
+            h.Write();
+        }
+    }
+
+    // Meta-mesh cell overlay (one TGraph per cell border, named by level).
+    for (size_t k = 0; k < mm.cells.size(); ++k) {
+        const auto &c = mm.cells[k];
+        const float xlo = Ag.i_to_x(c.i_bl);
+        const float xhi = Ag.i_to_x(c.i_bl + c.step);
+        const float ylo = Ag.j_to_y(c.j_bl);
+        const float yhi = Ag.j_to_y(c.j_bl + c.step);
+        const double xs[5] = {xlo, xhi, xhi, xlo, xlo};
+        const double ys[5] = {ylo, ylo, yhi, yhi, ylo};
+        TGraph g(5, xs, ys);
+        g.SetName(Form("metacell_%zu_level%d", k, c.level));
+        g.Write();
+    }
+
+    fout.cd();
+    fout.Close();
+
+    // All per-throw AMR meshes collected into one multipage PDF (one page per
+    // throw). Pattern lifted from the *_PROplot_Covar.pdf output in
+    // bin/PROfit.cxx:2282/2296/2312.
+    const std::string throws_pdf = acfg.output_tag + "_throws.pdf";
+    plot_amr_throws_multipage_pdf(throws, model, throws_pdf,
+                                  acfg.logx, acfg.logy, xaxis_idx, yaxis_idx);
+
+    // Single-page PDF of the merged meta-mesh — the "look at this" view.
+    const std::string metamesh_pdf = acfg.output_tag + "_metamesh.pdf";
+    plot_metamesh_pdf(mm, model, metamesh_pdf,
+                      (int)throws.size(), acfg.p_thresh, acfg.baseline_level,
+                      acfg.logx, acfg.logy, xaxis_idx, yaxis_idx);
+
+    result_out.diag_root_path = root_path;
+    log<LOG_INFO>(L"%1% || wrote diagnostics ROOT=%2% (throws=%3%, meta_cells=%4%); throws PDF=%5%; meta-mesh PDF=%6%.")
+        % __func__ % root_path.c_str() % (int)throws.size() % (int)mm.cells.size()
+        % throws_pdf.c_str() % metamesh_pdf.c_str();
+}
+
+// ====================================================================
+//  Section 5 — run_adaptive_fc (top-level dispatcher)
+// ====================================================================
+
+AdaptiveFCResult run_adaptive_fc(
+    const PROconfig &config,
+    const PROpeller &prop,
+    const PROsyst   &systs,
+    const PROfitterConfig &fitconfig,
+    PROseed         &proseed,
+    const Eigen::VectorXf &fakeDataParams,
+    const AdaptiveFCConfig &acfg,
+    int nthreads,
+    MultiPROgressBar &progress)
+{
+    AdaptiveFCResult res;
+
+    log<LOG_INFO>(L"%1% || mode=%2%, throws=%3%, p_thresh=%4%, baseline_level=%5%, "
+                  L"prepass=%6%x%7%/levels=%8%, stat_only=%9%.")
+        % __func__ % (int)acfg.mode % acfg.n_throws % acfg.p_thresh % acfg.baseline_level
+        % acfg.prepass_amr_initial_x % acfg.prepass_amr_initial_y % acfg.prepass_amr_levels
+        % (int)acfg.stat_only_throws;
+
+    std::unique_ptr<PROmodel> model = get_model_from_string(config, prop);
+
+    // Resolve axis names → indices using the same lookup the surface command uses.
+    const size_t xaxis_idx = resolve_axis_index(acfg.xvar, *model, systs, config, 1);
+    const size_t yaxis_idx = resolve_axis_index(acfg.yvar, *model, systs, config, 0);
+    log<LOG_INFO>(L"%1% || resolved xvar='%2%' -> idx=%3%; yvar='%4%' -> idx=%5%.")
+        % __func__ % acfg.xvar.c_str() % (int)xaxis_idx % acfg.yvar.c_str() % (int)yaxis_idx;
+
+    // Slice 1: Wilks prepass over N throws, then meta-mesh, then diagnostics.
+    if (acfg.mode != AdaptiveFCMode::InitBank) {
+        log<LOG_WARNING>(L"%1% || slice 1 only implements --mode init-bank; treating as init-bank.")
+            % __func__;
+    }
+
+    std::vector<PROmesh::AMRResult> per_throw_meshes =
+        generate_throws(config, prop, systs, *model, fitconfig, proseed,
+                        fakeDataParams, acfg, nthreads, xaxis_idx, yaxis_idx, progress);
+    res.n_throws_done = (int)per_throw_meshes.size();
+    res.leaves_per_throw.reserve(per_throw_meshes.size());
+    for (const auto &amr : per_throw_meshes) res.leaves_per_throw.push_back((int)amr.leaves.size());
+
+    MetaMesh mm = build_meta_mesh(per_throw_meshes, acfg.p_thresh, acfg.baseline_level);
+    res.n_meta_cells     = (int)mm.cells.size();
+    res.n_baseline_cells = mm.n_baseline_cells;
+    res.n_refined_cells  = mm.n_refined_cells;
+
+    write_slice1_diagnostics(per_throw_meshes, mm, *model, systs, acfg,
+                             xaxis_idx, yaxis_idx, res);
+
+    return res;
+}
+
+} // namespace PROfit

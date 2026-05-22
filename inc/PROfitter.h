@@ -526,32 +526,6 @@ namespace PROfit {
             float Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed_points );
 
             /**
-             * @brief Scan-mode fit: skip Latin/PSO/tail-LBFGS, run one LBFGS per (deduped) seed.
-             * @details Intended for PROfile / PROsurf sub-fits where a strong seed (the
-             * global best-fit, possibly plus harmonic-frequency seeds) already locates the
-             * basin. Bypasses the global search machinery entirely:
-             *   - No Latin hypercube (skips ~750 chi² evaluations).
-             *   - No PSO (skips ~15 × 100 chi² evaluations).
-             *   - No tail-Latin LBFGS phase (saves the n_localfit-1-fudge extra LBFGS runs).
-             * Per-call cost drops from ~5 LBFGS runs to 1-2 (one per surviving seed).
-             *
-             * Seeds are deduplicated by physics-parameter L2 distance: a candidate seed
-             * whose `head(model.nparams)` is within @p dedup_eps_phys of any already-kept
-             * seed is dropped. This collapses near-duplicate seeds (e.g. a freq-seed close
-             * to the global BF in physics-space) since LBFGS would converge to the same
-             * basin from either; nuisance differences fall out in the optimisation.
-             *
-             * Should NOT be used for an unseeded global fit — use Fit() for that.
-             *
-             * @param metric          The PROmetric to minimise.
-             * @param seeds           List of starting parameter vectors. Must be non-empty.
-             * @param dedup_eps_phys  Drop a seed whose physics-param L2 distance to any
-             *                        already-kept seed is below this. Default 1e-3 (σ-units).
-             * @return Minimum chi² across surviving seeds; best_fit is set accordingly.
-             */
-            float FitScan(PROmetric &metric, const std::vector<Eigen::VectorXf> &seeds, float dedup_eps_phys = 1e-3f);
-
-            /**
              * @brief Compute harmonic frequency-domain seed points for the physics parameter space.
              * @details Scans chi-squared as a function of physics parameters in frequency space,
              * identifies peaks, and stores the corresponding parameter-space seeds in freq_seed_points.
