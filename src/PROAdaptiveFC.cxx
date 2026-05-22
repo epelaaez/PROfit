@@ -52,9 +52,14 @@
 #include "TGraph.h"
 #include "TH1F.h"
 #include "TH2D.h"
+#include "TLegend.h"
 #include "TLine.h"
+#include "TList.h"
+#include "TMarker.h"
+#include "TObjArray.h"
 #include "TPad.h"
 #include "TPaveText.h"
+#include "TROOT.h"
 #include "TStyle.h"
 #include "TTree.h"
 
@@ -1914,6 +1919,251 @@ static void plot_asimov_verdict_pdf(
         % __func__ % filename.c_str() % (int)cl_targets.size();
 }
 
+// Build the finest-grid TH2D of `dchi2_obs - crit_dchi2` for a given CL by
+// painting each cell's value across its footprint. Bins inside undecidable
+// cells are left at 0 (the contour treats them as boundary cases — usually
+// fine because undecidable cells are at the periphery of the active region).
+static TH2D *build_fc_deviation_th2d(const PEBank &bank,
+                                     const AsimovObs &obs,
+                                     const std::vector<CellVerdict> &verd_cl,
+                                     const AxisXform &A,
+                                     const std::string &name)
+{
+    const int W = bank.finest_nx, H = bank.finest_ny;
+    std::vector<double> ex(W + 1), ey(H + 1);
+    for (int i = 0; i <= W; ++i) ex[(size_t)i] = (double)A.i_to_x(i);
+    for (int j = 0; j <= H; ++j) ey[(size_t)j] = (double)A.j_to_y(j);
+    TH2D *h = new TH2D(name.c_str(), ";;;#Delta#chi^{2}_{obs} - #Delta#chi^{2}_{c}",
+                       W, ex.data(), H, ey.data());
+    for (int idx = 0; idx < bank.n_cells; ++idx) {
+        const auto &v = verd_cl[(size_t)idx];
+        if (!v.decidable) continue;
+        const float dev = obs.dchi2_obs[(size_t)idx] - v.crit_dchi2;
+        const int i0 = bank.cell_i_bl[(size_t)idx];
+        const int j0 = bank.cell_j_bl[(size_t)idx];
+        const int sp = bank.cell_step [(size_t)idx];
+        for (int ii = i0; ii < i0 + sp && ii < W; ++ii) {
+            for (int jj = j0; jj < j0 + sp && jj < H; ++jj) {
+                h->SetBinContent(ii + 1, jj + 1, (double)dev);
+            }
+        }
+    }
+    return h;
+}
+
+// Extract contour TGraphs at `level` from a TH2D using ROOT's CONT LIST
+// machinery. Returns a vector of newly-allocated TGraph copies (ownership
+// transferred to caller). May return empty if no contour exists at that level.
+//
+// Reference: standard ROOT idiom around TH2::Draw("CONT Z LIST") + the
+// gROOT->GetListOfSpecials()->FindObject("contours") TObjArray.
+static std::vector<TGraph*> extract_contour_graphs(TH2D *h, double level)
+{
+    std::vector<TGraph*> out;
+    if (!h) return out;
+    const double levels[1] = {level};
+    h->SetContour(1, levels);
+
+    // Draw onto a hidden temp canvas to populate gROOT's contour list.
+    TCanvas tmp("tmp_contour_extract", "", 200, 200);
+    tmp.cd();
+    h->Draw("CONT Z LIST");
+    tmp.Update();
+
+    TObjArray *contours_array = (TObjArray*)gROOT->GetListOfSpecials()->FindObject("contours");
+    if (!contours_array || contours_array->GetSize() < 1) return out;
+    TList *level_contours = (TList*)contours_array->At(0);
+    if (!level_contours) return out;
+
+    TIter next(level_contours);
+    while (TObject *o = next()) {
+        TGraph *g_in = dynamic_cast<TGraph*>(o);
+        if (!g_in || g_in->GetN() <= 0) continue;
+        // Deep copy — the originals are owned by ROOT's special list and may
+        // be invalidated on subsequent Draw calls.
+        out.push_back(new TGraph(*g_in));
+    }
+    return out;
+}
+
+// Clean publication-style contour overlay: single canvas, axes only, one
+// contour line per requested CL, optional injected-truth marker. The
+// equivalent of the per-CL "verdict map" boundary, in one composite figure.
+static void plot_asimov_contour_pdf(
+    const PEBank &bank,
+    const AsimovObs &obs,
+    const std::vector<float> &cl_targets,
+    const std::vector<std::vector<CellVerdict>> &verdicts,
+    const std::string &filename,
+    const std::string &xlabel,
+    const std::string &ylabel,
+    bool logx, bool logy,
+    bool xlog_axis, bool ylog_axis,
+    bool draw_truth_marker,
+    float truth_x_phys,
+    float truth_y_phys)
+{
+    if (bank.n_cells <= 0 || cl_targets.empty()) {
+        log<LOG_WARNING>(L"%1% || plot_asimov_contour_pdf: empty input, skipping.") % __func__;
+        return;
+    }
+    AxisXform A{bank.x_lo, bank.x_hi, bank.y_lo, bank.y_hi,
+                bank.finest_nx, bank.finest_ny, xlog_axis, ylog_axis};
+
+    TCanvas c("asimov_contour", "Asimov FC contour", 900, 800);
+    if (logx) c.SetLogx();
+    if (logy) c.SetLogy();
+    c.SetLeftMargin(0.13);
+    c.SetRightMargin(0.04);
+    c.SetTopMargin(0.06);
+    c.SetBottomMargin(0.12);
+
+    const float xmin = A.i_to_x(0);
+    const float xmax = A.i_to_x(bank.finest_nx);
+    const float ymin = A.j_to_y(0);
+    const float ymax = A.j_to_y(bank.finest_ny);
+
+    TH1F *frame = new TH1F("asimov_contour_frame",
+                           (std::string("FC contour (asimov);") + xlabel + ";" + ylabel).c_str(),
+                           1, xmin, xmax);
+    frame->SetMinimum(ymin);
+    frame->SetMaximum(ymax);
+    frame->SetStats(0);
+    frame->GetXaxis()->SetTitleSize(0.045);
+    frame->GetYaxis()->SetTitleSize(0.045);
+    frame->Draw();
+
+    const int contour_palette[5] = {kRed + 1, kAzure + 1, kGreen + 2, kMagenta + 1, kBlack};
+    TLegend *leg = new TLegend(0.65, 0.75, 0.95, 0.93);
+    leg->SetBorderSize(1);
+    leg->SetFillColor(kWhite);
+    leg->SetTextSize(0.030);
+
+    // Stash extracted graphs so they live until c.Print returns.
+    std::vector<TGraph*> all_segments;
+
+    for (size_t k = 0; k < cl_targets.size(); ++k) {
+        const int col = contour_palette[k % 5];
+        TH2D *h_dev = build_fc_deviation_th2d(bank, obs, verdicts[k], A,
+                                              Form("dev_cl%zu", k));
+        auto segs = extract_contour_graphs(h_dev, 0.0);
+        delete h_dev;
+        if (segs.empty()) {
+            log<LOG_WARNING>(L"%1% || no contour found at CL=%2% (deviation never crosses zero?).")
+                % __func__ % cl_targets[k];
+            continue;
+        }
+        for (TGraph *g : segs) {
+            g->SetLineColor(col);
+            g->SetLineWidth(3);
+            g->Draw("L SAME");
+            all_segments.push_back(g);
+        }
+        leg->AddEntry(segs.front(), Form("CL = %.3f", cl_targets[k]), "l");
+    }
+
+    if (draw_truth_marker) {
+        TMarker *truth = new TMarker((double)truth_x_phys, (double)truth_y_phys, 29); // star
+        truth->SetMarkerColor(kBlack);
+        truth->SetMarkerSize(2.2);
+        truth->Draw();
+        leg->AddEntry(truth, "Injected truth", "p");
+    }
+
+    leg->Draw();
+
+    c.Print(filename.c_str());
+    log<LOG_INFO>(L"%1% || asimov contour PDF written to %2% (%3% CLs).")
+        % __func__ % filename.c_str() % (int)cl_targets.size();
+
+    for (TGraph *g : all_segments) delete g;
+}
+
+// Persist the contour TGraphs + a per-cell TTree to a ROOT file so the
+// asimov results can be loaded in downstream analyses / notebooks without
+// re-running the dispatcher.
+static void save_asimov_root(
+    const PEBank &bank,
+    const AsimovObs &obs,
+    const std::vector<float> &cl_targets,
+    const std::vector<std::vector<CellVerdict>> &verdicts,
+    const std::string &filename,
+    bool xlog_axis, bool ylog_axis)
+{
+    TFile fout(filename.c_str(), "RECREATE");
+    if (fout.IsZombie()) {
+        log<LOG_ERROR>(L"%1% || save_asimov_root: could not open %2%.") % __func__ % filename.c_str();
+        return;
+    }
+
+    AxisXform A{bank.x_lo, bank.x_hi, bank.y_lo, bank.y_hi,
+                bank.finest_nx, bank.finest_ny, xlog_axis, ylog_axis};
+
+    // Per-cell TTree with one row per cell and per-CL crit/verdict columns.
+    TTree t("cells", "asimov per-cell results");
+    int    cell_idx = 0, cell_i_bl = 0, cell_j_bl = 0, cell_level = 0, cell_step = 0;
+    float  cell_x_phys = 0.0f, cell_y_phys = 0.0f;
+    float  dchi2_obs = 0.0f, chi2_syst = 0.0f;
+    const float chi2_osc_global = obs.chi2_osc_global;
+    t.Branch("cell_idx",  &cell_idx);
+    t.Branch("i_bl",      &cell_i_bl);
+    t.Branch("j_bl",      &cell_j_bl);
+    t.Branch("level",     &cell_level);
+    t.Branch("step",      &cell_step);
+    t.Branch("x_phys",    &cell_x_phys);
+    t.Branch("y_phys",    &cell_y_phys);
+    t.Branch("dchi2_obs", &dchi2_obs);
+    t.Branch("chi2_syst", &chi2_syst);
+    t.Branch("chi2_osc_global", const_cast<float*>(&chi2_osc_global));
+
+    // Per-CL columns; one float (crit) + one int (verdict) per CL target.
+    std::vector<float> crit_per_cl(cl_targets.size(), 0.0f);
+    std::vector<int>   verdict_per_cl(cl_targets.size(), -1); // -1 = undecidable
+    for (size_t k = 0; k < cl_targets.size(); ++k) {
+        const std::string cl_label = Form("%.4f", cl_targets[k]);
+        t.Branch(("crit_dchi2_cl_" + cl_label).c_str(), &crit_per_cl[k]);
+        t.Branch(("verdict_cl_"    + cl_label).c_str(), &verdict_per_cl[k]);
+    }
+
+    for (int idx = 0; idx < bank.n_cells; ++idx) {
+        cell_idx   = idx;
+        cell_i_bl  = bank.cell_i_bl[(size_t)idx];
+        cell_j_bl  = bank.cell_j_bl[(size_t)idx];
+        cell_level = bank.cell_level[(size_t)idx];
+        cell_step  = bank.cell_step [(size_t)idx];
+        const float xm = bank.cell_center_x[(size_t)idx];
+        const float ym = bank.cell_center_y[(size_t)idx];
+        cell_x_phys = xlog_axis ? std::pow(10.0f, xm) : xm;
+        cell_y_phys = ylog_axis ? std::pow(10.0f, ym) : ym;
+        dchi2_obs   = obs.dchi2_obs[(size_t)idx];
+        chi2_syst   = obs.chi2_syst[(size_t)idx];
+        for (size_t k = 0; k < cl_targets.size(); ++k) {
+            const auto &v = verdicts[k][(size_t)idx];
+            crit_per_cl[k]    = v.crit_dchi2;
+            verdict_per_cl[k] = !v.decidable ? -1 : (v.included ? 1 : 0);
+        }
+        t.Fill();
+    }
+    t.Write();
+
+    // Per-CL contour TGraphs.
+    for (size_t k = 0; k < cl_targets.size(); ++k) {
+        TH2D *h_dev = build_fc_deviation_th2d(bank, obs, verdicts[k], A,
+                                              Form("dev_save_cl%zu", k));
+        auto segs = extract_contour_graphs(h_dev, 0.0);
+        for (size_t s = 0; s < segs.size(); ++s) {
+            segs[s]->SetName(Form("contour_cl_%.4f_seg%zu", cl_targets[k], s));
+            segs[s]->Write();
+        }
+        for (TGraph *g : segs) delete g;
+        delete h_dev;
+    }
+
+    fout.Close();
+    log<LOG_INFO>(L"%1% || asimov ROOT artifact written to %2%.")
+        % __func__ % filename.c_str();
+}
+
 } // anonymous
 
 // ====================================================================
@@ -2044,6 +2294,27 @@ AdaptiveFCResult run_adaptive_fc(
             ? model->pretty_param_names.at(yaxis_idx) : std::string("y");
         plot_asimov_verdict_pdf(bank, obs, acfg.cl_targets, verdicts, out_pdf, bank_in,
                                 xlabel, ylabel, acfg.logx, acfg.logy, xlog_axis, ylog_axis);
+
+        // Clean publication-style contour overlay — the main asimov deliverable.
+        // Inject-truth marker: pulled from fakeDataParams in model space, mapped
+        // to physical for the canvas (same convention as the bank summary).
+        const float truth_x_phys = xlog_axis
+            ? std::pow(10.0f, fakeDataParams((int)xaxis_idx))
+            : fakeDataParams((int)xaxis_idx);
+        const float truth_y_phys = ylog_axis
+            ? std::pow(10.0f, fakeDataParams((int)yaxis_idx))
+            : fakeDataParams((int)yaxis_idx);
+        const std::string contour_pdf = acfg.output_tag + "_asimov_contour.pdf";
+        plot_asimov_contour_pdf(bank, obs, acfg.cl_targets, verdicts, contour_pdf,
+                                xlabel, ylabel, acfg.logx, acfg.logy,
+                                xlog_axis, ylog_axis,
+                                /*draw_truth_marker=*/ true,
+                                truth_x_phys, truth_y_phys);
+
+        // ROOT artifact: contour TGraphs + per-cell TTree for downstream use.
+        const std::string asimov_root = acfg.output_tag + "_asimov_contours.root";
+        save_asimov_root(bank, obs, acfg.cl_targets, verdicts, asimov_root,
+                         xlog_axis, ylog_axis);
 
         // Populate result.
         res.bank_path     = bank_in;
