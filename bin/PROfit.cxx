@@ -781,7 +781,13 @@ int main(int argc, char* argv[])
     for(size_t i = 0; i < model->nparams; ++i) fakedataparams(i) = fake_data_osc_param_vector(i);
     log<LOG_INFO>(L"%1% || model->default_val: %2%") % __func__ % model->default_val;
     log<LOG_INFO>(L"%1% || fake_data_osc_param_vector: %2%") % __func__ % fake_data_osc_param_vector;
-    log<LOG_INFO>(L"%1% || fakedataparams (physics portion): %2% %3%") % __func__ % fakedataparams(0) % fakedataparams(1);
+    if(fakedataparams.size() >= 2) {
+        log<LOG_INFO>(L"%1% || fakedataparams (physics portion): %2% %3%") % __func__ % fakedataparams(0) % fakedataparams(1);
+    } else if(fakedataparams.size() == 1) {
+        log<LOG_INFO>(L"%1% || fakedataparams (physics portion): %2%") % __func__ % fakedataparams(0);
+    } else {
+        log<LOG_INFO>(L"%1% || fakedataparams (physics portion): empty") % __func__;
+    }
     for(const auto& [name, shift]: injected_systs) {
         log<LOG_INFO>(L"%1% || Injected syst: %2% shifted by %3%") % __func__ % name.c_str() % shift;
 

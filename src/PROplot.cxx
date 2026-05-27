@@ -747,7 +747,7 @@ namespace PROfit{
             }
             else{
                 cv_hist->SetMaximum(y_max);
-                cv_hist->SetMinimum(0.01);
+                cv_hist->SetMinimum(0.000001); // to avoid including a zero label, which can overlap the ratio plot
                 cv_hist->Draw("hist");
             }
 
