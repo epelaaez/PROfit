@@ -169,6 +169,7 @@ std::wostream *OSTREAM = &wcout;
 std::wofstream LOG_FILE_STREAM;
 bool LOGGING_TO_FILE = false;
 
+//void mcmc_worker(std::vector<Metropolis<log_phys_target, adaptive_proposal>> &mets, Eigen::VectorXf initial, PROmetric *metric, uint32_t seed, size_t nchains, size_t burnin, size_t steps);
 void mcmc_worker(std::vector<Metropolis<simple_target, adaptive_proposal>> &mets, Eigen::VectorXf initial, PROmetric *metric, uint32_t seed, size_t nchains, size_t burnin, size_t steps);
 
 struct GlobalFitResult {
@@ -2619,6 +2620,7 @@ int main(int argc, char* argv[])
         }
 
         // Debug PDF for covariance_to_spline systematics — only emitted if at least one is present.
+        log<LOG_INFO>(L"%1% || cov2spline debug info %2%") % __func__ % !variable_systs[config.i_prime].cov2spline_debug_info.empty();
         if(!variable_systs[config.i_prime].cov2spline_debug_info.empty()) {
             const std::string cov2spline_pdf = final_output_tag + "_covariance_to_spline_checks.pdf";
             plotCov2SplineChecks(config, variable_cvs[config.i_prime], variable_systs[config.i_prime], cov2spline_pdf, config.i_prime);
@@ -3019,9 +3021,13 @@ int main(int argc, char* argv[])
         std::vector<std::vector<float>> samples = latin_hypercube_sampling(mcmc_chains, nparams, latin_distribution, myseed.global_rng);
         recenter_latin_samples(samples, global_ub, global_lb);
         std::vector<Eigen::VectorXf> samples_eigen; 
-        for(size_t i = 0; i < samples.size(); ++i)
+        for(size_t i = 0; i < samples.size(); ++i) {
             samples_eigen.push_back(Eigen::VectorXf::Map(samples[i].data(), samples[i].size()));
+            //samples_eigen.back()(0) = std::pow(10, samples_eigen.back()(0));
+            //samples_eigen.back()(1) = std::pow(10, samples_eigen.back()(1));
+        }
         size_t mcmc_threads = mcmc_chains >= nthread ? nthread : mcmc_chains;
+        //std::vector<std::vector<Metropolis<log_phys_target, adaptive_proposal>>> mets;
         std::vector<std::vector<Metropolis<simple_target, adaptive_proposal>>> mets;
         mets.reserve(mcmc_threads);
         std::vector<std::thread> threads;
@@ -3462,11 +3468,14 @@ int main(int argc, char* argv[])
 }
 
 
+//void mcmc_worker(std::vector<Metropolis<log_phys_target, adaptive_proposal>> &mets, Eigen::VectorXf initial, PROmetric *metric, uint32_t seed, size_t nchains, size_t burnin, size_t steps) {
 void mcmc_worker(std::vector<Metropolis<simple_target, adaptive_proposal>> &mets, Eigen::VectorXf initial, PROmetric *metric, uint32_t seed, size_t nchains, size_t burnin, size_t steps) {
     std::uniform_int_distribution<uint32_t> dseed(0, std::numeric_limits<uint32_t>::max());
     std::mt19937 rng(seed);
     for(size_t i = 0; i < nchains; ++i) {
+        log<LOG_ERROR>(L"%1% || Running %2% burn in and %3% steps.") % __func__ % burnin % steps;
         simple_target target{*metric};
+        //log_phys_target target{*metric};
         adaptive_proposal proposal(*metric, dseed(rng));
         mets.emplace_back(target, proposal, initial, dseed(rng));
         mets.back().run(burnin, steps);

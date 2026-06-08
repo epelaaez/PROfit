@@ -204,6 +204,21 @@ namespace PROfit {
         }
     };
 
+    struct log_phys_target {
+        PROmetric &metric;
+
+        // Returns log-target (-0.5*chi^2). Metropolis::step does exp(target(p) - target(current))
+        // so the exp argument stays in safe float32 range even when chi^2 is large.
+        float operator()(Eigen::VectorXf &value) {
+            Eigen::VectorXf empty = value;
+            Eigen::VectorXf corr = value;
+            corr.segment(0,2) = corr.segment(0,2).array().log10();
+            //return -0.5f*metric(value, empty, false)+value.segment(0,2).array().sum() - std::log(100-0.01);
+            return -0.5f*metric(corr, empty, false);//+corr.segment(0,2).array().sum() - std::log(100-0.01);
+            //return -0.5f*metric(corr, empty, false)-corr(0)-corr(1);
+        }
+    };
+
     struct prior_only_target {
         PROmetric &metric;
 
@@ -428,6 +443,7 @@ namespace PROfit {
                 if(std::find(fixed.begin(), fixed.end(), i) != std::end(fixed)) continue;
                 if(i < nparams) {
                     if(value(i) > metric.GetModel().ub(i) || value(i) < std::max(metric.GetModel().lb(i),-5.0f))
+                    //if(value(i) > std::pow(10, metric.GetModel().ub(i)) || value(i) < std::pow(10, metric.GetModel().lb(i)))
                         return false;
                 } else {
                     size_t si = i - nparams;
