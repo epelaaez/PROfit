@@ -64,7 +64,7 @@ namespace PROfit {
         int   prepass_amr_initial_x = 10;
         int   prepass_amr_initial_y = 10;
         int   prepass_amr_levels    = 3;
-        float prepass_delta_widen   = 0.5f;
+        float prepass_delta_widen   = 0.05f; ///< Tiny by design: per-throw global-fit warm-starts make AMR fitter scatter sub-χ², so the "halo" of cells just inside/outside the contour is wasted work for meta-mesh aggregation. (PROsurf surface-amr keeps its 0.5 default — different use case.)
         std::vector<float> prepass_contour_levels = {2.30f, 5.99f}; ///< Wilks Δχ² target levels (1σ, 2σ at 2 dof by default).
         bool  stat_only_throws    = false;
 

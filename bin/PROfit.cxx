@@ -321,7 +321,7 @@ int main(int argc, char* argv[])
     int   afc_n_throws = 200;
     std::vector<int> afc_prepass_initial = {10, 10};
     int   afc_prepass_levels = 3;
-    float afc_prepass_delta  = 0.5f;
+    float afc_prepass_delta  = 0.05f;
     std::vector<float> afc_prepass_contour_levels = {2.30f, 5.99f};
     float afc_p_thresh = 0.05f;
     int   afc_baseline_level = 2;
@@ -465,7 +465,10 @@ int main(int argc, char* argv[])
     afc_command->add_option("--prepass-amr-levels", afc_prepass_levels,
         "AMR refinement depth for the Wilks pre-pass.")->default_val(3);
     afc_command->add_option("--prepass-delta-widen", afc_prepass_delta,
-        "AMR straddle-band widening (chi^2 units).")->default_val(0.5f);
+        "AMR straddle-band widening (chi^2 units). Default 0.05: with per-throw global-fit "
+        "warm-starts, only cells whose corner range strictly brackets the contour need refinement; "
+        "the small non-zero default just absorbs floating-point edge cases. Bump if you want a "
+        "visual halo of refined cells around the contour polyline.")->default_val(0.05f);
     afc_command->add_option("--prepass-contour-levels", afc_prepass_contour_levels,
         "Wilks Delta-chi^2 targets per CL (default 2.30 5.99 for 1sigma, 2sigma at 2 dof).");
     afc_command->add_option("--p-thresh", afc_p_thresh,

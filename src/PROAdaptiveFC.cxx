@@ -100,6 +100,89 @@ static size_t resolve_axis_index(const std::string &name,
 }
 
 // ====================================================================
+//  Section 1a — run_throw_global_fit
+//
+//  Minimal global fit per throw, distilled from the core of do_a_fit in
+//  bin/PROfit.cxx (lines 3323-3357). Strips out progress bar, MCMC covariance,
+//  and error-band side-effects — we only need the best-fit parameter vector
+//  to use as a warm-start seed for the AMR level-0 evaluations.
+//
+//  Doing this once per throw anchors the per-throw gmin at the actual global
+//  best fit and warm-starts level-0 cell evaluations, removing the cold-start
+//  fitter noise that would otherwise drive false-straddle decisions.
+// ====================================================================
+
+struct ThrowGlobalFit {
+    float chi2 = 0.0f;
+    Eigen::VectorXf best_fit;
+    bool valid = false;
+};
+
+static ThrowGlobalFit run_throw_global_fit(
+    const PROconfig &config,
+    const PROpeller &prop,
+    const PROsyst   &systs,
+    const PROmodel  &model,
+    const PROdata   &data,
+    const PROfitterConfig &fitconfig,
+    const std::string &chi2_kind,
+    bool binned,
+    uint32_t seed)
+{
+    ThrowGlobalFit res;
+    const size_t nphys   = model.nparams;
+    const size_t nspline = systs.GetNSplines();
+    const size_t nparams = nphys + nspline;
+
+    PROmetric::EvalStrategy strat = binned ? PROmetric::BinnedChi2 : PROmetric::EventByEvent;
+    std::unique_ptr<PROmetric> metric;
+    if      (chi2_kind == "PROchi")    metric.reset(new PROchi   ("", config, prop, &systs, model, data, strat));
+    else if (chi2_kind == "PROCNP")    metric.reset(new PROCNP   ("", config, prop, &systs, model, data, strat));
+    else if (chi2_kind == "Poisson")   metric.reset(new PROpoisson("", config, prop, &systs, model, data, strat));
+    else {
+        log<LOG_ERROR>(L"%1% || run_throw_global_fit: unknown chi2 kind '%2%'.") % __func__ % chi2_kind.c_str();
+        return res;
+    }
+
+    // Full-floating bounds: physics within model lb/ub, splines within their restrict ranges.
+    Eigen::VectorXf lb((int)nparams), ub((int)nparams);
+    for (size_t j = 0; j < nphys; ++j) {
+        lb((int)j) = model.lb(j);
+        ub((int)j) = model.ub(j);
+    }
+    for (size_t j = nphys; j < nparams; ++j) {
+        const size_t si = j - nphys;
+        const float lo = systs.spline_has_restrict[si] ? systs.spline_restrict_lo[si] : systs.spline_lo[si];
+        const float hi = systs.spline_has_restrict[si] ? systs.spline_restrict_hi[si] : systs.spline_hi[si];
+        lb((int)j) = lo; ub((int)j) = hi;
+    }
+    metric->setBounds(lb, ub);
+
+    // Initial seed at the model's per-param default for physics + zero for splines.
+    Eigen::VectorXf seed_pt = Eigen::VectorXf::Zero((int)nparams);
+    for (size_t j = 0; j < nphys; ++j) seed_pt((int)j) = model.default_val(j);
+
+    PROfitter fitter(ub, lb, fitconfig, seed);
+    float best_chi2 = fitter.Fit(*metric, seed_pt);
+    Eigen::VectorXf best_fit = fitter.best_fit;
+
+    // Sweep the frequency-domain harmonic seed alternatives — same trick as do_a_fit.
+    fitter.calcFreqSeedPoints(*metric);
+    for (size_t i = 0; i < fitter.freq_seed_points.size(); ++i) {
+        const float c = fitter.freq_seed_values.at(i);
+        if (c < best_chi2) {
+            best_chi2 = c;
+            best_fit  = fitter.freq_seed_points.at(i);
+        }
+    }
+
+    res.chi2     = best_chi2;
+    res.best_fit = std::move(best_fit);
+    res.valid    = true;
+    return res;
+}
+
+// ====================================================================
 //  Section 1 — run_wilks_prepass
 //
 //  Copied/adapted from PROsurf::FillSurfaceAMR EvalFn (src/PROsurf.cxx:758-795).
@@ -108,6 +191,10 @@ static size_t resolve_axis_index(const std::string &name,
 //  The only structural difference from PROsurf's version: this one closes over
 //  a *PROdata* (the per-throw fake dataset) and builds a fresh PROmetric per
 //  thread from it, since PROsurf takes the metric pre-built from outside.
+//
+//  `caller_seeds`: warm-start seeds for level-0 cell evaluations. Mirrors
+//  PROsurf::FillSurfaceAMR's caller_seeds parameter — typically the per-throw
+//  global-fit best_fit, so cold-start fitter noise is eliminated.
 // ====================================================================
 
 static PROmesh::AMRResult run_wilks_prepass(
@@ -124,10 +211,15 @@ static PROmesh::AMRResult run_wilks_prepass(
     float x_lo, float x_hi,
     float y_lo, float y_hi,
     const PROmesh::AMROptions &opts_in,
-    int nthreads)
+    int nthreads,
+    const std::vector<Eigen::VectorXf> &caller_seeds = {})
 {
     PROmesh::AMROptions opts = opts_in;
     opts.nthreads = nthreads;
+    // Plumb caller seeds into AMR's level-0 warm-start, matching PROsurf::FillSurfaceAMR.
+    if (opts.initial_seed_points.empty() && !caller_seeds.empty()) {
+        opts.initial_seed_points = caller_seeds;
+    }
 
     // Thread-local metric clones. The first call on each thread allocates;
     // subsequent calls reuse. Mirrors PROsurf.cxx:761-764.
@@ -284,12 +376,76 @@ static std::vector<PROmesh::AMRResult> generate_throws(
             % __func__ % t % acfg.n_throws % (int)acfg.stat_only_throws
             % (int)(acfg.stat_only_throws ? 0 : systs.GetNSplines()) % (int)nbins_collapsed;
 
+        // Per-throw global fit — used to (a) anchor gmin at the actual best
+        // fit instead of letting it drift to the lucky-seed minimum over the
+        // AMR cells, and (b) warm-start level-0 AMR fits to reduce cold-start
+        // fitter noise. Mirrors the surface --surface-amr path
+        // (bin/PROfit.cxx:1399-1506).
+        const uint32_t gf_seed = dseed(proseed.global_rng);
+        ThrowGlobalFit gf = run_throw_global_fit(
+            config, prop, systs, model, data, fitconfig,
+            acfg.chi2, acfg.binned, gf_seed);
+        std::vector<Eigen::VectorXf> caller_seeds;
+        if (gf.valid) {
+            caller_seeds.push_back(gf.best_fit);
+            log<LOG_INFO>(L"%1% || throw %2%: per-throw global fit chi2=%3%, seeding AMR.")
+                % __func__ % t % gf.chi2;
+        } else {
+            log<LOG_WARNING>(L"%1% || throw %2%: per-throw global fit failed; AMR will cold-start.")
+                % __func__ % t;
+        }
+
         PROmesh::AMRResult amr = run_wilks_prepass(
             config, prop, systs, model, data, fitconfig,
             acfg.chi2, !acfg.binned ? true : false,
             xaxis_idx, yaxis_idx,
             x_lo_t, x_hi_t, y_lo_t, y_hi_t,
-            opts, nthreads);
+            opts, nthreads, caller_seeds);
+
+        // ----- Per-throw chi^2 landscape diagnostics -----
+        // Buckets are Δχ² = (point chi² - amr.gmin), bucket edges chosen so the
+        // contour level (5.99 for 2σ at 2 dof) falls cleanly in [4, 6]. If the
+        // deep basin sits in the [4, 8] bucket, the AMR is correctly seeing the
+        // null hypothesis disfavoured at ~2σ — over-refinement there is genuine
+        // FC structure, NOT fitter noise.
+        if (!amr.chi2_map.empty()) {
+            const float gmin = amr.min_chi2;
+            float global_fit_chi2 = gf.valid ? gf.chi2 : std::numeric_limits<float>::quiet_NaN();
+            float landscape_min =  std::numeric_limits<float>::infinity();
+            float landscape_max = -std::numeric_limits<float>::infinity();
+            double sum = 0.0, sum_sq = 0.0;
+            int n_pts = 0;
+            int buckets[6] = {0,0,0,0,0,0}; // [0,2), [2,4), [4,6), [6,8), [8,12), [12,inf)
+            for (const auto &kv : amr.chi2_map) {
+                const float c = kv.second;
+                landscape_min = std::min(landscape_min, c);
+                landscape_max = std::max(landscape_max, c);
+                sum += c; sum_sq += (double)c * c;
+                ++n_pts;
+                const float d = c - gmin;
+                int b = 0;
+                if      (d <  2.0f) b = 0;
+                else if (d <  4.0f) b = 1;
+                else if (d <  6.0f) b = 2;
+                else if (d <  8.0f) b = 3;
+                else if (d < 12.0f) b = 4;
+                else                b = 5;
+                ++buckets[b];
+            }
+            const double mean = sum / (double)n_pts;
+            const double var  = (sum_sq / (double)n_pts) - mean * mean;
+            const double stddev = std::sqrt(std::max(0.0, var));
+            log<LOG_INFO>(L"%1% || throw %2% landscape: global_fit_chi2=%3%, amr_gmin=%4%, gmax=%5%, mean=%6%, stddev=%7%, n_pts=%8%.")
+                % __func__ % t % global_fit_chi2 % landscape_min % landscape_max
+                % (float)mean % (float)stddev % n_pts;
+            log<LOG_INFO>(L"%1% || throw %2% chi2 buckets relative to gmin: "
+                          L"[0,2)=%3%, [2,4)=%4%, [4,6)=%5%, [6,8)=%6%, [8,12)=%7%, [12+)=%8%.")
+                % __func__ % t % buckets[0] % buckets[1] % buckets[2] % buckets[3] % buckets[4] % buckets[5];
+            log<LOG_INFO>(L"%1% || throw %2% leaves=%3%, fits_by_level=[%4%, %5%, %6%, %7%].")
+                % __func__ % t % (int)amr.leaves.size()
+                % amr.fits_by_level[0] % amr.fits_by_level[1]
+                % amr.fits_by_level[2] % amr.fits_by_level[3];
+        }
 
         results.push_back(std::move(amr));
         progress.increment_bar(0);

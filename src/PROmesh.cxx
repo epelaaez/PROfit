@@ -330,7 +330,22 @@ AMRResult run_amr(EvalFn eval,
             for (const auto &kv : chi2_map) gmin = std::min(gmin, kv.second);
         }
         for (float t : opts.contour_levels) shifted_targets.push_back(gmin + t);
-        if (!straddles_any(cmin, cmax, shifted_targets, opts.delta_widen)) return false;
+        const bool straddled = straddles_any(cmin, cmax, shifted_targets, opts.delta_widen);
+
+        // Per-classification trace at LOG_DEBUG. Run PROfit with `-v 4 -w 4`
+        // to capture. Format gives all info needed to recompute the straddle
+        // test offline: cell footprint, level, corner χ² range, gmin, target,
+        // δ, decision. Grep for "PROmesh classify" in the log to see what's
+        // driving refinement in any given region.
+        log<LOG_DEBUG>(L"%1% || PROmesh classify cell (i=%2%,j=%3%,L=%4%,step=%5%): "
+                      L"cmin=%6%, cmax=%7%, gmin=%8%, target=%9%, delta=%10% -> %11%")
+            % __func__ % c.i_bl % c.j_bl % c.level % c.step
+            % cmin % cmax % gmin
+            % (shifted_targets.empty() ? 0.0f : shifted_targets[0])
+            % opts.delta_widen
+            % (straddled ? "STRADDLE" : "SKIP");
+
+        if (!straddled) return false;
 
         // Subdivide: mark refined, register 4 children, enqueue 5 new corner evals.
         Cell parent;
@@ -461,41 +476,110 @@ AMRResult run_amr(EvalFn eval,
     // During the main pipelined run, cells are classified the moment their last
     // corner lands — using whatever gmin is visible at that instant. If gmin
     // later drops (a deeper basin appears in a region evaluated afterwards),
-    // earlier cells whose corners straddled the *old* (gmin + Δ) target band
-    // may not straddle the *new* one, OR — more importantly for the visible
-    // bug — cells that did NOT straddle the old target may now straddle the
-    // new target after gmin shifted. Those cells were never refined, leaving
-    // gaps where the contour exits a fully-refined region into a coarser one.
+    // cells that did NOT straddle the old target may now straddle the new
+    // (lower) target band after gmin shifted, leaving contour gaps.
     //
-    // Fix: re-run classify_and_maybe_subdivide on every still-leaf cell after
-    // the main loop converges, with the final gmin (classify_and_maybe_subdivide
-    // re-reads chi2_map for gmin on every call). Any cell that *now* straddles
-    // schedules child evaluations; a fresh worker pool drains them. Cascading
-    // refinements (children of children) are handled because the worker pool
-    // drives classify_and_maybe_subdivide on each evaluation completion just
-    // like in the main phase. Iterate until a sweep produces no new refinements.
-    for (int reclass_pass = 0; reclass_pass < max_levels + 1; ++reclass_pass) {
+    // Original fix: iterate classify_and_maybe_subdivide on every leaf up to
+    // max_levels+1 times. Problem: the straddle test is sensitive to
+    // fitter-noise (~O(1) χ² per fit). With many iterations and 2:1 balance
+    // cascading inside classify_and_maybe_subdivide, false-straddle events in
+    // the deep basin compound and the deep-basin region ends up fully refined.
+    //
+    // Two fixes applied below:
+    //   A) Single reclass pass instead of max_levels+1. After the main worker
+    //      pool drains, gmin is essentially final; subsequent passes only
+    //      compound noise.
+    //   B) Precompute the final gmin and target bands once. Filter the
+    //      leaves-to-recheck list down to cells whose [cmin, cmax] corner
+    //      range plausibly overlaps the (final_gmin + target ± δ) band, with
+    //      a 1*delta_widen safety margin on each side to absorb χ² drift from
+    //      any new corner evals scheduled during this pass. Cells deep in
+    //      the basin (cmax well below band) or far in the tail (cmin well
+    //      above band) cannot newly-straddle and are skipped — that
+    //      removes the cascade source.
+    {
+        // (A): single pass.
+        const int reclass_pass = 0;
+
+        // (B): final-gmin filter setup. Done once.
+        float final_gmin;
+        std::vector<float> final_targets;
+        {
+            std::lock_guard<std::mutex> lk(state_mu);
+            final_gmin = std::numeric_limits<float>::infinity();
+            for (const auto &kv : chi2_map) final_gmin = std::min(final_gmin, kv.second);
+            final_targets.reserve(opts.contour_levels.size());
+            for (float t : opts.contour_levels) final_targets.push_back(final_gmin + t);
+        }
+        // Safety margin in χ² units beyond opts.delta_widen on each side of
+        // the straddle band. Absorbs gmin drift from any new corner evals
+        // scheduled during this reclass pass.
+        const float safety = opts.delta_widen;
+
         std::vector<int> leaves_to_recheck;
+        int n_total_leaves = 0;
         {
             std::lock_guard<std::mutex> lk(state_mu);
             leaves_to_recheck.reserve(cells.size());
             for (int c = 0; c < (int)cells.size(); ++c) {
-                if (!cells[c].refined && cells[c].level < max_levels) {
-                    leaves_to_recheck.push_back(c);
+                if (cells[c].refined || cells[c].level >= max_levels) continue;
+                ++n_total_leaves;
+
+                // Compute cmin/cmax for this leaf's 4 corners (all must be in chi2_map
+                // for the cell to be classifiable; if any missing, defer to
+                // classify_and_maybe_subdivide which handles that case).
+                const int i0 = cells[c].i_bl, j0 = cells[c].j_bl, st = cells[c].step;
+                const uint64_t corner_keys[4] = {
+                    make_key(i0,      j0),
+                    make_key(i0 + st, j0),
+                    make_key(i0,      j0 + st),
+                    make_key(i0 + st, j0 + st),
+                };
+                float cmin = std::numeric_limits<float>::infinity();
+                float cmax = -std::numeric_limits<float>::infinity();
+                bool all_present = true;
+                for (uint64_t k : corner_keys) {
+                    auto it = chi2_map.find(k);
+                    if (it == chi2_map.end()) { all_present = false; break; }
+                    cmin = std::min(cmin, it->second);
+                    cmax = std::max(cmax, it->second);
                 }
+                if (!all_present) {
+                    // Defer — let classify_and_maybe_subdivide handle the
+                    // "not all corners ready" case gracefully.
+                    leaves_to_recheck.push_back(c);
+                    continue;
+                }
+
+                // (B) overlap filter: cell can plausibly straddle if its [cmin, cmax]
+                // overlaps any [t - δ - safety, t + δ + safety] band.
+                bool could_straddle = false;
+                for (float t : final_targets) {
+                    const float band_lo = t - opts.delta_widen - safety;
+                    const float band_hi = t + opts.delta_widen + safety;
+                    if (cmin <= band_hi && cmax >= band_lo) {
+                        could_straddle = true;
+                        break;
+                    }
+                }
+                if (could_straddle) leaves_to_recheck.push_back(c);
             }
         }
         int newly_refined = 0;
         for (int cidx : leaves_to_recheck) {
             if (classify_and_maybe_subdivide(cidx)) ++newly_refined;
         }
-        if (newly_refined == 0) break;
-        log<LOG_INFO>(L"%1% || PROmesh reclass pass %2%: %3% leaves newly refined; draining worker pool.")
-            % __func__ % reclass_pass % newly_refined;
-        std::vector<std::thread> post_workers;
-        post_workers.reserve(nthreads);
-        for (int t = 0; t < nthreads; ++t) post_workers.emplace_back(worker_loop);
-        for (auto &th : post_workers) th.join();
+        if (newly_refined > 0) {
+            log<LOG_INFO>(L"%1% || PROmesh reclass pass %2%: %3% / %4% leaves rechecked, %5% newly refined; draining worker pool.")
+                % __func__ % reclass_pass % (int)leaves_to_recheck.size() % n_total_leaves % newly_refined;
+            std::vector<std::thread> post_workers;
+            post_workers.reserve(nthreads);
+            for (int t = 0; t < nthreads; ++t) post_workers.emplace_back(worker_loop);
+            for (auto &th : post_workers) th.join();
+        } else {
+            log<LOG_INFO>(L"%1% || PROmesh reclass: %2% / %3% leaves rechecked, none newly refined.")
+                % __func__ % (int)leaves_to_recheck.size() % n_total_leaves;
+        }
     }
 
     // ----- Phase C: extract results -----
