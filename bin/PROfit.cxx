@@ -335,6 +335,7 @@ int main(int argc, char* argv[])
     int   afc_n_pe_min = 50;
     int   afc_n_pe_max = 5000;
     int   afc_update_layer = 0;
+    int   afc_n_brazil_throws = 100;
     float afc_roi_band = 8.0f;
 
 
@@ -505,6 +506,10 @@ int main(int argc, char* argv[])
         "deeper layers double. Cells below update-layer keep whatever PEs they already have, untouched.");
     afc_command->add_option("--wilson-eps", afc_wilson_eps,
         "Wilson half-width target. Unused for init-bank now (doubling rule); reserved for slice 2c classification.");
+    afc_command->add_option("--n-brazil-throws", afc_n_brazil_throws,
+        "Number of pseudo-experiment throws for --mode brazil. Each throw is one FC-style realisation "
+        "(syst+stat) classified against the bank. Aggregated into per-cell inclusion fractions and "
+        "median +/- 1sigma / +/- 2sigma Brazil-band contours.");
     afc_command->add_option("--roi-band", afc_roi_band, "ROI Delta-chi^2 band (slice 2c).");
 
     //PROglobal
@@ -2806,6 +2811,7 @@ int main(int argc, char* argv[])
         acfg.n_pe_min = afc_n_pe_min;
         acfg.n_pe_max = afc_n_pe_max;
         acfg.update_layer = afc_update_layer;
+        acfg.n_brazil_throws = afc_n_brazil_throws;
         acfg.roi_band = afc_roi_band;
 
         // One progress bar tracking the throw loop.

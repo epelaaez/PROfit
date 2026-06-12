@@ -101,6 +101,7 @@ namespace PROfit {
         int   update_layer = 0;  ///< Cells below this AMR level are skipped entirely.
         float wilson_eps = 0.05f; ///< Unused for bank generation now; kept for slice 2c classification.
         float roi_band = 8.0f;   ///< (slice 2c, unused for now).
+        int   n_brazil_throws = 100; ///< Number of pseudo-experiment throws for --mode brazil.
     };
 
     /**
