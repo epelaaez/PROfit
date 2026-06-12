@@ -968,10 +968,11 @@ namespace PROfit{
         log<LOG_DEBUG>(L"%1% || Finishing Plotting 1D Histogram %2%") % __func__ % hist_titles.c_str();
     }
 
-    void plot_channels(const std::string &filename, const PROconfig &config, std::optional<PROspec> cv, std::optional<PROspec> best_fit, std::optional<PROdata> data, std::optional<PROerrorbar> errband, std::optional<PROerrorbar> posterrband, std::vector<TPaveText> &texts, PlotBounds &bounds, PlotOptions opt, int other_index, bool ratio_bool) {
+    std::map<std::string, TObject *> plot_channels(const std::string &filename, const PROconfig &config, std::optional<PROspec> cv, std::optional<PROspec> best_fit, std::optional<PROdata> data, std::optional<PROerrorbar> errband, std::optional<PROerrorbar> posterrband, std::vector<TPaveText> &texts, PlotBounds &bounds, PlotOptions opt, int other_index, bool ratio_bool) {
 
         log<LOG_DEBUG>(L"%1% || Starting plot_channels") % __func__;
         std::string rat_y_title = bool(opt&PlotOptions::DataMCRatio) ? "Data/MC" : "Data/Best-Fit";
+        std::map<std::string, TObject *> objs;
 
         TCanvas c;
         c.Print((filename+"[").c_str());
@@ -1004,6 +1005,7 @@ namespace PROfit{
                 for(size_t channel = 0; channel < config.m_num_channels; ++channel) {
 
                     log<LOG_DEBUG>(L"%1% || channel %2%") % __func__ % channel;
+                    std::string mdc = config.m_mode_names[mode]+"_"+config.m_detector_names[det]+"_"+config.m_channel_names[channel];
 
                     std::string xtitle = config.GetChannelXAxisTitle(channel, other_index);
                     std::string ratio_titles = ";"+xtitle+";"+rat_y_title;
@@ -1087,6 +1089,7 @@ namespace PROfit{
                         p2d.cd();
                         cv_hist->SetTitle(hist_title.c_str());
                         cv_hist->Draw("colz");
+                        objs[mdc+"_cv2d"] = cv_hist->Clone();
                         c.cd();
                         p2d.Draw();
                         c.Print(filename.c_str());
@@ -1106,6 +1109,7 @@ namespace PROfit{
                             TPad pbfd("pbfd", "pbfd", 0, 0, 1, 1);
                             pbfd.cd();
                             bf_hist->Draw("colz");
+                            objs[mdc+"_bestfit2d"] = bf_hist->Clone();
                             c.cd();
                             pbfd.Draw();
                             c.Print(filename.c_str());
@@ -1125,6 +1129,7 @@ namespace PROfit{
                             TPad pdata("pdata", "pdata", 0, 0, 1, 1);
                             pdata.cd();
                             data_hist->Draw("colz");
+                            objs[mdc+"_data2d"] = data_hist->Clone();
                             c.cd();
                             pdata.Draw();
                             c.Print(filename.c_str());
@@ -1141,6 +1146,7 @@ namespace PROfit{
                                     post_channel_errband->SetPointEYhigh(xbin, scale*(posterrband->error_up((ybin-1)*channel_nbins_x+xbin+tot_offset)));
                                     post_channel_errband->SetPointEYlow(xbin, scale*(posterrband->error_down((ybin-1)*channel_nbins_x+xbin+tot_offset)));
                                 }
+                                objs[mdc+"_posterrband_slice_ybin"+std::to_string(ybin)] = post_channel_errband->Clone();
                             }
 
                             TGraphAsymmErrors* channel_errband = NULL;
@@ -1150,6 +1156,7 @@ namespace PROfit{
                                     channel_errband->SetPointEYhigh(xbin, scale*(errband->error_up((ybin-1)*channel_nbins_x+xbin+tot_offset)));
                                     channel_errband->SetPointEYlow(xbin, scale*(errband->error_down((ybin-1)*channel_nbins_x+xbin+tot_offset)));
                                 }
+                                objs[mdc+"_preerrband_slice_ybin"+std::to_string(ybin)] = channel_errband->Clone();
                             }
 
                             std::string ybin_str = "Slice "+std::to_string(ybin)+" "+hist_title;
@@ -1157,11 +1164,13 @@ namespace PROfit{
                             TH1D cv_hist_slice = *(cv_hist->ProjectionX("slc", ybin, ybin));
                             cv_hist_slice.SetTitle(ybin_str.c_str());
                             cv_hist_slice.GetYaxis()->SetTitle(ytitle.c_str());
+                            objs[mdc+"_cv_slice_ybin"+std::to_string(ybin)] = cv_hist_slice.Clone();
                             TH1D *bf_hist_slice = NULL;
                             if(best_fit){
                                 bf_hist_slice = bf_hist->ProjectionX("bfslc", ybin, ybin);
                                 bf_hist_slice->SetTitle(ybin_str.c_str());
                                 bf_hist_slice->GetYaxis()->SetTitle(ytitle.c_str());
+                                objs[mdc+"_bestfit_slice_ybin"+std::to_string(ybin)] = bf_hist_slice->Clone();
                             }
                             TH1D* data_hist_slice = NULL;
                             if(data){
@@ -1173,6 +1182,7 @@ namespace PROfit{
                                 data_hist_slice->SetMarkerStyle(kFullCircle);
                                 data_hist_slice->SetMarkerColor(kBlack);
                                 data_hist_slice->SetMarkerSize(1);
+                                objs[mdc+"_data_slice_ybin"+std::to_string(ybin)] = data_hist_slice->Clone();
                             }
 
                             plot_hist1ds(&c, &cv_hist_slice, channel_errband, {}, {}, bf_hist_slice, post_channel_errband, data_hist_slice, &dat_str, {}, ybin_str, ratio_titles, filename, bounds, {});
@@ -1217,6 +1227,8 @@ namespace PROfit{
                                 }
                             }
                         }
+                        objs[mdc+"_cv1d"] = cv_hist.Clone();
+                        if(cvstack) objs[mdc+"_cvstack"] = cvstack->Clone();
                     }
 
                     TGraphAsymmErrors *channel_errband = NULL;
@@ -1232,6 +1244,7 @@ namespace PROfit{
                             channel_errband->SetPointEYhigh(bin, scale*(errband_1d->error_up(bin)));
                             channel_errband->SetPointEYlow(bin, scale*(errband_1d->error_down(bin)));
                         }
+                        objs[mdc+"_preerrband"] = channel_errband->Clone();
                     }
 
                     TH1D* bf_hist = NULL;
@@ -1244,6 +1257,7 @@ namespace PROfit{
                             bf_hist->Scale(1, "width");
                         if(bool(opt&PlotOptions::AreaNormalized))
                             bf_hist->Scale(1.0/bf_hist->Integral());
+                        objs[mdc+"_bestfit"] = bf_hist->Clone();
                     }
 
                     TH1D* data_hist = NULL;
@@ -1261,6 +1275,7 @@ namespace PROfit{
                             data_hist->Scale(1, "width");
                         if(bool(opt&PlotOptions::AreaNormalized))
                             data_hist->Scale(1.0/data_hist->Integral());
+                        objs[mdc+"_data"] = data_hist->Clone();
                     }
 
                     TGraphAsymmErrors *post_channel_errband = NULL;
@@ -1274,6 +1289,7 @@ namespace PROfit{
                             post_channel_errband->SetPointEYhigh(bin, scale*(posterrband_1d->error_up(bin)));
                             post_channel_errband->SetPointEYlow(bin, scale*(posterrband_1d->error_down(bin)));
                         }
+                        objs[mdc+"_posterrband"] = post_channel_errband->Clone();
                     }
 
                     TText* text = NULL;
@@ -1328,6 +1344,7 @@ namespace PROfit{
 
 
         log<LOG_DEBUG>(L"%1% || Finishing plot_channels") % __func__;
+        return objs;
     }
 
 
