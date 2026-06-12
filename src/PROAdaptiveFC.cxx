@@ -2415,6 +2415,7 @@ AdaptiveFCResult run_adaptive_fc(
     const PROfitterConfig &fitconfig,
     PROseed         &proseed,
     const Eigen::VectorXf &fakeDataParams,
+    const PROdata   &data,
     const AdaptiveFCConfig &acfg,
     int nthreads,
     MultiPROgressBar &progress)
@@ -2484,17 +2485,16 @@ AdaptiveFCResult run_adaptive_fc(
             return res;
         }
 
-        // Build the asimov dataset: noise-free expected counts under
-        // fakeDataParams. CVParams flows through the metric automatically via
-        // the existing PROfit infrastructure (same as surface / fc).
-        PROspec asimov_spec = FillSpectra(config, prop, systs, *model,
-                                          fakeDataParams, acfg.binned, config.i_prime);
-        PROspec asimov_collapsed = PROspec(CollapseMatrix(config, asimov_spec.Spec()),
-                                           CollapseMatrix(config, asimov_spec.Error()));
-        PROdata asimov_data(asimov_collapsed.Spec(), asimov_collapsed.Error());
-
-        log<LOG_INFO>(L"%1% || asimov: built data from fakeDataParams (no throws), classifying %2% cells against %3%.")
-            % __func__ % bank.n_cells % bank_in.c_str();
+        // Use the data spectrum PROfit assembled — that's where --inject,
+        // --use-fake-data, --poisson-throw, --pseudo-experiment, and real data
+        // all flow into via bin/PROfit.cxx:993 (`data = variable_data[i_prime]`).
+        // Classifying against that here gives the user "FC contour for whatever
+        // dataset is in the chain". For null-asimov use, the user runs PROfit
+        // with --use-fake-data and no --inject (so data == CV-spectrum
+        // collapsed).
+        const PROdata &asimov_data = data;
+        log<LOG_INFO>(L"%1% || asimov: classifying %2% cells against bank %3%; data nbins=%4%.")
+            % __func__ % bank.n_cells % bank_in.c_str() % (int)asimov_data.Spec().size();
 
         // Stop the outer throws progress bar (it was set up by PROfit.cxx for
         // a phase we don't run) and launch a cells bar for the per-cell fits.

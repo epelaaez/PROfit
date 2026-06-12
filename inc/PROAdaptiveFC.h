@@ -26,6 +26,7 @@
 #include "PROfitter.h"
 #include "PROgress.h"
 #include "PROmesh.h"
+#include "PROdata.h"
 
 #include <Eigen/Eigen>
 
@@ -320,8 +321,13 @@ namespace PROfit {
     };
 
     /**
-     * @brief Adaptive FC entry point. Slice 1 stops after the meta-mesh is
-     * built and the diagnostic ROOT artifact is written.
+     * @brief Adaptive FC entry point.
+     *
+     * @param data  The data spectrum PROfit assembled (real data OR injected fake OR
+     *              `--poisson-throw`'d OR `--pseudo-experiment`'d). Asimov / classify
+     *              modes operate on this; build-mesh / init-bank don't read it.
+     *              Without this we'd silently ignore the user's `--use-fake-data`
+     *              choices in asimov mode.
      */
     AdaptiveFCResult run_adaptive_fc(
         const PROconfig &config,
@@ -330,6 +336,7 @@ namespace PROfit {
         const PROfitterConfig &fitconfig,
         PROseed         &proseed,
         const Eigen::VectorXf &fakeDataParams,
+        const PROdata   &data,
         const AdaptiveFCConfig &acfg,
         int nthreads,
         MultiPROgressBar &progress);

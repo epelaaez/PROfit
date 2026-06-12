@@ -2817,7 +2817,7 @@ int main(int argc, char* argv[])
 
         PROfit::AdaptiveFCResult ares = PROfit::run_adaptive_fc(
             config, prop, variable_systs[config.i_prime], scanFitConfig,
-            myseed, fakeDataParams, acfg, nthread, afc_progress);
+            myseed, fakeDataParams, data, acfg, nthread, afc_progress);
 
         afc_progress.finish_all();
         log<LOG_INFO>(L"%1% || fc-adaptive done: throws=%2%, meta_cells=%3% (baseline=%4%, refined=%5%), "
