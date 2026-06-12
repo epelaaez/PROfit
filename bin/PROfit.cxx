@@ -260,6 +260,7 @@ int main(int argc, char* argv[])
     bool force = false;
     bool noxrootd = false;
     bool poisson_throw = false;
+    bool pseudo_experiment = false;
     bool progress_bar = false;
     std::vector<std::string> scale_arg;
     std::map<std::string, float> scale_map;
@@ -373,6 +374,12 @@ int main(int argc, char* argv[])
 
     app.add_flag("--use-fake-data", use_fake_data, "Ignore any data XML or embedded <data> section and use fake (MC) data instead.");
     app.add_flag("--poisson-throw", poisson_throw, "Do a Poisson stats throw of fake data.");
+    app.add_flag("--pseudo-experiment", pseudo_experiment,
+        "Generate a true FC-style pseudo-experiment as fake data: spline Gaussian pulls (rejection-sampled "
+        "within each spline's restrict bounds) + covariance-systematic bin shifts via Cholesky factor of the "
+        "total covariance + Poisson stats variation. Combines with --inject (the injection sets the underlying "
+        "truth signal). Applied only to the i_prime variable. Mutually informative with --poisson-throw, but "
+        "the pseudo-experiment already includes its own Poisson step — passing both is redundant.");
     app.add_flag("--scale-by-width", binwidth_scale, "Scale histgrams by 1/(bin width).");
     app.add_flag("--data-mc-ratio", data_mc_ratio, "For ratio plots, use data/pre-fit mc instead of data/best-fit mc.");
     app.add_option("--scale", scale_arg, "Scale detector POT by a given value.");
@@ -983,6 +990,51 @@ int main(int argc, char* argv[])
     else{
         log<LOG_INFO>(L"%1% || Going to get fake data set up for each variable.") % __func__ ;
         for(size_t io = 0; io < config.m_num_variables; ++io) {
+            if (pseudo_experiment && io == config.i_prime && config.m_channel_variable_plot_bool.at(io)) {
+                // True FC-style pseudo-experiment for the i_prime variable.
+                // Pattern lifted verbatim from src/PROfc.cxx::fc_worker's per-PE body:
+                //   1. CV spectrum + Cholesky of the bin-bin covariance once.
+                //   2. Throw spline pulls Gaussian, rejection-sampled within restrict bounds.
+                //   3. Throw covariance bin shifts (Gaussian in standardised units).
+                //   4. Build shifted spectrum, add L*throwC to the collapsed spec, Poisson-variate.
+                std::normal_distribution<float> d;
+                const size_t nphys   = model->nparams;
+                const size_t nspline = variable_systs[io].GetNSplines();
+
+                PROspec cv_for_L = FillSpectra(config, prop, variable_systs[io], *model,
+                                               fakedataparams, !eventbyevent, io);
+                Eigen::MatrixXf L_chol = variable_systs[io].DecomposeFractionalCovariance(config, cv_for_L.Spec());
+
+                Eigen::VectorXf throws = fakedataparams;
+                for (size_t i = 0; i < nspline; ++i) {
+                    const float tlo = variable_systs[io].spline_has_restrict[i]
+                        ? variable_systs[io].spline_restrict_lo[i] : variable_systs[io].spline_lo[i];
+                    const float thi = variable_systs[io].spline_has_restrict[i]
+                        ? variable_systs[io].spline_restrict_hi[i] : variable_systs[io].spline_hi[i];
+                    do {
+                        throws((int)(i + nphys)) = d(PROseed::global_rng);
+                    } while (throws((int)(i + nphys)) < tlo || throws((int)(i + nphys)) > thi);
+                }
+
+                const int nbins_coll = config.m_num_variable_bins_total_collapsed[io];
+                Eigen::VectorXf throwC(nbins_coll);
+                for (int i = 0; i < nbins_coll; ++i) throwC(i) = d(PROseed::global_rng);
+
+                PROspec shifted = FillSpectra(config, prop, variable_systs[io], *model,
+                                              throws, !eventbyevent, io);
+                PROspec newSpec = PROspec::PoissonVariation(
+                    PROspec(CollapseMatrix(config, shifted.Spec(), io) + L_chol * throwC,
+                            CollapseMatrix(config, shifted.Error(), io)),
+                    dseed(myseed.global_rng));
+
+                log<LOG_INFO>(L"%1% || Generated FC-style pseudo-experiment for i_prime variable %2% "
+                              L"(splines thrown=%3%, cov bins thrown=%4%).")
+                    % __func__ % io % (int)nspline % nbins_coll;
+
+                variable_data.push_back(PROdata(newSpec.Spec(), newSpec.Error()));
+                continue;
+            }
+
             PROspec data_spec = config.m_channel_variable_plot_bool.at(io) ?  FillSpectra(config, prop, variable_systs[io], *model, fakedataparams, !eventbyevent, io) : PROspec(config.m_num_variable_bins_total[io]) ;
             if(poisson_throw) data_spec = PROspec::PoissonVariation(data_spec, dseed(myseed.global_rng));
             Eigen::VectorXf data_vec = CollapseMatrix(config, data_spec.Spec(), io);
