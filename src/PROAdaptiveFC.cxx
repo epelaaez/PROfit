@@ -1639,13 +1639,22 @@ struct CellState {
     std::vector<PEBankRecord> records; // local accumulator; copied into PEBank when stopped or capped
 };
 
-// Drive PE generation for every MetaCell. Slice-2a stopping rule: Wilson
-// half-width < acfg.wilson_eps, with a floor of acfg.n_pe_min and a cap of
-// acfg.n_pe_max. The Δχ²_obs threshold against which `n_above_obs` is
-// counted is, for init-bank mode, the *median* Δχ² of PEs already at this
-// cell — i.e. we're asking "is the sample stable enough to call the median
-// to within wilson_eps?" Later modes (asimov/brazil/classify) supply a
-// specific Δχ²_obs and re-run the classification.
+// Drive PE generation for every MetaCell using a deterministic doubling rule.
+//
+//   to_add_for_cell = n_pe_min * 2^max(0, level - update_layer)
+//
+// This many PEs are *added* to the cell on each run — independent of what's
+// already there. So running init-bank twice with --n-pe-min 50 on a fresh
+// L=0 cell gives 50, then 100 PEs. On an L=2 cell: 200, then 400. Pure
+// additive top-up; the bank grows monotonically.
+//
+// Cells with level < update_layer are left UNTOUCHED. This lets the user grow
+// only the deeper layers: `--update-layer 2 --n-pe-min 100` adds 100 to L=2,
+// 200 to L=3, etc., while L=0,1 keep whatever PEs they already have.
+//
+// n_pe_max is a *total-per-cell* safety cap — even with repeated runs, no
+// cell ever exceeds this PE count. If existing >= n_pe_max, the cell is
+// skipped on this run.
 static void schedule_pes(const AdaptiveFCConfig &acfg,
                          const PROconfig &config,
                          const PROpeller &prop,
@@ -1666,18 +1675,31 @@ static void schedule_pes(const AdaptiveFCConfig &acfg,
     const int n_cells = (int)cell_x_model.size();
     if (n_cells == 0) return;
 
-    bank_out.cell_pes.assign(n_cells, {});
+    // Preserve any pre-existing PEs (top-up support).
+    if ((int)bank_out.cell_pes.size() != n_cells) {
+        bank_out.cell_pes.assign(n_cells, {});
+    }
+
+    // Per-cell number of PEs to ADD on this run (additive doubling).
+    auto compute_to_add = [&](int level) -> int {
+        if (level < acfg.update_layer) return -1; // skip cell entirely
+        const int delta = std::max(0, level - acfg.update_layer);
+        if (delta > 20) return acfg.n_pe_max; // safety against integer overflow
+        return (int)((int64_t)acfg.n_pe_min << delta);
+    };
+
+    log<LOG_INFO>(L"%1% || schedule_pes: additive doubling, n_pe_min=%2% (added per run), "
+                  L"n_pe_max=%3% (total cap), update_layer=%4%.")
+        % __func__ % acfg.n_pe_min % acfg.n_pe_max % acfg.update_layer;
 
     std::uniform_int_distribution<uint32_t> dseed(0, std::numeric_limits<uint32_t>::max());
 
-    // Cell-job queue: simple atomic index + mutexed cell state map. For
-    // n_cells ~ hundreds this is plenty; revisit if we ever go to N_cells > 10k.
     std::atomic<int> next_cell{0};
     std::mutex log_mutex;
     std::atomic<int64_t> total_pes{0};
-    std::atomic<int> cells_capped{0};
-
-    SequentialFCTest stop_rule;
+    std::atomic<int> cells_skipped_layer{0};  ///< level < update_layer
+    std::atomic<int> cells_at_cap{0};         ///< existing already >= n_pe_max
+    std::atomic<int> cells_topped_up{0};      ///< added PEs this run
 
     auto worker = [&](int thread_idx) {
         std::mt19937 thread_rng((*proseed.getThreadSeeds())[thread_idx]);
@@ -1685,19 +1707,30 @@ static void schedule_pes(const AdaptiveFCConfig &acfg,
             int c = next_cell.fetch_add(1);
             if (c >= n_cells) break;
 
-            std::vector<PEBankRecord> local_pes;
-            local_pes.reserve((size_t)acfg.n_pe_min);
+            std::vector<PEBankRecord> local_pes = bank_out.cell_pes[(size_t)c];
+            const int n_existing = (int)local_pes.size();
+            const int level = (c < (int)bank_out.cell_level.size()) ? bank_out.cell_level[(size_t)c] : 0;
+            const int to_add_raw = compute_to_add(level);
 
-            // Per-PE loop with Wilson-stop polling. The Bernoulli statistic
-            // used for stopping is "fraction of PEs with dchi2 >= sample
-            // median" — a stable proxy when we don't yet have a specific
-            // Δχ²_obs to classify against.
-            int n_above = 0;
-            float running_median = 0.0f;
-            std::vector<float> sorted_buf;
-            sorted_buf.reserve((size_t)acfg.n_pe_max);
+            if (to_add_raw < 0) {
+                // Below update_layer — preserve existing, do nothing.
+                // Bar is sized for *PEs added*, so skipped cells don't tick.
+                cells_skipped_layer.fetch_add(1);
+                total_pes.fetch_add((int64_t)n_existing);
+                continue;
+            }
+            if (n_existing >= acfg.n_pe_max) {
+                // Hard total cap reached — skip.
+                cells_at_cap.fetch_add(1);
+                total_pes.fetch_add((int64_t)n_existing);
+                continue;
+            }
 
-            for (int i = 0; i < acfg.n_pe_max; ++i) {
+            // Clamp to_add so we don't exceed total cap.
+            const int final_total = std::min(n_existing + to_add_raw, acfg.n_pe_max);
+
+            cells_topped_up.fetch_add(1);
+            for (int i = n_existing; i < final_total; ++i) {
                 AdaptivePEArgs args{};
                 args.config = &config;
                 args.prop   = &prop;
@@ -1715,36 +1748,11 @@ static void schedule_pes(const AdaptiveFCConfig &acfg,
 
                 PEBankRecord rec = run_one_pe(args);
                 local_pes.push_back(rec);
-
-                // Insert into sorted buffer (for running median).
-                auto it = std::upper_bound(sorted_buf.begin(), sorted_buf.end(), rec.dchi2);
-                sorted_buf.insert(it, rec.dchi2);
-                running_median = sorted_buf[sorted_buf.size() / 2];
-                n_above = 0;
-                for (float v : sorted_buf) if (v >= running_median) ++n_above;
-
-                const int n_done = i + 1;
-                if (n_done >= acfg.n_pe_min) {
-                    if (stop_rule.should_stop(n_done, n_above, acfg.wilson_eps)) {
-                        std::lock_guard<std::mutex> lg(log_mutex);
-                        log<LOG_INFO>(L"%1% || cell %2%/%3% stopped: n=%4%, halfwidth=%5%.")
-                            % __func__ % c % n_cells % n_done
-                            % stop_rule.wilson_halfwidth(n_done, n_above);
-                        break;
-                    }
-                }
-            }
-
-            if ((int)local_pes.size() >= acfg.n_pe_max) {
-                cells_capped.fetch_add(1);
-                std::lock_guard<std::mutex> lg(log_mutex);
-                log<LOG_WARNING>(L"%1% || cell %2%/%3% hit n_pe_max=%4% without Wilson-stopping.")
-                    % __func__ % c % n_cells % acfg.n_pe_max;
+                progress.increment_bar(progress_bar_idx);  // tick per PE produced
             }
 
             total_pes.fetch_add((int64_t)local_pes.size());
-            bank_out.cell_pes[c] = std::move(local_pes);
-            progress.increment_bar(progress_bar_idx);
+            bank_out.cell_pes[(size_t)c] = std::move(local_pes);
         }
     };
 
@@ -1754,12 +1762,16 @@ static void schedule_pes(const AdaptiveFCConfig &acfg,
     for (auto &th : tpool) th.join();
 
     result_out.total_pes_generated = total_pes.load();
-    result_out.cells_hit_n_pe_max  = cells_capped.load();
+    result_out.cells_hit_n_pe_max  = cells_topped_up.load(); ///< Repurposed: cells that actually got new PEs.
     result_out.mean_pes_per_cell   = n_cells > 0 ? (float)total_pes.load() / (float)n_cells : 0.0f;
 
-    log<LOG_INFO>(L"%1% || schedule_pes done: cells=%2%, total_pes=%3%, mean=%4%, capped=%5%.")
+    log<LOG_INFO>(L"%1% || schedule_pes done: cells=%2%, total_pes=%3%, mean=%4%, "
+                  L"topped_up=%5%, at_cap=%6%, skipped_below_update_layer=%7%.")
         % __func__ % n_cells % (int64_t)total_pes.load()
-        % result_out.mean_pes_per_cell % (int)cells_capped.load();
+        % result_out.mean_pes_per_cell
+        % (int)cells_topped_up.load()
+        % (int)cells_at_cap.load()
+        % (int)cells_skipped_layer.load();
 }
 
 // Compute per-cell (x, y) coords for every MetaCell — Option A: PE bank at
@@ -2079,6 +2091,24 @@ static void plot_asimov_verdict_pdf(
 // painting each cell's value across its footprint. Bins inside undecidable
 // cells are left at 0 (the contour treats them as boundary cases — usually
 // fine because undecidable cells are at the periphery of the active region).
+// Build the FC deviation TH2D by *interpolating* between cell-center samples.
+//
+// Treats each meta-cell as a point sample at its center (in finest-grid
+// integer coords). For every finest-grid bin, finds the K=4 nearest decidable
+// cell-center samples by Euclidean distance and computes their inverse-
+// distance-squared weighted average — the standard Shepard-style IDW with p=2.
+//
+// Why this is the right thing (vs cell-painting + TH2::Smooth(N)):
+//   - Painted cells produce piecewise-constant footprints; the contour
+//     extracted at iso-level 0 then hugs cell edges and looks stair-stepped.
+//     TH2::Smooth(N) blurs in finest-bin space with an arbitrary kernel — the
+//     result depends on N, and large cells get smeared more than small ones.
+//   - IDW with K=4 nearest samples gives a smooth surface whose interpolation
+//     resolution matches the local mesh density: refined regions (small cells,
+//     close-packed centers) get tight interpolation, baseline regions (wide
+//     centers) get a smoother fill. No arbitrary smoothing parameter.
+//   - Surface passes through cell-center values to high precision (exact at
+//     center bins; ~0 error at finer resolution).
 static TH2D *build_fc_deviation_th2d(const PEBank &bank,
                                      const AsimovObs &obs,
                                      const std::vector<CellVerdict> &verd_cl,
@@ -2091,16 +2121,66 @@ static TH2D *build_fc_deviation_th2d(const PEBank &bank,
     for (int j = 0; j <= H; ++j) ey[(size_t)j] = (double)A.j_to_y(j);
     TH2D *h = new TH2D(name.c_str(), ";;;#Delta#chi^{2}_{obs} - #Delta#chi^{2}_{c}",
                        W, ex.data(), H, ey.data());
+
+    // Collect (cell_center_finest_coords, deviation_value) for decidable cells.
+    struct Sample { float cx, cy, val; };
+    std::vector<Sample> samples;
+    samples.reserve((size_t)bank.n_cells);
     for (int idx = 0; idx < bank.n_cells; ++idx) {
         const auto &v = verd_cl[(size_t)idx];
         if (!v.decidable) continue;
         const float dev = obs.dchi2_obs[(size_t)idx] - v.crit_dchi2;
-        const int i0 = bank.cell_i_bl[(size_t)idx];
-        const int j0 = bank.cell_j_bl[(size_t)idx];
-        const int sp = bank.cell_step [(size_t)idx];
-        for (int ii = i0; ii < i0 + sp && ii < W; ++ii) {
-            for (int jj = j0; jj < j0 + sp && jj < H; ++jj) {
-                h->SetBinContent(ii + 1, jj + 1, (double)dev);
+        const float fcx = (float)bank.cell_i_bl[(size_t)idx]
+                        + 0.5f * (float)bank.cell_step[(size_t)idx];
+        const float fcy = (float)bank.cell_j_bl[(size_t)idx]
+                        + 0.5f * (float)bank.cell_step[(size_t)idx];
+        samples.push_back({fcx, fcy, dev});
+    }
+    if (samples.empty()) return h;
+
+    // For each finest-grid bin, IDW interpolation over the K=4 nearest samples.
+    constexpr int K = 4;
+    for (int i = 0; i < W; ++i) {
+        const float bx = (float)i + 0.5f;
+        for (int j = 0; j < H; ++j) {
+            const float by = (float)j + 0.5f;
+
+            // Track the K smallest squared distances (linear scan; K=4 makes
+            // the worst-of-K replacement trivial). For n_cells ~ 1000 and
+            // n_bins ~ 4096 this is ~16M float ops — sub-second.
+            std::array<std::pair<float, size_t>, K> nearest;
+            for (int k = 0; k < K; ++k) {
+                nearest[k] = {std::numeric_limits<float>::infinity(), 0};
+            }
+            for (size_t s = 0; s < samples.size(); ++s) {
+                const float dx = samples[s].cx - bx;
+                const float dy = samples[s].cy - by;
+                const float d2 = dx*dx + dy*dy;
+                int worst = 0;
+                for (int k = 1; k < K; ++k) {
+                    if (nearest[k].first > nearest[worst].first) worst = k;
+                }
+                if (d2 < nearest[worst].first) nearest[worst] = {d2, s};
+            }
+
+            // IDW with p=2 (inverse squared distance). Exact pass-through at
+            // sample locations — guard against d=0 explicitly.
+            float num = 0.0f, den = 0.0f;
+            bool exact_hit = false;
+            for (int k = 0; k < K; ++k) {
+                if (std::isinf(nearest[k].first)) continue;
+                if (nearest[k].first < 1e-6f) {
+                    h->SetBinContent(i + 1, j + 1,
+                                      (double)samples[nearest[k].second].val);
+                    exact_hit = true;
+                    break;
+                }
+                const float w = 1.0f / nearest[k].first;
+                num += w * samples[nearest[k].second].val;
+                den += w;
+            }
+            if (!exact_hit && den > 0.0f) {
+                h->SetBinContent(i + 1, j + 1, (double)(num / den));
             }
         }
     }
@@ -2190,9 +2270,9 @@ static void plot_asimov_contour_pdf(
     frame->Draw();
 
     const int contour_palette[5] = {kRed + 1, kAzure + 1, kGreen + 2, kMagenta + 1, kBlack};
-    TLegend *leg = new TLegend(0.65, 0.75, 0.95, 0.93);
-    leg->SetBorderSize(1);
-    leg->SetFillColor(kWhite);
+    TLegend *leg = new TLegend(0.15, 0.13, 0.45, 0.30);
+    leg->SetBorderSize(0);
+    leg->SetFillStyle(0);
     leg->SetTextSize(0.030);
 
     // Stash extracted graphs so they live until c.Print returns.
@@ -2200,6 +2280,8 @@ static void plot_asimov_contour_pdf(
 
     for (size_t k = 0; k < cl_targets.size(); ++k) {
         const int col = contour_palette[k % 5];
+        // build_fc_deviation_th2d does IDW interpolation between cell-center
+        // samples — smooth surface by construction, no Smooth() needed.
         TH2D *h_dev = build_fc_deviation_th2d(bank, obs, verdicts[k], A,
                                               Form("dev_cl%zu", k));
         auto segs = extract_contour_graphs(h_dev, 0.0);
@@ -2302,7 +2384,7 @@ static void save_asimov_root(
     }
     t.Write();
 
-    // Per-CL contour TGraphs.
+    // Per-CL contour TGraphs (smoothed to match the plotted curves).
     for (size_t k = 0; k < cl_targets.size(); ++k) {
         TH2D *h_dev = build_fc_deviation_th2d(bank, obs, verdicts[k], A,
                                               Form("dev_save_cl%zu", k));
@@ -2581,11 +2663,53 @@ AdaptiveFCResult run_adaptive_fc(
             bank.cell_level.push_back(c.level);
         }
 
-        // Stop the throws progress bar (never used in init-bank) and launch
-        // the cells one, sized for the actual cell count.
+        // Top-up: try to carry forward an existing <tag>_bank.bin if its mesh
+        // footprint matches. Each cell's PE list is preserved; schedule_pes
+        // only generates additional PEs for cells not yet at the criterion.
+        {
+            std::ifstream test(bank_path, std::ios::binary);
+            if (test.is_open()) {
+                test.close();
+                PEBank existing;
+                if (load_bank(existing, bank_path)
+                    && existing.n_cells   == bank.n_cells
+                    && existing.finest_nx == bank.finest_nx
+                    && existing.finest_ny == bank.finest_ny
+                    && existing.max_levels == bank.max_levels) {
+                    bank.cell_pes = std::move(existing.cell_pes);
+                    int64_t existing_total = 0;
+                    for (const auto &v : bank.cell_pes) existing_total += (int64_t)v.size();
+                    log<LOG_INFO>(L"%1% || init-bank top-up: loaded existing bank %2% (%3% PEs / %4% cells). Generating additional PEs to meet criterion.")
+                        % __func__ % bank_path.c_str() % (long long)existing_total % bank.n_cells;
+                } else {
+                    log<LOG_WARNING>(L"%1% || init-bank: existing bank at %2% has mismatched footprint; ignoring and regenerating.")
+                        % __func__ % bank_path.c_str();
+                }
+            }
+        }
+
+        // Stop the throws progress bar (never used in init-bank). Launch a
+        // PE-counted bar: bar size = total PEs to be added across all cells.
+        // Updating per-PE (rather than per-cell) makes the bar smooth on
+        // large meshes where each cell takes minutes.
         progress.finish_all(true);
+        int total_pes_to_add = 0;
+        for (int c = 0; c < bank.n_cells; ++c) {
+            const int level = bank.cell_level[(size_t)c];
+            if (level < acfg.update_layer) continue;
+            const int n_existing = (c < (int)bank.cell_pes.size())
+                ? (int)bank.cell_pes[(size_t)c].size() : 0;
+            if (n_existing >= acfg.n_pe_max) continue;
+            const int delta = std::max(0, level - acfg.update_layer);
+            const int to_add_raw = (delta > 20)
+                ? acfg.n_pe_max
+                : (int)((int64_t)acfg.n_pe_min << delta);
+            total_pes_to_add += std::min(to_add_raw, acfg.n_pe_max - n_existing);
+        }
+        log<LOG_INFO>(L"%1% || init-bank: will add %2% PEs total across %3% cells.")
+            % __func__ % total_pes_to_add % bank.n_cells;
         std::vector<std::pair<int, std::string>> cells_bar_cfg;
-        cells_bar_cfg.push_back({(int)mm.cells.size(), "AFC cells (PEs)"});
+        cells_bar_cfg.push_back({std::max(1, total_pes_to_add), "AFC PEs added"});
         MultiPROgressBar cells_progress(cells_bar_cfg);
         cells_progress.initialize_display();
         cells_progress.start_display_thread();

@@ -88,11 +88,18 @@ namespace PROfit {
         bool        binned = true;
 
         // ---- PE-bank generation knobs ----
+        // Per-cell PE generation follows an additive doubling rule:
+        //   to_add = n_pe_min * 2^max(0, cell.level - update_layer)
+        // Each run ADDS this many PEs to the cell on top of whatever's already
+        // there (existing PEs always preserved). Cells with level < update_layer
+        // are not touched. n_pe_max is a total-per-cell safety cap — no cell
+        // ever exceeds it, even across many runs.
         std::vector<float> cl_targets = {0.683f, 0.90f, 0.954f};
-        float wilson_eps = 0.05f;
-        int   n_pe_min = 30;
-        int   n_pe_max = 1000;
-        float roi_band = 8.0f; ///< (slice-2c, unused for now)
+        int   n_pe_min = 50;     ///< PEs added per run at level == update_layer; doubles for each deeper level.
+        int   n_pe_max = 5000;   ///< Hard total cap per cell (cumulative across runs).
+        int   update_layer = 0;  ///< Cells below this AMR level are skipped entirely.
+        float wilson_eps = 0.05f; ///< Unused for bank generation now; kept for slice 2c classification.
+        float roi_band = 8.0f;   ///< (slice 2c, unused for now).
     };
 
     /**

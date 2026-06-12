@@ -331,8 +331,9 @@ int main(int argc, char* argv[])
     bool  afc_logx = true, afc_logy = true;
     std::vector<float> afc_cl_targets = {0.683f, 0.90f, 0.954f};
     float afc_wilson_eps = 0.05f;
-    int   afc_n_pe_min = 30;
-    int   afc_n_pe_max = 1000;
+    int   afc_n_pe_min = 50;
+    int   afc_n_pe_max = 5000;
+    int   afc_update_layer = 0;
     float afc_roi_band = 8.0f;
 
 
@@ -487,9 +488,16 @@ int main(int argc, char* argv[])
     afc_command->add_flag("--logy,!--liny", afc_logy, "y-axis log/linear (default log).");
     // PE-bank generation knobs (used by --mode init-bank; consumed by asimov/classify too).
     afc_command->add_option("--cl", afc_cl_targets, "Target CLs (one or more).");
-    afc_command->add_option("--wilson-eps", afc_wilson_eps, "Wilson half-width stop target.");
-    afc_command->add_option("--n-pe-min", afc_n_pe_min, "Floor on PEs per cell.");
-    afc_command->add_option("--n-pe-max", afc_n_pe_max, "Cap on PEs per cell.");
+    afc_command->add_option("--n-pe-min", afc_n_pe_min,
+        "PEs ADDED to each cell on this run, at level == update-layer. Doubles per deeper level: "
+        "--n-pe-min 50 adds 50/100/200/400 to L=0/1/2/3 cells. Re-running adds another batch on top.");
+    afc_command->add_option("--n-pe-max", afc_n_pe_max,
+        "Hard total-per-cell cap. No cell ever exceeds this PE count, even across repeated init-bank runs.");
+    afc_command->add_option("--update-layer", afc_update_layer,
+        "Only add to cells at AMR level >= update-layer (default 0 = all). Layer L gets n-pe-min PEs added, "
+        "deeper layers double. Cells below update-layer keep whatever PEs they already have, untouched.");
+    afc_command->add_option("--wilson-eps", afc_wilson_eps,
+        "Wilson half-width target. Unused for init-bank now (doubling rule); reserved for slice 2c classification.");
     afc_command->add_option("--roi-band", afc_roi_band, "ROI Delta-chi^2 band (slice 2c).");
 
     //PROglobal
@@ -2745,6 +2753,7 @@ int main(int argc, char* argv[])
         acfg.wilson_eps = afc_wilson_eps;
         acfg.n_pe_min = afc_n_pe_min;
         acfg.n_pe_max = afc_n_pe_max;
+        acfg.update_layer = afc_update_layer;
         acfg.roi_band = afc_roi_band;
 
         // One progress bar tracking the throw loop.
