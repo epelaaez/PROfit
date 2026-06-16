@@ -335,6 +335,7 @@ int main(int argc, char* argv[])
     int   afc_n_pe_min = 50;
     int   afc_n_pe_max = 5000;
     int   afc_update_layer = 0;
+    int   afc_only_layer   = -1;
     int   afc_n_brazil_throws = 100;
     float afc_roi_band = 8.0f;
 
@@ -504,6 +505,10 @@ int main(int argc, char* argv[])
     afc_command->add_option("--update-layer", afc_update_layer,
         "Only add to cells at AMR level >= update-layer (default 0 = all). Layer L gets n-pe-min PEs added, "
         "deeper layers double. Cells below update-layer keep whatever PEs they already have, untouched.");
+    afc_command->add_option("--update-only-layer", afc_only_layer,
+        "Only add to cells at AMR level == update-only-layer (no doubling, no other layers). "
+        "Default -1 = disabled. Overrides --update-layer when >= 0. "
+        "Example: --update-only-layer 2 --n-pe-min 100 adds exactly 100 PEs to L=2 cells, nothing to L=0/1/3.");
     afc_command->add_option("--wilson-eps", afc_wilson_eps,
         "Wilson half-width target. Unused for init-bank now (doubling rule); reserved for slice 2c classification.");
     afc_command->add_option("--n-brazil-throws", afc_n_brazil_throws,
@@ -2811,6 +2816,7 @@ int main(int argc, char* argv[])
         acfg.n_pe_min = afc_n_pe_min;
         acfg.n_pe_max = afc_n_pe_max;
         acfg.update_layer = afc_update_layer;
+        acfg.only_layer = afc_only_layer;
         acfg.n_brazil_throws = afc_n_brazil_throws;
         acfg.roi_band = afc_roi_band;
 

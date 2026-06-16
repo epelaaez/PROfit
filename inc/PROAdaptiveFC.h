@@ -99,6 +99,7 @@ namespace PROfit {
         int   n_pe_min = 50;     ///< PEs added per run at level == update_layer; doubles for each deeper level.
         int   n_pe_max = 5000;   ///< Hard total cap per cell (cumulative across runs).
         int   update_layer = 0;  ///< Cells below this AMR level are skipped entirely.
+        int   only_layer   = -1; ///< If >= 0, update ONLY cells at exactly this level (overrides update_layer).
         float wilson_eps = 0.05f; ///< Unused for bank generation now; kept for slice 2c classification.
         float roi_band = 8.0f;   ///< (slice 2c, unused for now).
         int   n_brazil_throws = 100; ///< Number of pseudo-experiment throws for --mode brazil.

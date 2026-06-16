@@ -1681,17 +1681,29 @@ static void schedule_pes(const AdaptiveFCConfig &acfg,
         bank_out.cell_pes.assign(n_cells, {});
     }
 
-    // Per-cell number of PEs to ADD on this run (additive doubling).
+    // Per-cell number of PEs to ADD on this run. When acfg.only_layer >= 0,
+    // only cells at exactly that level get topped up by n_pe_min (no doubling,
+    // all other layers untouched). Otherwise the standard doubling rule:
+    // level < update_layer skipped; level >= update_layer gets n_pe_min × 2^(level-update_layer).
     auto compute_to_add = [&](int level) -> int {
+        if (acfg.only_layer >= 0) {
+            return (level == acfg.only_layer) ? acfg.n_pe_min : -1;
+        }
         if (level < acfg.update_layer) return -1; // skip cell entirely
         const int delta = std::max(0, level - acfg.update_layer);
         if (delta > 20) return acfg.n_pe_max; // safety against integer overflow
         return (int)((int64_t)acfg.n_pe_min << delta);
     };
 
-    log<LOG_INFO>(L"%1% || schedule_pes: additive doubling, n_pe_min=%2% (added per run), "
-                  L"n_pe_max=%3% (total cap), update_layer=%4%.")
-        % __func__ % acfg.n_pe_min % acfg.n_pe_max % acfg.update_layer;
+    if (acfg.only_layer >= 0) {
+        log<LOG_INFO>(L"%1% || schedule_pes: --update-only-layer=%2%, n_pe_min=%3% added per matching cell, "
+                      L"n_pe_max=%4% (total cap).")
+            % __func__ % acfg.only_layer % acfg.n_pe_min % acfg.n_pe_max;
+    } else {
+        log<LOG_INFO>(L"%1% || schedule_pes: additive doubling, n_pe_min=%2% (added per run), "
+                      L"n_pe_max=%3% (total cap), update_layer=%4%.")
+            % __func__ % acfg.n_pe_min % acfg.n_pe_max % acfg.update_layer;
+    }
 
     std::uniform_int_distribution<uint32_t> dseed(0, std::numeric_limits<uint32_t>::max());
 
@@ -2588,24 +2600,38 @@ static void plot_brazil_band_pdf(
         TH2D *h_incl = build_inclusion_th2d(bank, inclusion_frac[k], A,
                                             Form("incl_cl%zu", k));
 
-        // (1) Extract median (P=0.5) FIRST — extract_contour_graphs resets the
-        //     histogram's contour to {0.5} internally. We save the segments
-        //     and re-set the contour to the 4 band levels before CONT3.
+        // (1) Extract median contour (P=0.5).
         auto median_segs = extract_contour_graphs(h_incl, 0.5);
 
-        // (2) Configure the 4-level Brazil band fill:
-        //     5 regions for 4 levels (0.025, 0.16, 0.84, 0.975):
-        //       R0 (P<0.025):       white   (outside the contour, no signal)
-        //       R1 (0.025-0.16):    yellow  (outer ±2σ slice)
-        //       R2 (0.16-0.84):     green   (±1σ band)
-        //       R3 (0.84-0.975):    yellow  (inner ±2σ slice)
-        //       R4 (P>0.975):       white   (deep inside, contour rarely fails to enclose)
-        double band_levels[4] = {0.025, 0.16, 0.84, 0.975};
-        h_incl->SetContour(4, band_levels);
-        int palette_colors[5] = {kWhite, brazil_yellow, brazil_green,
-                                 brazil_yellow, kWhite};
-        gStyle->SetPalette(5, palette_colors);
-        h_incl->Draw("CONT3 SAME");
+        // (2) Paint the Brazil bands as filled TBoxes per finest-grid bin.
+        //     This bypasses ROOT's CONT3/CONT0/palette quirks (CONT3 only draws
+        //     contour lines, CONT0 can't always pick up a custom palette
+        //     reliably when called with "SAME"). 5 regions for 4 thresholds:
+        //       R0 (P<0.025):       outside       -> not drawn (white background)
+        //       R1 (0.025 <= P < 0.16):  outer ±2σ -> brazil_yellow
+        //       R2 (0.16 <= P <= 0.84):  ±1σ band  -> brazil_green
+        //       R3 (0.84 < P <= 0.975):  inner ±2σ -> brazil_yellow
+        //       R4 (P > 0.975):       deep inside  -> not drawn (white)
+        const int W = bank.finest_nx, H = bank.finest_ny;
+        for (int i = 0; i < W; ++i) {
+            const float xlo = A.i_to_x(i);
+            const float xhi = A.i_to_x(i + 1);
+            for (int j = 0; j < H; ++j) {
+                const float v = (float)h_incl->GetBinContent(i + 1, j + 1);
+                int color = -1;
+                if      (v >= 0.025f && v < 0.16f)  color = brazil_yellow;
+                else if (v >= 0.16f  && v <= 0.84f) color = brazil_green;
+                else if (v > 0.84f   && v <= 0.975f) color = brazil_yellow;
+                if (color < 0) continue;  // white regions: skip
+                const float ylo = A.j_to_y(j);
+                const float yhi = A.j_to_y(j + 1);
+                TBox *box = new TBox(xlo, ylo, xhi, yhi);
+                box->SetFillColor(color);
+                box->SetLineColor(color);  // no visible border between adjacent bins
+                box->SetLineWidth(0);
+                box->Draw();
+            }
+        }
 
         // (3) Median dashed line on top.
         for (TGraph *g : median_segs) {
@@ -3170,14 +3196,24 @@ AdaptiveFCResult run_adaptive_fc(
         int total_pes_to_add = 0;
         for (int c = 0; c < bank.n_cells; ++c) {
             const int level = bank.cell_level[(size_t)c];
-            if (level < acfg.update_layer) continue;
+            // Mirror compute_to_add's level eligibility: only_layer >= 0 wins.
+            if (acfg.only_layer >= 0) {
+                if (level != acfg.only_layer) continue;
+            } else {
+                if (level < acfg.update_layer) continue;
+            }
             const int n_existing = (c < (int)bank.cell_pes.size())
                 ? (int)bank.cell_pes[(size_t)c].size() : 0;
             if (n_existing >= acfg.n_pe_max) continue;
-            const int delta = std::max(0, level - acfg.update_layer);
-            const int to_add_raw = (delta > 20)
-                ? acfg.n_pe_max
-                : (int)((int64_t)acfg.n_pe_min << delta);
+            int to_add_raw;
+            if (acfg.only_layer >= 0) {
+                to_add_raw = acfg.n_pe_min;  // no doubling in only-layer mode
+            } else {
+                const int delta = std::max(0, level - acfg.update_layer);
+                to_add_raw = (delta > 20)
+                    ? acfg.n_pe_max
+                    : (int)((int64_t)acfg.n_pe_min << delta);
+            }
             total_pes_to_add += std::min(to_add_raw, acfg.n_pe_max - n_existing);
         }
         log<LOG_INFO>(L"%1% || init-bank: will add %2% PEs total across %3% cells.")
