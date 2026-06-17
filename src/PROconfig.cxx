@@ -1392,6 +1392,12 @@ int PROconfig::LoadFromXML(const std::string &filename){
                         throw std::invalid_argument(std::string("restrict attribute for systematic '") + wt + "' must be two numbers, e.g. restrict=\"-1, 1\"");
                     while(*end == ' ' || *end == ',') ++end;
                     float rhi = std::strtof(end, nullptr);
+                    if(rlo > rhi) {
+                        log<LOG_WARNING>(L"%1% || restrict for systematic %2% given as [%3%, %4%] with lo>hi; swapping. "
+                                         L"An inverted range would otherwise hang rejection-sampling (pseudo-experiments).")
+                            % __func__ % wt.c_str() % rlo % rhi;
+                        const float t = rlo; rlo = rhi; rhi = t;
+                    }
                     m_mcgen_variation_restrict[wt] = {rlo, rhi};
                     log<LOG_INFO>(L"%1% || Parsed restrict=[%2%, %3%] for systematic %4%") % __func__ % rlo % rhi % wt.c_str();
                 }

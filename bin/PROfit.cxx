@@ -1017,13 +1017,32 @@ int main(int argc, char* argv[])
 
                 Eigen::VectorXf throws = fakedataparams;
                 for (size_t i = 0; i < nspline; ++i) {
-                    const float tlo = variable_systs[io].spline_has_restrict[i]
-                        ? variable_systs[io].spline_restrict_lo[i] : variable_systs[io].spline_lo[i];
-                    const float thi = variable_systs[io].spline_has_restrict[i]
-                        ? variable_systs[io].spline_restrict_hi[i] : variable_systs[io].spline_hi[i];
-                    do {
-                        throws((int)(i + nphys)) = d(PROseed::global_rng);
-                    } while (throws((int)(i + nphys)) < tlo || throws((int)(i + nphys)) > thi);
+                    // Guard against spline_has_restrict / restrict_lo / restrict_hi being
+                    // shorter than the spline list (e.g. covariance_to_spline knobs that
+                    // don't populate them) -- an OOB read here gives garbage bounds.
+                    const bool has_r = i < variable_systs[io].spline_has_restrict.size()
+                                       && variable_systs[io].spline_has_restrict[i];
+                    float tlo = has_r ? variable_systs[io].spline_restrict_lo[i] : variable_systs[io].spline_lo[i];
+                    float thi = has_r ? variable_systs[io].spline_restrict_hi[i] : variable_systs[io].spline_hi[i];
+                    if (tlo > thi) { const float t = tlo; tlo = thi; thi = t; }  // tolerate inverted bounds
+                    // Rejection-sample N(0,1) truncated to [tlo, thi], but NEVER loop forever:
+                    // if the range is unreachable (deep tail / degenerate / bad restrict),
+                    // fall back to the in-range value nearest the CV (0) and warn which spline.
+                    const int max_attempts = 10000;
+                    int attempts = 0;
+                    float x = d(PROseed::global_rng);
+                    while ((x < tlo || x > thi) && ++attempts < max_attempts)
+                        x = d(PROseed::global_rng);
+                    if (x < tlo || x > thi) {
+                        x = (0.0f < tlo) ? tlo : (0.0f > thi ? thi : 0.0f);
+                        const std::string sname = i < variable_systs[io].spline_names.size()
+                            ? variable_systs[io].spline_names[i] : ("spline#" + std::to_string(i));
+                        log<LOG_WARNING>(L"%1% || Pseudo-experiment: spline '%2%' (index %3%) has throw bounds "
+                                         L"[%4%, %5%] unreachable by a unit Gaussian after %6% draws; clamping to %7%. "
+                                         L"Check its knobvals / restrict attribute.")
+                            % __func__ % sname.c_str() % (int)i % tlo % thi % max_attempts % x;
+                    }
+                    throws((int)(i + nphys)) = x;
                 }
 
                 const int nbins_coll = config.m_num_variable_bins_total_collapsed[io];
