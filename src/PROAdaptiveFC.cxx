@@ -2701,40 +2701,78 @@ static void plot_brazil_band_pdf(
         auto segs_q84  = extract_contour_graphs(h_incl, 0.84);
         auto segs_q975 = extract_contour_graphs(h_incl, 0.975);
 
-        // (1) Brazil-band fills via per-row run-length-encoded TBoxes.
-        //   Naïve per-bin TBox at 256×256 generates ~65k Draw() calls per
-        //   page — ROOT's TPad primitive bookkeeping hangs at that scale
-        //   during c.Print(). RLE collapses runs of identical-color bins
-        //   in each row into a single wide TBox. For smooth bands that's
-        //   typically 4–8 boxes per row × 256 rows ≈ 1k–2k boxes per page,
-        //   well within ROOT's comfort zone. Visually identical at print
-        //   resolution because adjacent rows share their y-edges, so the
-        //   collapsed-rows pattern looks like contiguous bands.
+        // (1) Brazil-band fills via cell-based, per-row run-length-encoded
+        //   TBoxes.
+        //
+        //   Earlier attempts used h_incl (the IDW-smoothed surface) for the
+        //   per-bin color decision. That gave smooth visual transitions but
+        //   bled the ±2σ yellow into the deep basin: IDW averages a bin's
+        //   value from its 4 nearest decided cells, so a bin sitting between
+        //   a decided "deep-basin" cell (v≈1) and a decided "boundary" cell
+        //   (v≈0.5) gets an interpolated value in the 0.84–0.975 band, even
+        //   though no actual cell *believes* it sits in the inner-2σ rim.
+        //   With large baseline cells in sparse-bank regions, the IDW
+        //   smoothing zone covers a huge swath of the plot.
+        //
+        //   Fix: for the *fills*, each bin inherits the value of the
+        //   meta-cell that physically contains it — no IDW. Cell-edges in
+        //   the fills are then hidden by the smooth IDW-based contour
+        //   outlines drawn in step (2). Result: bands appear *only* where
+        //   some actual cell has its own inclusion fraction in the band
+        //   range. Undecidable cells (sentinel v<0) are skipped entirely
+        //   and stay white, which is the correct "unknown" presentation
+        //   instead of being smeared into a band colour.
         //
         //   Five-region classification of P(included):
         //       v < 0.025 or v > 0.975          → outside bands (no fill)
         //       0.025 ≤ v < 0.16, 0.84 < v ≤ 0.975 → ±2σ outer/inner (yellow)
         //       0.16 ≤ v ≤ 0.84                 → ±1σ (green)
-        //   The smooth contour outlines drawn in step (2) then trace the
-        //   real boundaries on top, hiding any sub-pixel run-edge artefacts.
         const int W_up = h_incl->GetNbinsX();
         const int H_up = h_incl->GetNbinsY();
+        // upsample factor relative to bank.finest_nx (must match the call
+        // to build_inclusion_th2d above).
+        const int up = std::max(1, W_up / std::max(1, bank.finest_nx));
+
+        // Precompute a [W_up × H_up] lookup mapping each upsampled bin to
+        // the index of the meta-cell that contains it. -1 = no cell covers
+        // this bin (shouldn't happen if the meta-mesh tiles the parameter
+        // space, but we guard for safety).
+        std::vector<int> cell_id_at((size_t)W_up * (size_t)H_up, -1);
+        for (int c = 0; c < bank.n_cells; ++c) {
+            const int i0  = bank.cell_i_bl[(size_t)c] * up;
+            const int j0  = bank.cell_j_bl[(size_t)c] * up;
+            const int len = bank.cell_step[(size_t)c] * up;
+            const int i_end = std::min(W_up, i0 + len);
+            const int j_end = std::min(H_up, j0 + len);
+            const int i_beg = std::max(0, i0);
+            const int j_beg = std::max(0, j0);
+            for (int ii = i_beg; ii < i_end; ++ii) {
+                for (int jj = j_beg; jj < j_end; ++jj) {
+                    cell_id_at[(size_t)ii * (size_t)H_up + (size_t)jj] = c;
+                }
+            }
+        }
+
         auto color_for_v = [&](float v) -> int {
+            if (v < 0.0f) return -1; // undecidable cell: leave white
             if      (v >= 0.025f && v < 0.16f)   return brazil_yellow;
             else if (v >= 0.16f  && v <= 0.84f)  return brazil_green;
             else if (v > 0.84f   && v <= 0.975f) return brazil_yellow;
             return -1; // outside bands
         };
+
+        // RLE per row over cell-based v lookups.
         for (int j = 0; j < H_up; ++j) {
             const float ylo = (float)h_incl->GetYaxis()->GetBinLowEdge(j + 1);
             const float yhi = (float)h_incl->GetYaxis()->GetBinUpEdge(j + 1);
             int run_color = -1;  // -1 means "no active fillable run"
             int run_start = 0;
             for (int i = 0; i <= W_up; ++i) {
-                // i == W_up forces a final emit of any active run.
-                const int color = (i < W_up)
-                    ? color_for_v((float)h_incl->GetBinContent(i + 1, j + 1))
-                    : -2; // sentinel: not equal to any valid color
+                int color = -2; // sentinel: forces emit at i == W_up
+                if (i < W_up) {
+                    const int cid = cell_id_at[(size_t)i * (size_t)H_up + (size_t)j];
+                    color = (cid >= 0) ? color_for_v(inclusion_frac[k][(size_t)cid]) : -1;
+                }
                 if (color != run_color) {
                     if (run_color >= 0) {
                         const float xlo = (float)h_incl->GetXaxis()->GetBinLowEdge(run_start + 1);
