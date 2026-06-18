@@ -2701,24 +2701,37 @@ static void plot_brazil_band_pdf(
         auto segs_q84  = extract_contour_graphs(h_incl, 0.84);
         auto segs_q975 = extract_contour_graphs(h_incl, 0.975);
 
-        // (1) Brazil-band fills via TGraph polygons, back-to-front layering:
-        //   Yellow inside P=0.025  → covers everything inside the ±2σ outer.
-        //   Green  inside P=0.16   → overlays inner part with green (±1σ).
-        //   Yellow inside P=0.84   → overlays inner part of green back to yellow.
-        //   White  inside P=0.975  → erases the deep interior to "outside the bands".
-        // Result: yellow rim 0.025–0.16, green ring 0.16–0.84, yellow rim 0.84–0.975.
-        auto fill_at = [&](std::vector<TGraph*> &segs, int color) {
-            for (TGraph *g : segs) {
-                g->SetFillColor(color);
-                g->SetLineColor(color); // hide segment seams
-                g->SetLineWidth(0);
-                g->Draw("F SAME");
+        // (1) Brazil-band fills via per-bin TBox at upsampled resolution.
+        //   TGraph::Draw("F") only fills closed polygons correctly; FC
+        //   contours are typically OPEN (extend to plot edges), which ROOT
+        //   "closes" with a straight line between endpoints, creating wedge
+        //   artifacts. Per-bin painting bypasses this entirely: classify
+        //   each bin into a region by its inclusion value and paint.
+        //   At upsample=4 (256×256), individual bins are sub-pixel at print
+        //   resolution — visually indistinguishable from a vector fill.
+        //   The smooth contour outlines drawn in step (2) then trace the
+        //   real boundaries on top.
+        const int W_up = h_incl->GetNbinsX();
+        const int H_up = h_incl->GetNbinsY();
+        for (int i = 0; i < W_up; ++i) {
+            const float xlo = (float)h_incl->GetXaxis()->GetBinLowEdge(i + 1);
+            const float xhi = (float)h_incl->GetXaxis()->GetBinUpEdge(i + 1);
+            for (int j = 0; j < H_up; ++j) {
+                const float v = (float)h_incl->GetBinContent(i + 1, j + 1);
+                int color = -1;
+                if      (v >= 0.025f && v < 0.16f)   color = brazil_yellow;
+                else if (v >= 0.16f  && v <= 0.84f)  color = brazil_green;
+                else if (v > 0.84f   && v <= 0.975f) color = brazil_yellow;
+                if (color < 0) continue;
+                const float ylo = (float)h_incl->GetYaxis()->GetBinLowEdge(j + 1);
+                const float yhi = (float)h_incl->GetYaxis()->GetBinUpEdge(j + 1);
+                TBox *box = new TBox(xlo, ylo, xhi, yhi);
+                box->SetFillColor(color);
+                box->SetLineColor(color);
+                box->SetLineWidth(0);
+                box->Draw();
             }
-        };
-        fill_at(segs_q025, brazil_yellow);
-        fill_at(segs_q16,  brazil_green);
-        fill_at(segs_q84,  brazil_yellow);
-        fill_at(segs_q975, kWhite);
+        }
 
         // (2) Thin black outlines on the band boundaries. The same extracted
         // TGraphs are restyled (line attrs swapped) and redrawn as polylines.
