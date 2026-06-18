@@ -2553,15 +2553,22 @@ static TH2D *build_inclusion_th2d(const PEBank &bank,
     for (int j = 0; j <= H; ++j) ey[(size_t)j] = (double)A.j_to_y(j);
     TH2D *h = new TH2D(name.c_str(), ";;;P(included)", W, ex.data(), H, ey.data());
 
+    // Skip cells whose inclusion fraction is the sentinel (< 0): those are
+    // permanently undecidable (bank too sparse, no throw could classify).
+    // IDW then fills their finest-grid bins from the nearest decided cells,
+    // which is the correct "deep basin = inside the contour" behaviour and
+    // eliminates the phantom contour ring at the AMR refined↔baseline edge.
     struct Sample { float cx, cy, val; };
     std::vector<Sample> samples;
     samples.reserve((size_t)bank.n_cells);
     for (int idx = 0; idx < bank.n_cells; ++idx) {
+        const float v = inclusion_frac_per_cell[(size_t)idx];
+        if (v < 0.0f) continue; // undecidable — skip
         const float fcx = (float)bank.cell_i_bl[(size_t)idx]
                         + 0.5f * (float)bank.cell_step[(size_t)idx];
         const float fcy = (float)bank.cell_j_bl[(size_t)idx]
                         + 0.5f * (float)bank.cell_step[(size_t)idx];
-        samples.push_back({fcx, fcy, inclusion_frac_per_cell[(size_t)idx]});
+        samples.push_back({fcx, fcy, v});
     }
     if (samples.empty()) return h;
 
@@ -3118,7 +3125,16 @@ AdaptiveFCResult run_adaptive_fc(
 
         // (4) Re-classify ALL throws (existing + new) against the current bank.
         //     Verdicts are derived afresh — archive stored only observables.
+        //     Track BOTH `included` and `decidable` per throw so the aggregation
+        //     can distinguish "throw said outside" from "bank too sparse to say":
+        //     treating undecidable as "outside" creates a phantom Brazil-band
+        //     ring at the AMR refined↔baseline boundary (deep-basin cells get
+        //     painted as excluded when they're really just unsampled).
         std::vector<std::vector<std::vector<uint8_t>>> per_throw_verdicts(
+            (size_t)n_total,
+            std::vector<std::vector<uint8_t>>(
+                (size_t)n_cl, std::vector<uint8_t>((size_t)n_cells, 0)));
+        std::vector<std::vector<std::vector<uint8_t>>> per_throw_decidable(
             (size_t)n_total,
             std::vector<std::vector<uint8_t>>(
                 (size_t)n_cl, std::vector<uint8_t>((size_t)n_cells, 0)));
@@ -3130,23 +3146,48 @@ AdaptiveFCResult run_adaptive_fc(
             auto verdicts = classify_against_bank(bank, obs_t, acfg.cl_targets, min_pes);
             for (int k = 0; k < n_cl; ++k) {
                 for (int c = 0; c < n_cells; ++c) {
-                    per_throw_verdicts[(size_t)t][(size_t)k][(size_t)c] =
-                        verdicts[(size_t)k][(size_t)c].included ? 1 : 0;
+                    const auto &v = verdicts[(size_t)k][(size_t)c];
+                    per_throw_decidable[(size_t)t][(size_t)k][(size_t)c] = v.decidable ? 1 : 0;
+                    per_throw_verdicts [(size_t)t][(size_t)k][(size_t)c] =
+                        (v.decidable && v.included) ? 1 : 0;
                 }
             }
         }
 
         // (5) Aggregate inclusion fractions across all throws.
+        //     Sentinel: inclusion_frac < 0 marks a cell where no throw was ever
+        //     decidable. build_inclusion_th2d skips such cells from the IDW
+        //     interpolation, so the surface is filled by neighbouring decided
+        //     cells — no phantom contour ringing the AMR boundary.
+        constexpr float kUndecidedSentinel = -1.0f;
         std::vector<std::vector<float>> inclusion_frac(
-            (size_t)n_cl, std::vector<float>((size_t)n_cells, 0.0f));
+            (size_t)n_cl, std::vector<float>((size_t)n_cells, kUndecidedSentinel));
+        int total_undecidable_cells = 0;
         for (int k = 0; k < n_cl; ++k) {
+            int undecidable_this_cl = 0;
             for (int c = 0; c < n_cells; ++c) {
-                int n_in = 0;
+                int n_in = 0, n_decided = 0;
                 for (int t = 0; t < n_total; ++t) {
-                    if (per_throw_verdicts[(size_t)t][(size_t)k][(size_t)c]) ++n_in;
+                    if (per_throw_decidable[(size_t)t][(size_t)k][(size_t)c]) {
+                        ++n_decided;
+                        if (per_throw_verdicts[(size_t)t][(size_t)k][(size_t)c]) ++n_in;
+                    }
                 }
-                inclusion_frac[(size_t)k][(size_t)c] = (float)n_in / (float)std::max(1, n_total);
+                if (n_decided > 0) {
+                    inclusion_frac[(size_t)k][(size_t)c] = (float)n_in / (float)n_decided;
+                } else {
+                    inclusion_frac[(size_t)k][(size_t)c] = kUndecidedSentinel;
+                    ++undecidable_this_cl;
+                }
             }
+            log<LOG_INFO>(L"%1% || brazil aggregation CL=%2%: %3% / %4% cells undecidable (bank too sparse).")
+                % __func__ % acfg.cl_targets[(size_t)k] % undecidable_this_cl % n_cells;
+            total_undecidable_cells += undecidable_this_cl;
+        }
+        if (total_undecidable_cells > 0) {
+            log<LOG_INFO>(L"%1% || brazil: %2% undecidable (cell, CL) entries skipped from IDW interpolation; "
+                          L"deep-basin / sparse-bank regions are filled by neighbouring decided cells.")
+                % __func__ % total_undecidable_cells;
         }
 
         // Outputs.
