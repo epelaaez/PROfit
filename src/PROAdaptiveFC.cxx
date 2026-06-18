@@ -1364,6 +1364,15 @@ void serialize(Archive &ar, PROfit::MetaCell &c, [[maybe_unused]] const unsigned
 }
 
 template <class Archive>
+void serialize(Archive &ar, PROfit::BrazilArchive &a, [[maybe_unused]] const unsigned int v) {
+    ar & a.finest_nx;
+    ar & a.finest_ny;
+    ar & a.n_cells;
+    ar & a.per_throw_global_chi2;
+    ar & a.per_throw_dchi2;
+}
+
+template <class Archive>
 void serialize(Archive &ar, PROfit::MetaMesh &m, [[maybe_unused]] const unsigned int v) {
     ar & m.cells;
     ar & m.finest_nx;
@@ -1484,6 +1493,64 @@ bool load_mesh(MetaMesh &mm_out, const std::string &path) {
     }
     log<LOG_INFO>(L"%1% || load_mesh: read %2% (cells=%3%, finest=%4%x%5%).")
         % __func__ % path.c_str() % (int)mm_out.cells.size() % mm_out.finest_nx % mm_out.finest_ny;
+    return true;
+}
+
+// --------------------------------------------------------------------
+//  BrazilArchive boost-serialisation. Same magic+version+payload layout
+//  as save_bank / save_mesh.
+// --------------------------------------------------------------------
+bool save_brazil_archive(const BrazilArchive &arc, const std::string &path) {
+    std::ofstream ofs(path, std::ios::binary);
+    if (!ofs.is_open()) {
+        log<LOG_ERROR>(L"%1% || save_brazil_archive: could not open %2% for writing.") % __func__ % path.c_str();
+        return false;
+    }
+    try {
+        boost::archive::binary_oarchive oa(ofs);
+        uint32_t magic = BrazilArchive::MAGIC;
+        uint16_t version = BrazilArchive::VERSION;
+        oa & magic;
+        oa & version;
+        oa & const_cast<BrazilArchive &>(arc);
+    } catch (const std::exception &e) {
+        log<LOG_ERROR>(L"%1% || save_brazil_archive: serialisation error: %2%") % __func__ % e.what();
+        return false;
+    }
+    log<LOG_INFO>(L"%1% || save_brazil_archive: wrote %2% (throws=%3%, n_cells=%4%).")
+        % __func__ % path.c_str() % (int)arc.per_throw_dchi2.size() % arc.n_cells;
+    return true;
+}
+
+bool load_brazil_archive(BrazilArchive &arc_out, const std::string &path) {
+    std::ifstream ifs(path, std::ios::binary);
+    if (!ifs.is_open()) {
+        log<LOG_ERROR>(L"%1% || load_brazil_archive: could not open %2% for reading.") % __func__ % path.c_str();
+        return false;
+    }
+    try {
+        boost::archive::binary_iarchive ia(ifs);
+        uint32_t magic = 0;
+        uint16_t version = 0;
+        ia & magic;
+        ia & version;
+        if (magic != BrazilArchive::MAGIC) {
+            log<LOG_ERROR>(L"%1% || load_brazil_archive: bad magic in %2% (got 0x%3$08x, expected 0x%4$08x).")
+                % __func__ % path.c_str() % magic % (uint32_t)BrazilArchive::MAGIC;
+            return false;
+        }
+        if (version != BrazilArchive::VERSION) {
+            log<LOG_ERROR>(L"%1% || load_brazil_archive: version mismatch in %2% (got %3%, expected %4%).")
+                % __func__ % path.c_str() % (int)version % (int)BrazilArchive::VERSION;
+            return false;
+        }
+        ia & arc_out;
+    } catch (const std::exception &e) {
+        log<LOG_ERROR>(L"%1% || load_brazil_archive: deserialisation error: %2%") % __func__ % e.what();
+        return false;
+    }
+    log<LOG_INFO>(L"%1% || load_brazil_archive: read %2% (throws=%3%, n_cells=%4%).")
+        % __func__ % path.c_str() % (int)arc_out.per_throw_dchi2.size() % arc_out.n_cells;
     return true;
 }
 
@@ -2945,52 +3012,86 @@ AdaptiveFCResult run_adaptive_fc(
     }
 
     // ---- Mode: brazil -------------------------------------------------------
-    // Substage 1: full Brazil-band construction with NO top-up. For each of
-    // n_brazil_throws, generate one FC-style pseudo-experiment dataset,
-    // classify every cell against the bank, accumulate per-cell inclusion
-    // verdicts, and emit the median + ±1σ + ±2σ contour bands. Substage 2
-    // will add adaptive bank top-up for cells with uncertain inclusion.
+    // Additive Brazil-band construction. Each invocation:
+    //   1. Loads <tag>_brazil.bin if it exists and matches the bank footprint.
+    //   2. Generates --n-brazil-throws NEW throws, appending observables to the
+    //      archive (chi2_osc_global + per-cell dchi2_obs per throw).
+    //   3. Saves the merged archive.
+    //   4. Re-classifies ALL throws (old + new) against the current bank +
+    //      cl_targets to derive per-throw verdicts. The archive deliberately
+    //      stores only observables, not verdicts, so growing the bank or
+    //      changing CLs between brazil runs reuses existing throw data.
+    //   5. Aggregates per-cell inclusion fractions across all throws and emits
+    //      the brazil-band PDF + ROOT TGraphs.
+    //
+    // (Substage 2 — adaptive bank top-up triggered by undecidable verdicts —
+    // is a separate slice on top of this.)
     if (acfg.mode == AdaptiveFCMode::Brazil) {
         const std::string bank_in = acfg.output_tag + "_bank.bin";
+        const std::string brazil_bin = acfg.output_tag + "_brazil.bin";
         PEBank bank;
         if (!load_bank(bank, bank_in)) {
             log<LOG_ERROR>(L"%1% || brazil: failed to load %2%.") % __func__ % bank_in.c_str();
             return res;
         }
 
-        const int n_throws = std::max(1, acfg.n_brazil_throws);
+        const int n_new    = std::max(1, acfg.n_brazil_throws);
         const int n_cells  = bank.n_cells;
         const int n_cl     = (int)acfg.cl_targets.size();
         const int min_pes  = std::max(10, acfg.n_pe_min);
 
-        log<LOG_INFO>(L"%1% || brazil: %2% throws against bank %3% (%4% cells, %5% CLs, "
-                      L"min_pes_for_decision=%6%).")
-            % __func__ % n_throws % bank_in.c_str() % n_cells % n_cl % min_pes;
+        // (1) Load existing archive if compatible. Otherwise initialise fresh.
+        BrazilArchive arc;
+        arc.finest_nx = bank.finest_nx;
+        arc.finest_ny = bank.finest_ny;
+        arc.n_cells   = n_cells;
+        {
+            std::ifstream test(brazil_bin, std::ios::binary);
+            if (test.is_open()) {
+                test.close();
+                BrazilArchive existing;
+                if (load_brazil_archive(existing, brazil_bin)
+                    && existing.n_cells   == n_cells
+                    && existing.finest_nx == bank.finest_nx
+                    && existing.finest_ny == bank.finest_ny) {
+                    arc.per_throw_global_chi2 = std::move(existing.per_throw_global_chi2);
+                    arc.per_throw_dchi2       = std::move(existing.per_throw_dchi2);
+                    log<LOG_INFO>(L"%1% || brazil: loaded existing archive %2% (%3% prior throws).")
+                        % __func__ % brazil_bin.c_str() % (int)arc.per_throw_dchi2.size();
+                } else {
+                    log<LOG_WARNING>(L"%1% || brazil: existing archive %2% has mismatched footprint; ignoring and starting fresh.")
+                        % __func__ % brazil_bin.c_str();
+                }
+            }
+        }
+        const int n_existing = (int)arc.per_throw_dchi2.size();
+        const int n_total    = n_existing + n_new;
 
-        // Per-throw, per-CL, per-cell verdicts: 1 if included at this CL.
-        std::vector<std::vector<std::vector<uint8_t>>> per_throw_verdicts(
-            (size_t)n_throws,
-            std::vector<std::vector<uint8_t>>(
-                (size_t)n_cl, std::vector<uint8_t>((size_t)n_cells, 0)));
-        std::vector<std::vector<float>> per_throw_dchi2(
-            (size_t)n_throws, std::vector<float>((size_t)n_cells, 0.0f));
-        std::vector<float> per_throw_global_chi2((size_t)n_throws, 0.0f);
+        log<LOG_INFO>(L"%1% || brazil: bank=%2% (%3% cells, %4% CLs, min_pes=%5%); existing=%6% throws, new=%7%, total after=%8%.")
+            % __func__ % bank_in.c_str() % n_cells % n_cl % min_pes
+            % n_existing % n_new % n_total;
 
-        // Outer progress bar tracks throws (visible).
+        // Reserve room for new throws so we can index by absolute throw_idx.
+        arc.per_throw_global_chi2.resize((size_t)n_total, 0.0f);
+        arc.per_throw_dchi2.resize((size_t)n_total);
+        for (int t = n_existing; t < n_total; ++t) {
+            arc.per_throw_dchi2[(size_t)t].assign((size_t)n_cells, 0.0f);
+        }
+
+        // (2) Run new throws. Bar tracks just the NEW work this run.
         progress.finish_all(true);
         std::vector<std::pair<int, std::string>> bar_cfg;
-        bar_cfg.push_back({n_throws, "Brazil throws"});
+        bar_cfg.push_back({n_new, "Brazil throws (new)"});
         MultiPROgressBar brazil_progress(bar_cfg);
         brazil_progress.initialize_display();
         brazil_progress.start_display_thread();
 
-        // Silent inner bar passed to compute_asimov_obs (display thread never
-        // started — no terminal output from it).
         std::vector<std::pair<int, std::string>> silent_cfg;
         silent_cfg.push_back({n_cells, "_silent"});
         MultiPROgressBar silent_progress(silent_cfg);
 
-        for (int t = 0; t < n_throws; ++t) {
+        for (int t_new = 0; t_new < n_new; ++t_new) {
+            const int t_abs = n_existing + t_new;
             PROdata throw_data = generate_pseudo_experiment_data(
                 config, prop, systs, *model, fakeDataParams, acfg.binned, proseed);
 
@@ -3000,39 +3101,54 @@ AdaptiveFCResult run_adaptive_fc(
                 bank.cell_center_x, bank.cell_center_y,
                 proseed, nthreads, silent_progress, 0);
 
-            per_throw_global_chi2[(size_t)t] = obs.chi2_osc_global;
+            arc.per_throw_global_chi2[(size_t)t_abs] = obs.chi2_osc_global;
             for (int c = 0; c < n_cells; ++c) {
-                per_throw_dchi2[(size_t)t][(size_t)c] = obs.dchi2_obs[(size_t)c];
+                arc.per_throw_dchi2[(size_t)t_abs][(size_t)c] = obs.dchi2_obs[(size_t)c];
             }
 
-            auto verdicts = classify_against_bank(bank, obs, acfg.cl_targets, min_pes);
+            log<LOG_INFO>(L"%1% || brazil throw %2%/%3% (abs=%4%): chi2_osc_global=%5%.")
+                % __func__ % (t_new + 1) % n_new % t_abs % obs.chi2_osc_global;
+            brazil_progress.increment_bar(0);
+        }
+        brazil_progress.finish_all(true);
+
+        // (3) Persist the merged archive.
+        save_brazil_archive(arc, brazil_bin);
+
+        // (4) Re-classify ALL throws (existing + new) against the current bank.
+        //     Verdicts are derived afresh — archive stored only observables.
+        std::vector<std::vector<std::vector<uint8_t>>> per_throw_verdicts(
+            (size_t)n_total,
+            std::vector<std::vector<uint8_t>>(
+                (size_t)n_cl, std::vector<uint8_t>((size_t)n_cells, 0)));
+        for (int t = 0; t < n_total; ++t) {
+            AsimovObs obs_t;
+            obs_t.chi2_osc_global = arc.per_throw_global_chi2[(size_t)t];
+            obs_t.dchi2_obs       = arc.per_throw_dchi2[(size_t)t];
+            obs_t.chi2_syst.assign((size_t)n_cells, 0.0f); // not stored / not needed for classify
+            auto verdicts = classify_against_bank(bank, obs_t, acfg.cl_targets, min_pes);
             for (int k = 0; k < n_cl; ++k) {
                 for (int c = 0; c < n_cells; ++c) {
                     per_throw_verdicts[(size_t)t][(size_t)k][(size_t)c] =
                         verdicts[(size_t)k][(size_t)c].included ? 1 : 0;
                 }
             }
-
-            log<LOG_INFO>(L"%1% || brazil throw %2%/%3%: chi2_osc_global=%4%.")
-                % __func__ % (t + 1) % n_throws % obs.chi2_osc_global;
-            brazil_progress.increment_bar(0);
         }
-        brazil_progress.finish_all(true);
 
-        // Aggregate per-cell inclusion fractions.
+        // (5) Aggregate inclusion fractions across all throws.
         std::vector<std::vector<float>> inclusion_frac(
             (size_t)n_cl, std::vector<float>((size_t)n_cells, 0.0f));
         for (int k = 0; k < n_cl; ++k) {
             for (int c = 0; c < n_cells; ++c) {
                 int n_in = 0;
-                for (int t = 0; t < n_throws; ++t) {
+                for (int t = 0; t < n_total; ++t) {
                     if (per_throw_verdicts[(size_t)t][(size_t)k][(size_t)c]) ++n_in;
                 }
-                inclusion_frac[(size_t)k][(size_t)c] = (float)n_in / (float)n_throws;
+                inclusion_frac[(size_t)k][(size_t)c] = (float)n_in / (float)std::max(1, n_total);
             }
         }
 
-        // Output paths and axis labels.
+        // Outputs.
         const std::string brazil_pdf  = acfg.output_tag + "_brazil_band.pdf";
         const std::string brazil_root = acfg.output_tag + "_brazil.root";
         const bool xlog_axis = (xaxis_idx < model->is_log10.size()) ? model->is_log10[xaxis_idx] : acfg.logx;
@@ -3052,10 +3168,10 @@ AdaptiveFCResult run_adaptive_fc(
                               xlabel, ylabel, acfg.logx, acfg.logy,
                               xlog_axis, ylog_axis,
                               /*draw_truth_marker=*/ true,
-                              truth_x_phys, truth_y_phys, n_throws);
+                              truth_x_phys, truth_y_phys, n_total);
 
-        save_brazil_root(bank, per_throw_verdicts, per_throw_dchi2,
-                          per_throw_global_chi2, inclusion_frac, acfg.cl_targets,
+        save_brazil_root(bank, per_throw_verdicts, arc.per_throw_dchi2,
+                          arc.per_throw_global_chi2, inclusion_frac, acfg.cl_targets,
                           brazil_root, xlog_axis, ylog_axis);
 
         // Populate result.
@@ -3066,8 +3182,9 @@ AdaptiveFCResult run_adaptive_fc(
         res.total_pes_generated = total_pes;
         res.mean_pes_per_cell   = n_cells > 0 ? (float)total_pes / (float)n_cells : 0.0f;
 
-        log<LOG_INFO>(L"%1% || brazil done: %2% throws across %3% cells; outputs %4%, %5%.")
-            % __func__ % n_throws % n_cells % brazil_pdf.c_str() % brazil_root.c_str();
+        log<LOG_INFO>(L"%1% || brazil done: %2% new + %3% existing = %4% total throws across %5% cells; outputs %6%, %7%, %8%.")
+            % __func__ % n_new % n_existing % n_total % n_cells
+            % brazil_bin.c_str() % brazil_pdf.c_str() % brazil_root.c_str();
         return res;
     }
 

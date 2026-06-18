@@ -304,6 +304,36 @@ namespace PROfit {
     bool load_bank(PEBank &bank_out, const std::string &path);
 
     /**
+     * @brief Per-throw observables persisted from --mode brazil runs.
+     *
+     * Stores only the *physics observables* per throw (the global chi^2 and
+     * the per-cell dchi2_obs). Verdicts (included / excluded / undecidable)
+     * are NOT stored — they're recomputed at use time from these observables
+     * against the current bank's empirical alpha-quantile and the current
+     * `cl_targets`. That makes the archive bank-agnostic and CL-agnostic:
+     * grow the bank or change CLs between brazil runs and the existing
+     * throws are reused without regenerating.
+     *
+     * On-disk: <tag>_brazil.bin, magic + version + serialised struct.
+     * Re-running --mode brazil --n-brazil-throws N appends N more throws
+     * to whatever's already there (mirrors PEBank additive top-up).
+     */
+    struct BrazilArchive {
+        static constexpr uint32_t MAGIC = 0x41464252;  ///< 'AFBR'
+        static constexpr uint16_t VERSION = 1;
+        // Footprint sanity check vs. the current bank at load time.
+        int finest_nx = 0;
+        int finest_ny = 0;
+        int n_cells   = 0;
+        // Per-throw data. Outer index = throw, inner = cell.
+        std::vector<float> per_throw_global_chi2;        ///< chi2_osc for each throw's global fit.
+        std::vector<std::vector<float>> per_throw_dchi2; ///< dchi2_obs per cell, per throw.
+    };
+
+    bool save_brazil_archive(const BrazilArchive &arc, const std::string &path);
+    bool load_brazil_archive(BrazilArchive &arc_out, const std::string &path);
+
+    /**
      * @brief Output bundle from run_adaptive_fc.
      */
     struct AdaptiveFCResult {
