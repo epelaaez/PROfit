@@ -2701,35 +2701,53 @@ static void plot_brazil_band_pdf(
         auto segs_q84  = extract_contour_graphs(h_incl, 0.84);
         auto segs_q975 = extract_contour_graphs(h_incl, 0.975);
 
-        // (1) Brazil-band fills via per-bin TBox at upsampled resolution.
-        //   TGraph::Draw("F") only fills closed polygons correctly; FC
-        //   contours are typically OPEN (extend to plot edges), which ROOT
-        //   "closes" with a straight line between endpoints, creating wedge
-        //   artifacts. Per-bin painting bypasses this entirely: classify
-        //   each bin into a region by its inclusion value and paint.
-        //   At upsample=4 (256×256), individual bins are sub-pixel at print
-        //   resolution — visually indistinguishable from a vector fill.
+        // (1) Brazil-band fills via per-row run-length-encoded TBoxes.
+        //   Naïve per-bin TBox at 256×256 generates ~65k Draw() calls per
+        //   page — ROOT's TPad primitive bookkeeping hangs at that scale
+        //   during c.Print(). RLE collapses runs of identical-color bins
+        //   in each row into a single wide TBox. For smooth bands that's
+        //   typically 4–8 boxes per row × 256 rows ≈ 1k–2k boxes per page,
+        //   well within ROOT's comfort zone. Visually identical at print
+        //   resolution because adjacent rows share their y-edges, so the
+        //   collapsed-rows pattern looks like contiguous bands.
+        //
+        //   Five-region classification of P(included):
+        //       v < 0.025 or v > 0.975          → outside bands (no fill)
+        //       0.025 ≤ v < 0.16, 0.84 < v ≤ 0.975 → ±2σ outer/inner (yellow)
+        //       0.16 ≤ v ≤ 0.84                 → ±1σ (green)
         //   The smooth contour outlines drawn in step (2) then trace the
-        //   real boundaries on top.
+        //   real boundaries on top, hiding any sub-pixel run-edge artefacts.
         const int W_up = h_incl->GetNbinsX();
         const int H_up = h_incl->GetNbinsY();
-        for (int i = 0; i < W_up; ++i) {
-            const float xlo = (float)h_incl->GetXaxis()->GetBinLowEdge(i + 1);
-            const float xhi = (float)h_incl->GetXaxis()->GetBinUpEdge(i + 1);
-            for (int j = 0; j < H_up; ++j) {
-                const float v = (float)h_incl->GetBinContent(i + 1, j + 1);
-                int color = -1;
-                if      (v >= 0.025f && v < 0.16f)   color = brazil_yellow;
-                else if (v >= 0.16f  && v <= 0.84f)  color = brazil_green;
-                else if (v > 0.84f   && v <= 0.975f) color = brazil_yellow;
-                if (color < 0) continue;
-                const float ylo = (float)h_incl->GetYaxis()->GetBinLowEdge(j + 1);
-                const float yhi = (float)h_incl->GetYaxis()->GetBinUpEdge(j + 1);
-                TBox *box = new TBox(xlo, ylo, xhi, yhi);
-                box->SetFillColor(color);
-                box->SetLineColor(color);
-                box->SetLineWidth(0);
-                box->Draw();
+        auto color_for_v = [&](float v) -> int {
+            if      (v >= 0.025f && v < 0.16f)   return brazil_yellow;
+            else if (v >= 0.16f  && v <= 0.84f)  return brazil_green;
+            else if (v > 0.84f   && v <= 0.975f) return brazil_yellow;
+            return -1; // outside bands
+        };
+        for (int j = 0; j < H_up; ++j) {
+            const float ylo = (float)h_incl->GetYaxis()->GetBinLowEdge(j + 1);
+            const float yhi = (float)h_incl->GetYaxis()->GetBinUpEdge(j + 1);
+            int run_color = -1;  // -1 means "no active fillable run"
+            int run_start = 0;
+            for (int i = 0; i <= W_up; ++i) {
+                // i == W_up forces a final emit of any active run.
+                const int color = (i < W_up)
+                    ? color_for_v((float)h_incl->GetBinContent(i + 1, j + 1))
+                    : -2; // sentinel: not equal to any valid color
+                if (color != run_color) {
+                    if (run_color >= 0) {
+                        const float xlo = (float)h_incl->GetXaxis()->GetBinLowEdge(run_start + 1);
+                        const float xhi = (float)h_incl->GetXaxis()->GetBinUpEdge(i);
+                        TBox *box = new TBox(xlo, ylo, xhi, yhi);
+                        box->SetFillColor(run_color);
+                        box->SetLineColor(run_color);
+                        box->SetLineWidth(0);
+                        box->Draw();
+                    }
+                    run_color = color;
+                    run_start = i;
+                }
             }
         }
 
