@@ -2541,33 +2541,48 @@ static void save_asimov_root(
 
 // Build a TH2D of per-cell inclusion fractions, IDW-interpolated between
 // cell centers. Same IDW algorithm as build_fc_deviation_th2d, but the
-// per-cell values are inclusion fractions (0..1).
+// per-cell values are inclusion fractions in [0, 1].
+//
+// `upsample` (>=1, default 1) multiplies the TH2D resolution per axis on top
+// of the bank's finest grid. Higher resolution → smoother marching-squares
+// contour polylines extracted afterwards. Brazil-band plotting uses upsample
+// 4 (256×256 from a 64×64 finest grid). IDW cost scales linearly with W*H
+// and n_samples, so the 16× extra bins are still sub-second.
+//
+// Cells whose inclusion_frac is < 0 (the "permanently undecidable" sentinel)
+// are skipped from the sample set — IDW then fills those locations from the
+// nearest decided cells, which is the correct behaviour for the deep-basin
+// region (no PEs available → the band is genuinely the "inside the FC
+// contour" interior).
 static TH2D *build_inclusion_th2d(const PEBank &bank,
                                   const std::vector<float> &inclusion_frac_per_cell,
                                   const AxisXform &A,
-                                  const std::string &name)
+                                  const std::string &name,
+                                  int upsample = 1)
 {
-    const int W = bank.finest_nx, H = bank.finest_ny;
+    const int up = std::max(1, upsample);
+    const int W = bank.finest_nx * up;
+    const int H = bank.finest_ny * up;
+
+    // Bin edges at the upsampled resolution, same physical bounds.
+    AxisXform A_up{A.x_lo, A.x_hi, A.y_lo, A.y_hi, W, H, A.xlog, A.ylog};
     std::vector<double> ex(W + 1), ey(H + 1);
-    for (int i = 0; i <= W; ++i) ex[(size_t)i] = (double)A.i_to_x(i);
-    for (int j = 0; j <= H; ++j) ey[(size_t)j] = (double)A.j_to_y(j);
+    for (int i = 0; i <= W; ++i) ex[(size_t)i] = (double)A_up.i_to_x(i);
+    for (int j = 0; j <= H; ++j) ey[(size_t)j] = (double)A_up.j_to_y(j);
     TH2D *h = new TH2D(name.c_str(), ";;;P(included)", W, ex.data(), H, ey.data());
 
-    // Skip cells whose inclusion fraction is the sentinel (< 0): those are
-    // permanently undecidable (bank too sparse, no throw could classify).
-    // IDW then fills their finest-grid bins from the nearest decided cells,
-    // which is the correct "deep basin = inside the contour" behaviour and
-    // eliminates the phantom contour ring at the AMR refined↔baseline edge.
+    // Collect samples at upsampled-grid sample coordinates (original cell
+    // centers scaled by `up`). Skip undecidable cells.
     struct Sample { float cx, cy, val; };
     std::vector<Sample> samples;
     samples.reserve((size_t)bank.n_cells);
     for (int idx = 0; idx < bank.n_cells; ++idx) {
         const float v = inclusion_frac_per_cell[(size_t)idx];
-        if (v < 0.0f) continue; // undecidable — skip
-        const float fcx = (float)bank.cell_i_bl[(size_t)idx]
-                        + 0.5f * (float)bank.cell_step[(size_t)idx];
-        const float fcy = (float)bank.cell_j_bl[(size_t)idx]
-                        + 0.5f * (float)bank.cell_step[(size_t)idx];
+        if (v < 0.0f) continue;
+        const float fcx = ((float)bank.cell_i_bl[(size_t)idx]
+                        + 0.5f * (float)bank.cell_step[(size_t)idx]) * (float)up;
+        const float fcy = ((float)bank.cell_j_bl[(size_t)idx]
+                        + 0.5f * (float)bank.cell_step[(size_t)idx]) * (float)up;
         samples.push_back({fcx, fcy, v});
     }
     if (samples.empty()) return h;
@@ -2671,46 +2686,59 @@ static void plot_brazil_band_pdf(
         frame->GetYaxis()->SetTitleSize(0.045);
         frame->Draw();
 
+        // High-res IDW surface so marching-squares contours are smooth.
+        // 4× upsampling → 256×256 from a 64×64 finest grid (sub-second cost).
         TH2D *h_incl = build_inclusion_th2d(bank, inclusion_frac[k], A,
-                                            Form("incl_cl%zu", k));
+                                            Form("incl_cl%zu", k), /*upsample=*/ 4);
 
-        // (1) Extract median contour (P=0.5).
-        auto median_segs = extract_contour_graphs(h_incl, 0.5);
+        // Extract each contour level as TGraphs once and reuse for both the
+        // filled band and the outline overlay. extract_contour_graphs mutates
+        // h_incl's contour level on each call, so we extract everything
+        // up-front before any drawing.
+        auto segs_q025 = extract_contour_graphs(h_incl, 0.025);
+        auto segs_q16  = extract_contour_graphs(h_incl, 0.16);
+        auto segs_med  = extract_contour_graphs(h_incl, 0.50);
+        auto segs_q84  = extract_contour_graphs(h_incl, 0.84);
+        auto segs_q975 = extract_contour_graphs(h_incl, 0.975);
 
-        // (2) Paint the Brazil bands as filled TBoxes per finest-grid bin.
-        //     This bypasses ROOT's CONT3/CONT0/palette quirks (CONT3 only draws
-        //     contour lines, CONT0 can't always pick up a custom palette
-        //     reliably when called with "SAME"). 5 regions for 4 thresholds:
-        //       R0 (P<0.025):       outside       -> not drawn (white background)
-        //       R1 (0.025 <= P < 0.16):  outer ±2σ -> brazil_yellow
-        //       R2 (0.16 <= P <= 0.84):  ±1σ band  -> brazil_green
-        //       R3 (0.84 < P <= 0.975):  inner ±2σ -> brazil_yellow
-        //       R4 (P > 0.975):       deep inside  -> not drawn (white)
-        const int W = bank.finest_nx, H = bank.finest_ny;
-        for (int i = 0; i < W; ++i) {
-            const float xlo = A.i_to_x(i);
-            const float xhi = A.i_to_x(i + 1);
-            for (int j = 0; j < H; ++j) {
-                const float v = (float)h_incl->GetBinContent(i + 1, j + 1);
-                int color = -1;
-                if      (v >= 0.025f && v < 0.16f)  color = brazil_yellow;
-                else if (v >= 0.16f  && v <= 0.84f) color = brazil_green;
-                else if (v > 0.84f   && v <= 0.975f) color = brazil_yellow;
-                if (color < 0) continue;  // white regions: skip
-                const float ylo = A.j_to_y(j);
-                const float yhi = A.j_to_y(j + 1);
-                TBox *box = new TBox(xlo, ylo, xhi, yhi);
-                box->SetFillColor(color);
-                box->SetLineColor(color);  // no visible border between adjacent bins
-                box->SetLineWidth(0);
-                box->Draw();
+        // (1) Brazil-band fills via TGraph polygons, back-to-front layering:
+        //   Yellow inside P=0.025  → covers everything inside the ±2σ outer.
+        //   Green  inside P=0.16   → overlays inner part with green (±1σ).
+        //   Yellow inside P=0.84   → overlays inner part of green back to yellow.
+        //   White  inside P=0.975  → erases the deep interior to "outside the bands".
+        // Result: yellow rim 0.025–0.16, green ring 0.16–0.84, yellow rim 0.84–0.975.
+        auto fill_at = [&](std::vector<TGraph*> &segs, int color) {
+            for (TGraph *g : segs) {
+                g->SetFillColor(color);
+                g->SetLineColor(color); // hide segment seams
+                g->SetLineWidth(0);
+                g->Draw("F SAME");
             }
-        }
+        };
+        fill_at(segs_q025, brazil_yellow);
+        fill_at(segs_q16,  brazil_green);
+        fill_at(segs_q84,  brazil_yellow);
+        fill_at(segs_q975, kWhite);
 
-        // (3) Median dashed line on top.
-        for (TGraph *g : median_segs) {
+        // (2) Thin black outlines on the band boundaries. The same extracted
+        // TGraphs are restyled (line attrs swapped) and redrawn as polylines.
+        auto outline_at = [&](std::vector<TGraph*> &segs) {
+            for (TGraph *g : segs) {
+                g->SetLineColor(kBlack);
+                g->SetLineWidth(1);
+                g->SetLineStyle(1); // solid
+                g->Draw("L SAME");
+            }
+        };
+        outline_at(segs_q025);
+        outline_at(segs_q16);
+        outline_at(segs_q84);
+        outline_at(segs_q975);
+
+        // (3) Median dashed black line on top.
+        for (TGraph *g : segs_med) {
             g->SetLineColor(kBlack);
-            g->SetLineStyle(2);  // dashed
+            g->SetLineStyle(2);
             g->SetLineWidth(2);
             g->Draw("L SAME");
         }
@@ -2761,7 +2789,11 @@ static void plot_brazil_band_pdf(
         c.Print(filename.c_str(), "pdf");
 
         delete h_incl;
-        for (TGraph *g : median_segs) delete g;
+        for (TGraph *g : segs_q025) delete g;
+        for (TGraph *g : segs_q16)  delete g;
+        for (TGraph *g : segs_med)  delete g;
+        for (TGraph *g : segs_q84)  delete g;
+        for (TGraph *g : segs_q975) delete g;
     }
 
     c.Print((filename + "]").c_str(), "pdf");
