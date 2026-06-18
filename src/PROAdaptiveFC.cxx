@@ -2936,9 +2936,9 @@ AdaptiveFCResult run_adaptive_fc(
         log<LOG_INFO>(L"%1% || asimov: classifying %2% cells against bank %3%; data nbins=%4%.")
             % __func__ % bank.n_cells % bank_in.c_str() % (int)asimov_data.Spec().size();
 
-        // Stop the outer throws progress bar (it was set up by PROfit.cxx for
-        // a phase we don't run) and launch a cells bar for the per-cell fits.
-        progress.finish_all(true);
+        // Outer throws bar wasn't displayed in asimov mode (see PROfit.cxx),
+        // so finish_all(false) — no display refresh on a never-shown bar.
+        progress.finish_all(false);
         std::vector<std::pair<int, std::string>> ab_cfg;
         ab_cfg.push_back({bank.n_cells, "AFC asimov cells"});
         MultiPROgressBar asimov_progress(ab_cfg);
@@ -3078,8 +3078,9 @@ AdaptiveFCResult run_adaptive_fc(
             arc.per_throw_dchi2[(size_t)t].assign((size_t)n_cells, 0.0f);
         }
 
-        // (2) Run new throws. Bar tracks just the NEW work this run.
-        progress.finish_all(true);
+        // (2) Run new throws. Outer bar wasn't displayed for brazil mode
+        // (see PROfit.cxx), so finish_all(false) — no spurious refresh.
+        progress.finish_all(false);
         std::vector<std::pair<int, std::string>> bar_cfg;
         bar_cfg.push_back({n_new, "Brazil throws (new)"});
         MultiPROgressBar brazil_progress(bar_cfg);
@@ -3228,7 +3229,7 @@ AdaptiveFCResult run_adaptive_fc(
         if (!load_mesh(mm, mesh_path)) {
             log<LOG_ERROR>(L"%1% || init-bank: required mesh artifact %2% not found. "
                            L"Run --mode build-mesh first.") % __func__ % mesh_path.c_str();
-            progress.finish_all(true);
+            progress.finish_all(false);
             return res;
         }
         log<LOG_INFO>(L"%1% || init-bank: loaded meta-mesh from %2% (cells=%3%).")
@@ -3239,7 +3240,7 @@ AdaptiveFCResult run_adaptive_fc(
 
         if (mm.cells.empty()) {
             log<LOG_WARNING>(L"%1% || empty meta-mesh; nothing to bank.") % __func__;
-            progress.finish_all(true);
+            progress.finish_all(false);
             return res;
         }
 
@@ -3305,11 +3306,11 @@ AdaptiveFCResult run_adaptive_fc(
             }
         }
 
-        // Stop the throws progress bar (never used in init-bank). Launch a
+        // Stop the throws progress bar (never displayed in init-bank). Launch a
         // PE-counted bar: bar size = total PEs to be added across all cells.
         // Updating per-PE (rather than per-cell) makes the bar smooth on
         // large meshes where each cell takes minutes.
-        progress.finish_all(true);
+        progress.finish_all(false);
         int total_pes_to_add = 0;
         for (int c = 0; c < bank.n_cells; ++c) {
             const int level = bank.cell_level[(size_t)c];
@@ -3374,7 +3375,7 @@ AdaptiveFCResult run_adaptive_fc(
     // Brazil / Classify / unknown — slice 2c+ territory.
     log<LOG_ERROR>(L"%1% || mode '%2%' is not yet implemented in slice 2b.")
         % __func__ % (int)acfg.mode;
-    progress.finish_all(true);
+    progress.finish_all(false);
     return res;
 }
 

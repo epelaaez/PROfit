@@ -2839,18 +2839,31 @@ int main(int argc, char* argv[])
         acfg.n_brazil_throws = afc_n_brazil_throws;
         acfg.roi_band = afc_roi_band;
 
-        // One progress bar tracking the throw loop.
+        // Outer "AFC throws" bar is only meaningful for build-mesh (the prepass
+        // throws each tick this bar via generate_throws). Other modes (init-bank,
+        // print-bank, asimov, brazil) create their own dedicated bars sized for
+        // the work they actually do — they don't use this one. Starting its
+        // display in those modes leaves "AFC throws X/N_throws" frozen above
+        // the real bar and looks like overcounting. So: skip display for
+        // non-BuildMesh and skip the round-up at finish.
+        const bool needs_outer_throws_bar =
+            (acfg.mode == PROfit::AdaptiveFCMode::BuildMesh);
         std::vector<std::pair<int, std::string>> afc_PB_configs;
-        afc_PB_configs.push_back({acfg.n_throws, "AFC throws"});
+        afc_PB_configs.push_back({
+            needs_outer_throws_bar ? acfg.n_throws : 1,
+            "AFC throws"});
         MultiPROgressBar afc_progress(afc_PB_configs);
-        afc_progress.initialize_display();
-        afc_progress.start_display_thread();
+        if (needs_outer_throws_bar) {
+            afc_progress.initialize_display();
+            afc_progress.start_display_thread();
+        }
 
         PROfit::AdaptiveFCResult ares = PROfit::run_adaptive_fc(
             config, prop, variable_systs[config.i_prime], scanFitConfig,
             myseed, fakeDataParams, data, acfg, nthread, afc_progress);
 
-        afc_progress.finish_all();
+        if (needs_outer_throws_bar) afc_progress.finish_all();
+        else                         afc_progress.finish_all(false);
         log<LOG_INFO>(L"%1% || fc-adaptive done: throws=%2%, meta_cells=%3% (baseline=%4%, refined=%5%), "
                       L"diag=%6%, bank=%7% (pes=%8%, mean/cell=%9%, capped=%10%).")
             % __func__ % ares.n_throws_done % ares.n_meta_cells
