@@ -1060,6 +1060,17 @@ int main(int argc, char* argv[])
                               L"(splines thrown=%3%, cov bins thrown=%4%).")
                     % __func__ % io % (int)nspline % nbins_coll;
 
+                // List the thrown spline pulls (in sigma) that produced this pseudo-experiment.
+                std::string thrown_str;
+                for (size_t i = 0; i < nspline; ++i) {
+                    const std::string sn = i < variable_systs[io].spline_names.size()
+                        ? variable_systs[io].spline_names[i] : ("spline#" + std::to_string(i));
+                    thrown_str += sn + "=" + std::to_string(throws((int)(i + nphys)));
+                    if (i + 1 < nspline) thrown_str += ", ";
+                }
+                log<LOG_INFO>(L"%1% || Pseudo-experiment thrown spline pulls (sigma): %2%")
+                    % __func__ % thrown_str.c_str();
+
                 variable_data.push_back(PROdata(newSpec.Spec(), newSpec.Error()));
                 continue;
             }
