@@ -1440,6 +1440,22 @@ PROfile::PROfile(const PROconfig &config, const PROsyst &systs, const PROmodel &
         log<LOG_DEBUG>(L"%1% || Bfvalues : %2% %3% ") % __func__ % count % bfvalues[count];
         log<LOG_DEBUG>(L"%1% || RangeValues : %2% %3% %4% ") % __func__ % count % values1_down[count] % values1_up[count];
         log<LOG_DEBUG>(L"%1% || ErrValues : %2% %3% %4% ") % __func__ % count % values1_errdown[count] % values1_errup[count];
+
+        // Greppable per-parameter best-fit and profiled 1-sigma interval (raw names
+        // and values, in scan space -- physics params are log10), so the contents of
+        // _1sigma_detailed.pdf can be reproduced outside PROfit. Tag: [PROfile1sig]
+        std::string pname;
+        const char *ptype;
+        if (with_osc && count < metric.GetModel().nparams) {
+            pname = metric.GetModel().param_names[count];
+            ptype = "phys";
+        } else {
+            pname = metric.GetSysts().spline_names[with_osc ? count - metric.GetModel().nparams : count];
+            ptype = "syst";
+        }
+        log<LOG_INFO>(L"%1% || [PROfile1sig] type=%2% param=%3% BF=%4% lo=%5% hi=%6% errlo=%7% errhi=%8%")
+            % __func__ % ptype % pname.c_str() % tmp[0] % tmp[1] % tmp[2]
+            % std::abs(tmp[0] - tmp[1]) % std::abs(tmp[2] - tmp[0]);
         if(twosig){
             std::vector<float> tmp2 = findMinAndBounds(g.get(),4.0,lo, hi);
             values2_down.push_back(abs(tmp2[1]-tmp[0]));
