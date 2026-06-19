@@ -698,17 +698,46 @@ static void draw_amr_mesh_on_canvas(TCanvas &c,
     frame->Draw();
 
     const int level_palette[6] = { kAzure - 9, kAzure - 4, kAzure + 1, kViolet - 4, kViolet + 1, kRed + 1 };
-    for (const auto &leaf : amr.leaves) {
-        const float xlo = A.i_to_x(leaf.i_bl);
-        const float xhi = A.i_to_x(leaf.i_bl + leaf.step);
-        const float ylo = A.j_to_y(leaf.j_bl);
-        const float yhi = A.j_to_y(leaf.j_bl + leaf.step);
-        TBox *box = new TBox(xlo, ylo, xhi, yhi);
-        const int idx = std::min(leaf.level, 5);
-        box->SetFillColorAlpha(level_palette[idx], 0.25f);
-        box->SetLineColor(kBlack);
-        box->SetLineWidth(1);
-        box->Draw();
+    // Draw shallowest-first so deeper (smaller, more numerous) cells layer
+    // cleanly over shared edges of their parent. With cells of mixed sizes,
+    // a deep cell's left edge can sit on a shallow cell's interior; without
+    // ordering, the painter clobbers the deeper border.
+    std::vector<const PROmesh::MeshCell*> sorted_leaves;
+    sorted_leaves.reserve(amr.leaves.size());
+    for (const auto &leaf : amr.leaves) sorted_leaves.push_back(&leaf);
+    std::sort(sorted_leaves.begin(), sorted_leaves.end(),
+              [](const PROmesh::MeshCell *a, const PROmesh::MeshCell *b){
+                  return a->level < b->level;
+              });
+    // Two-TBox-per-leaf rendering: one for the translucent level fill, one
+    // for the opaque black outline. The single-TBox path (set fill + line,
+    // call Draw()) drops the border in this ROOT build whenever the fill
+    // uses SetFillColorAlpha — Draw() short-circuits to "f only" mode.
+    // Splitting into a Draw("F") fill followed by a Draw("L") outline with
+    // SetFillStyle(0) forces both to render unconditionally.
+    for (const PROmesh::MeshCell *leaf : sorted_leaves) {
+        const float xlo = A.i_to_x(leaf->i_bl);
+        const float xhi = A.i_to_x(leaf->i_bl + leaf->step);
+        const float ylo = A.j_to_y(leaf->j_bl);
+        const float yhi = A.j_to_y(leaf->j_bl + leaf->step);
+        const int idx = std::min(leaf->level, 5);
+
+        // (a) Translucent level fill — explicit "F" so it never draws a line.
+        TBox *fill = new TBox(xlo, ylo, xhi, yhi);
+        fill->SetFillColorAlpha(level_palette[idx], 0.20f);
+        fill->SetLineColor(level_palette[idx]); // border matches fill if rendered
+        fill->SetLineWidth(0);
+        fill->Draw("F");
+
+        // (b) Outline-only TBox with SetFillStyle(0) — guaranteed no fill, so
+        // Draw("L") never blends with the level color and the black border
+        // is opaque regardless of the underlying fill's alpha.
+        TBox *border = new TBox(xlo, ylo, xhi, yhi);
+        border->SetFillStyle(0);
+        border->SetLineColor(kGray + 1);
+        border->SetLineWidth(1);
+        border->SetLineStyle(1);
+        border->Draw("L");
     }
 
     const int contour_colors[5] = { kRed + 1, kOrange + 7, kGreen + 2, kMagenta, kBlack };
