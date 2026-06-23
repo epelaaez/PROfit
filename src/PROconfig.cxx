@@ -1661,16 +1661,25 @@ int PROconfig::LoadFromXML(const std::string &filename){
             }
 
 
+            // variable_index is optional: oscillation models require it (it maps the parameter
+            // to a kinematic PROpeller variable, e.g. "L/E"), but normalization models such as
+            // template_fit name a subchannel instead and carry no kinematic variable, so a
+            // missing variable_index defaults to -1 rather than being a hard error.
             const char* model_parameter_index= pModelParam->Attribute("variable_index");
             if(model_parameter_index==NULL){
-                log<LOG_ERROR>(L"%1% || ERROR: Model Params need a variable index in xml.@ line %2% in %3% ") % __func__ % __LINE__  % __FILE__;
-                log<LOG_ERROR>(L"Terminating.");
-                exit(EXIT_FAILURE);
+                m_model_parameter_index.push_back(-1);
             }else{
                 m_model_parameter_index.push_back(strtod(model_parameter_index, &end));
             }
 
-            log<LOG_DEBUG>(L"%1% || Model Param Name :  %2% and index %3% ") % __func__ % m_model_parameter_names.back().c_str() % m_model_parameter_index.back()  ;
+            // Optional scale bounds (used by template_fit-style normalization models). Default
+            // to [0, 10] when absent so a generic <parameter> tag without them is still valid.
+            const char* model_parameter_min = pModelParam->Attribute("min");
+            const char* model_parameter_max = pModelParam->Attribute("max");
+            m_model_parameter_min.push_back(model_parameter_min==NULL ? 0.0f  : (float)strtod(model_parameter_min, &end));
+            m_model_parameter_max.push_back(model_parameter_max==NULL ? 10.0f : (float)strtod(model_parameter_max, &end));
+
+            log<LOG_DEBUG>(L"%1% || Model Param Name :  %2% and index %3% (min %4%, max %5%) ") % __func__ % m_model_parameter_names.back().c_str() % m_model_parameter_index.back() % m_model_parameter_min.back() % m_model_parameter_max.back()  ;
             m_model_parameter_map[m_model_parameter_names.back()]=m_model_parameter_index.back();
             pModelParam = pModelParam->NextSiblingElement("parameter");
         }
