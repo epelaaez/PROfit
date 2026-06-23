@@ -2588,10 +2588,10 @@ int main(int argc, char* argv[])
 
             for(const auto& v: dchi2s) for(const auto& dchi2: v) flattened_dchi2s.push_back(dchi2);
             std::sort(flattened_dchi2s.begin(), flattened_dchi2s.end());
-            writeVectorToFile(pvalue_file, flattened_dchi2s);
+            writeVectorToFile(&pvalue_file, flattened_dchi2s);
 	}
 	else if(!save_null_dist){
-	    flattened_dchi2s = readVectorFromFile(pvalue_file);
+	    flattened_dchi2s = readVectorFromFile(&pvalue_file);
 	}
 	log<LOG_INFO>(L"%1% || 90%% Feldman-Cousins delta chi2 after throwing %2% universes is %3%") 
             % __func__ % nuniv % flattened_dchi2s[0.9*flattened_dchi2s.size()];
