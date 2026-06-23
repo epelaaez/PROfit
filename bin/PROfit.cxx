@@ -376,6 +376,7 @@ int main(int argc, char* argv[])
     PlotBounds pbounds; 
     size_t nuniv;
     bool gof_pvalue = false;
+    bool reuse_dist = false;
     bool pvalue = false;
 
 
