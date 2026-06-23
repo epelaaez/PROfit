@@ -479,6 +479,7 @@ int main(int argc, char* argv[])
     CLI::App *profc_command = app.add_subcommand("fc", "Run Feldman-Cousins for this injected signal");
     profc_command->add_option("-u,--universes", nuniv, "Number of Feldman Cousins universes to throw")->default_val(1000);
     profc_command->add_flag("--gof", gof_pvalue, "Get GOF pvalue");
+    profc_command->add_flag("--reuse", reuse_dist, "Reuse existing chi2_null.root file for pvalue calculation.");
     profc_command->add_flag("--pval", pvalue, "Get FC pvalue")->excludes("--gof");
 
     //PROglobal
@@ -2558,9 +2559,9 @@ int main(int argc, char* argv[])
         fc_progress.start_display_thread(); 
 
 	bool save_null_dist = true;
-        if(pvalue){
-	    std::string pvalue_file = "chi2_null.root";
-            TFile* file = TFile::Open(filename.c_str(), "READ");
+	std::string pvalue_file = "chi2_null.root";
+        if(reuse_dist){
+            TFile* file = TFile::Open(pvalue_file.c_str(), "READ");
             if (!file) {
                 save_null_dist = true; 
             }
@@ -2570,7 +2571,7 @@ int main(int argc, char* argv[])
 	}
 
         std::vector<float> flattened_dchi2s;
-        if(save_null_dist || !pvalue){
+        if(save_null_dist){
             for(size_t i = 0; i < FCthreads; i++) {
                 dchi2s.emplace_back();
                 outs.emplace_back();
@@ -2588,10 +2589,10 @@ int main(int argc, char* argv[])
 
             for(const auto& v: dchi2s) for(const auto& dchi2: v) flattened_dchi2s.push_back(dchi2);
             std::sort(flattened_dchi2s.begin(), flattened_dchi2s.end());
-            writeVectorToFile(&pvalue_file, flattened_dchi2s);
+            writeVectorToFile(pvalue_file, flattened_dchi2s);
 	}
 	else if(!save_null_dist){
-	    flattened_dchi2s = readVectorFromFile(&pvalue_file);
+	    flattened_dchi2s = readVectorFromFile(pvalue_file);
 	}
 	log<LOG_INFO>(L"%1% || 90%% Feldman-Cousins delta chi2 after throwing %2% universes is %3%") 
             % __func__ % nuniv % flattened_dchi2s[0.9*flattened_dchi2s.size()];
