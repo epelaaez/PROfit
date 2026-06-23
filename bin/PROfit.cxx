@@ -49,6 +49,77 @@
 
 using namespace PROfit;
 
+
+void writeVectorToFile(const std::string& filename, const std::vector<float>& dataVector) {
+    // 1. Create/Overwrite the specified ROOT file
+    TFile* outFile = TFile::Open(filename.c_str(), "RECREATE");
+    if (!outFile || outFile->IsZombie()) {
+        std::cerr << "Error: Could not create file " << filename << std::endl;
+        return;
+    }
+    
+    // 2. Create the TTree
+    TTree* tree = new TTree("myTree", "A tree with a vector");
+    
+    // 3. ROOT needs a pointer to the vector. 
+    // Since dataVector is const&, we make a local pointer to a non-const copy 
+    // or simply point to a local copy to ensure safety.
+    std::vector<float> localCopy = dataVector;
+    std::vector<float>* vecPtr = &localCopy;
+    
+    // 4. Create the branch pointing to our pointer address
+    tree->Branch("floatVector", &vecPtr);
+    
+    // 5. Fill the tree with the vector data (creates 1 entry containing the entire vector)
+    tree->Fill();
+    
+    // 6. Write and clean up
+    outFile->Write();
+    outFile->Close();
+    delete outFile;
+    
+    std::cout << "Successfully wrote vector of size " << dataVector.size() << " to " << filename << std::endl;
+}
+
+std::vector<float> readVectorFromFile(const std::string& filename) {
+    std::vector<float> resultVector;
+
+    // 1. Open the specified file
+    TFile* inFile = TFile::Open(filename.c_str(), "READ");
+    if (!inFile || inFile->IsZombie()) {
+        std::cerr << "Error: Could not open file " << filename << std::endl;
+        return resultVector; // Returns empty vector
+    }
+    
+    // 2. Get the TTree
+    TTree* tree = nullptr;
+    inFile->GetObject("myTree", tree);
+    if (!tree) {
+        std::cerr << "Error: Could not find TTree 'myTree' in " << filename << std::endl;
+        inFile->Close();
+        delete inFile;
+        return resultVector;
+    }
+    
+    // 3. Set up the pointer for ROOT tracking
+    std::vector<float>* vecPtr = nullptr;
+    tree->SetBranchAddress("floatVector", &vecPtr);
+    
+    // 4. Read the first entry (assuming 1 entry containing your saved vector)
+    if (tree->GetEntries() > 0) {
+        tree->GetEntry(0); 
+        if (vecPtr) {
+            resultVector = *vecPtr; // Copy the data to our return vector
+        }
+    }
+    
+    // 5. Clean up ROOT memory
+    inFile->Close();
+    delete inFile;
+    
+    return resultVector;
+}
+
 // Unique key for DetVar propeller maps (names can be reused across sections).
 static std::string DetVarKey(const PROconfig& config, size_t file_index) {
     const auto& dv = config.m_detvar_files[file_index];
@@ -2486,27 +2557,45 @@ int main(int argc, char* argv[])
         fc_progress.initialize_display();
         fc_progress.start_display_thread(); 
 
-
-        for(size_t i = 0; i < FCthreads; i++) {
-            dchi2s.emplace_back();
-            outs.emplace_back();
-            fc_args args{todo + (i >= addone), &dchi2s.back(), &outs.back(), config, prop, variable_systs[config.i_prime], chi2, fakeDataParams, L, scanFitConfig,(*myseed.getThreadSeeds())[i], (int)i, !eventbyevent, gof_mode};
-
-
-            threads.emplace_back([args, &fc_progress]() {
-                        PROfit::fc_worker(args, std::ref(fc_progress));
-                        });
-        }
-        for(auto&& t: threads) {
-            t.join();
-        }
-        fc_progress.finish_all();
+	bool save_null_dist = true;
+        if(pvalue){
+	    std::string pvalue_file = "chi2_null.root";
+            TFile* file = TFile::Open(filename.c_str(), "READ");
+            if (!file) {
+                save_null_dist = true; 
+            }
+	    else {
+                save_null_dist = false;
+	    }
+	}
 
         std::vector<float> flattened_dchi2s;
-        for(const auto& v: dchi2s) for(const auto& dchi2: v) flattened_dchi2s.push_back(dchi2);
-        std::sort(flattened_dchi2s.begin(), flattened_dchi2s.end());
-        log<LOG_INFO>(L"%1% || 90%% Feldman-Cousins delta chi2 after throwing %2% universes is %3%") 
+        if(save_null_dist || !pvalue){
+            for(size_t i = 0; i < FCthreads; i++) {
+                dchi2s.emplace_back();
+                outs.emplace_back();
+                fc_args args{todo + (i >= addone), &dchi2s.back(), &outs.back(), config, prop, variable_systs[config.i_prime], chi2, fakeDataParams, L, scanFitConfig,(*myseed.getThreadSeeds())[i], (int)i, !eventbyevent, gof_mode};
+
+
+                threads.emplace_back([args, &fc_progress]() {
+                            PROfit::fc_worker(args, std::ref(fc_progress));
+                            });
+            }
+            for(auto&& t: threads) {
+                t.join();
+            }
+            fc_progress.finish_all();
+
+            for(const auto& v: dchi2s) for(const auto& dchi2: v) flattened_dchi2s.push_back(dchi2);
+            std::sort(flattened_dchi2s.begin(), flattened_dchi2s.end());
+            writeVectorToFile(pvalue_file, flattened_dchi2s);
+	}
+	else if(!save_null_dist){
+	    flattened_dchi2s = readVectorFromFile(pvalue_file);
+	}
+	log<LOG_INFO>(L"%1% || 90%% Feldman-Cousins delta chi2 after throwing %2% universes is %3%") 
             % __func__ % nuniv % flattened_dchi2s[0.9*flattened_dchi2s.size()];
+
         if(gof_pvalue) {
             std::vector<float> flattened_syst_chi2;
             for(const auto &out : outs) for(const auto &fco : out) flattened_syst_chi2.push_back(fco.chi2_syst);
