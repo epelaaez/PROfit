@@ -11,8 +11,9 @@ using namespace PROfit;
 
 
 PROCNP::PROCNP(const std::string tag, const PROconfig &conin, const PROpeller &pin, const PROsyst *systin, const PROmodel &modelin, const PROdata &datain, EvalStrategy strat, bool shape_only, std::vector<float> physics_param_fixed) : PROmetric(), model_tag(tag), config(conin), peller(pin), syst(systin), model(modelin), data(datain), strat(strat), shape_only(shape_only), physics_param_fixed(physics_param_fixed), correlated_systematics(false) {
-    last_value = 0.0; last_param = Eigen::VectorXf::Zero(model.nparams+syst->GetNSplines()); 
+    last_value = 0.0; last_param = Eigen::VectorXf::Zero(model.nparams+syst->GetNSplines());
     fixed_index = -999;
+    gradient_mode = GradientOneSidedFull; ///< Default for PROCNP: one-sided forward FD on full chi² (~2× faster).
 
     // Build the correlation matrix between priors if configured to
     if (conin.m_mcgen_correlations.size()) {

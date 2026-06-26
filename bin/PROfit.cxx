@@ -328,14 +328,14 @@ int main(int argc, char* argv[])
     app.add_option("--fit-options", global_fit_options, "Parameters for single, detailed global best fit LBFGSB. See PROfitter.h or run --fit-help for available settings.");
     app.add_option("--scan-fit-options", scan_fit_options, "Parameters for simpier, multiple best fits in PROfile/surface LBFGSB.");
     app.add_flag("--fit-help", show_fit_help, "Show detailed help for all fitting parameters (L-BFGS-B, PSO, MCMC, etc.)");
-    std::string gradient_mode_str = "central-full";
+    std::string gradient_mode_str = "one-sided-full";
     app.add_option("--grad-mode", gradient_mode_str,
                    "Gradient evaluation strategy passed to the metric. One of: "
-                   "central-full (default; central FD on full chi^2), "
-                   "one-sided-full (forward FD on full chi^2; ~2x faster, O(h)), "
+                   "central-full (central FD on full chi^2; most accurate, slowest), "
+                   "one-sided-full (default; forward FD on full chi^2; ~2x faster, O(h)), "
                    "central-lin (central FD on delta only, M frozen at base; Gauss-Newton, ~5-10x), "
                    "one-sided-lin (forward FD on delta only, M frozen at base; ~10-20x).")
-        ->default_str("central-full");
+        ->default_str("one-sided-full");
 
     app.add_option("--inject-systs", injected_systs, "Systematic shifts to inject. Map of name and shift value in sigmas. Only spline systs are supported right now.");
     app.add_option("--inject-systs-cv", cv_injected_systs, "Systematic shifts to inject.  as CV Map of name and shift value in sigmas. Only spline systs are supported right now.");
@@ -1086,11 +1086,11 @@ int main(int argc, char* argv[])
     // either of them.
     {
         const PROmetric::GradientMode gmode_a =
-            PROmetric::parseGradientMode(gradient_mode_str, PROmetric::GradientCentralFull);
+            PROmetric::parseGradientMode(gradient_mode_str, PROmetric::GradientOneSidedFull);
         const PROmetric::GradientMode gmode_b =
             PROmetric::parseGradientMode(gradient_mode_str, PROmetric::GradientOneSidedLin);
         if (gmode_a != gmode_b) {
-            log<LOG_WARNING>(L"%1% || Unknown --grad-mode '%2%'; falling back to central-full.")
+            log<LOG_WARNING>(L"%1% || Unknown --grad-mode '%2%'; falling back to one-sided-full.")
                 % __func__ % gradient_mode_str.c_str();
         }
         fitConfig.gradient_mode     = gmode_a;
