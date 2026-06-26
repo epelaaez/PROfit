@@ -582,17 +582,21 @@ void PROsurf::PlotCurve(const PROconfig &config, const PROmodel &model, const PR
     if(logx) p1->SetLogx();
     if(logy) p1->SetLogy();
     surf.Draw("COLZ");
-    TMarker *markerA = new TMarker(pow(10,A[xaxis_idx]), pow(10,A[yaxis_idx]), 29); 
+    // Points are stored in the model's native space (log10 if is_log10, linear otherwise);
+    // convert to the linear plot space only for axes that are actually log10.
+    auto to_plot_x = [&](float val){ return model.is_log10[xaxis_idx] ? std::pow(10.0f, val) : val; };
+    auto to_plot_y = [&](float val){ return model.is_log10[yaxis_idx] ? std::pow(10.0f, val) : val; };
+    TMarker *markerA = new TMarker(to_plot_x(A[xaxis_idx]), to_plot_y(A[yaxis_idx]), 29);
     markerA->SetMarkerColor(kBlack);
     markerA->SetMarkerSize(3);
     markerA->Draw();
-    TMarker *markerB = new TMarker(pow(10,B[xaxis_idx]), pow(10,B[yaxis_idx]), 29);
+    TMarker *markerB = new TMarker(to_plot_x(B[xaxis_idx]), to_plot_y(B[yaxis_idx]), 29);
     markerB->SetMarkerColor(kBlack);
     markerB->SetMarkerSize(3);
     markerB->Draw();
 
 
-    TArrow *arrow = new TArrow(pow(10,A[xaxis_idx]), pow(10,A[yaxis_idx]), pow(10,B[xaxis_idx]), pow(10,B[yaxis_idx]),0.01, "|>");
+    TArrow *arrow = new TArrow(to_plot_x(A[xaxis_idx]), to_plot_y(A[yaxis_idx]), to_plot_x(B[xaxis_idx]), to_plot_y(B[yaxis_idx]),0.01, "|>");
     arrow->SetLineStyle(2);  // Dashed
     arrow->SetLineWidth(2);
     arrow->SetLineColor(kBlack);
