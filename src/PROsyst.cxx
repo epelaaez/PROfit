@@ -221,6 +221,7 @@ namespace PROfit {
         ret.fractional_covariance = ret.covmat.size() ? ret.SumMatrices()
             : Eigen::MatrixXf::Constant(fractional_covariance.rows(), fractional_covariance.cols(), 0.0f);
         ret.other_index = other_index;
+        ret.cov2spline_debug_info = cov2spline_debug_info;
         log<LOG_DEBUG>(L"%1% | Done Subset.") % __func__ ;
         return ret;
     }
@@ -270,6 +271,7 @@ namespace PROfit {
         ret.fractional_covariance = ret.covmat.size() ? ret.SumMatrices()
             : Eigen::MatrixXf::Constant(fractional_covariance.rows(), fractional_covariance.cols(), 0.0f);
         ret.other_index = other_index;
+        ret.cov2spline_debug_info = cov2spline_debug_info;
         return ret;
     }
 
