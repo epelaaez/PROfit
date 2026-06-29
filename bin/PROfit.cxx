@@ -1220,6 +1220,13 @@ int main(int argc, char* argv[])
         for(const auto &[name, obj] : drawn_objs)
             obj->Write(name.c_str());
 
+        for(size_t i = 0; i < profile.graphs.size(); ++i) {
+            std::string name = i < metric->GetModel().nparams
+                             ? metric->GetModel().param_names[i]
+                             : metric->GetSysts().spline_names[i - metric->GetModel().nparams];
+            profile.graphs[i]->Write((name + "_profile").c_str());
+        }
+
         if(global_fit_result.size() > 0) {
             bool use_phys_gfr = (size_t)global_fit_result.size() == N_phys_params + metric->GetSysts().GetNSplines();
             TH1D global_fit_hist("global_fit_result", "Global Best Fit Parameters", global_fit_result.size(), 0, global_fit_result.size());
