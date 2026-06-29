@@ -697,7 +697,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
             const char* inpot = pMC->Attribute("pot");
             if(inpot==NULL){
-                m_mcgen_pot.push_back(-1.0);
+                m_mcgen_pot.push_back(1.0);
             }else{
                 m_mcgen_pot.push_back(strtod(inpot,&end) );
             }
