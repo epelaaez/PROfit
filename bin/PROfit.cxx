@@ -1561,6 +1561,7 @@ int main(int argc, char* argv[])
         if(binwidth_scale) opt |= PlotOptions::BinWidthScaled;
         if(area_normalized) opt |= PlotOptions::AreaNormalized;
         std::vector<PROspec> variable_cvs;
+        std::vector<std::map<std::string, TObject *>> cv_objs;
         for(size_t io = 0; io < config.m_num_variables; ++io) {
 
             variable_cvs.push_back(FillSpectra(config, prop, variable_systs[config.i_prime],*model,CVParams, !eventbyevent, io));
@@ -1575,7 +1576,8 @@ int main(int argc, char* argv[])
                     config, cv_plot, bkg_subchannels, io);
                 cv_plot.Spec() -= bkg_full;
             }
-            plot_channels(final_output_tag+"_PROplot_Variable_"+std::to_string(io)+"_CV.pdf", config, cv_plot, {}, {}, {}, {}, notext, pbounds, opt, io);
+            auto objs = plot_channels(final_output_tag+"_PROplot_Variable_"+std::to_string(io)+"_CV.pdf", config, cv_plot, {}, {}, {}, {}, notext, pbounds, opt, io);
+            cv_objs.push_back(objs);
         }
 
         std::string filename = final_output_tag+"_fractional_systematics.pdf";
@@ -2127,8 +2129,9 @@ int main(int argc, char* argv[])
 
 
         std::vector<PROerrorbar> other_err_bands;
+        std::vector<std::map<std::string, TObject*>> errband_objs;
         for(size_t io = 0; io < config.m_num_variables; ++io) {
-            if(!config.m_channel_variable_plot_bool.at(io)) continue; // For now skip the L/E 250 bin. 
+            if(!config.m_channel_variable_plot_bool.at(io)) { errband_objs.push_back({}); continue; } // For now skip the L/E 250 bin. 
             other_err_bands.push_back(getErrorBand(config, prop, variable_systs[io], *model, variable_cvs[io], CVParams, binwidth_scale, io));
 
             // --bkg-subtract: shift CV, data, and error band by the bkg CV.
@@ -2155,8 +2158,9 @@ int main(int argc, char* argv[])
                 errband_plot.error_up    -= bkg_collapsed;
                 // errband_plot.covariance intentionally unchanged.
             }
-            plot_channels(final_output_tag+"_PROplot_Variable_"+std::to_string(io)+"_ErrorBand.pdf", config, cv_plot, {}, data_plot,
+            auto objs = plot_channels(final_output_tag+"_PROplot_Variable_"+std::to_string(io)+"_ErrorBand.pdf", config, cv_plot, {}, data_plot,
                     errband_plot, {}, other_channel_chitexts[io], pbounds, opt | PlotOptions::DataMCRatio, io);
+            errband_objs.push_back(objs);
         }
 
 
@@ -2253,41 +2257,11 @@ int main(int argc, char* argv[])
 
         fout.mkdir("ErrorBand");
         fout.cd("ErrorBand");
-        size_t eind = 0;
-        for(size_t io = 0; io < config.m_num_variables; ++io) {
-            if(!config.m_channel_variable_plot_bool.at(io))continue;// For now skip the L/E 250 bin. 
-            size_t tot_offset = 0;
-            // We need to use a different index here since we don't add error bars to the vector if
-            // plot="false" in the xml
-            const PROerrorbar &err = other_err_bands.at(eind++);
-            for(size_t mode = 0; mode < config.m_num_modes; ++mode) {
-                for(size_t det = 0; det < config.m_num_detectors; ++det) {
-                    for(size_t channel = 0; channel < config.m_num_channels; ++channel) {
-                        size_t channel_nbins_x = config.m_channel_variable_bins[channel][io].NBinsAlong(0);
-                        // default is 1d, but catch 2d case for ybins
-                        size_t channel_nbins_y = 1;
-                        if(config.m_channel_variable_dims[channel][io] == 2)  channel_nbins_y = config.m_channel_variable_bins[channel][io].NBinsAlong(1);
-                        size_t nbins_p_2dchan = channel_nbins_y*channel_nbins_x;
-                        TGraphAsymmErrors eband(nbins_p_2dchan);
-                        for(size_t i = 0; i < nbins_p_2dchan; ++i) {
-                            float x = channel_nbins_y == 1 ? 
-                                (config.m_channel_variable_bins[channel][io].Edges(0)[i+1] + config.m_channel_variable_bins[channel][io].Edges(0)[i])/2 :
-                                i;
-                            float xerr = channel_nbins_y == 1 ?
-                                (config.m_channel_variable_bins[channel][io].Edges(0)[i+1] - config.m_channel_variable_bins[channel][io].Edges(0)[i])/2 :
-                                0.5;
-                            eband.SetPoint(i, x, err.error_point(tot_offset + i));
-                            eband.SetPointEYhigh(i, err.error_up(tot_offset + i));
-                            eband.SetPointEYlow(i, err.error_down(tot_offset + i));
-                            eband.SetPointEXhigh(i, xerr);
-                            eband.SetPointEXlow(i, xerr);
-                        }
-                        std::string name = config.m_mode_names[mode]+"_"+config.m_detector_names[det]+"_"+config.m_channel_names[channel]+"_var"+std::to_string(io);
-                        eband.Write(name.c_str());
-                        tot_offset += nbins_p_2dchan;
-                    }
-                }
-            }
+        for(size_t i = 0; i < errband_objs.size(); ++i) {
+            fout.mkdir(("ErrorBand/Var"+std::to_string(i)).c_str());
+            fout.cd(("ErrorBand/Var"+std::to_string(i)).c_str());
+            for(const auto &[n, o] : errband_objs[i])
+                o->Write(n.c_str());
         }
 
         if((with_splines)) {
