@@ -1306,8 +1306,11 @@ namespace PROfit {
                 if(spline_bin < 0) continue;
                 int var_num = inconfig.m_mcgen_variation_histaxisvars_map.at(var_syst_objs.front()->systname)[0];
                 float val = vars[var_num].first();
-                int bin = inconfig.m_mcgen_variation_hist1d_map.at(var_syst_objs.front()->systname)->FindBin(val);
-                float wgt = inconfig.m_mcgen_variation_hist1d_map.at(var_syst_objs.front()->systname)->GetBinContent(bin);
+                if(std::isnan(val) || std::isinf(val)) continue;
+                TH1 *h = inconfig.m_mcgen_variation_hist1d_map.at(var_syst_objs.front()->systname);
+                int bin = h->FindBin(val);
+                float wgt = h->GetBinContent(bin);
+                if(val < h->GetXaxis()->GetXmin() || val > h->GetXaxis()->GetXmax()) wgt = 1;
 
                 // Only filling 1 sigma, so just combine CV and Universe filling
                 for(auto so: var_syst_objs) {
@@ -1321,8 +1324,12 @@ namespace PROfit {
                 int yvar_num = inconfig.m_mcgen_variation_histaxisvars_map.at(var_syst_objs.front()->systname)[1];
                 float xval = vars[xvar_num].first();
                 float yval = vars[yvar_num].first();
-                int bin = inconfig.m_mcgen_variation_hist2d_map.at(var_syst_objs.front()->systname)->FindBin(xval, yval);
-                float wgt = inconfig.m_mcgen_variation_hist2d_map.at(var_syst_objs.front()->systname)->GetBinContent(bin);
+                if(std::isnan(xval) || std::isnan(yval) || std::isinf(xval) || std::isinf(yval)) continue;
+                TH2 *h = inconfig.m_mcgen_variation_hist2d_map.at(var_syst_objs.front()->systname);
+                int bin = h->FindBin(xval, yval);
+                float wgt = h->GetBinContent(bin);
+                if(xval < h->GetXaxis()->GetXmin() || xval > h->GetXaxis()->GetXmax()
+                    || yval < h->GetYaxis()->GetXmin() || yval > h->GetYaxis()->GetXmax()) wgt = 1;
 
                 // Only filling 1 sigma, so just combine CV and Universe filling
                 for(auto so: var_syst_objs) {
