@@ -3156,8 +3156,33 @@ std::map<std::string, TObject *> draw_fit_result(const PROconfig &config, const 
         drawn_objs["post_fit_param_correlations"] = corrhist.Clone();
     }
 
-    if(fitres.mh)
+    if(fitres.mh) {
         fitres.mh->plot_autocorrelation(prefix+"_corrmat_mcmc_autocorrelation.pdf", param_names, &drawn_objs);
+        std::string name = prefix+"_mcmc_chain";
+        drawn_objs[name] = new TTree(name.c_str(), name.c_str());
+        TTree *tree = (TTree*)drawn_objs[name];
+        Eigen::VectorXf v = Eigen::VectorXf::Zero(N_params);
+        for(size_t i = 0; i < model.nparams; ++i) {
+            tree->Branch(model.param_names[i].c_str(), &v(i));
+        }
+        for(size_t i = model.nparams; i < N_params; ++i) {
+            const std::string &sname = syst.spline_names[i-model.nparams];
+            std::string::size_type l = sname.find(':');
+            // TODO: This only handles names with a single colon in them.
+            // I don't think we ever have more than that, it's really just meant for the 'flat' and 'norm' systs.
+            if(l != std::string::npos) {
+                std::string bname = sname;
+                bname[l] = '_';
+                tree->Branch(bname.c_str(), &v(i));
+            } else {
+                tree->Branch(sname.c_str(), &v(i));
+            }
+        }
+        for(const auto &p : fitres.mh->chain) {
+            v = p;
+            tree->Fill();
+        }
+    }
 
     if(fitres.fitter.best_fit.size()) {
         std::string hname = "#chi^{2}/nbins = " + to_string(fitres.chi2) + "/" + to_string(config.m_num_variable_bins_total_collapsed[config.i_prime]);
