@@ -169,8 +169,8 @@ std::wostream *OSTREAM = &wcout;
 std::wofstream LOG_FILE_STREAM;
 bool LOGGING_TO_FILE = false;
 
-//void mcmc_worker(std::vector<Metropolis<log_phys_target, adaptive_proposal>> &mets, Eigen::VectorXf initial, PROmetric *metric, uint32_t seed, size_t nchains, size_t burnin, size_t steps);
-void mcmc_worker(std::vector<Metropolis<simple_target, adaptive_proposal>> &mets, Eigen::VectorXf initial, PROmetric *metric, uint32_t seed, size_t nchains, size_t burnin, size_t steps);
+void mcmc_worker(std::vector<std::unique_ptr<Metropolis<log_phys_target, adaptive_proposal>>> &mets, Eigen::VectorXf initial, PROmetric *metric, uint32_t seed, size_t nchains, size_t burnin, size_t steps);
+//void mcmc_worker(std::vector<std::unique_ptr<Metropolis<simple_target, adaptive_proposal>>> &mets, Eigen::VectorXf initial, PROmetric *metric, uint32_t seed, size_t nchains, size_t burnin, size_t steps);
 
 struct GlobalFitResult {
     PROfitter fitter;
@@ -3023,12 +3023,12 @@ int main(int argc, char* argv[])
         std::vector<Eigen::VectorXf> samples_eigen; 
         for(size_t i = 0; i < samples.size(); ++i) {
             samples_eigen.push_back(Eigen::VectorXf::Map(samples[i].data(), samples[i].size()));
-            //samples_eigen.back()(0) = std::pow(10, samples_eigen.back()(0));
-            //samples_eigen.back()(1) = std::pow(10, samples_eigen.back()(1));
+            samples_eigen.back()(0) = std::pow(10, samples_eigen.back()(0));
+            samples_eigen.back()(1) = std::pow(10, samples_eigen.back()(1));
         }
         size_t mcmc_threads = mcmc_chains >= nthread ? nthread : mcmc_chains;
-        //std::vector<std::vector<Metropolis<log_phys_target, adaptive_proposal>>> mets;
-        std::vector<std::vector<Metropolis<simple_target, adaptive_proposal>>> mets;
+        std::vector<std::vector<std::unique_ptr<Metropolis<log_phys_target, adaptive_proposal>>>> mets;
+        //std::vector<std::vector<std::unique_ptr<Metropolis<simple_target, adaptive_proposal>>>> mets;
         mets.reserve(mcmc_threads);
         std::vector<std::thread> threads;
         size_t chains_per_thread = mcmc_chains / mcmc_threads;
@@ -3079,7 +3079,7 @@ int main(int argc, char* argv[])
                     }
                     param_names.push_back(config.m_mcgen_variation_plotname_map.at(metric->GetSysts().spline_names[i-N_phys_params]));
                 }
-                for(const auto &p : met.chain) {
+                for(const auto &p : met->chain) {
                 //    twod[0].Fill(p(1), p(0));
                 //    oned[0].Fill(p(1));
                 //    oned[1].Fill(p(0));
@@ -3087,7 +3087,7 @@ int main(int argc, char* argv[])
                     tree.Fill();
                 }
                 tree.Write();
-                met.plot_autocorrelation((final_output_tag+"_PROMCMC_autocorrelation_chain"+std::to_string(chain_counter)+".pdf").c_str(), param_names, {});
+                met->plot_autocorrelation((final_output_tag+"_PROMCMC_autocorrelation_chain"+std::to_string(chain_counter)+".pdf").c_str(), param_names, {});
             }
         }
         //TCanvas c;
@@ -3468,17 +3468,18 @@ int main(int argc, char* argv[])
 }
 
 
-//void mcmc_worker(std::vector<Metropolis<log_phys_target, adaptive_proposal>> &mets, Eigen::VectorXf initial, PROmetric *metric, uint32_t seed, size_t nchains, size_t burnin, size_t steps) {
-void mcmc_worker(std::vector<Metropolis<simple_target, adaptive_proposal>> &mets, Eigen::VectorXf initial, PROmetric *metric, uint32_t seed, size_t nchains, size_t burnin, size_t steps) {
+void mcmc_worker(std::vector<std::unique_ptr<Metropolis<log_phys_target, adaptive_proposal>>> &mets, Eigen::VectorXf initial, PROmetric *metric, uint32_t seed, size_t nchains, size_t burnin, size_t steps) {
+//void mcmc_worker(std::vector<std::unique_ptr<Metropolis<simple_target, adaptive_proposal>>> &mets, Eigen::VectorXf initial, PROmetric *metric, uint32_t seed, size_t nchains, size_t burnin, size_t steps) {
     std::uniform_int_distribution<uint32_t> dseed(0, std::numeric_limits<uint32_t>::max());
     std::mt19937 rng(seed);
+    mets.reserve(nchains);
     for(size_t i = 0; i < nchains; ++i) {
-        log<LOG_ERROR>(L"%1% || Running %2% burn in and %3% steps.") % __func__ % burnin % steps;
-        simple_target target{*metric};
-        //log_phys_target target{*metric};
+        //simple_target target{*metric};
+        log_phys_target target{*metric};
         adaptive_proposal proposal(*metric, dseed(rng));
-        mets.emplace_back(target, proposal, initial, dseed(rng));
-        mets.back().run(burnin, steps);
+        auto met = std::make_unique<Metropolis<log_phys_target, adaptive_proposal>>(target, proposal, initial, dseed(rng));
+        met->run(burnin, steps);
+        mets.emplace_back(std::move(met));
     }
 }
 

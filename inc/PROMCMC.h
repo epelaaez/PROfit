@@ -364,7 +364,7 @@ namespace PROfit {
         std::vector<int> active;
         std::mt19937 rng;
         static constexpr bool has_tune = true;
-        std::vector<Eigen::VectorXf> proposed;
+        //std::vector<Eigen::VectorXf> proposed;
         Eigen::VectorXf last_proposed;
         Eigen::VectorXf last_accepted;
         Eigen::VectorXf mean;
@@ -442,8 +442,8 @@ namespace PROfit {
             for(long int i = 0; i < value.size(); ++i) {
                 if(std::find(fixed.begin(), fixed.end(), i) != std::end(fixed)) continue;
                 if(i < nparams) {
-                    if(value(i) > metric.GetModel().ub(i) || value(i) < std::max(metric.GetModel().lb(i),-5.0f))
-                    //if(value(i) > std::pow(10, metric.GetModel().ub(i)) || value(i) < std::pow(10, metric.GetModel().lb(i)))
+                    //if(value(i) > metric.GetModel().ub(i) || value(i) < std::max(metric.GetModel().lb(i),-5.0f))
+                    if(value(i) > std::pow(10, metric.GetModel().ub(i)) || value(i) < std::max(std::pow(10, metric.GetModel().lb(i)),1e-5))
                         return false;
                 } else {
                     size_t si = i - nparams;
@@ -505,6 +505,102 @@ namespace PROfit {
         }
 
     };
+
+class HMC {
+    public:
+        float epsilon, L;
+        std::vector<Eigen::VectorXf> chain;
+
+        void leapfrog(Eigen::VectorXf &theta, Eigen::VectorXf &r, PROmetric &metric) {
+            Eigen::VectorXf g = theta;
+            metric(theta, g, true);
+            r += epsilon/2 * g;
+            theta += epsilon * r;
+            metric(theta, g, true);
+            r += epsilon/2 * g;
+        }
+
+        void operator()(Eigen::VectorXf theta0, PROmetric &metric, size_t M, uint32_t seed) {
+            std::mt19937 rng(seed);
+            std::normal_distribution<float> normal(0, 1);
+            std::uniform_real_distribution<float> uniform(0, 1);
+            Eigen::VectorXf empty;
+            chain.push_back(theta0);
+            Eigen::VectorXf r0 = theta0, r = r0; // Just set the size, we'll set the values with rng in the loop
+            for(size_t m = 0; m < M; ++m) {
+                Eigen::VectorXf theta = chain.back();
+                for(long i = 0; i < r.size(); ++i) r(i) = normal(rng);
+                r0 = r;
+                for(size_t i = 0; i < L; ++i) leapfrog(theta, r, metric);
+                float alpha = std::min(1.0f, std::expf(metric(theta, empty, false) - 0.5 * r.dot(r) - metric(chain.back(), empty, false) + 0.5 * r0.dot(r0)));
+                if(alpha < uniform(rng)) {
+                    chain.push_back(theta);
+                } else {
+                    chain.push_back(theta0);
+                }
+            }
+        }
+};
+
+class NUTS {
+        std::mt19937 rng;
+    public:
+        float theta0, delta, L, M, Madapt;
+
+        void leapfrog(Eigen::VectorXf &theta, Eigen::VectorXf &r, float epsilon, PROmetric &metric) {
+            Eigen::VectorXf g = theta;
+            metric(theta, g, true);
+            r += epsilon/2 * g;
+            theta += epsilon * r;
+            metric(theta, g, true);
+            r += epsilon/2 * g;
+        }
+
+        float find_reasonable_epsilon(const Eigen::VectorXf &theta, PROmetric &metric) {
+            float epsilon = 1;
+            Eigen::VectorXf r = theta;
+            std::normal_distribution<float> normal(0, 1);
+            for(long i = 0; i < r.size(); ++i) r(i) = normal(rng);
+            Eigen::VectorXf thetap = theta;
+            Eigen::VectorXf rp = r;
+            leapfrog(thetap, rp, epsilon, metric);
+            float a = 2
+        }
+
+        float operator()() {
+            float theta = theta0;
+            float epsilon0 = find_reasonable_epsilon(theta),
+                  mu = std::log10(10 * epsilon0),
+                  epsilon0bar = 1,
+                  H0bar = 0,
+                  gamma = 0.05,
+                  t0 = 10,
+                  kappa = 0.75;
+            for(size_t m = 0; m < M; ++m) {
+                // sample r0 from Normal(0, I)
+                // resample u from Uniform(0, exp(L(theta)-0.5 * r0 * r0))
+                float thetatminus = theta,
+                      thtetaplus = theta,
+                      rminus = r0,
+                      rplus = r0,
+                      j = 0,
+                      thetam = theta,
+                      n = 1,
+                      s = 1;
+                while(s == 1) {
+
+                }
+                if(m < Madapt) {
+                    Hbar_m = (1 - 1/(m + t0)) * Hbar_m + 1/(m + t0) * (delta - alpha/n_alpha);
+                    epsilonm = std::exp(mu - 
+                } else {
+                    epsilonm = epsilonbar_Madapt;
+                }
+            }
+        }
+};
+
+
 };
 
 #endif
