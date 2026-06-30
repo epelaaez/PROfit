@@ -932,7 +932,17 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
         plotFunctions.push_back([&, idx]() {
             // Check if this is a physics param (only possible when with_osc=true)
             bool is_physics = with_osc && idx < model.nparams;
-            std::string xval = is_physics ? "Log_{10}(" + model.pretty_param_names[idx]+")" : "#sigma Shift";
+            std::string xval;
+            if(is_physics) {
+                const bool is_log_param = (idx < model.is_log10.size()) && model.is_log10[idx];
+                if(is_log_param) {
+                    xval = "Log_{10}(" + model.pretty_param_names[idx] + ")";
+                } else {
+                    xval = model.pretty_param_names[idx];
+                }
+            } else {
+                xval = "#sigma Shift";
+            }
             std::string tit = (is_physics ? names[idx] : config.m_mcgen_variation_plotname_map.at(names[idx])) + ";" + xval + "; #Delta#Chi^{2}";
             graphs[idx]->SetTitle(tit.c_str());
             graphs[idx]->Draw("AL");
@@ -1243,7 +1253,12 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
         if(mask_osc && with_osc && i < model.nparams) continue;
         std::string label;
         if(with_osc && i < model.nparams) {
-            label = "Log_{10}(" + model.pretty_param_names[i] + ")";
+            const bool is_log_param = (i < model.is_log10.size()) && model.is_log10[i];
+            if(is_log_param) {
+                label = "Log_{10}(" + model.pretty_param_names[i] + ")";
+            } else {
+                label = model.pretty_param_names[i];
+            }
         } else {
             label = config.m_mcgen_variation_plotname_map.at(names[i]);
         }
@@ -1325,7 +1340,12 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
         // In with_osc mode, first model.nparams entries are physics, rest are splines
         std::string label;
         if (with_osc && i < model.nparams) {
-            label = "Log_{10}(" + model.pretty_param_names[i] + ")";
+            const bool is_log_param = (i < model.is_log10.size()) && model.is_log10[i];
+            if(is_log_param) {
+                label = "Log_{10}(" + model.pretty_param_names[i] + ")";
+            } else {
+                label = model.pretty_param_names[i];
+            }
         } else {
             label = config.m_mcgen_variation_plotname_map.at(names[i]);
         }

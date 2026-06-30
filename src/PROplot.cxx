@@ -2168,7 +2168,13 @@ namespace PROfit{
         for(int i = 0; i < nBins; ++i) {
             std::string label;
             if(with_osc && i < (int)model.nparams) {
-                label = "Log_{10}(" + model.pretty_param_names[i] + ")";
+                const bool is_log_param = (i < (int)model.is_log10.size()) && model.is_log10[i];
+
+                if(is_log_param) {
+                    label = "Log_{10}(" + model.pretty_param_names[i] + ")";
+                } else {
+                    label = model.pretty_param_names[i];
+                }
             } else {
                 auto it = config.m_mcgen_variation_plotname_map.find(names[i]);
                 label = (it != config.m_mcgen_variation_plotname_map.end()) ? it->second : names[i];
