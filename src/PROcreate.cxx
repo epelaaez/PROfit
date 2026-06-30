@@ -433,9 +433,9 @@ namespace PROfit {
         }
 
         //Do we have any external systeatics?
-        if(inconfig.m_num_variation_type_external_covariance>0){
+        if(inconfig.m_num_variation_type_external_covariance>0 || inconfig.m_num_variation_type_external_covariance_to_spline>0){
             for(auto& allow_sys : inconfig.m_mcgen_variation_type_map){
-                if(allow_sys.second=="external_covariance"){
+                if(allow_sys.second=="external_covariance" || allow_sys.second=="external_covariance_to_spline"){
                     map_systematic_num_universe[allow_sys.first] = -1;
                 }
             }
@@ -529,6 +529,17 @@ namespace PROfit {
                     log<LOG_INFO>(L"%1% || Systematic variation %2% is a match for an externally loaded covariance systematic. Processing a such. ") % __func__ % sys_name.c_str();
                     log<LOG_INFO>(L"%1% || External filename:  %2%, External Matrix :%3% . Use for variable number %4%") % __func__ % sv.back().external_filename.c_str() % sys_name.c_str() % sv.back().binning;
                 }
+                if(sys_mode == "external_covariance_to_spline"){
+                    sv.back().external_filename = inconfig.m_mcgen_variation_external_filename_map.at(sys_name);
+                    sv.back().binning = binningindex;
+                    auto it_nk = inconfig.m_mcgen_variation_num_decomp_knobs.find(sys_name);
+                    if(it_nk != inconfig.m_mcgen_variation_num_decomp_knobs.end()) {
+                        sv.back().num_decomp_knobs = it_nk->second;
+                        log<LOG_INFO>(L"%1% || Setting num_decomp_knobs=%2% for systematic %3%") % __func__ % sv.back().num_decomp_knobs % sys_name.c_str();
+                    }
+                    log<LOG_INFO>(L"%1% || Systematic variation %2% is a match for an externally loaded covariance-to-spline systematic. Processing a such. ") % __func__ % sys_name.c_str();
+                    log<LOG_INFO>(L"%1% || External filename:  %2%, External Matrix :%3% . Use for variable number %4%") % __func__ % sv.back().external_filename.c_str() % sys_name.c_str() % sv.back().binning;
+                }
                 if(sys_mode == "hist1d" || sys_mode == "hist2d") {
                     map_systematic_knob_vals[sys_name] = {1.0f};
                     sv.back().knob_index = map_systematic_knob_vals[sys_name];
@@ -612,7 +623,7 @@ namespace PROfit {
         for(size_t i = 0; i < syst_vector.size(); ++i){
             auto &sv = syst_vector[i];
             for(auto &s: sv) {
-                if(s.mode=="flat" || s.mode=="external_covariance")
+                if(s.mode=="flat" || s.mode=="external_covariance" || s.mode=="external_covariance_to_spline")
                     continue;
                 //Get these binnings right
                 s.CreateSpecs( (s.mode == "covariance" ) ? inconfig.m_num_variable_bins_total[i] : inconfig.m_num_variable_bins_total[s.binning]);

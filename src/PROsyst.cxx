@@ -127,6 +127,30 @@ namespace PROfit {
                     covar_names.push_back(syst.systname);
                     ++n_covar;
                 }
+            }else if(syst.mode == "external_covariance_to_spline"){
+                // Like covariance_to_spline, but the fractional covariance is read from an
+                // external TMatrixD instead of being built from MC universes. Splines are added
+                // unconditionally (keyed to syst.binning), matching covariance_to_spline.
+                Eigen::MatrixXf frac_cov = LoadExternalFractionalCovariance(config, syst);
+                size_t n_before = splines.size();
+                FillSplinesFromCovarianceMatrix(frac_cov, syst);
+                size_t n_after = splines.size();
+
+                // Propagate parent tag + plotname to the synthesized knob entries (see
+                // covariance_to_spline branch above for the rationale).
+                PROconfig& mut_config = const_cast<PROconfig&>(config);
+                auto parent_tags_it = mut_config.m_mcgen_variation_tags.find(syst.systname);
+                auto parent_plotname_it = mut_config.m_mcgen_variation_plotname_map.find(syst.systname);
+                for(size_t si = n_before; si < n_after; ++si) {
+                    const std::string& knob_name = spline_names[si];
+                    if(parent_tags_it != mut_config.m_mcgen_variation_tags.end()) {
+                        mut_config.m_mcgen_variation_tags[knob_name] = parent_tags_it->second;
+                    }
+                    if(parent_plotname_it != mut_config.m_mcgen_variation_plotname_map.end()) {
+                        const std::string suffix = knob_name.substr(syst.systname.size());
+                        mut_config.m_mcgen_variation_plotname_map[knob_name] = parent_plotname_it->second + suffix;
+                    }
+                }
             }
         }
 
@@ -444,14 +468,15 @@ namespace PROfit {
 
         return;
     }
-    void PROsyst::LoadExternalCovarianceMatrix(const PROconfig &config, const SystStruct& syst){
+    Eigen::MatrixXf PROsyst::LoadExternalFractionalCovariance(const PROconfig &config, const SystStruct& syst){
         //this is matrix name
         std::string matrixname = syst.GetSysName();
         std::string filename = syst.external_filename;
         log<LOG_INFO>(L"%1% || Loading a TMatrix from %2% named %3%") % __func__ % filename.c_str() % matrixname.c_str();
-        int nbins = config.m_num_variable_bins_total[other_index];
+        // The external matrix is generated in the systematic's own binning, so size against syst.binning.
+        // (For the "external_covariance" mode this is gated to equal other_index by the caller.)
+        int nbins = config.m_num_variable_bins_total[syst.binning];
         Eigen::MatrixXf fracM = Eigen::MatrixXf::Zero(nbins, nbins);
-        Eigen::MatrixXf corrM = Eigen::MatrixXf::Identity(nbins, nbins);
 
         TFile* file = TFile::Open(filename.c_str(), "READ");
         if(!file || file->IsZombie()){
@@ -494,19 +519,26 @@ namespace PROfit {
 
         // Check if matrix is positive semi-definite
         if(!PROsyst::isPositiveSemiDefinite_WithTolerance(fracM, 2.0*Eigen::NumTraits<float>::dummy_precision())){
-            log<LOG_WARNING>(L"%1% || External covariance matrix %2% is not positive semi-definite!") 
+            log<LOG_WARNING>(L"%1% || External covariance matrix %2% is not positive semi-definite!")
                 % __func__ % matrixname.c_str();
         }
 
+        log<LOG_INFO>(L"%1% || Successfully loaded %2%x%3% covariance matrix %4%")
+            % __func__ % nbins % nbins % matrixname.c_str();
+
+        return fracM;
+    }
+
+    void PROsyst::LoadExternalCovarianceMatrix(const PROconfig &config, const SystStruct& syst){
+        std::string matrixname = syst.GetSysName();
+        Eigen::MatrixXf fracM = LoadExternalFractionalCovariance(config, syst);
+
         // Generate correlation matrix from fractional covariance
-        corrM = PROsyst::GenerateCorrMatrix(fracM);
+        Eigen::MatrixXf corrM = PROsyst::GenerateCorrMatrix(fracM);
 
         syst_map[matrixname] = {covmat.size(), SystType::Covariance};
         covmat.push_back(fracM);
         corrmat.push_back(corrM);
-
-        log<LOG_INFO>(L"%1% || Successfully loaded %2%x%3% covariance matrix %4%") 
-            % __func__ % nbins % nbins % matrixname.c_str();
 
         return;
     }
@@ -828,6 +860,10 @@ namespace PROfit {
 
     void PROsyst::FillSplinesFromCovariance(const SystStruct& syst) {
         Eigen::MatrixXf frac_cov = PROsyst::GenerateFracCovarMatrix(syst);
+        FillSplinesFromCovarianceMatrix(frac_cov, syst);
+    }
+
+    void PROsyst::FillSplinesFromCovarianceMatrix(Eigen::MatrixXf frac_cov, const SystStruct& syst) {
         // symmetrize to kill any float-asymmetry before eigendecomposition
         frac_cov = 0.5f * (frac_cov + frac_cov.transpose());
 
