@@ -134,11 +134,11 @@ namespace PROfit{
       bool GetReweight() const {return hist_reweight;}
 
        int GetModelRule() const{
-	return model_rule;
+        return model_rule;
       };
 
       int GetIncludeSystematics() const{
-	return include_systematics;
+        return include_systematics;
       };
 
 
@@ -447,6 +447,7 @@ namespace PROfit{
             std::map<std::string, std::pair<float,float>> m_mcgen_variation_restrict; //map of systematics with restrict="lo, hi" (clamp knob value during evaluation and fitting)
             std::map<std::string, float> m_mcgen_variation_scale; //map of systematics with scale factor to apply to weights (e.g., 0.001 for weights stored as x1000)
             std::map<std::string, int> m_mcgen_variation_num_decomp_knobs; //map of covariance_to_spline systematics to the number of eigenpairs to keep (-1 or missing = keep all)
+            std::map<std::string, bool> m_mcgen_variation_include_resid_cov; //map of covariance_to_spline systematics to whether the un-kept eigenpairs are retained as a residual covariance (missing = true)
       
             //FIX skepic
             std::vector<std::string> systematic_name;

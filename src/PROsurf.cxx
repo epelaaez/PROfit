@@ -1246,8 +1246,21 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
         }
     }
 
-    // Parameter labels (rotated -45 degrees)
-    float text_size = x_label_size;
+    // Parameter labels (rotated -45 degrees). Precompute labels so we can also shrink the
+    // font for long names: a -45 deg label of L chars drops ~0.42*size*L in NDC height; with
+    // the 0.30 bottom margin that gives size ~0.6/L. Take the smaller of that and the
+    // nBins-based x_label_size so long names are not clipped off the bottom of the page.
+    std::vector<std::string> labels(barvalues.size());
+    size_t max_label_len = 1;
+    for(size_t i = 0; i < barvalues.size(); ++i) {
+        if(mask_osc && with_osc && i < model.nparams) continue;
+        labels[i] = (with_osc && i < model.nparams)
+            ? ("Log_{10}(" + model.pretty_param_names[i] + ")")
+            : config.m_mcgen_variation_plotname_map.at(names[i]);
+        max_label_len = std::max(max_label_len, labels[i].size());
+    }
+    float len_based_size = std::max(0.012f, std::min(0.030f, 0.6f / (float)max_label_len));
+    float text_size = std::min(x_label_size, len_based_size);
     float label_y = y_axis_min - y_range_size * 0.04f;
     for(size_t i = 0; i < barvalues.size(); ++i) {
         if(mask_osc && with_osc && i < model.nparams) continue;
@@ -1335,6 +1348,18 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
     todraw.GetYaxis()->SetTitleOffset(0.8);
 
     float y_min = todraw.GetMinimum();
+    // Precompute labels and shrink the font so the longest -45 deg label fits in the bottom
+    // margin (0.25 of the canvas). A rotated label of L chars drops ~0.42*size*L in NDC height;
+    // with margin ~0.25 that gives size ~0.5/L, capped at the previous fixed 0.03.
+    std::vector<std::string> labels(barvalues.size());
+    size_t max_label_len = 1;
+    for (size_t i = 0; i < barvalues.size(); ++i) {
+        labels[i] = (with_osc && i < model.nparams)
+            ? ("Log_{10}(" + model.pretty_param_names[i] + ")")
+            : config.m_mcgen_variation_plotname_map.at(names[i]);
+        max_label_len = std::max(max_label_len, labels[i].size());
+    }
+    float label_text_size = std::max(0.012f, std::min(0.03f, 0.5f / (float)max_label_len));
     for (size_t i = 0; i < barvalues.size(); ++i) {
         // In syst-only mode (with_osc=false), all entries are splines
         // In with_osc mode, first model.nparams entries are physics, rest are splines
@@ -1351,7 +1376,7 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
         }
         TLatex* text = new TLatex(barvalues[i], y_min - 0.05, label.c_str());  // Position text below axis
         text->SetTextAlign(13);
-        text->SetTextSize(0.03);
+        text->SetTextSize(label_text_size);
         text->SetTextAngle(-45);
         text->Draw();
     }

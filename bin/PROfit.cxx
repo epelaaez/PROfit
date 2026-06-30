@@ -328,14 +328,14 @@ int main(int argc, char* argv[])
     app.add_option("--fit-options", global_fit_options, "Parameters for single, detailed global best fit LBFGSB. See PROfitter.h or run --fit-help for available settings.");
     app.add_option("--scan-fit-options", scan_fit_options, "Parameters for simpier, multiple best fits in PROfile/surface LBFGSB.");
     app.add_flag("--fit-help", show_fit_help, "Show detailed help for all fitting parameters (L-BFGS-B, PSO, MCMC, etc.)");
-    std::string gradient_mode_str = "central-full";
+    std::string gradient_mode_str = "one-sided-full";
     app.add_option("--grad-mode", gradient_mode_str,
                    "Gradient evaluation strategy passed to the metric. One of: "
-                   "central-full (default; central FD on full chi^2), "
-                   "one-sided-full (forward FD on full chi^2; ~2x faster, O(h)), "
+                   "central-full (central FD on full chi^2; most accurate, slowest), "
+                   "one-sided-full (default; forward FD on full chi^2; ~2x faster, O(h)), "
                    "central-lin (central FD on delta only, M frozen at base; Gauss-Newton, ~5-10x), "
                    "one-sided-lin (forward FD on delta only, M frozen at base; ~10-20x).")
-        ->default_str("central-full");
+        ->default_str("one-sided-full");
 
     app.add_option("--inject-systs", injected_systs, "Systematic shifts to inject. Map of name and shift value in sigmas. Only spline systs are supported right now.");
     app.add_option("--inject-systs-cv", cv_injected_systs, "Systematic shifts to inject.  as CV Map of name and shift value in sigmas. Only spline systs are supported right now.");
@@ -781,7 +781,13 @@ int main(int argc, char* argv[])
     for(size_t i = 0; i < model->nparams; ++i) fakedataparams(i) = fake_data_osc_param_vector(i);
     log<LOG_INFO>(L"%1% || model->default_val: %2%") % __func__ % model->default_val;
     log<LOG_INFO>(L"%1% || fake_data_osc_param_vector: %2%") % __func__ % fake_data_osc_param_vector;
-    log<LOG_INFO>(L"%1% || fakedataparams (physics portion): %2% %3%") % __func__ % fakedataparams(0) % fakedataparams(1);
+    if(fakedataparams.size() >= 2) {
+        log<LOG_INFO>(L"%1% || fakedataparams (physics portion): %2% %3%") % __func__ % fakedataparams(0) % fakedataparams(1);
+    } else if(fakedataparams.size() == 1) {
+        log<LOG_INFO>(L"%1% || fakedataparams (physics portion): %2%") % __func__ % fakedataparams(0);
+    } else {
+        log<LOG_INFO>(L"%1% || fakedataparams (physics portion): empty") % __func__;
+    }
     for(const auto& [name, shift]: injected_systs) {
         log<LOG_INFO>(L"%1% || Injected syst: %2% shifted by %3%") % __func__ % name.c_str() % shift;
 
@@ -1080,11 +1086,11 @@ int main(int argc, char* argv[])
     // either of them.
     {
         const PROmetric::GradientMode gmode_a =
-            PROmetric::parseGradientMode(gradient_mode_str, PROmetric::GradientCentralFull);
+            PROmetric::parseGradientMode(gradient_mode_str, PROmetric::GradientOneSidedFull);
         const PROmetric::GradientMode gmode_b =
             PROmetric::parseGradientMode(gradient_mode_str, PROmetric::GradientOneSidedLin);
         if (gmode_a != gmode_b) {
-            log<LOG_WARNING>(L"%1% || Unknown --grad-mode '%2%'; falling back to central-full.")
+            log<LOG_WARNING>(L"%1% || Unknown --grad-mode '%2%'; falling back to one-sided-full.")
                 % __func__ % gradient_mode_str.c_str();
         }
         fitConfig.gradient_mode     = gmode_a;
@@ -2332,6 +2338,13 @@ int main(int argc, char* argv[])
             c.Print((final_output_tag+"_PROplot_Spline.pdf" + "]").c_str(), "pdf");
             c.Clear();
 
+        }
+
+        // Debug PDF for covariance_to_spline systematics — only emitted if at least one is present.
+        if(!variable_systs[config.i_prime].cov2spline_debug_info.empty()) {
+            const std::string cov2spline_pdf = final_output_tag + "_covariance_to_spline_checks.pdf";
+            plotCov2SplineChecks(config, variable_cvs[config.i_prime], variable_systs[config.i_prime], cov2spline_pdf, config.i_prime);
+            log<LOG_INFO>(L"%1% || covariance_to_spline diagnostics written to %2%") % __func__ % cov2spline_pdf.c_str();
         }
 
         //now onto root files

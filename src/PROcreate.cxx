@@ -518,6 +518,11 @@ namespace PROfit {
                         sv.back().num_decomp_knobs = it_nk->second;
                         log<LOG_INFO>(L"%1% || Setting num_decomp_knobs=%2% for systematic %3%") % __func__ % sv.back().num_decomp_knobs % sys_name.c_str();
                     }
+                    auto it_rc = inconfig.m_mcgen_variation_include_resid_cov.find(sys_name);
+                    if(it_rc != inconfig.m_mcgen_variation_include_resid_cov.end()) {
+                        sv.back().include_resid_cov = it_rc->second;
+                    }
+                    log<LOG_INFO>(L"%1% || Setting include_resid_cov=%2% for systematic %3%") % __func__ % sv.back().include_resid_cov % sys_name.c_str();
                     log<LOG_INFO>(L"%1% || Systematic variation %2% is a match for a covariance_to_spline systematic. Processing as such. ") % __func__ % sys_name.c_str();
                 }
                 if(sys_mode == "flat"){
@@ -1203,7 +1208,15 @@ namespace PROfit {
                         if(var_syst_objs.front()->knobval[u] == var_syst_objs.front()->knob_index[is]) break;
                     
                     float w = static_cast<float>(map_iter->second->at(is));
-                    if(std::isnan(w) || std::isinf(w)) w = 1;
+                    if(std::isnan(w) || std::isinf(w)) {
+                        log<LOG_WARNING>(L"%1% || Encountered a bad weight (%2%) for syst %3%. Setting to 1 instead.")
+                            % __func__ % w % map_iter->first.c_str();
+                        w = 1;
+                    } else if(w > 30) {
+                        log<LOG_WARNING>(L"%1% || Encountered a very large weight (%2%) for syst %3%. Setting to 1 instead.")
+                            % __func__ % w % map_iter->first.c_str();
+                        w = 1;
+                    }
                     for(auto so: var_syst_objs){
                         if (!so->include_only_weights.empty()) {
                             // Compute weight using only the included weights (avoids divide-by-zero)
@@ -1235,6 +1248,15 @@ namespace PROfit {
                     float raw_weight = static_cast<float>(map_iter->second->at(iuni));
                     float scaled_weight = raw_weight * var_syst_objs.front()->scale; // apply scale factor (default 1.0)
                     float sys_wei = run_syst ? additional_weight * scaled_weight :  1.0;
+                    if(std::isnan(sys_wei) || std::isinf(sys_wei)) {
+                        log<LOG_WARNING>(L"%1% || Encountered a bad weight (%2%) for syst %3%. Setting to 1 instead.")
+                            % __func__ % sys_wei % map_iter->first.c_str();
+                        sys_wei = 1;
+                    } else if(sys_wei > 30) {
+                        log<LOG_WARNING>(L"%1% || Encountered a very large weight (%2%) for syst %3%. Setting to 1 instead.")
+                            % __func__ % sys_wei % map_iter->first.c_str();
+                        sys_wei = 1;
+                    }
                     for(size_t io = 0; io < inconfig.m_num_variables; ++io) {
                         if(var_bin_indices[io] >= 0){
                             var_syst_objs[io]->FillUniverse(iuni, var_bin_indices[io], mc_weight * sys_wei);
@@ -1249,6 +1271,15 @@ namespace PROfit {
                     float raw_weight = static_cast<float>(map_iter->second->at(iuni));
                     float scaled_weight = raw_weight * var_syst_objs.front()->scale;
                     float sys_wei = run_syst ? additional_weight * scaled_weight : 1.0;
+                    if(std::isnan(sys_wei) || std::isinf(sys_wei)) {
+                        log<LOG_WARNING>(L"%1% || Encountered a bad weight (%2%) for syst %3%. Setting to 1 instead.")
+                            % __func__ % sys_wei % map_iter->first.c_str();
+                        sys_wei = 1;
+                    } else if(sys_wei > 30) {
+                        log<LOG_WARNING>(L"%1% || Encountered a very large weight (%2%) for syst %3%. Setting to 1 instead.")
+                            % __func__ % sys_wei % map_iter->first.c_str();
+                        sys_wei = 1;
+                    }
                     for(auto so: var_syst_objs){
                         so->FillUniverse(iuni, spline_bin, mc_weight * sys_wei);
                     }
