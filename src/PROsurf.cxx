@@ -8,6 +8,8 @@
 #include <future>
 #include <algorithm>
 #include <functional>
+#include <fstream>
+#include <iomanip>
 
 #include "TGraph.h"
 #include "TLatex.h"
@@ -800,6 +802,48 @@ PROfile::PROfile(const PROconfig &config, const PROsyst &systs, const PROmodel &
         ++offset;
     }
     if(fitconfig.progress_bar) prof_progress.finish_all();
+
+    {
+    std::string outname = filename.empty()
+        ? "PROfile_points.txt"
+        : filename + "_points.txt";
+
+    std::ofstream prof_file(outname);
+
+    prof_file << "# PROfile scan points written by PROfit\n";
+    prof_file << "# This file contains the profile curves shown in PROfile.pdf\n";
+    prof_file << "# columns: param_index param_type param_name fixed_value delta_chi2 chi_post\n";
+
+    size_t n_model_params = with_osc ? model.nparams : 0;
+
+    for(size_t iparam = 0; iparam < combinedResults.size(); ++iparam) {
+        std::string param_name = names.at(iparam);
+
+        std::string param_type =
+            (iparam < n_model_params) ? "model" : "spline";
+
+        for(size_t j = 0; j < combinedResults[iparam].knob_vals.size(); ++j) {
+            float fixed_value = combinedResults[iparam].knob_vals.at(j);
+            float delta_chi2  = combinedResults[iparam].knob_chis.at(j);
+            float chi_post    = delta_chi2 + minchi;
+
+            prof_file << iparam << " "
+                      << param_type << " "
+                      << param_name << " "
+                      << std::setprecision(12) << fixed_value << " "
+                      << std::setprecision(12) << delta_chi2 << " "
+                      << std::setprecision(12) << chi_post
+                      << "\n";
+        }
+
+        prof_file << "\n";
+    }
+
+    prof_file.close();
+
+    log<LOG_INFO>(L"%1% || Wrote PROfile scan points to %2%")
+        % __func__ % outname.c_str();
+}
 
     //create all graphs, used directly in first setion
     for(auto & out: combinedResults){
