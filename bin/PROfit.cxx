@@ -12,6 +12,7 @@
 #include "PROcess.h"
 #include "PROsurf.h"
 #include "PROfc.h"
+#include "PROAdaptiveFC.h"
 #include "PROfitter.h"
 #include "PROmodel.h"
 #include "PROMCMC.h"
@@ -261,6 +262,7 @@ int main(int argc, char* argv[])
     bool force = false;
     bool noxrootd = false;
     bool poisson_throw = false;
+    bool pseudo_experiment = false;
     bool progress_bar = false;
     std::vector<std::string> scale_arg;
     std::map<std::string, float> scale_map;
@@ -282,6 +284,14 @@ int main(int argc, char* argv[])
     bool MCMC_prefit_errors = false;
     bool systs_only = false;
     bool use_fake_data = false;
+    bool use_probe = false;
+    int n_probe_chunks = 1; // 1 = no chunking by default. Opt in via --probe-chunks N when physics is the wall-time bottleneck.
+    bool profile_timing = false; // Toggles PROfile/PROfitter scan-mode timing instrumentation (latin/PSO/LBFGS phase breakdown + parallel efficiency).
+    bool use_surface_amr = false; // Adaptive-mesh-refinement surface scan (PROsurf::FillSurfaceAMR / PROmesh).
+    int amr_initial = 10;
+    int amr_levels  = 3;
+    float amr_delta = 0.5f;
+    std::vector<float> amr_contour_levels;
 
     float xlo, xhi, ylo, yhi;
     std::array<float, 2> xlims, ylims;
@@ -308,6 +318,28 @@ int main(int argc, char* argv[])
     size_t nuniv;
     bool gof_pvalue = false;
     bool pvalue = false;
+
+    // fc-adaptive (slice 1: Wilks prepass + meta-mesh + diagnostics).
+    std::string afc_mode_str = "init-bank";
+    int   afc_n_throws = 200;
+    std::vector<int> afc_prepass_initial = {10, 10};
+    int   afc_prepass_levels = 3;
+    float afc_prepass_delta  = 0.05f;
+    std::vector<float> afc_prepass_contour_levels = {2.30f, 5.99f};
+    float afc_p_thresh = 0.05f;
+    int   afc_baseline_level = 2;
+    bool  afc_stat_only_throws = false;
+    std::string afc_xvar = "sinsq2thmm", afc_yvar = "dmsq";
+    float afc_xlo = 1e-4f, afc_xhi = 1.0f, afc_ylo = 1e-2f, afc_yhi = 1e2f;
+    bool  afc_logx = true, afc_logy = true;
+    std::vector<float> afc_cl_targets = {0.683f, 0.90f, 0.954f};
+    float afc_wilson_eps = 0.05f;
+    int   afc_n_pe_min = 50;
+    int   afc_n_pe_max = 5000;
+    int   afc_update_layer = 0;
+    int   afc_only_layer   = -1;
+    int   afc_n_brazil_throws = 100;
+    float afc_roi_band = 8.0f;
 
 
     //Global Arguments for all PROfit enables subcommands.
@@ -346,6 +378,12 @@ int main(int argc, char* argv[])
 
     app.add_flag("--use-fake-data", use_fake_data, "Ignore any data XML or embedded <data> section and use fake (MC) data instead.");
     app.add_flag("--poisson-throw", poisson_throw, "Do a Poisson stats throw of fake data.");
+    app.add_flag("--pseudo-experiment", pseudo_experiment,
+        "Generate a true FC-style pseudo-experiment as fake data: spline Gaussian pulls (rejection-sampled "
+        "within each spline's restrict bounds) + covariance-systematic bin shifts via Cholesky factor of the "
+        "total covariance + Poisson stats variation. Combines with --inject (the injection sets the underlying "
+        "truth signal). Applied only to the i_prime variable. Mutually informative with --poisson-throw, but "
+        "the pseudo-experiment already includes its own Poisson step — passing both is redundant.");
     app.add_flag("--scale-by-width", binwidth_scale, "Scale histgrams by 1/(bin width).");
     app.add_flag("--data-mc-ratio", data_mc_ratio, "For ratio plots, use data/pre-fit mc instead of data/best-fit mc.");
     app.add_option("--scale", scale_arg, "Scale detector POT by a given value.");
@@ -388,10 +426,18 @@ int main(int argc, char* argv[])
     surface_command->add_flag("--only-throw", only_brazil, "Only run Brazil band throws and not the nominal surface")->needs("--brazil-band");
     surface_command->add_option("--from-many", brazil_throws, "Make Brazil band from many provided throws")->needs("--brazil-band");
     surface_command->add_option("--curve-mode", procurve_points , "Make a PROcurve plot from param A to param B.");
+    surface_command->add_flag("--surface-amr", use_surface_amr, "Use adaptive-mesh-refinement (PROmesh) instead of the fixed dense grid. Concentrates fits near the target chi^2 contour for ~6-8x wall-time win on equivalent contour quality.");
+    surface_command->add_option("--amr-initial", amr_initial, "AMR coarsest grid size (NxN). Default 10.")->default_val(10);
+    surface_command->add_option("--amr-levels", amr_levels, "AMR refinement depth. Effective resolution along the contour is amr_initial * 2^amr_levels. Default 3.")->default_val(3);
+    surface_command->add_option("--amr-delta", amr_delta, "AMR straddle-band widening (chi^2 units). Refines a cell if any corner is within delta of any contour level. Default 0.5.")->default_val(0.5f);
+    surface_command->add_option("--amr-levels-chi2", amr_contour_levels, "Vector of Delta-chi^2 target levels for AMR contour finding. Default {5.99} = 95% CL at 2 dof. Pass e.g. --amr-levels-chi2 2.30 5.99 11.83 for 1/2/3 sigma in one pass.");
 
     //PROfile, make N profile'd chi^2 for each physics and nuisence parameters
     CLI::App *profile_command = app.add_subcommand("profile", "Make a 1D profiled chi2 for each physics and nuisence parameter.");
     profile_command->add_flag("--mcmc-prefit", MCMC_prefit_errors, "Use MCMC to sample the systematic priors for the pre-fit error band.");
+    profile_command->add_flag("--probe", use_probe, "Use PRObe adaptive importance sampling instead of the legacy 18-uniform scan.");
+    profile_command->add_option("--probe-chunks", n_probe_chunks, "When --probe is set, split each physics parameter scan into N parallel chunks. Default 1 (no chunking). Useful only when physics scans are the wall-time bottleneck and you have spare threads beyond nuisance work. Hard-capped at nthreads.")->default_val(1);
+    profile_command->add_flag("--profile-timing", profile_timing, "Emit a scan-timing summary at end of PROfile (per-fit cost, parallel efficiency, latin/PSO/LBFGS breakdown). Diagnostic only.");
 
     //PROplot, plot things
     CLI::App *proplot_command = app.add_subcommand("plot", "Make plots of CV, or injected point with error bars and covariance.");
@@ -411,6 +457,67 @@ int main(int argc, char* argv[])
     profc_command->add_option("-u,--universes", nuniv, "Number of Feldman Cousins universes to throw")->default_val(1000);
     profc_command->add_flag("--gof", gof_pvalue, "Get GOF pvalue");
     profc_command->add_flag("--pval", pvalue, "Get FC pvalue")->excludes("--gof");
+
+    // PROAdaptiveFC, adaptive FC pipeline. Slice 1: Wilks prepass + meta-mesh + diagnostics.
+    CLI::App *afc_command = app.add_subcommand("fc-adaptive",
+        "Adaptive Feldman-Cousins. Sub-modes (--mode): build-mesh, init-bank, "
+        "print-bank, asimov. Each mode reads/writes <output_tag>-prefixed artifacts. "
+        "Typical workflow: build-mesh -> init-bank -> print-bank / asimov.");
+    afc_command->add_option("--mode", afc_mode_str,
+        "Pipeline mode: build-mesh, init-bank, print-bank, asimov. "
+        "build-mesh: Wilks prepass -> <tag>_mesh.bin + diagnostic PDFs. "
+        "init-bank: requires <tag>_mesh.bin, generates <tag>_bank.bin. "
+        "print-bank: load <tag>_bank.bin and write summary PDFs. "
+        "asimov: load <tag>_bank.bin and write FC contour + verdict PDFs.")
+        ->default_str("build-mesh");
+    afc_command->add_option("--throws", afc_n_throws,
+        "Number of Wilks pre-pass throws (each produces one AMR mesh).")->default_val(200);
+    afc_command->add_option("--prepass-amr-initial", afc_prepass_initial,
+        "AMR coarsest grid size (one or two ints; default 10 10).")->expected(0, 2);
+    afc_command->add_option("--prepass-amr-levels", afc_prepass_levels,
+        "AMR refinement depth for the Wilks pre-pass.")->default_val(3);
+    afc_command->add_option("--prepass-delta-widen", afc_prepass_delta,
+        "AMR straddle-band widening (chi^2 units). Default 0.05: with per-throw global-fit "
+        "warm-starts, only cells whose corner range strictly brackets the contour need refinement; "
+        "the small non-zero default just absorbs floating-point edge cases. Bump if you want a "
+        "visual halo of refined cells around the contour polyline.")->default_val(0.05f);
+    afc_command->add_option("--prepass-contour-levels", afc_prepass_contour_levels,
+        "Wilks Delta-chi^2 targets per CL (default 2.30 5.99 for 1sigma, 2sigma at 2 dof).");
+    afc_command->add_option("--p-thresh", afc_p_thresh,
+        "Refine cell in meta-mesh if fraction of throws refining it >= p_thresh.")->default_val(0.05f);
+    afc_command->add_option("--baseline-level", afc_baseline_level,
+        "Levels strictly below baseline-level are always kept in the meta-mesh.")->default_val(2);
+    afc_command->add_flag("--stat-only-throws", afc_stat_only_throws,
+        "Use only statistical throws (no systematic throws).");
+    afc_command->add_option("--xvar", afc_xvar, "Name of x-axis variable.")->default_str("sinsq2thmm");
+    afc_command->add_option("--yvar", afc_yvar, "Name of y-axis variable.")->default_str("dmsq");
+    afc_command->add_option("--xlo", afc_xlo, "Lower x-axis limit.")->default_val(1e-4f);
+    afc_command->add_option("--xhi", afc_xhi, "Upper x-axis limit.")->default_val(1.0f);
+    afc_command->add_option("--ylo", afc_ylo, "Lower y-axis limit.")->default_val(1e-2f);
+    afc_command->add_option("--yhi", afc_yhi, "Upper y-axis limit.")->default_val(1e2f);
+    afc_command->add_flag("--logx,!--linx", afc_logx, "x-axis log/linear (default log).");
+    afc_command->add_flag("--logy,!--liny", afc_logy, "y-axis log/linear (default log).");
+    // PE-bank generation knobs (used by --mode init-bank; consumed by asimov/classify too).
+    afc_command->add_option("--cl", afc_cl_targets, "Target CLs (one or more).");
+    afc_command->add_option("--n-pe-min", afc_n_pe_min,
+        "PEs ADDED to each cell on this run, at level == update-layer. Doubles per deeper level: "
+        "--n-pe-min 50 adds 50/100/200/400 to L=0/1/2/3 cells. Re-running adds another batch on top.");
+    afc_command->add_option("--n-pe-max", afc_n_pe_max,
+        "Hard total-per-cell cap. No cell ever exceeds this PE count, even across repeated init-bank runs.");
+    afc_command->add_option("--update-layer", afc_update_layer,
+        "Only add to cells at AMR level >= update-layer (default 0 = all). Layer L gets n-pe-min PEs added, "
+        "deeper layers double. Cells below update-layer keep whatever PEs they already have, untouched.");
+    afc_command->add_option("--update-only-layer", afc_only_layer,
+        "Only add to cells at AMR level == update-only-layer (no doubling, no other layers). "
+        "Default -1 = disabled. Overrides --update-layer when >= 0. "
+        "Example: --update-only-layer 2 --n-pe-min 100 adds exactly 100 PEs to L=2 cells, nothing to L=0/1/3.");
+    afc_command->add_option("--wilson-eps", afc_wilson_eps,
+        "Wilson half-width target. Unused for init-bank now (doubling rule); reserved for slice 2c classification.");
+    afc_command->add_option("--n-brazil-throws", afc_n_brazil_throws,
+        "Number of pseudo-experiment throws for --mode brazil. Each throw is one FC-style realisation "
+        "(syst+stat) classified against the bank. Aggregated into per-cell inclusion fractions and "
+        "median +/- 1sigma / +/- 2sigma Brazil-band contours.");
+    afc_command->add_option("--roi-band", afc_roi_band, "ROI Delta-chi^2 band (slice 2c).");
 
     //PROglobal
     CLI::App *proglobal_command = app.add_subcommand("global", "Just do a single global fit.");
@@ -901,6 +1008,81 @@ int main(int argc, char* argv[])
     else{
         log<LOG_INFO>(L"%1% || Going to get fake data set up for each variable.") % __func__ ;
         for(size_t io = 0; io < config.m_num_variables; ++io) {
+            if (pseudo_experiment && io == config.i_prime && config.m_channel_variable_plot_bool.at(io)) {
+                // True FC-style pseudo-experiment for the i_prime variable.
+                // Pattern lifted verbatim from src/PROfc.cxx::fc_worker's per-PE body:
+                //   1. CV spectrum + Cholesky of the bin-bin covariance once.
+                //   2. Throw spline pulls Gaussian, rejection-sampled within restrict bounds.
+                //   3. Throw covariance bin shifts (Gaussian in standardised units).
+                //   4. Build shifted spectrum, add L*throwC to the collapsed spec, Poisson-variate.
+                std::normal_distribution<float> d;
+                const size_t nphys   = model->nparams;
+                const size_t nspline = variable_systs[io].GetNSplines();
+
+                PROspec cv_for_L = FillSpectra(config, prop, variable_systs[io], *model,
+                                               fakedataparams, !eventbyevent, io);
+                Eigen::MatrixXf L_chol = variable_systs[io].DecomposeFractionalCovariance(config, cv_for_L.Spec());
+
+                Eigen::VectorXf throws = fakedataparams;
+                for (size_t i = 0; i < nspline; ++i) {
+                    // Guard against spline_has_restrict / restrict_lo / restrict_hi being
+                    // shorter than the spline list (e.g. covariance_to_spline knobs that
+                    // don't populate them) -- an OOB read here gives garbage bounds.
+                    const bool has_r = i < variable_systs[io].spline_has_restrict.size()
+                                       && variable_systs[io].spline_has_restrict[i];
+                    float tlo = has_r ? variable_systs[io].spline_restrict_lo[i] : variable_systs[io].spline_lo[i];
+                    float thi = has_r ? variable_systs[io].spline_restrict_hi[i] : variable_systs[io].spline_hi[i];
+                    if (tlo > thi) { const float t = tlo; tlo = thi; thi = t; }  // tolerate inverted bounds
+                    // Rejection-sample N(0,1) truncated to [tlo, thi], but NEVER loop forever:
+                    // if the range is unreachable (deep tail / degenerate / bad restrict),
+                    // fall back to the in-range value nearest the CV (0) and warn which spline.
+                    const int max_attempts = 10000;
+                    int attempts = 0;
+                    float x = d(PROseed::global_rng);
+                    while ((x < tlo || x > thi) && ++attempts < max_attempts)
+                        x = d(PROseed::global_rng);
+                    if (x < tlo || x > thi) {
+                        x = (0.0f < tlo) ? tlo : (0.0f > thi ? thi : 0.0f);
+                        const std::string sname = i < variable_systs[io].spline_names.size()
+                            ? variable_systs[io].spline_names[i] : ("spline#" + std::to_string(i));
+                        log<LOG_WARNING>(L"%1% || Pseudo-experiment: spline '%2%' (index %3%) has throw bounds "
+                                         L"[%4%, %5%] unreachable by a unit Gaussian after %6% draws; clamping to %7%. "
+                                         L"Check its knobvals / restrict attribute.")
+                            % __func__ % sname.c_str() % (int)i % tlo % thi % max_attempts % x;
+                    }
+                    throws((int)(i + nphys)) = x;
+                }
+
+                const int nbins_coll = config.m_num_variable_bins_total_collapsed[io];
+                Eigen::VectorXf throwC(nbins_coll);
+                for (int i = 0; i < nbins_coll; ++i) throwC(i) = d(PROseed::global_rng);
+
+                PROspec shifted = FillSpectra(config, prop, variable_systs[io], *model,
+                                              throws, !eventbyevent, io);
+                PROspec newSpec = PROspec::PoissonVariation(
+                    PROspec(CollapseMatrix(config, shifted.Spec(), io) + L_chol * throwC,
+                            CollapseMatrix(config, shifted.Error(), io)),
+                    dseed(myseed.global_rng));
+
+                log<LOG_INFO>(L"%1% || Generated FC-style pseudo-experiment for i_prime variable %2% "
+                              L"(splines thrown=%3%, cov bins thrown=%4%).")
+                    % __func__ % io % (int)nspline % nbins_coll;
+
+                // List the thrown spline pulls (in sigma) that produced this pseudo-experiment.
+                std::string thrown_str;
+                for (size_t i = 0; i < nspline; ++i) {
+                    const std::string sn = i < variable_systs[io].spline_names.size()
+                        ? variable_systs[io].spline_names[i] : ("spline#" + std::to_string(i));
+                    thrown_str += sn + "=" + std::to_string(throws((int)(i + nphys)));
+                    if (i + 1 < nspline) thrown_str += ", ";
+                }
+                log<LOG_INFO>(L"%1% || Pseudo-experiment thrown spline pulls (sigma): %2%")
+                    % __func__ % thrown_str.c_str();
+
+                variable_data.push_back(PROdata(newSpec.Spec(), newSpec.Error()));
+                continue;
+            }
+
             PROspec data_spec = config.m_channel_variable_plot_bool.at(io) ?  FillSpectra(config, prop, variable_systs[io], *model, fakedataparams, !eventbyevent, io) : PROspec(config.m_num_variable_bins_total[io]) ;
             if(poisson_throw) data_spec = PROspec::PoissonVariation(data_spec, dseed(myseed.global_rng));
             Eigen::VectorXf data_vec = CollapseMatrix(config, data_spec.Spec(), io);
@@ -1207,9 +1389,14 @@ int main(int argc, char* argv[])
 
         std::vector<Eigen::VectorXf> seeds = fitres.fitter.freq_seed_points;//to be updated to v1.1.5 harmoincs [DONE]
         if(!seeds.size()) seeds.push_back(fitres.fitter.best_fit);
+        // Toggle scan-mode timing instrumentation around the PROfile dispatch.
+        // The constructor reads PROfit::GetScanTimingEnabled() once; PROfitter::Fit
+        // also reads it (cached per call) to gate its sub-timers.
+        if (profile_timing) PROfit::GetScanTimingEnabled() = true;
         PROfile profile(config, metric->GetSysts(), metric->GetModel(), *metric, myseed, scanFitConfig,
                 final_output_tag+"_PROfile", fitres.chi2, !systs_only, nthread, seeds,
-                fakedataparams);
+                fakedataparams, use_probe, n_probe_chunks);
+        if (profile_timing) PROfit::GetScanTimingEnabled() = false;
         log<LOG_INFO>(L"%1% || fakedataparams for Plot (true_params/red stars): %2%") % __func__ % fakedataparams;
         profile.Plot(config, metric->GetSysts(), metric->GetModel(), *metric, myseed,
                 final_output_tag+"_PROfile", !systs_only, fitres.fitter.best_fit,
@@ -1330,17 +1517,50 @@ int main(int argc, char* argv[])
             size_t Ncurvep = grid_size.front();
             log<LOG_INFO>(L"%1% || Running a PROcurve from %2% to point %3% with %4% points") % __func__ % A% B %Ncurvep;
             
+            if(progress_bar) fitConfig.progress_bar = true;
             std::vector<surfOut> cpoints = surface.FillCurve(fitConfig, myseed, global_fit_chi2_surf, global_fit_result_surf, nthread, A, B, Ncurvep);
             surface.PlotCurve(config,*model,variable_systs[config.i_prime],cpoints,final_output_tag,logx,logy,xaxis_idx,yaxis_idx,A, B, Ncurvep); 
             return 0;
         }
 
 
+        if(progress_bar) scanFitConfig.progress_bar = true;
         if(!only_brazil) {
-            if(statonly)
+            if(statonly) {
                 surface.FillSurfaceStat(config, scanFitConfig, final_output_tag+"_statonly_surface.txt", CVParams, dseed(myseed.global_rng));
-            else
+            } else if (use_surface_amr) {
+                // Adaptive-mesh-refinement path (PROmesh::run_amr) — concentrates evaluations
+                // near the target contour. Reuses surface.surface() for plot-compat via the
+                // bilinear-reconstructed dense matrix.
+                PROmesh::AMROptions opts;
+                opts.initial_nx     = amr_initial;
+                opts.initial_ny     = amr_initial;
+                opts.max_levels     = amr_levels;
+                opts.delta_widen    = amr_delta;
+                opts.dense_nx       = (int)surface.nbinsx;
+                opts.dense_ny       = (int)surface.nbinsy;
+                opts.produce_dense  = true;
+                if (!amr_contour_levels.empty()) opts.contour_levels = amr_contour_levels;
+                // Use the global-fit best fit (from project-SBN-dev's do_a_fit
+                // pre-pass) as a warm-start seed for AMR's initial level-0 grid.
+                // Subsequent level fits still get cell-corner best_fits from
+                // PROmesh::run_amr.
+                std::vector<Eigen::VectorXf> caller_seeds;
+                if (global_fit_result_surf.size() > 0)
+                    caller_seeds.push_back(global_fit_result_surf);
+                PROmesh::AMRResult amr_result = surface.FillSurfaceAMR(
+                    scanFitConfig,
+                    final_output_tag+"_surface_amr.txt",
+                    myseed, nthread,
+                    caller_seeds,
+                    opts);
+                // Mesh visualisation: cells coloured by refinement level + the
+                // contour polylines overlaid in red. Saved next to the heatmap.
+                surface.PlotAMRMesh(amr_result, *model, final_output_tag,
+                                    logx, logy, xaxis_idx, yaxis_idx);
+            } else {
                 surface.FillSurface(scanFitConfig, final_output_tag+"_surface.txt",myseed, global_fit_chi2_surf, global_fit_result_surf, nthread);
+            }
         }
 
         std::vector<float> binedges_x, binedges_y;
@@ -2444,6 +2664,88 @@ int main(int argc, char* argv[])
         }
     }
 
+
+    //***********************************************************************
+    //***********************************************************************
+    //********************  Adaptive Feldman-Cousins (slice 1)  *************
+    //***********************************************************************
+    //***********************************************************************
+    if(*afc_command) {
+        PROfit::AdaptiveFCConfig acfg;
+        if      (afc_mode_str == "build-mesh") acfg.mode = PROfit::AdaptiveFCMode::BuildMesh;
+        else if (afc_mode_str == "init-bank")  acfg.mode = PROfit::AdaptiveFCMode::InitBank;
+        else if (afc_mode_str == "print-bank") acfg.mode = PROfit::AdaptiveFCMode::PrintBank;
+        else if (afc_mode_str == "asimov")     acfg.mode = PROfit::AdaptiveFCMode::Asimov;
+        else if (afc_mode_str == "brazil")     acfg.mode = PROfit::AdaptiveFCMode::Brazil;
+        else if (afc_mode_str == "classify")   acfg.mode = PROfit::AdaptiveFCMode::Classify;
+        else {
+            log<LOG_WARNING>(L"%1% || fc-adaptive: unknown --mode '%2%', defaulting to build-mesh.")
+                % __func__ % afc_mode_str.c_str();
+            acfg.mode = PROfit::AdaptiveFCMode::BuildMesh;
+        }
+        acfg.n_throws = afc_n_throws;
+        if (afc_prepass_initial.size() == 1) {
+            acfg.prepass_amr_initial_x = afc_prepass_initial[0];
+            acfg.prepass_amr_initial_y = afc_prepass_initial[0];
+        } else if (afc_prepass_initial.size() >= 2) {
+            acfg.prepass_amr_initial_x = afc_prepass_initial[0];
+            acfg.prepass_amr_initial_y = afc_prepass_initial[1];
+        }
+        acfg.prepass_amr_levels    = afc_prepass_levels;
+        acfg.prepass_delta_widen   = afc_prepass_delta;
+        acfg.prepass_contour_levels = afc_prepass_contour_levels;
+        acfg.p_thresh        = afc_p_thresh;
+        acfg.baseline_level  = afc_baseline_level;
+        acfg.stat_only_throws = afc_stat_only_throws;
+        acfg.xvar = afc_xvar;
+        acfg.yvar = afc_yvar;
+        acfg.x_lo = afc_xlo; acfg.x_hi = afc_xhi;
+        acfg.y_lo = afc_ylo; acfg.y_hi = afc_yhi;
+        acfg.logx = afc_logx; acfg.logy = afc_logy;
+        acfg.output_tag = final_output_tag;
+        acfg.chi2 = chi2;
+        acfg.binned = !eventbyevent;
+        acfg.cl_targets = afc_cl_targets;
+        acfg.wilson_eps = afc_wilson_eps;
+        acfg.n_pe_min = afc_n_pe_min;
+        acfg.n_pe_max = afc_n_pe_max;
+        acfg.update_layer = afc_update_layer;
+        acfg.only_layer = afc_only_layer;
+        acfg.n_brazil_throws = afc_n_brazil_throws;
+        acfg.roi_band = afc_roi_band;
+
+        // Outer "AFC throws" bar is only meaningful for build-mesh (the prepass
+        // throws each tick this bar via generate_throws). Other modes (init-bank,
+        // print-bank, asimov, brazil) create their own dedicated bars sized for
+        // the work they actually do — they don't use this one. Starting its
+        // display in those modes leaves "AFC throws X/N_throws" frozen above
+        // the real bar and looks like overcounting. So: skip display for
+        // non-BuildMesh and skip the round-up at finish.
+        const bool needs_outer_throws_bar =
+            (acfg.mode == PROfit::AdaptiveFCMode::BuildMesh);
+        std::vector<std::pair<int, std::string>> afc_PB_configs;
+        afc_PB_configs.push_back({
+            needs_outer_throws_bar ? acfg.n_throws : 1,
+            "AFC throws"});
+        MultiPROgressBar afc_progress(afc_PB_configs);
+        if (needs_outer_throws_bar) {
+            afc_progress.initialize_display();
+            afc_progress.start_display_thread();
+        }
+
+        PROfit::AdaptiveFCResult ares = PROfit::run_adaptive_fc(
+            config, prop, variable_systs[config.i_prime], scanFitConfig,
+            myseed, fakeDataParams, data, acfg, nthread, afc_progress);
+
+        if (needs_outer_throws_bar) afc_progress.finish_all();
+        else                         afc_progress.finish_all(false);
+        log<LOG_INFO>(L"%1% || fc-adaptive done: throws=%2%, meta_cells=%3% (baseline=%4%, refined=%5%), "
+                      L"diag=%6%, bank=%7% (pes=%8%, mean/cell=%9%, capped=%10%).")
+            % __func__ % ares.n_throws_done % ares.n_meta_cells
+            % ares.n_baseline_cells % ares.n_refined_cells % ares.diag_root_path.c_str()
+            % (ares.bank_path.empty() ? "<not written>" : ares.bank_path.c_str())
+            % (int64_t)ares.total_pes_generated % ares.mean_pes_per_cell % ares.cells_hit_n_pe_max;
+    }
 
     //***********************************************************************
     //***********************************************************************

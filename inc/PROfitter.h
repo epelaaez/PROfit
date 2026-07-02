@@ -22,9 +22,45 @@
 #include <Eigen/Eigen>
 #include "LBFGSB.h"
 
+#include <atomic>
+#include <cstdint>
 #include <random>
 
 namespace PROfit {
+
+    /**
+     * @brief Thread-safe accumulator for PROfile/PROsurf scan-mode timing diagnostics.
+     * @details PROfitter::Fit() reports per-phase microseconds (latin / PSO / LBFGS)
+     * and total fit count when GetScanTimingEnabled() is true. The dispatcher (PROfile
+     * constructor) resets these at the start of a scan and reads them at the end to
+     * print a parallelism / cost-breakdown report. When the flag is false, all the
+     * Fit() instrumentation collapses to a few inlined comparisons — zero allocation,
+     * negligible runtime impact.
+     */
+    struct ScanTimingStats {
+        std::atomic<uint64_t> n_fits{0};        ///< Number of Fit() calls completed since reset.
+        std::atomic<uint64_t> total_fit_us{0};  ///< Sum of wall time spent inside Fit() across all threads.
+        std::atomic<uint64_t> latin_us{0};      ///< Sum of wall time spent in the LHS evaluation loop.
+        std::atomic<uint64_t> pso_us{0};        ///< Sum of wall time spent in PSO.runSwarm().
+        std::atomic<uint64_t> lbfgs_us{0};      ///< Sum of wall time spent in all LBFGS local-fit phases.
+
+        /// Reset all counters to zero. Should be called from a single thread before dispatching workers.
+        void reset() {
+            n_fits.store(0);
+            total_fit_us.store(0);
+            latin_us.store(0);
+            pso_us.store(0);
+            lbfgs_us.store(0);
+        }
+    };
+
+    /// Global scan-timing accumulator. PROfitter::Fit reads-then-updates this when
+    /// GetScanTimingEnabled() returns true.
+    ScanTimingStats& GetScanTimingStats();
+
+    /// Global toggle gating the timing instrumentation in PROfitter::Fit.
+    /// Returns a reference so callers can flip it on/off (e.g. PROfile constructor).
+    bool& GetScanTimingEnabled();
 
     /**
      * @brief Configuration parameters for the PROfitter multi-start optimisation pipeline.

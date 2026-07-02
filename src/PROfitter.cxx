@@ -4,9 +4,24 @@
 #include "PROswarm.h"
 #include <Eigen/Eigen>
 
+#include <chrono>
 #include <random>
 
 using namespace PROfit;
+
+namespace PROfit {
+    // Definitions of the global scan-timing machinery declared in PROfitter.h.
+    // Function-local statics so the order of construction across translation
+    // units doesn't bite.
+    ScanTimingStats& GetScanTimingStats() {
+        static ScanTimingStats s;
+        return s;
+    }
+    bool& GetScanTimingEnabled() {
+        static bool b = false;
+        return b;
+    }
+}
 
 std::vector<std::vector<float>> PROfit::latin_hypercube_sampling(size_t num_samples, size_t dimensions, std::uniform_real_distribution<float>&dis, std::mt19937 &gen) {
     std::vector<std::vector<float>> samples(num_samples, std::vector<float>(dimensions));
@@ -127,10 +142,11 @@ float PROfitter::Fit(PROmetric &metric, const Eigen::VectorXf &seed_pt ) {
 
 float PROfitter::Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed_points ) {
 
-    // Apply the configured gradient strategy to the metric for the duration of
-    // this fit. The metric stores the mode itself (PROmetric::gradient_mode)
-    // so any subsequent operator() call inside the LBFGS solver will use it.
     metric.setGradientMode(fitconfig.gradient_mode);
+
+    const bool tim_on = PROfit::GetScanTimingEnabled();
+    auto fit_t0 = tim_on ? std::chrono::steady_clock::now()
+                         : std::chrono::steady_clock::time_point{};
 
     std::mt19937 rng;
     rng.seed(seed);
@@ -168,6 +184,8 @@ float PROfitter::Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed
     chi2s_multistart.reserve(fitconfig.n_latin_points);
 
     log<LOG_INFO>(L"%1% || Starting MultiGlobal runs (i.e latin hypercube runs, pure chi^2 no grad) : %2%") % __func__ % fitconfig.n_latin_points ;
+    auto latin_t0 = tim_on ? std::chrono::steady_clock::now()
+                           : std::chrono::steady_clock::time_point{};
     for(int s = 0; s < fitconfig.n_latin_points; s++){
         Eigen::VectorXf x = Eigen::Map<Eigen::VectorXf>(latin_samples[s].data(), latin_samples[s].size());
         Eigen::VectorXf grad = Eigen::VectorXf::Constant(x.size(), 0);
@@ -175,6 +193,11 @@ float PROfitter::Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed
         chi2s_multistart.push_back(fx);
         if(run_progress){progress->increment_bar(0);}
 
+    }
+    if (tim_on) {
+        const auto dt = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - latin_t0).count();
+        PROfit::GetScanTimingStats().latin_us.fetch_add((uint64_t)dt, std::memory_order_relaxed);
     }
     //Sort so we can take the best N_localfits for further zoning with a PSO
     //std::vector<int> best_multistart = sorted_indices(chi2s_multistart);    
@@ -196,15 +219,24 @@ float PROfitter::Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed
     }
     log<LOG_INFO>(L"%1% || Will swarm with %2% swarm points chis of %3% ") % __func__ % fitconfig.n_swarm_particles % swarm_string.c_str();
 
+    auto pso_t0 = tim_on ? std::chrono::steady_clock::now()
+                         : std::chrono::steady_clock::time_point{};
     PROswarm PSO(metric, rng, swarm_start_points, lb, ub , fitconfig.n_swarm_iterations);
     if(run_progress){
         PSO.runSwarm(metric,rng,fitconfig, progress);
     }else{
         PSO.runSwarm(metric,rng,fitconfig);
     }
+    if (tim_on) {
+        const auto dt = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - pso_t0).count();
+        PROfit::GetScanTimingStats().pso_us.fetch_add((uint64_t)dt, std::memory_order_relaxed);
+    }
 
+    auto lbfgs_t0 = tim_on ? std::chrono::steady_clock::now()
+                           : std::chrono::steady_clock::time_point{};
 
-    Eigen::VectorXf x;  
+    Eigen::VectorXf x;
 
     float chimin = 9999999;
     std::vector<float> chi2s_localfits;
@@ -383,11 +415,25 @@ float PROfitter::Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed
 
     log<LOG_INFO>(L"%1% || FINAL has a chi %2%") % __func__ %  chimin;
     std::string spec_string = "";
-    for(auto &f : best_fit) spec_string+=" "+std::to_string(f); 
+    for(auto &f : best_fit) spec_string+=" "+std::to_string(f);
     log<LOG_INFO>(L"%1% || FINAL is  : %2% ") % __func__ % spec_string.c_str();
+
+    if (tim_on) {
+        const auto now = std::chrono::steady_clock::now();
+        const auto dt_lbfgs = std::chrono::duration_cast<std::chrono::microseconds>(
+            now - lbfgs_t0).count();
+        const auto dt_total = std::chrono::duration_cast<std::chrono::microseconds>(
+            now - fit_t0).count();
+        auto& s = PROfit::GetScanTimingStats();
+        s.lbfgs_us.fetch_add((uint64_t)dt_lbfgs, std::memory_order_relaxed);
+        s.total_fit_us.fetch_add((uint64_t)dt_total, std::memory_order_relaxed);
+        s.n_fits.fetch_add(1, std::memory_order_relaxed);
+    }
 
     return chimin;
 }
+
+
 int PROfitter::calcFreqSeedPoints(PROmetric &metric) {
     freq_seed_points.clear();
     freq_seed_values.clear();

@@ -912,9 +912,11 @@ namespace PROfit {
             spline_names.push_back(knob_name);
             spline_lo.push_back(lo);
             spline_hi.push_back(hi);
+            // Keep the restrict bookkeeping vectors the SAME length as splines/spline_lo,
+            // otherwise per-spline loops (e.g. pseudo-experiment throws) read OOB.
             spline_has_restrict.push_back(false);
-            spline_restrict_lo.push_back(0.0f);
-            spline_restrict_hi.push_back(0.0f);
+            spline_restrict_lo.push_back(lo);
+            spline_restrict_hi.push_back(hi);
             spline_binnings.push_back(syst.binning);
             dbg.knob_names.push_back(knob_name);
             ++n_splines;
