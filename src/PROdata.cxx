@@ -82,7 +82,7 @@ void PROdata::toROOT(const PROconfig& inconfig, const std::string& output_name){
 
 bool PROdata::SameDim(const PROdata& a, const PROdata& b){
     if(a.nbins != b.nbins){
-        log<LOG_ERROR>(L"%1% || Two spectra have different bins: %2 vs. %3") % __func__ % a.nbins % b.nbins;
+        log<LOG_ERROR>(L"%1% || Two spectra have different bins: %2% vs. %3%") % __func__ % a.nbins % b.nbins;
         return false;
     }
     return true;

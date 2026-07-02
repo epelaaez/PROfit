@@ -42,14 +42,6 @@ namespace PROfit{
     int FindGlobalVariableBin(const PROconfig &inconfig, const BranchVariable::Value &other_value, const std::string& subchannel_fullname, int other_index);
 
 
-    /* Function: given a global bin index in the full vector, return the index of the subchannle this bin belongs to
-     * Parameter:
-     * 	 	inconfig:     a reference to PROconfig object, needed for calculating index 
-     * 	 	global_bin:   global bin index. It can be a global true bin index, or global reco bin index
-     * 	 		      Default to true.
-     */
-    int FindSubchannelIndexFromVariableGlobalBin(const PROconfig &inconfig, int global_bin, int var_index=0);
-
     /**
      * @brief Collapse a full mode×detector×channel×subchannel covariance matrix to the channel level.
      * @details Uses the primary collapsing matrix (variable index i_prime) from @p inconfig.

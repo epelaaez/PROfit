@@ -228,41 +228,38 @@ namespace PROfit {
         PROsyst ret;
         Eigen::VectorXf tmp_priors = spline_priors;
         Eigen::VectorXf tmp_centers = spline_centers;
-        for(const auto &[name, spair]: syst_map) {
+        // Iterate in the ORIGINAL spline/covariance order, not syst_map's
+        // alphabetical order: spline position defines the parameter-vector
+        // layout, so a reordered copy would silently misalign any parameter or
+        // seed vector built against this object.
+        for(size_t idx = 0; idx < spline_names.size(); ++idx) {
+            const std::string &name = spline_names[idx];
             if(std::find(systs.begin(), systs.end(), name) != systs.end()) continue;
-            const auto &[idx, stype] = spair;
-            switch(stype) {
-                case SystType::Spline:
-                    {
-                        ret.syst_map[name] = std::make_pair(ret.splines.size(), SystType::Spline);
-                        ret.spline_names.push_back(name);
-                        Spline spline_copy;//Create explicit deep copy of the Spline
-                        spline_copy.bins = splines[idx].bins;
-                        spline_copy.segments_per_bin = splines[idx].segments_per_bin;
-                        spline_copy.segments = splines[idx].segments;  // vector copy
-                        ret.splines.push_back(std::move(spline_copy));
-                        ret.spline_hi.push_back(spline_hi[idx]);
-                        ret.spline_lo.push_back(spline_lo[idx]);
-                        ret.spline_has_restrict.push_back(spline_has_restrict[idx]);
-                        ret.spline_restrict_lo.push_back(spline_restrict_lo[idx]);
-                        ret.spline_restrict_hi.push_back(spline_restrict_hi[idx]);
-                        ret.spline_binnings.push_back(spline_binnings[idx]);
-                        tmp_priors(ret.n_splines) = spline_priors(idx);
-                        tmp_centers(ret.n_splines) = spline_centers(idx);
-                        ++ret.n_splines;
-                        break;
-                    }
-                case SystType::Covariance:
-                    ret.syst_map[name] = std::make_pair(ret.covmat.size(), SystType::Covariance);
-                    ret.covar_names.push_back(name);
-                    ret.covmat.push_back(covmat[idx]);
-                    ret.corrmat.push_back(corrmat[idx]);
-                    ++ret.n_covar;
-                    break;
-                default:
-                    log<LOG_ERROR>(L"%1% || Unrecognized syst type %2% for syst %3%.") % __func__ % static_cast<int>(stype) % name.c_str();
-                    break;
-            }
+            ret.syst_map[name] = std::make_pair(ret.splines.size(), SystType::Spline);
+            ret.spline_names.push_back(name);
+            Spline spline_copy;//Create explicit deep copy of the Spline
+            spline_copy.bins = splines[idx].bins;
+            spline_copy.segments_per_bin = splines[idx].segments_per_bin;
+            spline_copy.segments = splines[idx].segments;  // vector copy
+            ret.splines.push_back(std::move(spline_copy));
+            ret.spline_hi.push_back(spline_hi[idx]);
+            ret.spline_lo.push_back(spline_lo[idx]);
+            ret.spline_has_restrict.push_back(spline_has_restrict[idx]);
+            ret.spline_restrict_lo.push_back(spline_restrict_lo[idx]);
+            ret.spline_restrict_hi.push_back(spline_restrict_hi[idx]);
+            ret.spline_binnings.push_back(spline_binnings[idx]);
+            tmp_priors(ret.n_splines) = spline_priors(idx);
+            tmp_centers(ret.n_splines) = spline_centers(idx);
+            ++ret.n_splines;
+        }
+        for(size_t idx = 0; idx < covar_names.size(); ++idx) {
+            const std::string &name = covar_names[idx];
+            if(std::find(systs.begin(), systs.end(), name) != systs.end()) continue;
+            ret.syst_map[name] = std::make_pair(ret.covmat.size(), SystType::Covariance);
+            ret.covar_names.push_back(name);
+            ret.covmat.push_back(covmat[idx]);
+            ret.corrmat.push_back(corrmat[idx]);
+            ++ret.n_covar;
         }
         ret.spline_priors = tmp_priors.segment(0, ret.n_splines);
         ret.spline_centers = tmp_centers.segment(0, ret.n_splines);

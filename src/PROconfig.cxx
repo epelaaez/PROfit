@@ -2128,7 +2128,10 @@ void PROconfig::remove_unused_files(){
 size_t PROconfig::find_equal_index(const std::vector<size_t>& input_vec, size_t val) const{
     auto pos_iter = std::lower_bound(input_vec.begin(), input_vec.end(), val);
     if(pos_iter == input_vec.end() || (*pos_iter) != val){
-        log<LOG_ERROR>(L"%1% || Input value: %2% does not exist in the vector! Max element available: %3%") % __func__ % val % input_vec.back();
+        if(input_vec.empty())
+            log<LOG_ERROR>(L"%1% || Input value: %2% does not exist in the vector (vector is empty)!") % __func__ % val;
+        else
+            log<LOG_ERROR>(L"%1% || Input value: %2% does not exist in the vector! Max element available: %3%") % __func__ % val % input_vec.back();
         log<LOG_ERROR>(L"Terminating.");
         exit(EXIT_FAILURE);
     }
@@ -2301,16 +2304,19 @@ int PROconfig::HexToROOTColor(const std::string& hexColor) const{
     if (hexColor.length() != 7 || hexColor[0] != '#') {
         throw std::invalid_argument("Invalid hex color format. It should be in the format #RRGGBB.");
     }
-    int r, g, b;
+    int r = 0, g = 0, b = 0;
     std::stringstream ss;
-    ss << std::hex << hexColor.substr(1, 2); 
+    ss << std::hex << hexColor.substr(1, 2);
     ss >> r;
     ss.clear();
-    ss << std::hex << hexColor.substr(3, 2); 
+    ss << std::hex << hexColor.substr(3, 2);
     ss >> g;
     ss.clear();
     ss << std::hex << hexColor.substr(5, 2);
     ss >> b;
+    if(ss.fail()) {
+        throw std::invalid_argument("Invalid hex color '" + hexColor + "': components must be hexadecimal.");
+    }
     return TColor::GetColor(r, g, b);
 }
 

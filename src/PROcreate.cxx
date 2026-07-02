@@ -71,10 +71,13 @@ namespace PROfit {
 
     std::string convertToXRootD(std::string fname_orig){
         std::string fname_use = fname_orig;
-        if(fname_orig.find("pnfs")!=std::string::npos ){
-            std::string p = "/pnfs";
-            std::string::size_type i = fname_orig.find(p);
-            fname_orig.erase(i,p.length());
+        // Search for "/pnfs" directly: testing for "pnfs" but erasing at
+        // find("/pnfs") threw std::out_of_range for paths containing "pnfs"
+        // without the leading slash.
+        const std::string p = "/pnfs";
+        std::string::size_type i = fname_orig.find(p);
+        if(i != std::string::npos){
+            fname_orig.erase(i, p.length());
             fname_use = "root://fndca1.fnal.gov:1094/pnfs/fnal.gov/usr"+fname_orig;
         }
         return fname_use;

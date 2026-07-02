@@ -156,53 +156,16 @@ namespace PROfit {
     bool load_mesh(MetaMesh &mm_out, const std::string &path);
 
     /**
-     * @brief Wilson-interval sequential stopping rule. Pure utility — no PROfit deps.
+     * @brief Empirical-quantile helper for PE-bank classification. Pure utility — no PROfit deps.
      *
-     * Slice-2a v1 rule: stop when the Wilson 95% half-width on the Bernoulli
-     * proportion estimate falls below `eps`. The spec-faithful rule (Wilson CI
-     * vs target alpha with Bonferroni-corrected milestones) is deferred to
-     * slice 2b's validation pass.
-     *
-     * All methods are constexpr-free but inlined so the helper has no link
-     * dependency on the .cxx (useful for unit-testing).
+     * Inlined so the helper has no link dependency on the .cxx (useful for
+     * unit-testing).
      */
     struct SequentialFCTest {
-        float z = 1.959963984540054f; ///< Wilson z-score; 1.96 for 95% nominal coverage.
-
-        /**
-         * @brief Wilson score interval on a Bernoulli proportion p = k/n.
-         * @return (lo, hi) bounds with nominal coverage 1 - alpha controlled by `z`.
-         */
-        std::pair<float, float> wilson_interval(int n, int k) const {
-            if (n <= 0) return {0.0f, 1.0f};
-            const float nf = (float)n;
-            const float p = (float)k / nf;
-            const float z2 = z * z;
-            const float denom = 1.0f + z2 / nf;
-            const float center = (p + z2 / (2.0f * nf)) / denom;
-            const float radical = std::sqrt(std::max(0.0f, p * (1.0f - p) / nf + z2 / (4.0f * nf * nf)));
-            const float half = (z * radical) / denom;
-            return {center - half, center + half};
-        }
-
-        /**
-         * @brief Half-width of the Wilson interval (handy for the v1 stop rule).
-         */
-        float wilson_halfwidth(int n, int k) const {
-            const auto [lo, hi] = wilson_interval(n, k);
-            return 0.5f * (hi - lo);
-        }
-
-        /**
-         * @brief Slice-2a stop rule: stop when half-width below `eps`.
-         *
-         * `k` is the count of PEs with Δχ²(syst) − Δχ²(syst+osc) ≥ Δχ²_obs(μ).
-         * `n` is the total PEs thrown at this cell so far.
-         */
-        bool should_stop(int n, int k, float eps) const {
-            if (n <= 0) return false;
-            return wilson_halfwidth(n, k) < eps;
-        }
+        // NOTE: the Wilson-interval sequential stopping rule that used to live
+        // here was never wired into schedule_pes (the additive-doubling rule
+        // is the real PE budget policy) and has been removed as dead code.
+        // Only the empirical-quantile helper below is used.
 
         /**
          * @brief Empirical Δχ² critical value at a given confidence level.
@@ -348,7 +311,8 @@ namespace PROfit {
         // Slice 2a fields (populated by --mode init-bank).
         std::string bank_path;        ///< Path of the saved PEBank artifact, if any.
         int64_t     total_pes_generated = 0;
-        int         cells_hit_n_pe_max  = 0; ///< Number of cells that reached n_pe_max without Wilson-stopping.
+        int         cells_hit_n_pe_max  = 0; ///< Number of cells skipped because they already hold n_pe_max PEs.
+        int         cells_topped_up     = 0; ///< Number of cells that received new PEs this run.
         float       mean_pes_per_cell   = 0.0f;
     };
 

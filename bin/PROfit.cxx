@@ -2876,11 +2876,12 @@ int main(int argc, char* argv[])
         if (needs_outer_throws_bar) afc_progress.finish_all();
         else                         afc_progress.finish_all(false);
         log<LOG_INFO>(L"%1% || fc-adaptive done: throws=%2%, meta_cells=%3% (baseline=%4%, refined=%5%), "
-                      L"diag=%6%, bank=%7% (pes=%8%, mean/cell=%9%, capped=%10%).")
+                      L"diag=%6%, bank=%7% (pes=%8%, mean/cell=%9%, topped_up=%10%, capped=%11%).")
             % __func__ % ares.n_throws_done % ares.n_meta_cells
             % ares.n_baseline_cells % ares.n_refined_cells % ares.diag_root_path.c_str()
             % (ares.bank_path.empty() ? "<not written>" : ares.bank_path.c_str())
-            % (int64_t)ares.total_pes_generated % ares.mean_pes_per_cell % ares.cells_hit_n_pe_max;
+            % (int64_t)ares.total_pes_generated % ares.mean_pes_per_cell
+            % ares.cells_topped_up % ares.cells_hit_n_pe_max;
     }
 
     //***********************************************************************

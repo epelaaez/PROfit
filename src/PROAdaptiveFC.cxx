@@ -1727,18 +1727,11 @@ static PEBankRecord run_one_pe(const AdaptivePEArgs &args)
 }
 
 // --------------------------------------------------------------------
-//  schedule_pes — owns a threadpool, hands out cell-jobs to workers,
-//  polls SequentialFCTest on every completed PE, stops cells once
-//  Wilson half-width < eps, caps at n_pe_max.
+//  schedule_pes — owns a threadpool and hands out cell-jobs to workers.
+//  The PE budget policy is the additive doubling rule below (the Wilson
+//  sequential stopping rule this comment used to mention was never wired
+//  in and has been removed as dead code).
 // --------------------------------------------------------------------
-
-struct CellState {
-    int     cell_idx;
-    int     n_done = 0;
-    int     n_above_obs = 0;
-    bool    stopped = false;
-    std::vector<PEBankRecord> records; // local accumulator; copied into PEBank when stopped or capped
-};
 
 // Drive PE generation for every MetaCell using a deterministic doubling rule.
 //
@@ -1884,7 +1877,8 @@ static void schedule_pes(const AdaptiveFCConfig &acfg,
     for (auto &th : tpool) th.join();
 
     result_out.total_pes_generated = total_pes.load();
-    result_out.cells_hit_n_pe_max  = cells_topped_up.load(); ///< Repurposed: cells that actually got new PEs.
+    result_out.cells_hit_n_pe_max  = cells_at_cap.load();
+    result_out.cells_topped_up     = cells_topped_up.load();
     result_out.mean_pes_per_cell   = n_cells > 0 ? (float)total_pes.load() / (float)n_cells : 0.0f;
 
     log<LOG_INFO>(L"%1% || schedule_pes done: cells=%2%, total_pes=%3%, mean=%4%, "

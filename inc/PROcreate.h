@@ -79,7 +79,7 @@ namespace PROfit{
         std::vector<std::shared_ptr<PROspec>> p_multi_spec; ///< Shared pointers to per-universe variation spectra.
 
         std::vector<int> norm_bins; ///< Bin indices used for shape-normalisation (empty = normalise all bins).
-        float norm_value;           ///< Normalisation target integral (used in shape-only mode).
+        float norm_value = 0.0f;    ///< Normalisation target integral (used in shape-only mode; only set for "norm" systematics).
         bool force_0_cv = false;    ///< If true, normalise spline shifts by the shift at knob=0.
         std::vector<int> include_only_weights; ///< 1-based indices of weight universes to include; empty = all.
         float scale = 1.0f;         ///< Scale factor applied to all weights (e.g. 0.001 for weights stored as x1000).

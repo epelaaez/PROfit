@@ -33,10 +33,6 @@ namespace PROfit{
     }
 
 
-    int FindSubchannelIndexFromGlobalBin(const PROconfig &inconfig, int global_bin, int var_index ){
-        return inconfig.GetSubchannelIndexFromVariableGlobalBin(global_bin,var_index);
-    }
-
     Eigen::MatrixXf CollapseMatrix(const PROconfig &inconfig, const Eigen::MatrixXf& full_matrix){
         const Eigen::SparseMatrix<float>& T = inconfig.GetCollapsingMatrixSparse();
         const Eigen::Index num_bin_before_collapse = T.rows();
