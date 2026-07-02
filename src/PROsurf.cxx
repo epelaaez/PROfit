@@ -8,6 +8,8 @@
 #include <future>
 #include <algorithm>
 #include <functional>
+#include <fstream>
+#include <iomanip>
 
 #include "TGraph.h"
 #include "TLatex.h"
@@ -801,6 +803,48 @@ PROfile::PROfile(const PROconfig &config, const PROsyst &systs, const PROmodel &
     }
     if(fitconfig.progress_bar) prof_progress.finish_all();
 
+    {
+    std::string outname = filename.empty()
+        ? "PROfile_points.txt"
+        : filename + "_points.txt";
+
+    std::ofstream prof_file(outname);
+
+    prof_file << "# PROfile scan points written by PROfit\n";
+    prof_file << "# This file contains the profile curves shown in PROfile.pdf\n";
+    prof_file << "# columns: param_index param_type param_name fixed_value delta_chi2 chi_post\n";
+
+    size_t n_model_params = with_osc ? model.nparams : 0;
+
+    for(size_t iparam = 0; iparam < combinedResults.size(); ++iparam) {
+        std::string param_name = names.at(iparam);
+
+        std::string param_type =
+            (iparam < n_model_params) ? "model" : "spline";
+
+        for(size_t j = 0; j < combinedResults[iparam].knob_vals.size(); ++j) {
+            float fixed_value = combinedResults[iparam].knob_vals.at(j);
+            float delta_chi2  = combinedResults[iparam].knob_chis.at(j);
+            float chi_post    = delta_chi2 + minchi;
+
+            prof_file << iparam << " "
+                      << param_type << " "
+                      << param_name << " "
+                      << std::setprecision(12) << fixed_value << " "
+                      << std::setprecision(12) << delta_chi2 << " "
+                      << std::setprecision(12) << chi_post
+                      << "\n";
+        }
+
+        prof_file << "\n";
+    }
+
+    prof_file.close();
+
+    log<LOG_INFO>(L"%1% || Wrote PROfile scan points to %2%")
+        % __func__ % outname.c_str();
+}
+
     //create all graphs, used directly in first setion
     for(auto & out: combinedResults){
         log<LOG_INFO>(L"%1% || Knob Values: %2%") % __func__ %  out.knob_vals;
@@ -932,7 +976,17 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
         plotFunctions.push_back([&, idx]() {
             // Check if this is a physics param (only possible when with_osc=true)
             bool is_physics = with_osc && idx < model.nparams;
-            std::string xval = is_physics ? "Log_{10}(" + model.pretty_param_names[idx]+")" : "#sigma Shift";
+            std::string xval;
+            if(is_physics) {
+                const bool is_log_param = (idx < model.is_log10.size()) && model.is_log10[idx];
+                if(is_log_param) {
+                    xval = "Log_{10}(" + model.pretty_param_names[idx] + ")";
+                } else {
+                    xval = model.pretty_param_names[idx];
+                }
+            } else {
+                xval = "#sigma Shift";
+            }
             std::string tit = (is_physics ? names[idx] : config.m_mcgen_variation_plotname_map.at(names[idx])) + ";" + xval + "; #Delta#Chi^{2}";
             graphs[idx]->SetTitle(tit.c_str());
             graphs[idx]->Draw("AL");
@@ -1254,7 +1308,18 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
     float label_y = y_axis_min - y_range_size * 0.04f;
     for(size_t i = 0; i < barvalues.size(); ++i) {
         if(mask_osc && with_osc && i < model.nparams) continue;
-        TLatex* text = new TLatex(barvalues[i], label_y, labels[i].c_str());
+        std::string label;
+        if(with_osc && i < model.nparams) {
+            const bool is_log_param = (i < model.is_log10.size()) && model.is_log10[i];
+            if(is_log_param) {
+                label = "Log_{10}(" + model.pretty_param_names[i] + ")";
+            } else {
+                label = model.pretty_param_names[i];
+            }
+        } else {
+            label = config.m_mcgen_variation_plotname_map.at(names[i]);
+        }
+        TLatex* text = new TLatex(barvalues[i], label_y, label.c_str());
         text->SetTextAlign(13);
         text->SetTextSize(text_size);
         text->SetTextAngle(-45);
@@ -1342,7 +1407,18 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
     for (size_t i = 0; i < barvalues.size(); ++i) {
         // In syst-only mode (with_osc=false), all entries are splines
         // In with_osc mode, first model.nparams entries are physics, rest are splines
-        TLatex* text = new TLatex(barvalues[i], y_min - 0.05, labels[i].c_str());  // Position text below axis
+        std::string label;
+        if (with_osc && i < model.nparams) {
+            const bool is_log_param = (i < model.is_log10.size()) && model.is_log10[i];
+            if(is_log_param) {
+                label = "Log_{10}(" + model.pretty_param_names[i] + ")";
+            } else {
+                label = model.pretty_param_names[i];
+            }
+        } else {
+            label = config.m_mcgen_variation_plotname_map.at(names[i]);
+        }
+        TLatex* text = new TLatex(barvalues[i], y_min - 0.05, label.c_str());  // Position text below axis
         text->SetTextAlign(13);
         text->SetTextSize(label_text_size);
         text->SetTextAngle(-45);
