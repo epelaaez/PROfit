@@ -599,6 +599,7 @@ AMRResult run_amr(EvalFn eval,
     // contour" picture.
     result.finest_nx = finest_nx;
     result.finest_ny = finest_ny;
+    result.max_levels = max_levels;
     result.x_lo = x_lo; result.x_hi = x_hi;
     result.y_lo = y_lo; result.y_hi = y_hi;
     result.leaves.reserve(cells.size());

@@ -1246,6 +1246,15 @@ namespace PROfit {
                 }
                 for(int iuni = 0; iuni < var_syst_objs.front()->GetNUniverse(); ++iuni){
                     float raw_weight = static_cast<float>(map_iter->second->at(iuni));
+                    // Same non-finite guard the spline path applies at its w:
+                    // one NaN/inf universe weight would silently NaN the whole
+                    // covariance (later zeroed by toFiniteMatrix, hiding the
+                    // bad input). Warn so the input problem is visible.
+                    if(std::isnan(raw_weight) || std::isinf(raw_weight)){
+                        log<LOG_WARNING>(L"%1% || Non-finite universe weight %2% for covariance systematic '%3%' universe %4%; using 1.")
+                            % __func__ % raw_weight % var_syst_objs.front()->GetSysName().c_str() % iuni;
+                        raw_weight = 1;
+                    }
                     float scaled_weight = raw_weight * var_syst_objs.front()->scale; // apply scale factor (default 1.0)
                     float sys_wei = run_syst ? additional_weight * scaled_weight :  1.0;
                     for(size_t io = 0; io < inconfig.m_num_variables; ++io) {
@@ -1260,6 +1269,11 @@ namespace PROfit {
                     so->FillCV(spline_bin, mc_weight);
                 for(int iuni = 0; iuni < var_syst_objs.front()->GetNUniverse(); ++iuni){
                     float raw_weight = static_cast<float>(map_iter->second->at(iuni));
+                    if(std::isnan(raw_weight) || std::isinf(raw_weight)){
+                        log<LOG_WARNING>(L"%1% || Non-finite universe weight %2% for covariance_to_spline systematic '%3%' universe %4%; using 1.")
+                            % __func__ % raw_weight % var_syst_objs.front()->GetSysName().c_str() % iuni;
+                        raw_weight = 1;
+                    }
                     float scaled_weight = raw_weight * var_syst_objs.front()->scale;
                     float sys_wei = run_syst ? additional_weight * scaled_weight : 1.0;
                     for(auto so: var_syst_objs){

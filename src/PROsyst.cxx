@@ -6,6 +6,7 @@
 #include "PROlog.h"
 #include "PROtocall.h"
 #include <Eigen/Eigen>
+#include <mutex>
 #include <random>
 
 namespace PROfit {
@@ -1023,8 +1024,17 @@ namespace PROfit {
     }
 
     Eigen::MatrixXf PROsyst::DecomposeFractionalCovariance(const PROconfig &config, const Eigen::VectorXf &cv_vec) const {
-        if(cv_vec.size() == last_decomp_spec.size() && cv_vec == last_decomp_spec)
-          return last_decomp_mat;
+        // The mutable last_decomp_* cache is written from this const method;
+        // metric clones and throw helpers share PROsyst objects across
+        // threads, so guard the cache. Function-local mutex keeps PROsyst
+        // copyable; contention is irrelevant on this cold path (the SVD below
+        // dominates).
+        static std::mutex decomp_cache_mutex;
+        {
+            std::lock_guard<std::mutex> lk(decomp_cache_mutex);
+            if(cv_vec.size() == last_decomp_spec.size() && cv_vec == last_decomp_spec)
+                return last_decomp_mat;
+        }
         Eigen::MatrixXf full_cov = cv_vec.asDiagonal() * fractional_covariance * cv_vec.asDiagonal();
         Eigen::MatrixXf coll = other_index < 0 ? CollapseMatrix(config, full_cov) : CollapseMatrix(config, full_cov, other_index);
         /*Eigen::LDLT<Eigen::MatrixXf> ldlt(coll);
@@ -1082,8 +1092,11 @@ namespace PROfit {
             fallback_sampler.col(i) = U.col(keep[i]) * std::sqrt(S(keep[i]));
         }
 
-        last_decomp_spec = cv_vec;
-        last_decomp_mat = fallback_sampler;
+        {
+            std::lock_guard<std::mutex> lk(decomp_cache_mutex);
+            last_decomp_spec = cv_vec;
+            last_decomp_mat = fallback_sampler;
+        }
         return fallback_sampler;
 
     }

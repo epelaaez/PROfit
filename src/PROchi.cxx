@@ -94,14 +94,23 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
     //log<LOG_DEBUG>(L"%1% || Created physics subvector with size %2%") % __func__ % subvector1.size();
     if(model.model_constraint){
         if(!model.model_constraint(subvector1)){
+            // Keep value and gradient consistent for the minimizer: a huge
+            // flat plateau with a stale gradient sends LBFGSB in a random
+            // direction.
+            if(rungradient) gradient.setZero();
             return 1e10;
         }
     }
 
     // Get Spectra from FillSpectra
     Eigen::VectorXf subvector2 = param.segment(nparams - nsyst, nsyst);
-    
-    PROspec result = FillSpectra(config, peller, *syst, model, param, fs_cache, strat == BinnedChi2, config.i_prime);
+
+    // strat != EventByEvent (not == BinnedChi2): the FD gradient closures below
+    // use the same condition, so for BinnedGrad the value and the gradient are
+    // computed from the SAME (binned) spectrum model, and the fill cache stays
+    // valid instead of being invalidated by an unbinned base call every
+    // iteration.
+    PROspec result = FillSpectra(config, peller, *syst, model, param, fs_cache, strat != EventByEvent, config.i_prime);
 
     Eigen::MatrixXf full_covariance = result.Spec().asDiagonal() * (syst->fractional_covariance) * result.Spec().asDiagonal();
 

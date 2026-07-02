@@ -13,6 +13,8 @@
  */
 #include "PROAdaptiveFC.h"
 
+#include "MurmurHash3.h"
+
 #include "PROlog.h"
 #include "PROmodel.h"
 #include "PROchi.h"
@@ -84,15 +86,17 @@ static size_t resolve_axis_index(const std::string &name,
         loc != model.param_names.end()) {
         return std::distance(model.param_names.begin(), loc);
     }
+    // Spline axes index the FULL [physics | spline] parameter vector that the
+    // callers pin/bound, so the spline position must be offset by nparams.
     if (auto loc = std::find(systs.spline_names.begin(), systs.spline_names.end(), name);
         loc != systs.spline_names.end()) {
-        return std::distance(systs.spline_names.begin(), loc);
+        return model.nparams + std::distance(systs.spline_names.begin(), loc);
     }
     for (const auto &[xml_name, plot_name] : config.m_mcgen_variation_plotname_map) {
         if (name == plot_name) {
             if (auto loc = std::find(systs.spline_names.begin(), systs.spline_names.end(), xml_name);
                 loc != systs.spline_names.end()) {
-                return std::distance(systs.spline_names.begin(), loc);
+                return model.nparams + std::distance(systs.spline_names.begin(), loc);
             }
         }
     }
@@ -101,34 +105,13 @@ static size_t resolve_axis_index(const std::string &name,
     return fallback;
 }
 
-// Throw one nuisance pull from N(0,1) truncated to spline i's allowed range,
-// without ever looping forever. Mirrors the guarded pattern introduced in
-// bin/PROfit.cxx by commit 000b3d0: OOB-safe spline_has_restrict lookup
-// (covariance_to_spline knobs may not populate it), inverted-bounds tolerance,
-// and bounded attempts with a clamp-to-nearest-in-range fallback + warning.
+// Truncated-Gaussian nuisance throws use the shared, bounded, OOB-safe
+// ThrowRestrictedSplinePull from PROcess.h (pattern from commit 000b3d0).
 static float throw_restricted_spline(const PROsyst &systs, size_t i,
                                      std::mt19937 &rng,
                                      std::normal_distribution<float> &d)
 {
-    const bool has_r = i < systs.spline_has_restrict.size() && systs.spline_has_restrict[i];
-    float tlo = has_r ? systs.spline_restrict_lo[i] : systs.spline_lo[i];
-    float thi = has_r ? systs.spline_restrict_hi[i] : systs.spline_hi[i];
-    if (tlo > thi) { const float t = tlo; tlo = thi; thi = t; }
-
-    const int max_attempts = 10000;
-    int attempts = 0;
-    float x = d(rng);
-    while ((x < tlo || x > thi) && ++attempts < max_attempts)
-        x = d(rng);
-    if (x < tlo || x > thi) {
-        x = (0.0f < tlo) ? tlo : (0.0f > thi ? thi : 0.0f);
-        const std::string sname = i < systs.spline_names.size()
-            ? systs.spline_names[i] : ("spline#" + std::to_string(i));
-        log<LOG_WARNING>(L"%1% || spline '%2%' (index %3%) has throw bounds [%4%, %5%] unreachable "
-                         L"by a unit Gaussian after %6% draws; clamping to %7%. Check its knobvals / restrict attribute.")
-            % __func__ % sname.c_str() % (int)i % tlo % thi % max_attempts % x;
-    }
-    return x;
+    return ThrowRestrictedSplinePull(systs, i, rng, d);
 }
 
 // ====================================================================
@@ -516,17 +499,26 @@ static MetaMesh build_meta_mesh(const std::vector<PROmesh::AMRResult> &throws,
     mm.finest_ny  = throws.front().finest_ny;
     mm.x_lo = throws.front().x_lo;  mm.x_hi = throws.front().x_hi;
     mm.y_lo = throws.front().y_lo;  mm.y_hi = throws.front().y_hi;
-    int max_level_seen = 0;
     for (const auto &amr : throws) {
-        if (amr.finest_nx != mm.finest_nx || amr.finest_ny != mm.finest_ny) {
-            log<LOG_ERROR>(L"%1% || build_meta_mesh: throws disagree on finest grid (%2%x%3% vs %4%x%5%).")
-                % __func__ % amr.finest_nx % amr.finest_ny % mm.finest_nx % mm.finest_ny;
+        if (amr.finest_nx != mm.finest_nx || amr.finest_ny != mm.finest_ny ||
+            amr.max_levels != throws.front().max_levels) {
+            log<LOG_ERROR>(L"%1% || build_meta_mesh: throws disagree on finest grid / AMR depth (%2%x%3% L%4% vs %5%x%6% L%7%).")
+                % __func__ % amr.finest_nx % amr.finest_ny % amr.max_levels
+                % mm.finest_nx % mm.finest_ny % throws.front().max_levels;
             return mm;
         }
-        for (const auto &leaf : amr.leaves) max_level_seen = std::max(max_level_seen, leaf.level);
     }
-    mm.max_levels = max_level_seen;
-    const int n_levels = max_level_seen + 1;
+    // Use the AMR configuration depth, NOT the deepest level any throw
+    // happened to reach: the finest grid is always initial × 2^max_levels, so
+    // deriving max_levels from observed leaves mis-sizes every cell whenever
+    // no throw refined to full depth.
+    mm.max_levels = throws.front().max_levels;
+    if (mm.finest_nx % (1 << mm.max_levels) != 0 || mm.finest_ny % (1 << mm.max_levels) != 0) {
+        log<LOG_ERROR>(L"%1% || build_meta_mesh: finest grid %2%x%3% is not a multiple of 2^max_levels (L%4%). This is a bug.")
+            % __func__ % mm.finest_nx % mm.finest_ny % mm.max_levels;
+        return mm;
+    }
+    const int n_levels = mm.max_levels + 1;
     const int n_throws = (int)throws.size();
 
     // For each finest-grid point (i, j), count refinement-depth tallies across throws.
@@ -1687,9 +1679,12 @@ static PEBankRecord run_one_pe(const AdaptivePEArgs &args)
     Eigen::VectorXf throwC(nbins_coll);
     for (int i = 0; i < nbins_coll; ++i) throwC(i) = d(rng);
 
-    // Build fake-data spectrum.
-    PROchi::EvalStrategy strat = args.binned ? PROchi::BinnedChi2 : PROchi::EventByEvent;
-    PROspec shifted = FillSpectra(config, prop, systs, model, throws, strat);
+    // Build fake-data spectrum. Fill the i_prime variable explicitly: the
+    // previous call passed an EvalStrategy enum where FillSpectra takes
+    // `bool binned` and let var_index default to 0, while the CollapseMatrix
+    // below collapses with the i_prime matrix — wrong-variable physics when
+    // i_prime != 0.
+    PROspec shifted = FillSpectra(config, prop, systs, model, throws, args.binned, config.i_prime);
     PROspec newSpec = PROspec::PoissonVariation(
         PROspec(CollapseMatrix(config, shifted.Spec()) + (*args.L) * throwC,
                 CollapseMatrix(config, shifted.Error())),
@@ -1810,17 +1805,26 @@ static void schedule_pes(const AdaptiveFCConfig &acfg,
             % __func__ % acfg.n_pe_min % acfg.n_pe_max % acfg.update_layer;
     }
 
-    std::uniform_int_distribution<uint32_t> dseed(0, std::numeric_limits<uint32_t>::max());
+    // Deterministic per-PE seeding: seeds are derived from (base, cell, PE
+    // index) via MurmurHash3, NOT drawn from a per-thread RNG stream. With the
+    // work-stealing scheduler below, which thread claims which cell depends on
+    // OS scheduling — per-thread streams made the bank irreproducible even
+    // with a fixed --global-seed.
+    const uint32_t pe_seed_base = (*proseed.getThreadSeeds())[0];
+    auto pe_seed_for = [pe_seed_base](int cell, int pe_index) -> uint32_t {
+        const uint32_t key[2] = {(uint32_t)cell, (uint32_t)pe_index};
+        uint32_t out = 0;
+        MurmurHash3_x86_32(key, sizeof(key), pe_seed_base, &out);
+        return out;
+    };
 
     std::atomic<int> next_cell{0};
-    std::mutex log_mutex;
     std::atomic<int64_t> total_pes{0};
     std::atomic<int> cells_skipped_layer{0};  ///< level < update_layer
     std::atomic<int> cells_at_cap{0};         ///< existing already >= n_pe_max
     std::atomic<int> cells_topped_up{0};      ///< added PEs this run
 
-    auto worker = [&](int thread_idx) {
-        std::mt19937 thread_rng((*proseed.getThreadSeeds())[thread_idx]);
+    auto worker = [&](int) {
         while (true) {
             int c = next_cell.fetch_add(1);
             if (c >= n_cells) break;
@@ -1862,7 +1866,7 @@ static void schedule_pes(const AdaptiveFCConfig &acfg,
                 args.yaxis_idx = yaxis_idx;
                 args.cell_x_model = cell_x_model[c];
                 args.cell_y_model = cell_y_model[c];
-                args.seed = dseed(thread_rng);
+                args.seed = pe_seed_for(c, i);
 
                 PEBankRecord rec = run_one_pe(args);
                 local_pes.push_back(rec);

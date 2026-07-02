@@ -98,12 +98,17 @@ float PROpoisson::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &grad
     Eigen::VectorXf subvector1 = param.segment(0, nparams - nsyst);
     if(model.model_constraint){
         if(!model.model_constraint(subvector1)){
+            // Keep value and gradient consistent for the minimizer.
+            if(rungradient) gradient.setZero();
             return 1e10;
         }
     }
     Eigen::VectorXf subvector2 = param.segment(nparams - nsyst, nsyst);
-    
-    PROspec result = FillSpectra(config, peller, *syst, model, param, fs_cache, strat == BinnedChi2);
+
+    // strat != EventByEvent (not == BinnedChi2): matches the FD gradient
+    // helpers so BinnedGrad uses one consistent spectrum model and keeps the
+    // fill cache valid.
+    PROspec result = FillSpectra(config, peller, *syst, model, param, fs_cache, strat != EventByEvent);
 
     const Eigen::VectorXf vdata = shape_only
         ? data.Normalize(config,result)
@@ -278,7 +283,10 @@ float PROpoisson::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &grad
 
 float PROpoisson::getSingleChannelChi(size_t global_channel_index, const PROspec &cv, size_t var_index) {
 
-    size_t nbin = config.m_channel_variable_bins[global_channel_index][var_index].NBins();
+    // m_channel_variable_bins is indexed by LOCAL channel index (PROchi and
+    // PROCNP convert the same way); using the global index breaks any config
+    // with more than one mode x detector.
+    size_t nbin = config.m_channel_variable_bins[config.GetLocalChannelIndexFromGlobalChannelIndex(global_channel_index)][var_index].NBins();
     size_t startBin = config.GetCollapsedGlobalVariableBinStart(global_channel_index,var_index);
 
 

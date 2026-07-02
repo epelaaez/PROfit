@@ -520,8 +520,30 @@ namespace PROfit {
         bool binned = true;//dont want to faf around with event by event here lets be honst
         if (binned){
             spec = FillSpectra(inconfig, inprop, insyst, model, params, binned, other_index).Spec();
-        } 
+        }
 
         return PROspec(spec, spec.array().sqrt());
+    }
+
+    float ThrowRestrictedSplinePull(const PROsyst &insyst, size_t i, std::mt19937 &rng, std::normal_distribution<float> &d) {
+        const bool has_r = i < insyst.spline_has_restrict.size() && insyst.spline_has_restrict[i];
+        float tlo = has_r ? insyst.spline_restrict_lo[i] : insyst.spline_lo[i];
+        float thi = has_r ? insyst.spline_restrict_hi[i] : insyst.spline_hi[i];
+        if (tlo > thi) { const float t = tlo; tlo = thi; thi = t; }
+
+        const int max_attempts = 10000;
+        int attempts = 0;
+        float x = d(rng);
+        while ((x < tlo || x > thi) && ++attempts < max_attempts)
+            x = d(rng);
+        if (x < tlo || x > thi) {
+            x = (0.0f < tlo) ? tlo : (0.0f > thi ? thi : 0.0f);
+            const std::string sname = i < insyst.spline_names.size()
+                ? insyst.spline_names[i] : ("spline#" + std::to_string(i));
+            log<LOG_WARNING>(L"%1% || spline '%2%' (index %3%) has throw bounds [%4%, %5%] unreachable "
+                             L"by a unit Gaussian after %6% draws; clamping to %7%. Check its knobvals / restrict attribute.")
+                % __func__ % sname.c_str() % (int)i % tlo % thi % max_attempts % x;
+        }
+        return x;
     }
 };

@@ -7,6 +7,8 @@
 
 #include <Eigen/Eigen>
 
+#include <algorithm>
+
 using namespace PROfit;
 
 
@@ -84,6 +86,8 @@ float PROCNP::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
     log<LOG_DEBUG>(L"%1% || Created physics subvector with size %2%") % __func__ % subvector1.size();
      if(model.model_constraint){
         if(!model.model_constraint(subvector1)){
+            // Keep value and gradient consistent for the minimizer.
+            if(rungradient) gradient.setZero();
             return 1e10;
         }
     }
@@ -91,7 +95,10 @@ float PROCNP::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
     Eigen::VectorXf subvector2 = param.segment(model.nparams, syst->GetNSplines());
     //log<LOG_DEBUG>(L"%1% || Created spline subvector with size %2%") % __func__ % subvector2.size();
 
-    PROspec result = FillSpectra(config, peller, *syst, model, param, fs_cache, strat == BinnedChi2, config.i_prime);
+    // strat != EventByEvent (not == BinnedChi2): matches the FD gradient
+    // closures so BinnedGrad uses one consistent spectrum model and keeps the
+    // fill cache valid.
+    PROspec result = FillSpectra(config, peller, *syst, model, param, fs_cache, strat != EventByEvent, config.i_prime);
 
 
     Eigen::VectorXf collapsed_cv = cachedNoshiftCollapsedCV(subvector1, param.size());
@@ -99,9 +106,16 @@ float PROCNP::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
     Eigen::VectorXf normdata = shape_only
         ? data.Normalize(config,result)
         : data.Spec();
-    for(long i = 0; i < data.Spec().size(); ++i)
-        collapsed_stat_covariance(i,i) = data.Spec()(i) == 0 ? collapsed_cv(i)/2 :
-            3 / (1.0 / normdata(i) + 2.0 / collapsed_cv(i));
+    // CNP diagonal 3/(1/n + 2/mu) with mu from the physics-only CV. Guard
+    // mu <= 0: it would zero the diagonal and make M singular wherever the
+    // systematic covariance is also empty. The zero-data test uses normdata
+    // (consistent with the gradient rebuild path).
+    constexpr float kMinCNPMu = 1e-6f;
+    for(long i = 0; i < data.Spec().size(); ++i) {
+        const float mu = std::max(collapsed_cv(i), kMinCNPMu);
+        collapsed_stat_covariance(i,i) = normdata(i) == 0 ? mu/2 :
+            3 / (1.0 / normdata(i) + 2.0 / mu);
+    }
 
     Eigen::MatrixXf full_covariance = result.Spec().asDiagonal() * (syst->fractional_covariance) * result.Spec().asDiagonal();
 
@@ -163,10 +177,12 @@ float PROCNP::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
             if (i_perturbed < model.nparams) {
                 Eigen::VectorXf cv_p = cachedNoshiftCollapsedCV(
                     param_at.segment(0, model.nparams), param.size());
-                for (long j = 0; j < data.Spec().size(); ++j)
+                for (long j = 0; j < data.Spec().size(); ++j) {
+                    const float mu = std::max(cv_p(j), kMinCNPMu);
                     new_stat(j, j) = normdata(j) == 0
-                        ? cv_p(j) / 2
-                        : 3 / (1.0 / normdata(j) + 2.0 / cv_p(j));
+                        ? mu / 2
+                        : 3 / (1.0 / normdata(j) + 2.0 / mu);
+                }
             }
             Eigen::MatrixXf fcl  = rl.Spec().asDiagonal() * (syst->fractional_covariance)
                                    * rl.Spec().asDiagonal();

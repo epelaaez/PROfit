@@ -71,6 +71,34 @@ namespace {
         log<LOG_ERROR>(L"Terminating.");
         exit(EXIT_FAILURE);
     }
+
+    // Build uniform bin edges from min/max/nbins XML attributes with full
+    // validation. A partially-specified <bins> used to reach strtod(NULL) —
+    // undefined behavior — and nbins=0 divided by zero.
+    std::vector<float> BuildUniformEdges(const char* omin, const char* omax, const char* onbins, const char* element) {
+        if(omin == nullptr || omax == nullptr || onbins == nullptr) {
+            log<LOG_ERROR>(L"%1% || ERROR: <%2%> needs all of min, max and nbins when edges are not given (got min=%3%, max=%4%, nbins=%5%).")
+                % __func__ % element % (omin ? omin : "<missing>") % (omax ? omax : "<missing>") % (onbins ? onbins : "<missing>");
+            log<LOG_ERROR>(L"Terminating.");
+            exit(EXIT_FAILURE);
+        }
+        char* end = nullptr;
+        const float minp = strtod(omin, &end);
+        const float maxp = strtod(omax, &end);
+        const int nbinsp = (int)strtod(onbins, &end);
+        if(nbinsp < 1 || !(maxp > minp)) {
+            log<LOG_ERROR>(L"%1% || ERROR: <%2%> has invalid binning min=%3%, max=%4%, nbins=%5% (need max > min and nbins >= 1).")
+                % __func__ % element % minp % maxp % nbinsp;
+            log<LOG_ERROR>(L"Terminating.");
+            exit(EXIT_FAILURE);
+        }
+        std::vector<float> edges;
+        edges.reserve(nbinsp + 1);
+        const float step = (maxp - minp) / (float)nbinsp;
+        for(int i = 0; i < nbinsp; ++i) edges.push_back(minp + i * step);
+        edges.push_back(maxp);
+        return edges;
+    }
 }
 
 
@@ -426,16 +454,8 @@ int PROconfig::LoadFromXML(const std::string &filename){
                         }
                         log<LOG_DEBUG>(L"%1% || This 2D variable has a Variable Binning in X with  %2% bins, Edges defined as %3%    ") % __func__ % binedge_x.size() % binedge_x;
                     }else{
-                        float minp = strtod(omin_x, &end);
-                        float maxp = strtod(omax_x, &end);
-                        int nbinsp = (int)strtod(onbins_x, &end);
-                        float step = (maxp-minp)/(float)nbinsp;
-                        for(int i=0; i<nbinsp; i++){
-                            binedge_x.push_back(minp+i*step);
-                        }
-                        binedge_x.push_back(maxp);
-                        log<LOG_DEBUG>(L"%1% || This 2D variable has a Variable Binning in X with min %2%, max %3% and nbins %4%   ") % __func__ % minp % maxp % nbinsp ;
-                        log<LOG_DEBUG>(L"%1% || Which corresponds to edges %2%   ") % __func__ % binedge_x ;
+                        binedge_x = BuildUniformEdges(omin_x, omax_x, onbins_x, "bins2D (x)");
+                        log<LOG_DEBUG>(L"%1% || This 2D variable has a Variable Binning in X with edges %2%   ") % __func__ % binedge_x ;
                     }
 
                     std::vector<float> binedge_y;
@@ -448,16 +468,8 @@ int PROconfig::LoadFromXML(const std::string &filename){
                         }
                         log<LOG_DEBUG>(L"%1% || This 2D variable has a Variable Binning in X with  %2% bins, Edges defined as %3%    ") % __func__ % binedge_y.size() % binedge_y;
                     }else{
-                        float minp = strtod(omin_y, &end);
-                        float maxp = strtod(omax_y, &end);
-                        int nbinsp = (int)strtod(onbins_y, &end);
-                        float step = (maxp-minp)/(float)nbinsp;
-                        for(int i=0; i<nbinsp; i++){
-                            binedge_y.push_back(minp+i*step);
-                        }
-                        binedge_y.push_back(maxp);
-                        log<LOG_DEBUG>(L"%1% || This 2D variable has a Variable Binning in X with min %2%, max %3% and nbins %4%   ") % __func__ % minp % maxp % nbinsp ;
-                        log<LOG_DEBUG>(L"%1% || Which corresponds to edges %2%   ") % __func__ % binedge_y ;
+                        binedge_y = BuildUniformEdges(omin_y, omax_y, onbins_y, "bins2D (y)");
+                        log<LOG_DEBUG>(L"%1% || This 2D variable has a Variable Binning in Y with edges %2%   ") % __func__ % binedge_y ;
                     }
 
                     m_channel_variable_bins.back().push_back(PROconfig::Binning(std::vector<std::vector<float>>({binedge_x, binedge_y})));
@@ -515,16 +527,8 @@ int PROconfig::LoadFromXML(const std::string &filename){
                         }
                         log<LOG_DEBUG>(L"%1% || This variable has a Variable Binning with  %2% bins, Edges defined as %3%    ") % __func__ % binedge.size() % binedge ;
                     }else{
-                        float minp = strtod(omin, &end);
-                        float maxp = strtod(omax, &end);
-                        int nbinsp = (int)strtod(onbins, &end);
-                        float step = (maxp-minp)/(float)nbinsp;
-                        for(int i=0; i<nbinsp; i++){
-                            binedge.push_back(minp+i*step);
-                        }
-                        binedge.push_back(maxp);
-                        log<LOG_DEBUG>(L"%1% || This variable has a Variable Binning with min %2%, max %3% and nbins %4%   ") % __func__ % minp % maxp % nbinsp ;
-                        log<LOG_DEBUG>(L"%1% || Which corresponds to edges %2%   ") % __func__ % binedge ;
+                        binedge = BuildUniformEdges(omin, omax, onbins, "bins");
+                        log<LOG_DEBUG>(L"%1% || This variable has a Variable Binning with edges %2%   ") % __func__ % binedge ;
                     }
 
                     m_channel_variable_bins.back().push_back({binedge});
@@ -1852,8 +1856,12 @@ void PROconfig::CalcTotalBins(){
                     tmp.insert(tmp.end(), widths.begin(), widths.end());
                 }
             }
-        m_variable_bin_to_edges.push_back(tmpe);
         }
+        // One entry per VARIABLE (consumers index this by variable index).
+        // This push used to sit inside the mode loop with a never-cleared
+        // accumulator: with >1 mode the vector held nvars*nmodes cumulatively
+        // growing entries and per-variable lookups read the wrong edges.
+        m_variable_bin_to_edges.push_back(tmpe);
         Eigen::VectorXf coll_bin_widths = Eigen::Map<Eigen::VectorXf>(tmp.data(),tmp.size());
         collapsed_bin_widths.push_back(coll_bin_widths);
         log<LOG_INFO>(L"%1% || On variable %2% bin widths are size %3% and  %4% ") % __func__ % io % coll_bin_widths.size() % coll_bin_widths;

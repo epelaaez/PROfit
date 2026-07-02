@@ -99,7 +99,10 @@ public:
     /* Function: create PROspec of given size */
     PROdata(size_t num_bins);
 
-    TH1D toTH1D(const PROconfig& inconfig, int channel_index, int other_index = -1, int dim = 0) const;
+    // other_index defaults to 0 (the first variable), matching PROspec::toTH1D.
+    // The old default of -1 indexed m_channel_variable_bins[...][-1] — UB for
+    // every caller that used the default (toROOT, plotSpectrum).
+    TH1D toTH1D(const PROconfig& inconfig, int channel_index, int other_index = 0, int dim = 0) const;
 
     void toROOT(const PROconfig& inconfig, const std::string& output_name);
 
