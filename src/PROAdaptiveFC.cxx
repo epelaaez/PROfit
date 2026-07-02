@@ -465,6 +465,13 @@ static std::vector<PROmesh::AMRResult> generate_throws(
                 % amr.fits_by_level[2] % amr.fits_by_level[3];
         }
 
+        // bestfit_map is warm-start scratch used only DURING the AMR run; it is
+        // by far the largest piece of an AMRResult (one full parameter vector
+        // per evaluated point) and nothing downstream (meta-mesh tally,
+        // diagnostics) reads it. Free it so memory doesn't grow linearly with
+        // n_throws.
+        amr.bestfit_map.clear();
+
         results.push_back(std::move(amr));
         progress.increment_bar(0);
     }
@@ -1930,6 +1937,9 @@ static void compute_cell_centers(const MetaMesh &mm,
 //
 //  Used by --mode brazil to generate one fake-data realisation per throw.
 // --------------------------------------------------------------------
+// The CV spectrum and its covariance decomposition (an SVD) are
+// throw-INVARIANT: the caller computes them once and passes L_chol in,
+// instead of redoing the factorization inside every brazil throw.
 static PROdata generate_pseudo_experiment_data(
     const PROconfig &config,
     const PROpeller &prop,
@@ -1937,14 +1947,11 @@ static PROdata generate_pseudo_experiment_data(
     const PROmodel  &model,
     const Eigen::VectorXf &fakeDataParams,
     bool binned,
+    const Eigen::MatrixXf &L_chol,
     PROseed &proseed)
 {
     const size_t nphys   = model.nparams;
     const size_t nspline = systs.GetNSplines();
-
-    PROspec cv_for_L = FillSpectra(config, prop, systs, model, fakeDataParams,
-                                   binned, config.i_prime);
-    Eigen::MatrixXf L_chol = systs.DecomposeFractionalCovariance(config, cv_for_L.Spec());
 
     std::normal_distribution<float> d;
     std::uniform_int_distribution<uint32_t> dseed(0, std::numeric_limits<uint32_t>::max());
@@ -3229,10 +3236,16 @@ AdaptiveFCResult run_adaptive_fc(
         silent_cfg.push_back({n_cells, "_silent"});
         MultiPROgressBar silent_progress(silent_cfg);
 
+        // Throw-invariant: CV spectrum + covariance decomposition (an SVD)
+        // hoisted out of the per-throw loop.
+        PROspec brazil_cv = FillSpectra(config, prop, systs, *model, fakeDataParams,
+                                        acfg.binned, config.i_prime);
+        Eigen::MatrixXf brazil_L = systs.DecomposeFractionalCovariance(config, brazil_cv.Spec());
+
         for (int t_new = 0; t_new < n_new; ++t_new) {
             const int t_abs = n_existing + t_new;
             PROdata throw_data = generate_pseudo_experiment_data(
-                config, prop, systs, *model, fakeDataParams, acfg.binned, proseed);
+                config, prop, systs, *model, fakeDataParams, acfg.binned, brazil_L, proseed);
 
             AsimovObs obs = compute_asimov_obs(
                 config, prop, systs, *model, fitconfig, throw_data,

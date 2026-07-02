@@ -89,6 +89,14 @@ AMRResult run_amr(EvalFn eval,
     std::deque<std::unique_ptr<std::atomic<int>>> corner_counts;
     // Map from (i, j) → list of cell indices that include (i, j) as a corner.
     std::unordered_map<uint64_t, std::vector<int>> corner_to_cells;
+    // Map from a cell's bottom-left anchor (i_bl, j_bl) → cell indices with
+    // that anchor (parents and their first child share an anchor). Used by the
+    // 2:1 balance check to locate the leaf containing a point in O(max_levels)
+    // probes instead of scanning the whole cell list.
+    std::unordered_map<uint64_t, std::vector<int>> anchor_to_cells;
+    // Keys currently sitting in `work` — O(1) double-queue check instead of a
+    // linear scan of the whole deque per enqueue.
+    std::unordered_set<uint64_t> pending_keys;
     // Work queue: pending evaluation requests. Producer-consumer protocol with
     // state_cv: workers wait on state_cv until the queue is non-empty or all
     // work is done.
@@ -113,6 +121,7 @@ AMRResult run_amr(EvalFn eval,
         const int idx = static_cast<int>(cells.size());
         cells.push_back(c);
         corner_counts.push_back(std::make_unique<std::atomic<int>>(0));
+        anchor_to_cells[make_key(c.i_bl, c.j_bl)].push_back(idx);
 
         const int i0 = c.i_bl, j0 = c.j_bl, st = c.step;
         const uint64_t corner_keys[4] = {
@@ -148,12 +157,10 @@ AMRResult run_amr(EvalFn eval,
             std::lock_guard<std::mutex> lk(state_mu);
             const uint64_t key = make_key(i, j);
             if (chi2_map.find(key) != chi2_map.end()) return;  // already evaluated
-            // Avoid double-queueing: linear scan of pending work. OK for small
-            // queues (<a few thousand); for larger runs swap to an
-            // unordered_set<uint64_t> tracked alongside `work`.
-            for (const auto &r : work) {
-                if (r.key == key) return;
-            }
+            // Avoid double-queueing: O(1) membership check (the previous
+            // linear scan of the whole deque made enqueueing O(queue²)).
+            if (pending_keys.count(key)) return;
+            pending_keys.insert(key);
             // Build warm-start seeds from the cell-local corners that are
             // already in bestfit_map. Edge midpoints get 2 seeds (the endpoint
             // corners); cell centers get 4. For initial-level points (no
@@ -206,19 +213,19 @@ AMRResult run_amr(EvalFn eval,
                 const int ni = i_bl + neighbour_offsets[n][0];
                 const int nj = j_bl + neighbour_offsets[n][1];
                 if (ni < 0 || nj < 0 || ni >= finest_nx || nj >= finest_ny) continue;
-                // Find a leaf cell whose bounding box contains (ni, nj) as its bottom-left
-                // and is at coarser level.
-                for (int c = 0; c < (int)cells.size(); ++c) {
-                    if (cells[c].refined) continue;
-                    if (cells[c].level >= level) continue;       // not coarser than parent
-                    // After subdividing parent (level L) → children (level L+1),
-                    // 2:1 balance forbids any leaf neighbour at level < L (i.e.
-                    // L-1 or coarser): difference between child (L+1) and
-                    // neighbour (≤ L-1) would be ≥ 2.
-                    // Spatial overlap: does this coarse cell touch our just-refined cell?
-                    const int cs = cells[c].step;
-                    if (ni >= cells[c].i_bl && ni <= cells[c].i_bl + cs &&
-                        nj >= cells[c].j_bl && nj <= cells[c].j_bl + cs) {
+                // Locate the leaf containing (ni, nj) at each coarser level by
+                // masking the point down to that level's anchor grid — O(levels)
+                // hash probes instead of the previous O(cells) scan per
+                // neighbour. After subdividing parent (level L) → children
+                // (L+1), 2:1 balance forbids any leaf neighbour at level ≤ L-1.
+                for (int lev = level - 1; lev >= 0; --lev) {
+                    const int cs = 1 << (max_levels - lev);
+                    const uint64_t akey = make_key(ni & ~(cs - 1), nj & ~(cs - 1));
+                    auto it = anchor_to_cells.find(akey);
+                    if (it == anchor_to_cells.end()) continue;
+                    for (int c : it->second) {
+                        if (cells[c].refined) continue;
+                        if (cells[c].level != lev) continue;
                         to_refine.push_back(c);
                     }
                 }
@@ -431,6 +438,7 @@ AMRResult run_amr(EvalFn eval,
                 }
                 req = std::move(work.front());
                 work.pop_front();
+                pending_keys.erase(req.key);
             }
 
             EvalResult r = eval(req);
