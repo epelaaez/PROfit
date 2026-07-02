@@ -54,6 +54,20 @@ namespace PROfit{
         return Eigen::VectorXf(T.transpose() * full_vector);
     }
 
+    Eigen::MatrixXf CollapsedScaledCovariance(const PROconfig &inconfig, const Eigen::MatrixXf& frac_cov, const Eigen::VectorXf& spec){
+        const Eigen::SparseMatrix<float>& T = inconfig.GetCollapsingMatrixSparse();
+        if(frac_cov.rows() != T.rows() || frac_cov.cols() != T.rows() || spec.size() != T.rows()){
+            log<LOG_ERROR>(L"%1% || Dimension mismatch: frac_cov %2%x%3%, spec %4%, expected %5%.")
+                % __func__ % frac_cov.rows() % frac_cov.cols() % spec.size() % T.rows();
+            log<LOG_ERROR>(L"Terminating.");
+            exit(EXIT_FAILURE);
+        }
+        // S = diag(spec) * T stays sparse (same pattern as T, rows scaled).
+        Eigen::SparseMatrix<float> S = spec.asDiagonal() * T;
+        Eigen::MatrixXf FS = frac_cov * S;               // dense (N x m), no N x N temporary
+        return Eigen::MatrixXf(S.transpose() * FS);      // dense (m x m)
+    }
+
     Eigen::MatrixXf CollapseMatrix(const PROconfig &inconfig, const Eigen::MatrixXf& full_matrix, int other_index){
         const Eigen::SparseMatrix<float>& T = inconfig.GetCollapsingMatrixSparse(other_index);
         const Eigen::Index num_bin_before_collapse = T.rows();

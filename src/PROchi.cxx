@@ -113,14 +113,18 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
     // iteration.
     PROspec result = FillSpectra(config, peller, *syst, model, param, fs_cache, strat != EventByEvent, config.i_prime);
 
-    Eigen::MatrixXf full_covariance = result.Spec().asDiagonal() * (syst->fractional_covariance) * result.Spec().asDiagonal();
-
     Eigen::VectorXf normdata = shape_only
         ? data.Normalize(config,result)
         : data.Spec();
 
-    Eigen::MatrixXf collapsed_full_covariance = CollapseMatrix(config, full_covariance);
-    collapsed_stat_covariance = (normdata).matrix().asDiagonal();
+    // Collapsed systematic covariance computed as S^T F S with S = diag(spec)*T
+    // kept sparse — the full-binning dense diag(s)*F*diag(s) is never
+    // materialized (this runs on every evaluation). Note the
+    // collapsed_stat_covariance member is deliberately NOT overwritten here:
+    // it keeps the ctor's cwiseMax(1)-guarded form for getSingleChannelChi
+    // (the per-call overwrite dropped that zero-bin guard and was only read
+    // by the NaN diagnostics below).
+    Eigen::MatrixXf collapsed_full_covariance = CollapsedScaledCovariance(config, syst->fractional_covariance, result.Spec());
 
     // non_empty_indices and reduced_collapsed_stat_covariance are constant in default
     // (non-shape_only) mode and were precomputed in the ctor; in shape_only mode
@@ -167,9 +171,9 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
                 L"mc spec: %6%\ndata spec: %7%")
             % __func__ % value % covar_portion % pull % delta % CollapseMatrix(config, result.Spec())
             % data.Spec();
-        // collapsed_stat_covariance, print diagonal
-        for (Eigen::Index i = 0; i < collapsed_stat_covariance.cols(); ++i) {
-            log<LOG_ERROR>(L"%1% || ERROR: collapsed_stat_covariance(%2%) = %3%") % __func__ % i % collapsed_stat_covariance(i,i);
+        // stat covariance diagonal (normdata) for diagnostics
+        for (Eigen::Index i = 0; i < normdata.size(); ++i) {
+            log<LOG_ERROR>(L"%1% || ERROR: stat covariance diagonal (%2%) = %3%") % __func__ % i % normdata(i);
         }
         throw std::runtime_error("NANs in Chi().");
 
@@ -245,9 +249,7 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
                !model.model_constraint(param_at.segment(0, model.nparams))) return false;
             PROspec rl = FillSpectra(config, peller, *syst, model, param_at, fs_cache,
                                      strat != EventByEvent, config.i_prime);
-            Eigen::MatrixXf fcl   = rl.Spec().asDiagonal() * (syst->fractional_covariance)
-                                    * rl.Spec().asDiagonal();
-            Eigen::MatrixXf cfcl  = CollapseMatrix(config, fcl);
+            Eigen::MatrixXf cfcl  = CollapsedScaledCovariance(config, syst->fractional_covariance, rl.Spec());
             Eigen::MatrixXf gM_lo = reduced_collapsed_stat_covariance + cfcl(idx, idx);
             Eigen::VectorXf cmcl  = CollapseMatrix(config, rl.Spec());
             Eigen::VectorXf dl    = cmcl(idx) - normdata(idx);
@@ -255,6 +257,11 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
             chi2_out = dl.dot(gM_lo.llt().solve(dl)) + Pull(nuis);
             return true;
         };
+
+        // One reusable work vector: perturb component i in place and restore,
+        // instead of two full parameter-vector copies per FD parameter
+        // (O(nparams) copying per gradient instead of O(nparams^2)).
+        Eigen::VectorXf param_work = param;
 
         for (size_t i = 0; i < model.nparams + nsyst; i++) {
 
@@ -281,17 +288,19 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
             const int  sign          = boundary_step ? (at_lower ? 1 : -1) : 1;
             const bool use_central   = !boundary_step && !one_sided;
 
-            // Build the perturbed param vectors.
-            Eigen::VectorXf param_plus  = param;  param_plus(i)  = param(i) + sign * h;
-            Eigen::VectorXf param_minus = param;  param_minus(i) = param(i) - sign * h;
-
             float grad_i = 0.0f;
 
             if (linearised) {
                 // ----- Linearised: FD on δ, M frozen at base, analytic pull deriv -----
                 Eigen::VectorXf delta_plus, delta_minus;
-                bool ok_plus  = compute_delta_at(param_plus,  delta_plus);
-                bool ok_minus = use_central ? compute_delta_at(param_minus, delta_minus) : true;
+                param_work(i) = param(i) + sign * h;
+                bool ok_plus  = compute_delta_at(param_work,  delta_plus);
+                bool ok_minus = true;
+                if (use_central) {
+                    param_work(i) = param(i) - sign * h;
+                    ok_minus = compute_delta_at(param_work, delta_minus);
+                }
+                param_work(i) = param(i);
 
                 Eigen::VectorXf ddelta_dtheta;
                 if (use_central) {
@@ -331,14 +340,22 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
                 // ----- Full FD path -----
                 if (use_central) {
                     float chi2_plus = 0.0f, chi2_minus = 0.0f;
-                    if (!compute_chi2_at(param_plus,  chi2_plus))  chi2_plus  = 1e10f;
-                    if (!compute_chi2_at(param_minus, chi2_minus)) chi2_minus = 1e10f;
+                    param_work(i) = param(i) + sign * h;
+                    const bool okp = compute_chi2_at(param_work, chi2_plus);
+                    param_work(i) = param(i) - sign * h;
+                    const bool okm = compute_chi2_at(param_work, chi2_minus);
+                    param_work(i) = param(i);
+                    if (!okp) chi2_plus  = 1e10f;
+                    if (!okm) chi2_minus = 1e10f;
                     grad_i = (chi2_plus - chi2_minus) / (2.0f * h);
                     gradient(i) = grad_i;
                 } else {
                     // One-sided: gradient ≈ sign * (chi²(θ+sign*h) - value) / h
                     float chi2_one = 0.0f;
-                    if (!compute_chi2_at(param_plus, chi2_one)) {
+                    param_work(i) = param(i) + sign * h;
+                    const bool ok_one = compute_chi2_at(param_work, chi2_one);
+                    param_work(i) = param(i);
+                    if (!ok_one) {
                         gradient(i) = sign * 1e10f;
                         // Don't apply bounce check here — we *want* a huge gradient
                         // pushing back into the feasible region.
@@ -380,8 +397,7 @@ float PROchi::getSingleChannelChi(size_t global_channel_index, const PROspec & c
 
     Eigen::MatrixXf M(nbin, nbin);
     if(syst->GetNCovar()){
-        Eigen::MatrixXf full_covariance = cv.Spec().asDiagonal() * (syst->fractional_covariance) * cv.Spec().asDiagonal();
-        Eigen::MatrixXf collapsed_full_covariance = CollapseMatrix(config, full_covariance);
+        Eigen::MatrixXf collapsed_full_covariance = CollapsedScaledCovariance(config, syst->fractional_covariance, cv.Spec());
         Eigen::MatrixXf sub_collapsed_full_covariance = collapsed_full_covariance.block(startBin, startBin, nbin, nbin);
         Eigen::MatrixXf sub_collapsed_stat_covariance = collapsed_stat_covariance.block(startBin, startBin, nbin, nbin);
         M = sub_collapsed_full_covariance + sub_collapsed_stat_covariance;

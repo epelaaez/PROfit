@@ -195,6 +195,10 @@ float PROpoisson::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &grad
             return true;
         };
 
+        // One reusable work vector: perturb component i in place and restore,
+        // instead of two full parameter-vector copies per FD parameter.
+        Eigen::VectorXf param_work = param;
+
         for (size_t i = 0; i < nparams; i++) {
             if (is_fixed.size() > 0 && is_fixed.at(i)) {
                 gradient(i) = 0.0f;
@@ -219,13 +223,16 @@ float PROpoisson::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &grad
             const int  sign          = boundary_step ? (at_lower ? 1 : -1) : 1;
             const bool use_central   = !boundary_step && !one_sided;
 
-            Eigen::VectorXf param_plus  = param;  param_plus(i)  = param(i) + sign * h;
-            Eigen::VectorXf param_minus = param;  param_minus(i) = param(i) - sign * h;
-
             if (linearised) {
                 Eigen::VectorXf vmc_plus, vmc_minus;
-                bool ok_plus  = compute_vmc_at(param_plus,  vmc_plus);
-                bool ok_minus = use_central ? compute_vmc_at(param_minus, vmc_minus) : true;
+                param_work(i) = param(i) + sign * h;
+                bool ok_plus  = compute_vmc_at(param_work,  vmc_plus);
+                bool ok_minus = true;
+                if (use_central) {
+                    param_work(i) = param(i) - sign * h;
+                    ok_minus = compute_vmc_at(param_work, vmc_minus);
+                }
+                param_work(i) = param(i);
 
                 Eigen::VectorXf ds_dtheta;
                 if (use_central) {
@@ -250,12 +257,18 @@ float PROpoisson::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &grad
             } else {
                 if (use_central) {
                     float chi2_plus = 1e10f, chi2_minus = 1e10f;
-                    compute_chi2_at(param_plus,  chi2_plus);
-                    compute_chi2_at(param_minus, chi2_minus);
+                    param_work(i) = param(i) + sign * h;
+                    compute_chi2_at(param_work,  chi2_plus);
+                    param_work(i) = param(i) - sign * h;
+                    compute_chi2_at(param_work, chi2_minus);
+                    param_work(i) = param(i);
                     gradient(i) = (chi2_plus - chi2_minus) / (2.0f * h);
                 } else {
                     float chi2_one = 0.0f;
-                    if (!compute_chi2_at(param_plus, chi2_one)) {
+                    param_work(i) = param(i) + sign * h;
+                    const bool ok_one = compute_chi2_at(param_work, chi2_one);
+                    param_work(i) = param(i);
+                    if (!ok_one) {
                         gradient(i) = sign * 1e10f;
                         if (!std::isfinite(gradient(i))) gradient(i) = 0.0f;
                         continue;

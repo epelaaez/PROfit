@@ -13,6 +13,7 @@
 
 #include <Eigen/Eigen>
 #include <cstdint>
+#include <map>
 #include <random>
 
 // PROfit include 
@@ -62,11 +63,24 @@ namespace PROfit{
         const PROsyst *last_syst_ptr = nullptr;
         const PROmodel *last_model_ptr = nullptr;
 
+        /// Flat physics grid passed to get_probs — depends only on the model's
+        /// ivars and the propagator's midbin vectors, i.e. constant across an
+        /// entire fit. Built once on first use and reused (it used to be
+        /// reallocated and refilled on every physics-changed call).
+        std::vector<std::vector<float>> phys_grid;
+        bool phys_grid_valid = false;
+
+        /// Per-cross-binning column sums of the migration histograms
+        /// (constant per (binning, var_index)); keyed by binning index.
+        std::map<size_t, Eigen::VectorXf> unweighted_sums;
+
         /// Mark cache contents stale; next call recomputes both halves.
         void invalidate() {
             last_var_index = -1;
             last_syst_ptr = nullptr;
             last_model_ptr = nullptr;
+            phys_grid_valid = false;
+            unweighted_sums.clear();
         }
     };
 

@@ -53,6 +53,20 @@ namespace PROfit{
     Eigen::MatrixXf CollapseMatrix(const PROconfig &inconfig, const Eigen::MatrixXf& full_matrix);
 
     /**
+     * @brief Collapsed, spectrum-scaled covariance: T^T diag(spec) F diag(spec) T.
+     * @details Computes S^T F S with S = diag(spec)*T kept sparse, so the full-binning
+     * dense N x N matrix diag(spec)*F*diag(spec) is never materialized. This is the
+     * per-evaluation systematic covariance used by the chi^2 metrics — algebraically
+     * identical to CollapseMatrix(config, spec.asDiagonal()*F*spec.asDiagonal()) but
+     * without the two dense N x N temporaries per call.
+     * @param inconfig    Analysis configuration providing the collapsing matrix (i_prime).
+     * @param frac_cov    Fractional covariance on the full (uncollapsed) binning.
+     * @param spec        Spectrum used for the diagonal scaling (full binning).
+     * @return Collapsed m x m covariance matrix.
+     */
+    Eigen::MatrixXf CollapsedScaledCovariance(const PROconfig &inconfig, const Eigen::MatrixXf& frac_cov, const Eigen::VectorXf& spec);
+
+    /**
      * @brief Collapse a full spectrum vector to the channel level using the primary variable.
      * @param inconfig    Analysis configuration providing the collapsing matrix.
      * @param full_vector Full spectrum vector (size m_num_variable_bins_total for primary variable).
