@@ -1724,6 +1724,8 @@ int PROconfig::LoadFromXML(const std::string &filename){
             m_use_mcstats = true;
         }else if(m_mcgen_variation_type[i] == "external_covariance"){
             m_num_variation_type_external_covariance+=1;
+        }else if(m_mcgen_variation_type[i] == "external_covariance_to_spline"){
+            m_num_variation_type_external_covariance_to_spline+=1;
         } else if(m_mcgen_variation_type[i] == "hist1d"){
             m_num_variation_type_hist1d+=1;
         } else if(m_mcgen_variation_type[i] == "hist2d"){
@@ -1735,6 +1737,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
     log<LOG_INFO>(L"%1% || num_variation_type_covariance: %2% ") % __func__ % m_num_variation_type_covariance;
     log<LOG_INFO>(L"%1% || num_variation_type_covariance_to_spline: %2% ") % __func__ % m_num_variation_type_covariance_to_spline;
     log<LOG_INFO>(L"%1% || num_variation_type_external_ovariance: %2% ") % __func__ % m_num_variation_type_external_covariance;
+    log<LOG_INFO>(L"%1% || num_variation_type_external_covariance_to_spline: %2% ") % __func__ % m_num_variation_type_external_covariance_to_spline;
     log<LOG_INFO>(L"%1% || num_variation_type_flat: %2% ") % __func__ % m_num_variation_type_flat;
     log<LOG_INFO>(L"%1% || num_variation_type_norm: %2% ") % __func__ % m_num_variation_type_norm;
     log<LOG_INFO>(L"%1% || num_variation_type_spline: %2% ") % __func__ % m_num_variation_type_spline;

@@ -193,6 +193,12 @@ namespace PROfit {
              */
             void LoadExternalCovarianceMatrix(const PROconfig& config, const SystStruct& syst);
 
+            /* Function: Open syst.external_filename and read the named TMatrixD into an Eigen fractional
+             * covariance matrix (sized to syst.binning), zeroing non-finite entries and warning if it is
+             * not positive semi-definite. Shared by the "external_covariance" and
+             * "external_covariance_to_spline" modes. */
+            Eigen::MatrixXf LoadExternalFractionalCovariance(const PROconfig& config, const SystStruct& syst);
+
             /* Function: given a syst struct with cv and variation spectra, build fractional covariance matrix for the systematics, as well as correlation matrix 
              * Return: {fractional covariance matrix, correlation covariance matrix}
              */
@@ -228,6 +234,12 @@ namespace PROfit {
              * eigenpair. Knobs are named "<syst.systname>_decomp_knob_<i>" where i = 0 corresponds to the
              * largest eigenvalue. If syst.num_decomp_knobs > 0, only the top N eigenpairs are kept. */
             void FillSplinesFromCovariance(const SystStruct& syst);
+
+            /* Function: Eigendecompose an already-built fractional covariance matrix and synthesize one
+             * linear spline per retained eigenpair (the shared core of FillSplinesFromCovariance). Used
+             * by both "covariance_to_spline" (matrix from MC universes) and "external_covariance_to_spline"
+             * (matrix loaded from an external TMatrixD). */
+            void FillSplinesFromCovarianceMatrix(Eigen::MatrixXf frac_cov, const SystStruct& syst);
 
             /* Function: Get weight for bin for a given shift using spline */
             float GetSplineShift(int syst_num, float shift, int bin) const;
