@@ -55,6 +55,25 @@ namespace PROfit {
     };
 
     /**
+     * @brief Diagnostic info captured when a "covariance_to_spline" systematic is processed.
+     * @details Populated by FillSplinesFromCovariance; consumed by plotCov2SplineChecks to
+     * make a covariance_to_spline_checks.pdf debug document.
+     */
+    struct Cov2SplineDebugInfo {
+        Eigen::MatrixXf original_frac_cov;  ///< Fractional covariance built from multisim throws (pre-symmetrized residual saved separately).
+        float pre_symm_asymmetry = 0.0f;     ///< ||C - C^T||_F before symmetrization (sanity number).
+        Eigen::VectorXf eigenvalues;         ///< All eigenvalues, ascending (Eigen convention).
+        Eigen::MatrixXf eigenvectors;        ///< Eigenvectors as columns (Eigen convention).
+        std::vector<int> kept_indices;       ///< Indices into eigenvalues/eigenvectors for retained modes, descending eigenvalue.
+        std::vector<std::string> knob_names; ///< Names of synthesized spline knobs, same order as kept_indices.
+        int binning = -1;                    ///< Binning index the covariance lives on.
+        bool has_residual = false;           ///< True if the un-kept eigenpairs were retained as a residual covariance.
+        int n_residual_modes = 0;            ///< Number of positive eigenpairs folded into the residual covariance.
+        Eigen::MatrixXf residual_cov;        ///< Residual fractional covariance from un-kept positive eigenpairs (empty if has_residual is false).
+        std::string residual_cov_name;       ///< Name under which the residual covariance was registered ("<systname>_resid_cov").
+    };
+
+    /**
      * @brief Aggregator for all systematic uncertainties acting on a PROfit analysis.
      * @details PROsyst groups both spline-based and covariance-matrix-based systematics.
      * On construction it processes the input SystStruct vector and:
@@ -250,6 +269,7 @@ namespace PROfit {
             std::vector<int> spline_binnings;        ///< Binning-scheme index for each spline.
             Eigen::VectorXf spline_priors;           ///< Prior width (sigma) for each spline nuisance parameter.
             Eigen::VectorXf spline_centers;          ///< Prior centre for each spline nuisance parameter.
+            std::map<std::string, Cov2SplineDebugInfo> cov2spline_debug_info; ///< Debug info per "covariance_to_spline" systematic, keyed by parent systname.
         private:
             std::map<std::string, std::pair<size_t, SystType>> syst_map; ///< Map from systematic name to (index, type).
             std::vector<Spline> splines;             ///< Ordered list of spline objects.

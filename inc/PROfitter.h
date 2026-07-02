@@ -114,7 +114,7 @@ namespace PROfit {
         /// GradientOneSidedFull for ~2× speedup, or to one of the *Lin variants for
         /// the Gauss-Newton-style linearised gradient (5–20× speedup, exact at minimum).
         /// See PROmetric::GradientMode for the full mode matrix.
-        PROmetric::GradientMode gradient_mode = PROmetric::GradientCentralFull;
+        PROmetric::GradientMode gradient_mode = PROmetric::GradientOneSidedFull;
 
         /** @brief Default constructor — leaves all parameters at their default values. */
         PROfitterConfig(){};

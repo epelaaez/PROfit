@@ -206,6 +206,8 @@ GlobalFitOptions operator&=(GlobalFitOptions &lhs, GlobalFitOptions rhs) {
 }
 GlobalFitResult do_a_fit(const PROconfig &config, const PROpeller &prop, const PROdata &data, PROmetric *metric, const Eigen::VectorXf &ub, const Eigen::VectorXf &lb, const PROfitterConfig &fit_config, const Eigen::VectorXf &CVParams, const PROspec &cv, const std::vector<int> &global_fixed, GlobalFitOptions opt);
 
+std::map<std::string, TObject *> draw_fit_result(const PROconfig &config, const PROpeller &prop, const PROmodel &model, const PROsyst &syst, const PROspec &cv, const PROdata &data, const GlobalFitResult &fitres, const std::string &prefix, PlotOptions popt, PlotBounds pbounds);
+
 // Walks the collapsed reco bins and logs any with prediction < threshold,
 // printing the channel, bin index/edges, prediction, and data count side-by-side.
 static void logLowPredictionBins(const PROconfig &config, const Eigen::VectorXf &pred_collapsed, const Eigen::VectorXf &data_collapsed, float threshold = 1.0f, size_t var_index = 0) {
@@ -360,14 +362,14 @@ int main(int argc, char* argv[])
     app.add_option("--fit-options", global_fit_options, "Parameters for single, detailed global best fit LBFGSB. See PROfitter.h or run --fit-help for available settings.");
     app.add_option("--scan-fit-options", scan_fit_options, "Parameters for simpier, multiple best fits in PROfile/surface LBFGSB.");
     app.add_flag("--fit-help", show_fit_help, "Show detailed help for all fitting parameters (L-BFGS-B, PSO, MCMC, etc.)");
-    std::string gradient_mode_str = "central-full";
+    std::string gradient_mode_str = "one-sided-full";
     app.add_option("--grad-mode", gradient_mode_str,
                    "Gradient evaluation strategy passed to the metric. One of: "
-                   "central-full (default; central FD on full chi^2), "
-                   "one-sided-full (forward FD on full chi^2; ~2x faster, O(h)), "
+                   "central-full (central FD on full chi^2; most accurate, slowest), "
+                   "one-sided-full (default; forward FD on full chi^2; ~2x faster, O(h)), "
                    "central-lin (central FD on delta only, M frozen at base; Gauss-Newton, ~5-10x), "
                    "one-sided-lin (forward FD on delta only, M frozen at base; ~10-20x).")
-        ->default_str("central-full");
+        ->default_str("one-sided-full");
 
     app.add_option("--inject-systs", injected_systs, "Systematic shifts to inject. Map of name and shift value in sigmas. Only spline systs are supported right now.");
     app.add_option("--inject-systs-cv", cv_injected_systs, "Systematic shifts to inject.  as CV Map of name and shift value in sigmas. Only spline systs are supported right now.");
@@ -888,7 +890,13 @@ int main(int argc, char* argv[])
     for(size_t i = 0; i < model->nparams; ++i) fakedataparams(i) = fake_data_osc_param_vector(i);
     log<LOG_INFO>(L"%1% || model->default_val: %2%") % __func__ % model->default_val;
     log<LOG_INFO>(L"%1% || fake_data_osc_param_vector: %2%") % __func__ % fake_data_osc_param_vector;
-    log<LOG_INFO>(L"%1% || fakedataparams (physics portion): %2% %3%") % __func__ % fakedataparams(0) % fakedataparams(1);
+    if(fakedataparams.size() >= 2) {
+        log<LOG_INFO>(L"%1% || fakedataparams (physics portion): %2% %3%") % __func__ % fakedataparams(0) % fakedataparams(1);
+    } else if(fakedataparams.size() == 1) {
+        log<LOG_INFO>(L"%1% || fakedataparams (physics portion): %2%") % __func__ % fakedataparams(0);
+    } else {
+        log<LOG_INFO>(L"%1% || fakedataparams (physics portion): empty") % __func__;
+    }
     for(const auto& [name, shift]: injected_systs) {
         log<LOG_INFO>(L"%1% || Injected syst: %2% shifted by %3%") % __func__ % name.c_str() % shift;
 
@@ -1262,11 +1270,11 @@ int main(int argc, char* argv[])
     // either of them.
     {
         const PROmetric::GradientMode gmode_a =
-            PROmetric::parseGradientMode(gradient_mode_str, PROmetric::GradientCentralFull);
+            PROmetric::parseGradientMode(gradient_mode_str, PROmetric::GradientOneSidedFull);
         const PROmetric::GradientMode gmode_b =
             PROmetric::parseGradientMode(gradient_mode_str, PROmetric::GradientOneSidedLin);
         if (gmode_a != gmode_b) {
-            log<LOG_WARNING>(L"%1% || Unknown --grad-mode '%2%'; falling back to central-full.")
+            log<LOG_WARNING>(L"%1% || Unknown --grad-mode '%2%'; falling back to one-sided-full.")
                 % __func__ % gradient_mode_str.c_str();
         }
         fitConfig.gradient_mode     = gmode_a;
@@ -1360,72 +1368,7 @@ int main(int argc, char* argv[])
         GlobalFitResult fitres = do_a_fit(config, prop, data, metric, global_ub, global_lb, fitConfig, CVParams, cv, global_fixed, opt); 
         global_fit_chi2 = fitres.chi2;
         global_fit_result = fitres.fitter.best_fit;
-
-        TH2D corrhist("crh", "", N_params, 0, N_params, N_params, 0, N_params);
-        TH2D fraccovhist("fch", "", N_params, 0, N_params, N_params, 0, N_params);
-        TH2D covhist("ch", "", N_params, 0, N_params, N_params, 0, N_params);
-        std::vector<std::string> param_names;
-        for(size_t i = 0; i < N_params; ++i) {
-            std::string label = i < N_phys_params 
-                ? metric->GetModel().pretty_param_names[i]
-                : config.m_mcgen_variation_plotname_map[metric->GetSysts().spline_names[i-N_phys_params]].c_str();
-            param_names.push_back(label);
-            covhist.GetXaxis()->SetBinLabel(i+1, label.c_str());
-            covhist.GetYaxis()->SetBinLabel(i+1, label.c_str());
-            fraccovhist.GetXaxis()->SetBinLabel(i+1, label.c_str());
-            fraccovhist.GetYaxis()->SetBinLabel(i+1, label.c_str());
-            corrhist.GetXaxis()->SetBinLabel(i+1, label.c_str());
-            corrhist.GetYaxis()->SetBinLabel(i+1, label.c_str());
-            for(size_t j = 0; j < N_params; ++j) {
-                covhist.SetBinContent(i+1, j+1, fitres.covmat(i,j));
-                fraccovhist.SetBinContent(i+1, j+1, fitres.fraccovmat(i,j));
-                corrhist.SetBinContent(i+1, j+1, fitres.corrmat(i,j));
-            }
-        }
-        TCanvas c1;
-        corrhist.SetMaximum(1);
-        corrhist.SetMinimum(-1);
-        covhist.SetMaximum(1);
-        covhist.SetMinimum(-1);
-        fraccovhist.SetMaximum(100);
-        fraccovhist.SetMinimum(-100);
-        //covhist.Draw("colz");
-        //c1.Print((final_output_tag+"_postfit_cov.pdf").c_str());
-        //fraccovhist.Draw("colz");
-        //c1.Print((final_output_tag+"_postfit_fraccov.pdf").c_str());
-        c1.SetLeftMargin(0.18);   
-        corrhist.SetTitle("Post-Fit Correlation Matrix");
-        corrhist.Draw("colz");
-        gPad->Update();
-
-        TLine line;
-        line.SetLineColor(kBlack);
-        line.SetLineWidth(2);
-        line.DrawLine(N_phys_params, 0, N_phys_params, N_params);
-        line.DrawLine(0, N_phys_params, N_params, N_phys_params);
-        c1.Print((final_output_tag+"_postfit_correlation_matrix.pdf").c_str());
-
         log<LOG_INFO>(L"%1% || MCMC acceptance is  %2%. ") % __func__% ((double)fitres.mh->naccept /fitConfig.MCMCiter);
-        fitres.mh->plot_autocorrelation(final_output_tag+"_PROfile_corrmat_mcmc_autocorrelation.pdf", param_names);
-
-        std::string hname = "#chi^{2}/nbins = " + to_string(fitres.chi2) + "/" + to_string(config.m_num_variable_bins_total_collapsed[config.i_prime]);
-        PROspec bf = FillSpectra(config, prop, metric->GetSysts(), metric->GetModel(), fitres.fitter.best_fit, true,config.i_prime);
-        // Concatenated bins across all channels share no common x-axis, so use bin-index axis.
-        TH1D post_hist("ph", hname.c_str(), config.m_num_variable_bins_total_collapsed[config.i_prime], 0, config.m_num_variable_bins_total_collapsed[config.i_prime]);
-        TH1D pre_hist("prh", hname.c_str(), config.m_num_variable_bins_total_collapsed[config.i_prime], 0, config.m_num_variable_bins_total_collapsed[config.i_prime]);
-        for(size_t i = 0; i < config.m_num_variable_bins_total_collapsed[config.i_prime]; ++i) {
-            post_hist.SetBinContent(i+1, bf.Spec()(i));
-            pre_hist.SetBinContent(i+1, cv.Spec()(i));
-        }
-
-        std::vector<TPaveText> texts;
-        TPaveText chi2text(0.55, 0.50, 0.85, 0.58, "NDC");
-        chi2text.AddText(hname.c_str());
-        chi2text.SetFillColor(0);
-        chi2text.SetBorderSize(0);
-        chi2text.SetTextAlign(12);
-        //chi2text.SetTextSize(0.035); 
-        texts.push_back(chi2text);
 
         PlotOptions popt; 
         if(data_mc_ratio){
@@ -1435,36 +1378,8 @@ int main(int argc, char* argv[])
         }
         if(binwidth_scale) popt |= PlotOptions::BinWidthScaled;
         if(area_normalized) popt |= PlotOptions::AreaNormalized;
-        plot_channels((final_output_tag+"_PROfile_hists.pdf"), config, cv, bf, data, fitres.err_band, fitres.post_err_band, texts, pbounds, popt);
+        std::map<std::string, TObject *> drawn_objs = draw_fit_result(config, prop, metric->GetModel(), metric->GetSysts(), cv, data, fitres, final_output_tag+"_PROfile", popt, pbounds);
 
-        TCanvas c;
-        c.Print((final_output_tag+"_postfit_posteriors.pdf[").c_str());
-        for(auto &h: fitres.posteriors) {
-            h.Draw("hist");
-            c.Print((final_output_tag+"_postfit_posteriors.pdf").c_str());
-        }
-        c.Print((final_output_tag+"_postfit_posteriors.pdf]").c_str());
-
-        Eigen::VectorXf inv_sqrt_diag_nuis = fitres.spline_covariance.diagonal().array().abs().max(1e-10f).sqrt().inverse();
-        Eigen::MatrixXf corrmat_nuis = inv_sqrt_diag_nuis.asDiagonal() * fitres.spline_covariance * inv_sqrt_diag_nuis.asDiagonal();
-
-        TH2F spline_cov("postfit_corr_nuisance_only", "", corrmat_nuis.cols(), 0, corrmat_nuis.cols(), corrmat_nuis.rows(), 0, corrmat_nuis.rows());
-        TH2F spline_cov_cov("postfit_cov_nuisance_only", "", fitres.spline_covariance.cols(), 0, fitres.spline_covariance.cols(), fitres.spline_covariance.rows(), 0, fitres.spline_covariance.rows());
-        for(int i = 0; i < corrmat_nuis.cols(); ++i) {
-            spline_cov.GetXaxis()->SetBinLabel(i+1, config.m_mcgen_variation_plotname_map[metric->GetSysts().spline_names[i]].c_str());
-            spline_cov.GetYaxis()->SetBinLabel(i+1, config.m_mcgen_variation_plotname_map[metric->GetSysts().spline_names[i]].c_str());
-            spline_cov_cov.GetXaxis()->SetBinLabel(i+1, config.m_mcgen_variation_plotname_map[metric->GetSysts().spline_names[i]].c_str());
-            spline_cov_cov.GetYaxis()->SetBinLabel(i+1, config.m_mcgen_variation_plotname_map[metric->GetSysts().spline_names[i]].c_str());
-            for(int j = 0; j < corrmat_nuis.rows(); ++j) {
-                spline_cov.SetBinContent(i+1, j+1, corrmat_nuis(i,j));
-                spline_cov_cov.SetBinContent(i+1, j+1, fitres.spline_covariance(i,j));
-            }
-        }
-        spline_cov.Draw("colz");
-        spline_cov.SetMaximum(1);
-        spline_cov.SetMinimum(-1);
-
-        c.Print((final_output_tag+"_postfit_correlation_matrix_nuisance_only.pdf").c_str());
 
         plot_mcmc_1sigma(final_output_tag+"_PROfile", config, metric->GetSysts(), metric->GetModel(), fitres.fitter.best_fit, fitres.post_param_lo, fitres.post_param_hi, !systs_only, fakedataparams);
 
@@ -1486,50 +1401,19 @@ int main(int argc, char* argv[])
         profile.Plot(config, metric->GetSysts(), metric->GetModel(), *metric, myseed,
                 final_output_tag+"_PROfile", !systs_only, fitres.fitter.best_fit,
                 fakedataparams, fitres.spline_covariance, fitres.post_param_lo, fitres.post_param_hi);
+
         TFile fout((final_output_tag+"_PROfile.root").c_str(), "RECREATE");
         profile.onesig.Write("one_sigma_errs");
-        pre_hist.Write("cv");
-        size_t tot_offset = 0;
-        for(size_t mode = 0; mode < config.m_num_modes; ++mode) {
-            for(size_t det = 0; det < config.m_num_detectors; ++det) {
-                for(size_t channel = 0; channel < config.m_num_channels; ++channel) {
-                    size_t channel_nbins_x = config.m_channel_variable_bins[channel][config.i_prime].NBinsAlong(0);
-                    // default is 1d, but catch 2d case for ybins
-                    size_t channel_nbins_y = 1;
-                    if(config.m_channel_variable_dims[channel][config.i_prime] == 2)  channel_nbins_y = config.m_channel_variable_bins[channel][config.i_prime].NBinsAlong(1);
-                    size_t nbins_p_2dchan = channel_nbins_y*channel_nbins_x;
-                    TGraphAsymmErrors preband(nbins_p_2dchan);
-                    TGraphAsymmErrors postband(nbins_p_2dchan);
-                    for(size_t i = 0; i < nbins_p_2dchan; ++i) {
-                        float x = channel_nbins_y == 1 ? 
-                            (config.m_channel_variable_bins[channel][config.i_prime].Edges(0)[i+1] + config.m_channel_variable_bins[channel][config.i_prime].Edges(0)[i])/2 :
-                            i;
-                        float xerr = channel_nbins_y == 1 ?
-                            (config.m_channel_variable_bins[channel][config.i_prime].Edges(0)[i+1] - config.m_channel_variable_bins[channel][config.i_prime].Edges(0)[i])/2 :
-                            0.5;
-                        preband.SetPoint(i, x, fitres.err_band->error_point(tot_offset + i));
-                        preband.SetPointEYhigh(i, fitres.err_band->error_up(tot_offset + i));
-                        preband.SetPointEYlow(i, fitres.err_band->error_down(tot_offset + i));
-                        preband.SetPointEXhigh(i, xerr);
-                        preband.SetPointEXlow(i, xerr);
-                        postband.SetPoint(i, x, fitres.post_err_band->error_point(tot_offset + i));
-                        postband.SetPointEYhigh(i, fitres.post_err_band->error_up(tot_offset + i));
-                        postband.SetPointEYlow(i, fitres.post_err_band->error_down(tot_offset + i));
-                        postband.SetPointEXhigh(i, xerr);
-                        postband.SetPointEXlow(i, xerr);
-                    }
-                    std::string name = config.m_mode_names[mode]+"_"+config.m_detector_names[det]+"_"+config.m_channel_names[channel];
-                    preband.Write((name+"_prefit_err").c_str());
-                    postband.Write((name+"_postfit_err").c_str());
-                    tot_offset += nbins_p_2dchan;
-                }
-            }
+        for(const auto &[name, obj] : drawn_objs)
+            obj->Write(name.c_str());
+
+        for(size_t i = 0; i < profile.graphs.size(); ++i) {
+            std::string name = i < metric->GetModel().nparams
+                             ? metric->GetModel().param_names[i]
+                             : metric->GetSysts().spline_names[i - metric->GetModel().nparams];
+            profile.graphs[i]->Write((name + "_profile").c_str());
         }
-        //err_band->Write("prefit_errband");
-        //post_err_band->Write("postfit_errband");
-        post_hist.Write("best_fit");
-        spline_cov.Write();
-        spline_cov_cov.Write();
+
         if(global_fit_result.size() > 0) {
             bool use_phys_gfr = (size_t)global_fit_result.size() == N_phys_params + metric->GetSysts().GetNSplines();
             TH1D global_fit_hist("global_fit_result", "Global Best Fit Parameters", global_fit_result.size(), 0, global_fit_result.size());
@@ -1897,6 +1781,7 @@ int main(int argc, char* argv[])
         if(binwidth_scale) opt |= PlotOptions::BinWidthScaled;
         if(area_normalized) opt |= PlotOptions::AreaNormalized;
         std::vector<PROspec> variable_cvs;
+        std::vector<std::map<std::string, TObject *>> cv_objs;
         for(size_t io = 0; io < config.m_num_variables; ++io) {
 
             variable_cvs.push_back(FillSpectra(config, prop, variable_systs[config.i_prime],*model,CVParams, !eventbyevent, io));
@@ -1911,7 +1796,8 @@ int main(int argc, char* argv[])
                     config, cv_plot, bkg_subchannels, io);
                 cv_plot.Spec() -= bkg_full;
             }
-            plot_channels(final_output_tag+"_PROplot_Variable_"+std::to_string(io)+"_CV.pdf", config, cv_plot, {}, {}, {}, {}, notext, pbounds, opt, io);
+            auto objs = plot_channels(final_output_tag+"_PROplot_Variable_"+std::to_string(io)+"_CV.pdf", config, cv_plot, {}, {}, {}, {}, notext, pbounds, opt, io);
+            cv_objs.push_back(objs);
         }
 
         std::string filename = final_output_tag+"_fractional_systematics.pdf";
@@ -2463,8 +2349,9 @@ int main(int argc, char* argv[])
 
 
         std::vector<PROerrorbar> other_err_bands;
+        std::vector<std::map<std::string, TObject*>> errband_objs;
         for(size_t io = 0; io < config.m_num_variables; ++io) {
-            if(!config.m_channel_variable_plot_bool.at(io)) continue; // For now skip the L/E 250 bin. 
+            if(!config.m_channel_variable_plot_bool.at(io)) { errband_objs.push_back({}); continue; } // For now skip the L/E 250 bin. 
             other_err_bands.push_back(getErrorBand(config, prop, variable_systs[io], *model, variable_cvs[io], CVParams, binwidth_scale, io));
 
             // --bkg-subtract: shift CV, data, and error band by the bkg CV.
@@ -2478,21 +2365,21 @@ int main(int argc, char* argv[])
             if (do_bkg_subtract) {
                 Eigen::VectorXf bkg_full      = build_subchannel_mask_spec(
                     config, cv_plot, bkg_subchannels, io);
-                // Pass `io` explicitly: the 1-arg CollapseMatrix uses
-                // config.i_prime, which is wrong when this loop iterates over
-                // multiple plottable variables (io may differ from i_prime).
                 Eigen::VectorXf bkg_collapsed = CollapseMatrix(config, bkg_full, io);
+
                 cv_plot.Spec() -= bkg_full;
-                // PROdata holds a const spec; rebuild via the (spec, error) ctor.
                 data_plot = PROdata(Eigen::VectorXf(data_plot.Spec() - bkg_collapsed),
                                     data_plot.Error());
-                errband_plot.error_point -= bkg_collapsed;
-                errband_plot.error_down  -= bkg_collapsed;
-                errband_plot.error_up    -= bkg_collapsed;
-                // errband_plot.covariance intentionally unchanged.
+
+                Eigen::VectorXf bkg_for_errband = binwidth_scale
+                    ? Eigen::VectorXf(bkg_collapsed.array() /
+                                      config.collapsed_bin_widths.at(io).array())
+                    : bkg_collapsed;
+                errband_plot.error_point -= bkg_for_errband;
             }
-            plot_channels(final_output_tag+"_PROplot_Variable_"+std::to_string(io)+"_ErrorBand.pdf", config, cv_plot, {}, data_plot,
+            auto objs = plot_channels(final_output_tag+"_PROplot_Variable_"+std::to_string(io)+"_ErrorBand.pdf", config, cv_plot, {}, data_plot,
                     errband_plot, {}, other_channel_chitexts[io], pbounds, opt | PlotOptions::DataMCRatio, io);
+            errband_objs.push_back(objs);
         }
 
 
@@ -2554,6 +2441,13 @@ int main(int argc, char* argv[])
 
         }
 
+        // Debug PDF for covariance_to_spline systematics — only emitted if at least one is present.
+        if(!variable_systs[config.i_prime].cov2spline_debug_info.empty()) {
+            const std::string cov2spline_pdf = final_output_tag + "_covariance_to_spline_checks.pdf";
+            plotCov2SplineChecks(config, variable_cvs[config.i_prime], variable_systs[config.i_prime], cov2spline_pdf, config.i_prime);
+            log<LOG_INFO>(L"%1% || covariance_to_spline diagnostics written to %2%") % __func__ % cov2spline_pdf.c_str();
+        }
+
         //now onto root files
         TFile fout((final_output_tag+"_PROplot.root").c_str(), "RECREATE");
 
@@ -2582,41 +2476,11 @@ int main(int argc, char* argv[])
 
         fout.mkdir("ErrorBand");
         fout.cd("ErrorBand");
-        size_t eind = 0;
-        for(size_t io = 0; io < config.m_num_variables; ++io) {
-            if(!config.m_channel_variable_plot_bool.at(io))continue;// For now skip the L/E 250 bin. 
-            size_t tot_offset = 0;
-            // We need to use a different index here since we don't add error bars to the vector if
-            // plot="false" in the xml
-            const PROerrorbar &err = other_err_bands.at(eind++);
-            for(size_t mode = 0; mode < config.m_num_modes; ++mode) {
-                for(size_t det = 0; det < config.m_num_detectors; ++det) {
-                    for(size_t channel = 0; channel < config.m_num_channels; ++channel) {
-                        size_t channel_nbins_x = config.m_channel_variable_bins[channel][io].NBinsAlong(0);
-                        // default is 1d, but catch 2d case for ybins
-                        size_t channel_nbins_y = 1;
-                        if(config.m_channel_variable_dims[channel][io] == 2)  channel_nbins_y = config.m_channel_variable_bins[channel][io].NBinsAlong(1);
-                        size_t nbins_p_2dchan = channel_nbins_y*channel_nbins_x;
-                        TGraphAsymmErrors eband(nbins_p_2dchan);
-                        for(size_t i = 0; i < nbins_p_2dchan; ++i) {
-                            float x = channel_nbins_y == 1 ? 
-                                (config.m_channel_variable_bins[channel][io].Edges(0)[i+1] + config.m_channel_variable_bins[channel][io].Edges(0)[i])/2 :
-                                i;
-                            float xerr = channel_nbins_y == 1 ?
-                                (config.m_channel_variable_bins[channel][io].Edges(0)[i+1] - config.m_channel_variable_bins[channel][io].Edges(0)[i])/2 :
-                                0.5;
-                            eband.SetPoint(i, x, err.error_point(tot_offset + i));
-                            eband.SetPointEYhigh(i, err.error_up(tot_offset + i));
-                            eband.SetPointEYlow(i, err.error_down(tot_offset + i));
-                            eband.SetPointEXhigh(i, xerr);
-                            eband.SetPointEXlow(i, xerr);
-                        }
-                        std::string name = config.m_mode_names[mode]+"_"+config.m_detector_names[det]+"_"+config.m_channel_names[channel]+"_var"+std::to_string(io);
-                        eband.Write(name.c_str());
-                        tot_offset += nbins_p_2dchan;
-                    }
-                }
-            }
+        for(size_t i = 0; i < errband_objs.size(); ++i) {
+            fout.mkdir(("ErrorBand/Var"+std::to_string(i)).c_str());
+            fout.cd(("ErrorBand/Var"+std::to_string(i)).c_str());
+            for(const auto &[n, o] : errband_objs[i])
+                o->Write(n.c_str());
         }
 
         if((with_splines)) {
@@ -2902,80 +2766,19 @@ int main(int argc, char* argv[])
         global_fit_chi2 = fitres.chi2;
         global_fit_result = fitres.fitter.best_fit;
 
-        TH2D corrhist("crh", "", N_params, 0, N_params, N_params, 0, N_params);
-        TH2D fraccovhist("fch", "", N_params, 0, N_params, N_params, 0, N_params);
-        TH2D covhist("ch", "", N_params, 0, N_params, N_params, 0, N_params);
-        std::vector<std::string> param_names;
-        for(size_t i = 0; i < N_params; ++i) {
-            std::string label = i < N_phys_params 
-                ? metric->GetModel().pretty_param_names[i]
-                : config.m_mcgen_variation_plotname_map[metric->GetSysts().spline_names[i-N_phys_params]].c_str();
-            param_names.push_back(label);
-            covhist.GetXaxis()->SetBinLabel(i+1, label.c_str());
-            covhist.GetYaxis()->SetBinLabel(i+1, label.c_str());
-            fraccovhist.GetXaxis()->SetBinLabel(i+1, label.c_str());
-            fraccovhist.GetYaxis()->SetBinLabel(i+1, label.c_str());
-            corrhist.GetXaxis()->SetBinLabel(i+1, label.c_str());
-            corrhist.GetYaxis()->SetBinLabel(i+1, label.c_str());
-            for(size_t j = 0; j < N_params; ++j) {
-                covhist.SetBinContent(i+1, j+1, fitres.covmat(i,j));
-                fraccovhist.SetBinContent(i+1, j+1, fitres.fraccovmat(i,j));
-                corrhist.SetBinContent(i+1, j+1, fitres.corrmat(i,j));
-            }
-        }
-        TCanvas c1;
-        corrhist.SetMaximum(1);
-        corrhist.SetMinimum(-1);
-        covhist.SetMaximum(1);
-        covhist.SetMinimum(-1);
-        fraccovhist.SetMaximum(100);
-        fraccovhist.SetMinimum(-100);
-        c1.SetLeftMargin(0.18);   
-        corrhist.SetTitle("Post-Fit Correlation Matrix");
-        corrhist.Draw("colz");
-        gPad->Update();
-
-        TLine line;
-        line.SetLineColor(kBlack);
-        line.SetLineWidth(2);
-        line.DrawLine(N_phys_params, 0, N_phys_params, N_params);
-        line.DrawLine(0, N_phys_params, N_params, N_phys_params);
-        c1.Print((final_output_tag+"_postfit_correlation_matrix.pdf").c_str());
-
-        log<LOG_INFO>(L"%1% || MCMC acceptance is  %2%. ") % __func__% ((double)fitres.mh->naccept /fitConfig.MCMCiter);
-
-        fitres.mh->plot_autocorrelation(final_output_tag+"_PROglobal_corrmat_mcmc_autocorrelation.pdf", param_names);
-
-        std::string hname = "#chi^{2}/nbins = " + to_string(fitres.chi2) + "/" + to_string(config.m_num_variable_bins_total_collapsed[config.i_prime]);
-        PROspec bf = FillSpectra(config, prop, metric->GetSysts(), metric->GetModel(), fitres.fitter.best_fit, true ,config.i_prime);
-
-        // Concatenated bins across all channels share no common x-axis, so use bin-index axis.
-        TH1D post_hist("ph", hname.c_str(), config.m_num_variable_bins_total_collapsed[config.i_prime], 0, config.m_num_variable_bins_total_collapsed[config.i_prime]);
-        TH1D pre_hist("prh", hname.c_str(), config.m_num_variable_bins_total_collapsed[config.i_prime], 0, config.m_num_variable_bins_total_collapsed[config.i_prime]);
-        for(size_t i = 0; i < config.m_num_variable_bins_total_collapsed[config.i_prime]; ++i) {
-            post_hist.SetBinContent(i+1, bf.Spec()(i));
-            pre_hist.SetBinContent(i+1, cv.Spec()(i));
-        }
-
-        std::vector<TPaveText> texts;
-        TPaveText chi2text(0.55, 0.50, 0.85, 0.58, "NDC");
-        chi2text.AddText(hname.c_str());
-        chi2text.SetFillColor(0);
-        chi2text.SetBorderSize(0);
-        chi2text.SetTextAlign(12);
-        //chi2text.SetTextSize(0.035); 
-        texts.push_back(chi2text);
-
         PlotOptions popt; 
         if(data_mc_ratio){
             popt = PlotOptions::DataMCRatio;
-        } 
-        else{
+        } else {
             popt = PlotOptions::DataPostfitRatio;
         }
         if(binwidth_scale) popt |= PlotOptions::BinWidthScaled;
         if(area_normalized) popt |= PlotOptions::AreaNormalized;
-        plot_channels((final_output_tag+"_PROglobal_hists.pdf"), config, cv, bf, data, fitres.err_band, fitres.post_err_band, texts, pbounds, popt, 0, true);
+        std::map<std::string, TObject *> drawn_objs = draw_fit_result(config, prop, metric->GetModel(), metric->GetSysts(), cv, data, fitres, final_output_tag+"_PROglobal", popt, pbounds);
+
+        TFile fout((final_output_tag+"_PROglobal.root").c_str(), "RECREATE");
+        for(const auto &[n, o] : drawn_objs)
+            o->Write(n.c_str());
     }
 
     if(*promcmc_command) {
@@ -3047,7 +2850,7 @@ int main(int argc, char* argv[])
                     tree.Fill();
                 }
                 tree.Write();
-                met.plot_autocorrelation((final_output_tag+"_PROMCMC_autocorrelation_chain"+std::to_string(chain_counter)+".pdf").c_str(), param_names);
+                met.plot_autocorrelation((final_output_tag+"_PROMCMC_autocorrelation_chain"+std::to_string(chain_counter)+".pdf").c_str(), param_names, {});
             }
         }
         //TCanvas c;
@@ -3583,3 +3386,146 @@ GlobalFitResult do_a_fit(const PROconfig &config, const PROpeller &prop, const P
     return res;
 }
 
+std::map<std::string, TObject *> draw_fit_result(const PROconfig &config, const PROpeller &prop, const PROmodel &model, const PROsyst &syst, const PROspec &cv, const PROdata &data, const GlobalFitResult &fitres, const std::string &prefix, PlotOptions popt, PlotBounds pbounds) {
+    std::map<std::string, TObject *> drawn_objs;
+
+    size_t N_params = model.nparams + syst.GetNSplines();
+    size_t N_phys_params = model.nparams;
+    std::vector<std::string> param_names;
+    if(fitres.corrmat.size()) {
+        TH2D corrhist("crh", "", N_params, 0, N_params, N_params, 0, N_params);
+        TH2D fraccovhist("fch", "", N_params, 0, N_params, N_params, 0, N_params);
+        TH2D covhist("ch", "", N_params, 0, N_params, N_params, 0, N_params);
+        for(size_t i = 0; i < N_params; ++i) {
+            std::string label = i < N_phys_params 
+                ? model.pretty_param_names[i]
+                : config.m_mcgen_variation_plotname_map.at(syst.spline_names[i-N_phys_params]).c_str();
+            param_names.push_back(label);
+            covhist.GetXaxis()->SetBinLabel(i+1, label.c_str());
+            covhist.GetYaxis()->SetBinLabel(i+1, label.c_str());
+            fraccovhist.GetXaxis()->SetBinLabel(i+1, label.c_str());
+            fraccovhist.GetYaxis()->SetBinLabel(i+1, label.c_str());
+            corrhist.GetXaxis()->SetBinLabel(i+1, label.c_str());
+            corrhist.GetYaxis()->SetBinLabel(i+1, label.c_str());
+            for(size_t j = 0; j < N_params; ++j) {
+                covhist.SetBinContent(i+1, j+1, fitres.covmat(i,j));
+                fraccovhist.SetBinContent(i+1, j+1, fitres.fraccovmat(i,j));
+                corrhist.SetBinContent(i+1, j+1, fitres.corrmat(i,j));
+            }
+        }
+        TCanvas c1;
+        corrhist.SetMaximum(1);
+        corrhist.SetMinimum(-1);
+        covhist.SetMaximum(1);
+        covhist.SetMinimum(-1);
+        fraccovhist.SetMaximum(100);
+        fraccovhist.SetMinimum(-100);
+        //covhist.Draw("colz");
+        //c1.Print((prefix+"_postfit_cov.pdf").c_str());
+        //fraccovhist.Draw("colz");
+        //c1.Print((prefix+"_postfit_fraccov.pdf").c_str());
+        c1.SetLeftMargin(0.18);   
+        corrhist.SetTitle("Post-Fit Correlation Matrix");
+        corrhist.Draw("colz");
+        gPad->Update();
+
+        TLine line;
+        line.SetLineColor(kBlack);
+        line.SetLineWidth(2);
+        line.DrawLine(N_phys_params, 0, N_phys_params, N_params);
+        line.DrawLine(0, N_phys_params, N_params, N_phys_params);
+        c1.Print((prefix+"_postfit_correlation_matrix.pdf").c_str());
+        drawn_objs["post_fit_param_correlations"] = corrhist.Clone();
+    }
+
+    if(fitres.mh) {
+        fitres.mh->plot_autocorrelation(prefix+"_corrmat_mcmc_autocorrelation.pdf", param_names, &drawn_objs);
+        std::string name = prefix+"_mcmc_chain";
+        drawn_objs[name] = new TTree(name.c_str(), name.c_str());
+        TTree *tree = (TTree*)drawn_objs[name];
+        Eigen::VectorXf v = Eigen::VectorXf::Zero(N_params);
+        for(size_t i = 0; i < model.nparams; ++i) {
+            tree->Branch(model.param_names[i].c_str(), &v(i));
+        }
+        for(size_t i = model.nparams; i < N_params; ++i) {
+            const std::string &sname = syst.spline_names[i-model.nparams];
+            std::string::size_type l = sname.find(':');
+            // TODO: This only handles names with a single colon in them.
+            // I don't think we ever have more than that, it's really just meant for the 'flat' and 'norm' systs.
+            if(l != std::string::npos) {
+                std::string bname = sname;
+                bname[l] = '_';
+                tree->Branch(bname.c_str(), &v(i));
+            } else {
+                tree->Branch(sname.c_str(), &v(i));
+            }
+        }
+        for(const auto &p : fitres.mh->chain) {
+            v = p;
+            tree->Fill();
+        }
+    }
+
+    if(fitres.fitter.best_fit.size()) {
+        std::string hname = "#chi^{2}/nbins = " + to_string(fitres.chi2) + "/" + to_string(config.m_num_variable_bins_total_collapsed[config.i_prime]);
+        PROspec bf = FillSpectra(config, prop, syst, model, fitres.fitter.best_fit, true, config.i_prime);
+        // Concatenated bins across all channels share no common x-axis, so use bin-index axis.
+        TH1D post_hist("ph", hname.c_str(), config.m_num_variable_bins_total_collapsed[config.i_prime], 0, config.m_num_variable_bins_total_collapsed[config.i_prime]);
+        TH1D pre_hist("prh", hname.c_str(), config.m_num_variable_bins_total_collapsed[config.i_prime], 0, config.m_num_variable_bins_total_collapsed[config.i_prime]);
+        for(size_t i = 0; i < config.m_num_variable_bins_total_collapsed[config.i_prime]; ++i) {
+            post_hist.SetBinContent(i+1, bf.Spec()(i));
+            pre_hist.SetBinContent(i+1, cv.Spec()(i));
+        }
+
+        std::vector<TPaveText> texts;
+        TPaveText chi2text(0.55, 0.50, 0.85, 0.58, "NDC");
+        chi2text.AddText(hname.c_str());
+        chi2text.SetFillColor(0);
+        chi2text.SetBorderSize(0);
+        chi2text.SetTextAlign(12);
+        //chi2text.SetTextSize(0.035); 
+        texts.push_back(chi2text);
+
+        std::map<std::string, TObject *> tmp_objs = plot_channels((prefix+"_hists.pdf"), config, cv, bf, data, fitres.err_band, fitres.post_err_band, texts, pbounds, popt);
+        for(const auto &[name, obj] : tmp_objs)
+            drawn_objs[name] = obj;
+    }
+
+    TCanvas c;
+    if(fitres.posteriors.size()) {
+        c.Print((prefix+"_postfit_posteriors.pdf[").c_str());
+        for(auto &h: fitres.posteriors) {
+            TH1 *h1 = (TH1*)h.Clone();
+            h1->Draw("hist");
+            drawn_objs[h1->GetXaxis()->GetTitle()+std::string("_posterior")] = h1;
+            c.Print((prefix+"_postfit_posteriors.pdf").c_str());
+        }
+        c.Print((prefix+"_postfit_posteriors.pdf]").c_str());
+    }
+
+    if(fitres.spline_covariance.size()) {
+        Eigen::VectorXf inv_sqrt_diag_nuis = fitres.spline_covariance.diagonal().array().abs().max(1e-10f).sqrt().inverse();
+        Eigen::MatrixXf corrmat_nuis = inv_sqrt_diag_nuis.asDiagonal() * fitres.spline_covariance * inv_sqrt_diag_nuis.asDiagonal();
+
+        TH2F spline_cov("postfit_corr_nuisance_only", "", corrmat_nuis.cols(), 0, corrmat_nuis.cols(), corrmat_nuis.rows(), 0, corrmat_nuis.rows());
+        TH2F spline_cov_cov("postfit_cov_nuisance_only", "", fitres.spline_covariance.cols(), 0, fitres.spline_covariance.cols(), fitres.spline_covariance.rows(), 0, fitres.spline_covariance.rows());
+        for(int i = 0; i < corrmat_nuis.cols(); ++i) {
+            spline_cov.GetXaxis()->SetBinLabel(i+1, config.m_mcgen_variation_plotname_map.at(syst.spline_names[i]).c_str());
+            spline_cov.GetYaxis()->SetBinLabel(i+1, config.m_mcgen_variation_plotname_map.at(syst.spline_names[i]).c_str());
+            spline_cov_cov.GetXaxis()->SetBinLabel(i+1, config.m_mcgen_variation_plotname_map.at(syst.spline_names[i]).c_str());
+            spline_cov_cov.GetYaxis()->SetBinLabel(i+1, config.m_mcgen_variation_plotname_map.at(syst.spline_names[i]).c_str());
+            for(int j = 0; j < corrmat_nuis.rows(); ++j) {
+                spline_cov.SetBinContent(i+1, j+1, corrmat_nuis(i,j));
+                spline_cov_cov.SetBinContent(i+1, j+1, fitres.spline_covariance(i,j));
+            }
+        }
+        drawn_objs["postfit_corr_nuis"] = spline_cov.Clone();
+        spline_cov.Draw("colz");
+        spline_cov.SetMaximum(1);
+        spline_cov.SetMinimum(-1);
+
+        c.Print((prefix+"_postfit_correlation_matrix_nuisance_only.pdf").c_str());
+    }
+
+    return drawn_objs;
+}
