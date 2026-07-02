@@ -1190,6 +1190,19 @@ namespace PROfit {
 
             float additional_weight = syst_additional_weight.at(i); // extra per-systematic weights, unrelated to the per-event additional_weight set in the xml file
             auto map_iter = eventweight_map.find(var_syst_objs.front()->GetSysName());
+            // The spline/covariance/covariance_to_spline paths below dereference
+            // map_iter; a missing weight name (branch typo, absent friend tree)
+            // must fail loudly here instead of dereferencing the end iterator.
+            const std::string &sys_mode = var_syst_objs.front()->mode;
+            const bool needs_weights = (sys_mode == "spline" || sys_mode == "spline_to_covariance" ||
+                                        sys_mode == "covariance" || sys_mode == "covariance_to_spline");
+            if(needs_weights && map_iter == eventweight_map.end()){
+                log<LOG_ERROR>(L"%1% || ERROR: systematic '%2%' (mode %3%) has no entry in the event weight map. "
+                               L"Check that the variation name matches a weight branch in the input files.")
+                    % __func__ % var_syst_objs.front()->GetSysName().c_str() % sys_mode.c_str();
+                log<LOG_ERROR>(L"Terminating.");
+                exit(EXIT_FAILURE);
+            }
             int spline_bin = (var_syst_objs.front()->mode == "covariance") ? -1: var_bin_indices[var_syst_objs.front()->binning];
 
             if(var_syst_objs.front()->mode == "spline" || var_syst_objs.front()->mode == "spline_to_covariance") {

@@ -67,7 +67,8 @@ namespace PROfit {
                 }
 
                 log<LOG_INFO>(L"%1% || Converting spline '%2%' to covariance matrix using spline2cov") % __func__ % syst.systname.c_str();
-                Eigen::MatrixXf frac_cov = spline2cov(spline_idx, config, prop, *model, cvparams, 42);
+                // Disjoint seed range per converted spline (spline2cov draws 500 throws at seed..seed+499).
+                Eigen::MatrixXf frac_cov = spline2cov(spline_idx, config, prop, *model, cvparams, 42u + (uint32_t)spline_idx * 500u);
                 spline_priors  = saved_priors;
                 spline_centers = saved_centers;
                 Eigen::MatrixXf corr = GenerateCorrMatrix(frac_cov);
@@ -279,7 +280,8 @@ namespace PROfit {
                 case SystType::Spline: {
                                            ret.syst_map[name] = std::make_pair(ret.covmat.size(), SystType::Covariance);
                                            ret.covar_names.push_back(name);
-                                           Eigen::MatrixXf cov = spline2cov(idx, config, prop, model,params, seed);
+                                           // Disjoint seed range per spline (spline2cov draws 500 throws at seed..seed+499).
+                                           Eigen::MatrixXf cov = spline2cov(idx, config, prop, model,params, seed + (uint32_t)idx * 500u);
                                            Eigen::MatrixXf cor = GenerateCorrMatrix(cov);
                                            ret.covmat.push_back(cov);
                                            ret.corrmat.push_back(cor);
@@ -307,8 +309,11 @@ namespace PROfit {
         Eigen::MatrixXf cv = FillSpectra(config, prop, *this, model, params , true, other_index).Spec();
 
         std::vector<Eigen::VectorXf> specs;
+        // Distinct seed per throw: FillSplineRandomThrow now uses its seed
+        // argument on every call (it used to hold a function-local static RNG
+        // that ignored the seed after the first-ever call).
         for(size_t i = 0; i < 500; ++i){
-            specs.push_back(FillSplineRandomThrow(config, prop, *this, model, params, spline, seed, other_index).Spec());
+            specs.push_back(FillSplineRandomThrow(config, prop, *this, model, params, spline, seed + (uint32_t)i, other_index).Spec());
         }
 
         int nbins = config.m_num_variable_bins_total[other_index];

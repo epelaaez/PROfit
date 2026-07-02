@@ -53,6 +53,24 @@ namespace {
         label_out = s;
         unit_out = "";
     }
+
+    // The `use` attribute on <mode>/<detector>/<channel>/<subchannel> is
+    // deprecated: disabling entries via use="false" left the per-channel
+    // binning and per-detector POT arrays misaligned and is no longer
+    // supported. use="true" is tolerated (with a warning); anything else is a
+    // hard configuration error.
+    void RejectDeprecatedUseAttribute(const char* use_attr, const char* element) {
+        if(use_attr == nullptr) return;
+        if(std::string(use_attr) == "true") {
+            log<LOG_WARNING>(L"%1% || The 'use' attribute on <%2%> is deprecated and ignored; please remove it from your XML.")
+                % __func__ % element;
+            return;
+        }
+        log<LOG_ERROR>(L"%1% || ERROR: <%2% use=\"%3%\"> found. Disabling elements via use=\"false\" is deprecated and no longer supported: remove the whole element (or the 'use' attribute) from your XML.")
+            % __func__ % element % use_attr;
+        log<LOG_ERROR>(L"Terminating.");
+        exit(EXIT_FAILURE);
+    }
 }
 
 
@@ -243,11 +261,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 m_mode_plotnames.push_back(mode_plotname);
             }
 
-            const char* mode_use = pMode->Attribute("use");
-            if(mode_use == NULL || std::string(mode_use) == "true")
-                m_mode_bool.push_back(true);
-            else
-                m_mode_bool.push_back(false);
+            RejectDeprecatedUseAttribute(pMode->Attribute("use"), "mode");
 
             pMode = pMode->NextSiblingElement("mode");
             log<LOG_DEBUG>(L"%1% || Loading Mode %2%  ") % __func__ % m_mode_names.back().c_str() ;
@@ -293,11 +307,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 m_detector_plotnames.push_back(detector_plotname);
             }
 
-            const char* detector_use = pDet->Attribute("use");
-            if(detector_use==NULL || std::string(detector_use) == "true")
-                m_detector_bool.push_back(true);
-            else
-                m_detector_bool.push_back(false);
+            RejectDeprecatedUseAttribute(pDet->Attribute("use"), "detector");
 
             const char* detector_pot= pDet->Attribute("pot");
             if (detector_pot == nullptr) {
@@ -354,11 +364,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
             }
 
 
-            const char* channel_use = pChan->Attribute("use");
-            if(channel_use==NULL || std::string(channel_use) == "true")
-                m_channel_bool.push_back(true);
-            else
-                m_channel_bool.push_back(false);
+            RejectDeprecatedUseAttribute(pChan->Attribute("use"), "channel");
 
 
             const char* channel_xaxislabel = pChan->Attribute("xaxislabel");
@@ -540,7 +546,6 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
             // Now loop over all this channels subchanels. Not the names must be UNIQUE!!
             tinyxml2::XMLElement *pSubChan;
-            m_subchannel_bool.push_back({});
             pSubChan = pChan->FirstChildElement("subchannel");
             while(pSubChan){
 
@@ -581,11 +586,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                     m_subchannel_colors[nchan].push_back(subchannel_color);
                 }
 
-                const char* subchannel_use = pSubChan->Attribute("use");
-                if(subchannel_use==NULL || std::string(subchannel_use) == "true")
-                    m_subchannel_bool.back().push_back(true);
-                else
-                    m_subchannel_bool.back().push_back(false);
+                RejectDeprecatedUseAttribute(pSubChan->Attribute("use"), "subchannel");
 
                 const char* subchannel_data= pSubChan->Attribute("data");
                 if(subchannel_data==NULL){
@@ -1976,109 +1977,24 @@ std::string PROconfig::GetChannelUnit(size_t channel_index, size_t other_index) 
 
 void PROconfig::remove_unused_channel(){
 
-    log<LOG_INFO>(L"%1% || Remove any used channels and subchannels...") % __func__;
+    // The old `use="false"` disable mechanism is gone (it left the
+    // per-channel binning and per-detector POT arrays misaligned); every
+    // parsed mode/detector/channel/subchannel is in use, so the counts come
+    // straight from the parsed arrays.
+    m_num_modes = m_mode_names.size();
+    m_num_detectors = m_detector_names.size();
+    m_num_channels = m_channel_names.size();
 
-    m_num_modes = std::count(m_mode_bool.begin(), m_mode_bool.end(), true);
-    m_num_detectors = std::count(m_detector_bool.begin(), m_detector_bool.end(), true);
-    m_num_channels = std::count(m_channel_bool.begin(), m_channel_bool.end(), true);
+    // The subchannel arrays are over-allocated (to 100) before parsing; trim
+    // them to the real channel count so their size matches m_num_channels.
+    m_subchannel_names.resize(m_num_channels);
+    m_subchannel_plotnames.resize(m_num_channels);
+    m_subchannel_colors.resize(m_num_channels);
+    m_subchannel_datas.resize(m_num_channels);
 
-    //update mode-info
-    if(m_num_modes != m_mode_bool.size()){
-        log<LOG_DEBUG>(L"%1% || Found unused modes!! Clean it up...") % __func__;
-        std::vector<std::string> temp_mode_names(m_num_modes), temp_mode_plotnames(m_num_modes);
-        for(size_t i = 0, mode_index = 0; i != m_mode_bool.size(); ++i){
-            if(m_mode_bool[i]){
-                temp_mode_names[mode_index] = m_mode_names[i];
-                temp_mode_plotnames[mode_index] = m_mode_plotnames[i];
-
-                ++mode_index;
-            }    
-        }
-        m_mode_names = temp_mode_names;
-        m_mode_plotnames = temp_mode_plotnames;
-    }
-
-    ///update detector-info
-    if(m_num_detectors != m_detector_bool.size()){
-        log<LOG_DEBUG>(L"%1% || Found unused detectors!! Clean it up...") % __func__;
-        std::vector<std::string> temp_detector_names(m_num_detectors), temp_detector_plotnames(m_num_detectors);
-        for(size_t i = 0, det_index = 0; i != m_detector_bool.size(); ++i){
-            if(m_detector_bool[i]){
-                temp_detector_names[det_index] = m_detector_names[i];
-                temp_detector_plotnames[det_index] = m_detector_plotnames[i];
-
-                ++det_index;
-            }
-        }
-        m_detector_names = temp_detector_names;
-        m_detector_plotnames = temp_detector_plotnames;
-    }
-
-    if(m_num_channels != m_channel_bool.size()){
-        log<LOG_DEBUG>(L"%1% || Found unused channels!! Clean the messs up...") % __func__;
-
-        //update channel-related info
-        std::vector<std::vector<Binning>> temp_channel_other_bins(m_num_channels);
-
-        std::vector<std::string> temp_channel_names(m_num_channels);
-        std::vector<std::vector<int>> temp_variable_dims(m_num_channels);
-        std::vector<std::string> temp_channel_plotnames(m_num_channels);
-        std::vector<std::string> temp_channel_xaxis_labels(m_num_channels);
-        std::vector<std::string> temp_channel_units(m_num_channels);
-        std::vector<std::vector<std::string>> temp_channel_other_xaxis_labels(m_num_channels);
-        std::vector<std::vector<std::string>> temp_channel_other_units(m_num_channels);
-        for(size_t i=0, chan_index = 0; i< m_channel_bool.size(); ++i){
-            if(m_channel_bool[i]){
-                temp_channel_names[chan_index] = m_channel_names[i];
-                temp_channel_plotnames[chan_index] = m_channel_plotnames[i];
-                temp_channel_xaxis_labels[chan_index] = m_channel_xaxis_labels[i];
-                temp_channel_units[chan_index] = m_channel_units[i];
-
-                temp_channel_other_bins[chan_index] = m_channel_variable_bins[i];
-                temp_channel_other_xaxis_labels[chan_index] = m_channel_variable_xaxis_labels[i];
-                temp_channel_other_units[chan_index] = m_channel_variable_units[i];
-
-                ++chan_index;
-            }
-        }
-
-        m_channel_names = temp_channel_names;
-        m_channel_plotnames = temp_channel_plotnames;
-        m_channel_xaxis_labels = temp_channel_xaxis_labels;
-        m_channel_units = temp_channel_units;
-    }
-
-    {
-
-        //update subchannel-related info
-        m_num_subchannels.resize(m_num_channels);
-        std::vector<std::vector<std::string >> temp_subchannel_names(m_num_channels), temp_subchannel_plotnames(m_num_channels), temp_subchannel_colors(m_num_channels);
-        std::vector<std::vector<size_t >> temp_subchannel_datas(m_num_channels), temp_subchannel_model_rules(m_num_channels);
-        for(size_t i=0, chan_index = 0; i< m_channel_bool.size(); ++i){
-            if(m_channel_bool.at(i)){
-                m_num_subchannels[chan_index]= 0;
-                for(size_t j=0; j< m_subchannel_bool[i].size(); ++j){ 
-                    if(m_subchannel_bool[i][j]){
-                        ++m_num_subchannels[chan_index];
-                        temp_subchannel_names[chan_index].push_back(m_subchannel_names[i][j]);
-                        temp_subchannel_plotnames[chan_index].push_back(m_subchannel_plotnames[i][j]);	
-                        temp_subchannel_colors[chan_index].push_back(m_subchannel_colors[i][j]);	
-                        temp_subchannel_datas[chan_index].push_back(m_subchannel_datas[i][j]);
-
-                    }
-                }
-
-
-                ++chan_index;
-            }
-        }
-
-        m_subchannel_names = temp_subchannel_names;
-        m_subchannel_plotnames = temp_subchannel_plotnames;
-        m_subchannel_colors = temp_subchannel_colors;
-        m_subchannel_datas = temp_subchannel_datas;
-
-    }
+    m_num_subchannels.resize(m_num_channels);
+    for(size_t i = 0; i < m_num_channels; ++i)
+        m_num_subchannels[i] = m_subchannel_names[i].size();
 
     //grab list of fullnames used.
     log<LOG_DEBUG>(L"%1% || Sweet, now generating fullnames of all channels used...") % __func__;

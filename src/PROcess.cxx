@@ -322,14 +322,22 @@ namespace PROfit {
             }
 
             for(size_t i = 0; i < inprop.NEvent(); ++i) {
+                // Out-of-range events have bin index -1; PROspec::Fill does no
+                // bounds checking, so filling would corrupt memory.
+                const int reco_bin = inprop.VariableBinIndex(var_index, i);
+                if(reco_bin < 0) continue;
+
                 float oscw = inmodel.is_trivial ? 1.0f : probs(i, inprop.model_rule[i]);
                 float add_w = inprop.added_weights[i];
-                const int reco_bin = inprop.VariableBinIndex(var_index, i);
 
                 float systw = 1;
-                for(int j = 0; j < shifts.size(); ++j) {
+                // Iterate up to insyst.GetNSplines(), not shifts.size(): params
+                // may be over-sized when shared across variables with different
+                // spline counts (the binned path above already does this).
+                for(int j = 0; j < (int)insyst.GetNSplines(); ++j) {
                     int binning = insyst.spline_binnings[j];
                     const int spline_bin = inprop.VariableBinIndex(binning, i);
+                    if(spline_bin < 0) continue; // outside this spline's binning: no shift
                     systw *= insyst.GetSplineShift(j, shifts[j], spline_bin);
                 }
                 float finalw = oscw * systw * add_w;
@@ -438,8 +446,10 @@ namespace PROfit {
 
         Eigen::VectorXf params = cvparams;
 
-        // TODO: We should think about centralizing rng in a thread-safe/thread-aware way
-        static std::mt19937 rng{seed};
+        // Local generator seeded per call: a function-local static ignored the
+        // seed argument after the first-ever call and raced across threads.
+        // Callers are responsible for passing distinct seeds per throw.
+        std::mt19937 rng{seed};
         std::vector<std::normal_distribution<float>> d_spline;
         for(size_t i = 0; i < insyst.GetNSplines(); ++i)
             d_spline.emplace_back(insyst.spline_centers(i), insyst.spline_priors(i));
@@ -498,8 +508,10 @@ namespace PROfit {
         int nbins =  inconfig.m_num_variable_bins_total[other_index];
         Eigen::VectorXf spec = Eigen::VectorXf::Constant(nbins, 0);
 
-        // TODO: We should think about centralizing rng in a thread-safe/thread-aware way
-        static std::mt19937 rng{seed};
+        // Local generator seeded per call: a function-local static ignored the
+        // seed argument after the first-ever call and raced across threads.
+        // Callers are responsible for passing distinct seeds per throw.
+        std::mt19937 rng{seed};
         std::normal_distribution<float> d(insyst.spline_centers(spline), insyst.spline_priors(spline));
         float spline_throw = d(rng);
         Eigen::VectorXf params = cvparams;

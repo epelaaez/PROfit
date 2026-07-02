@@ -33,6 +33,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <fstream>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <random>
@@ -98,6 +99,36 @@ static size_t resolve_axis_index(const std::string &name,
     log<LOG_WARNING>(L"%1% || resolve_axis_index: axis variable '%2%' not found; falling back to %3%.")
         % __func__ % name.c_str() % fallback;
     return fallback;
+}
+
+// Throw one nuisance pull from N(0,1) truncated to spline i's allowed range,
+// without ever looping forever. Mirrors the guarded pattern introduced in
+// bin/PROfit.cxx by commit 000b3d0: OOB-safe spline_has_restrict lookup
+// (covariance_to_spline knobs may not populate it), inverted-bounds tolerance,
+// and bounded attempts with a clamp-to-nearest-in-range fallback + warning.
+static float throw_restricted_spline(const PROsyst &systs, size_t i,
+                                     std::mt19937 &rng,
+                                     std::normal_distribution<float> &d)
+{
+    const bool has_r = i < systs.spline_has_restrict.size() && systs.spline_has_restrict[i];
+    float tlo = has_r ? systs.spline_restrict_lo[i] : systs.spline_lo[i];
+    float thi = has_r ? systs.spline_restrict_hi[i] : systs.spline_hi[i];
+    if (tlo > thi) { const float t = tlo; tlo = thi; thi = t; }
+
+    const int max_attempts = 10000;
+    int attempts = 0;
+    float x = d(rng);
+    while ((x < tlo || x > thi) && ++attempts < max_attempts)
+        x = d(rng);
+    if (x < tlo || x > thi) {
+        x = (0.0f < tlo) ? tlo : (0.0f > thi ? thi : 0.0f);
+        const std::string sname = i < systs.spline_names.size()
+            ? systs.spline_names[i] : ("spline#" + std::to_string(i));
+        log<LOG_WARNING>(L"%1% || spline '%2%' (index %3%) has throw bounds [%4%, %5%] unreachable "
+                         L"by a unit Gaussian after %6% draws; clamping to %7%. Check its knobvals / restrict attribute.")
+            % __func__ % sname.c_str() % (int)i % tlo % thi % max_attempts % x;
+    }
+    return x;
 }
 
 // ====================================================================
@@ -354,8 +385,11 @@ static std::vector<PROmesh::AMRResult> generate_throws(
         Eigen::VectorXf throwC = Eigen::VectorXf::Constant((int)nbins_collapsed, 0);
 
         if (!acfg.stat_only_throws) {
+            // Truncated to each spline's allowed range — keeps the mesh throws
+            // statistically consistent with the PE throws in run_one_pe /
+            // generate_pseudo_experiment_data.
             for (size_t i = 0; i < systs.GetNSplines(); ++i) {
-                throwp((int)(i + N_phys_params)) = d(PROseed::global_rng);
+                throwp((int)(i + N_phys_params)) = throw_restricted_spline(systs, i, PROseed::global_rng, d);
             }
         }
         for (size_t i = 0; i < nbins_collapsed; ++i) {
@@ -523,99 +557,78 @@ static MetaMesh build_meta_mesh(const std::vector<PROmesh::AMRResult> &throws,
         }
     }
 
-    // Build MetaCells. A cell at level L is described by its bottom-left
-    // finest-integer coord and its step = 2^(max_levels - L). We sweep the
-    // finest grid by step at level L and decide inclusion based on the
-    // tally count for the top-left (i_bl, j_bl) of each candidate cell.
-    // For mixed-level meta-meshes, the rule is: a cell at level L exists iff
-    //   (a) L < baseline_level, OR
-    //   (b) tally[L][center] / n_throws ≥ p_thresh, AND no cell at deeper
-    //       level covering the same area also passes (b).
+    // Build MetaCells by top-down quadtree descent so the result is an EXACT
+    // tiling of the finest grid — no holes, no overlaps. (The previous
+    // two-pass anchor-based emission left uncovered finest points inside
+    // partially-refined baseline blocks — regions with no PE bank cell,
+    // typically right along contours — and could also emit a coarser cell
+    // overlapping an already-emitted deeper one.)
     //
-    // For slice 1 we keep the policy simple: emit cells at the *finest* level
-    // that passes the threshold at each finest-grid coordinate. If no level
-    // passes and L < baseline_level coverage applies, fall back to baseline.
-    //
-    // We materialise this by sweeping the finest grid and, for each finest
-    // coordinate, finding the deepest level L* where either condition holds.
-    // Then we deduplicate by the (i_bl, j_bl, step) coordinate of the cell
-    // that contains that finest coordinate at level L*.
+    // Descent rule at a block (i, j, level): subdivide iff any finest point in
+    // the block was refined to depth ≥ level+1 by at least threshold_count
+    // throws; otherwise emit the block as a leaf. Leaves at level ≥
+    // baseline_level are "refined" cells, coarser leaves are baseline cells.
     const int threshold_count = std::max(1, (int)std::ceil(p_thresh * (float)n_throws));
 
     std::vector<MetaCell> emitted;
     emitted.reserve(W * H / 4);
-    std::vector<uint8_t> seen_finest(W * H, 0); // marks finest points already covered by an emitted deeper cell
+    std::vector<uint8_t> covered(W * H, 0); // tiling sanity check
 
-    // First pass: emit deep (refined) cells where p_thresh is met.
-    // Walk from deepest level outward.
-    for (int level = mm.max_levels; level >= baseline_level; --level) {
+    // Peak tally over a block footprint at a given level.
+    auto block_peak_at_level = [&](int i, int j, int step, int L) -> int {
+        int peak = 0;
+        for (int ii = i; ii < i + step && ii < (int)W; ++ii)
+            for (int jj = j; jj < j + step && jj < (int)H; ++jj)
+                peak = std::max(peak, tally[(size_t)ii * H + (size_t)jj][L]);
+        return peak;
+    };
+
+    std::function<void(int, int, int)> descend = [&](int i, int j, int level) {
         const int step = 1 << std::max(0, mm.max_levels - level);
-        for (int i = 0; i < (int)W; i += step) {
-            for (int j = 0; j < (int)H; j += step) {
-                if (seen_finest[(size_t)i * H + (size_t)j]) continue;
-                const int count = tally[(size_t)i * H + (size_t)j][std::min(level, n_levels - 1)];
-                if (count >= threshold_count) {
-                    MetaCell c;
-                    c.i_bl = i; c.j_bl = j; c.step = step; c.level = level;
-                    c.per_level_refine_count.assign(n_levels, 0);
-                    // Aggregate per-level counts across the cell footprint (max).
-                    for (int L = 0; L < n_levels; ++L) {
-                        int peak = 0;
-                        for (int ii = i; ii < i + step && ii < (int)W; ++ii) {
-                            for (int jj = j; jj < j + step && jj < (int)H; ++jj) {
-                                peak = std::max(peak, tally[(size_t)ii * H + (size_t)jj][L]);
-                            }
-                        }
-                        c.per_level_refine_count[L] = peak;
-                    }
-                    emitted.push_back(std::move(c));
-                    mm.n_refined_cells++;
-                    // Mark this whole footprint as already covered.
-                    for (int ii = i; ii < i + step && ii < (int)W; ++ii) {
-                        for (int jj = j; jj < j + step && jj < (int)H; ++jj) {
-                            seen_finest[(size_t)ii * H + (size_t)jj] = 1;
-                        }
-                    }
-                }
-            }
+        const bool can_refine = level < mm.max_levels && step >= 2 &&
+                                (level + 1) < n_levels &&
+                                block_peak_at_level(i, j, step, level + 1) >= threshold_count;
+        if (can_refine) {
+            const int half = step / 2;
+            descend(i,        j,        level + 1);
+            descend(i + half, j,        level + 1);
+            descend(i,        j + half, level + 1);
+            descend(i + half, j + half, level + 1);
+            return;
         }
+
+        MetaCell c;
+        c.i_bl = i; c.j_bl = j; c.step = step; c.level = level;
+        c.per_level_refine_count.assign(n_levels, 0);
+        for (int L = 0; L < n_levels; ++L)
+            c.per_level_refine_count[L] = block_peak_at_level(i, j, step, L);
+        emitted.push_back(std::move(c));
+        if (level >= baseline_level) mm.n_refined_cells++;
+        else                         mm.n_baseline_cells++;
+        for (int ii = i; ii < i + step && ii < (int)W; ++ii)
+            for (int jj = j; jj < j + step && jj < (int)H; ++jj)
+                covered[(size_t)ii * H + (size_t)jj]++;
+    };
+
+    // Top-level sweep at the baseline tiling level. W and H are multiples of
+    // every power-of-two step ≤ 2^max_levels, so the blocks tile exactly.
+    {
+        const int level_b = std::max(0, baseline_level - 1);
+        const int step_b = 1 << std::max(0, mm.max_levels - level_b);
+        for (int i = 0; i < (int)W; i += step_b)
+            for (int j = 0; j < (int)H; j += step_b)
+                descend(i, j, level_b);
     }
 
-    // Second pass: fill remaining area with baseline-level cells.
-    {
-        const int level = std::max(0, baseline_level - 1);
-        const int step = 1 << std::max(0, mm.max_levels - level);
-        for (int i = 0; i < (int)W; i += step) {
-            for (int j = 0; j < (int)H; j += step) {
-                bool any_covered = false;
-                for (int ii = i; ii < i + step && ii < (int)W && !any_covered; ++ii) {
-                    for (int jj = j; jj < j + step && jj < (int)H && !any_covered; ++jj) {
-                        if (seen_finest[(size_t)ii * H + (size_t)jj]) any_covered = true;
-                    }
-                }
-                if (any_covered) continue;
-
-                MetaCell c;
-                c.i_bl = i; c.j_bl = j; c.step = step; c.level = level;
-                c.per_level_refine_count.assign(n_levels, 0);
-                for (int L = 0; L < n_levels; ++L) {
-                    int peak = 0;
-                    for (int ii = i; ii < i + step && ii < (int)W; ++ii) {
-                        for (int jj = j; jj < j + step && jj < (int)H; ++jj) {
-                            peak = std::max(peak, tally[(size_t)ii * H + (size_t)jj][L]);
-                        }
-                    }
-                    c.per_level_refine_count[L] = peak;
-                }
-                emitted.push_back(std::move(c));
-                mm.n_baseline_cells++;
-                for (int ii = i; ii < i + step && ii < (int)W; ++ii) {
-                    for (int jj = j; jj < j + step && jj < (int)H; ++jj) {
-                        seen_finest[(size_t)ii * H + (size_t)jj] = 1;
-                    }
-                }
-            }
-        }
+    // Tiling assertion: every finest point covered exactly once.
+    size_t n_holes = 0, n_overlaps = 0;
+    for (size_t p = 0; p < covered.size(); ++p) {
+        if (covered[p] == 0) ++n_holes;
+        else if (covered[p] > 1) ++n_overlaps;
+    }
+    if (n_holes || n_overlaps) {
+        log<LOG_ERROR>(L"%1% || build_meta_mesh: tiling invariant violated (%2% holes, %3% overlaps of %4% finest points). This is a bug.")
+            % __func__ % (int)n_holes % (int)n_overlaps % (int)covered.size();
     }
 
     mm.cells = std::move(emitted);
@@ -1664,13 +1677,9 @@ static PEBankRecord run_one_pe(const AdaptivePEArgs &args)
         lb_osc((int)j)  = lo; ub_osc((int)j)  = hi;
     }
 
-    // Throw splines (Gaussian, respecting restrict ranges).
+    // Throw splines (Gaussian, respecting restrict ranges; bounded + OOB-safe).
     for (size_t i = 0; i < nspline; ++i) {
-        const float tlo = systs.spline_has_restrict[i] ? systs.spline_restrict_lo[i] : systs.spline_lo[i];
-        const float thi = systs.spline_has_restrict[i] ? systs.spline_restrict_hi[i] : systs.spline_hi[i];
-        do {
-            throws((int)(i + nphys)) = d(rng);
-        } while (throws((int)(i + nphys)) < tlo || throws((int)(i + nphys)) > thi);
+        throws((int)(i + nphys)) = throw_restricted_spline(systs, i, rng, d);
     }
 
     // Stat throw vector.
@@ -1944,13 +1953,7 @@ static PROdata generate_pseudo_experiment_data(
 
     Eigen::VectorXf throws = fakeDataParams;
     for (size_t i = 0; i < nspline; ++i) {
-        const float tlo = systs.spline_has_restrict[i]
-            ? systs.spline_restrict_lo[i] : systs.spline_lo[i];
-        const float thi = systs.spline_has_restrict[i]
-            ? systs.spline_restrict_hi[i] : systs.spline_hi[i];
-        do {
-            throws((int)(i + nphys)) = d(PROseed::global_rng);
-        } while (throws((int)(i + nphys)) < tlo || throws((int)(i + nphys)) > thi);
+        throws((int)(i + nphys)) = throw_restricted_spline(systs, i, PROseed::global_rng, d);
     }
 
     const int nbins_coll = config.m_num_variable_bins_total_collapsed[config.i_prime];

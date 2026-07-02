@@ -98,6 +98,10 @@ AMRResult run_amr(EvalFn eval,
     std::atomic<size_t>          in_flight{0};
     std::atomic<bool>            shutdown{false};
     std::atomic<int>             total_fits{0};
+    // Running global χ² minimum, maintained lock-free at result insertion.
+    // Classification reads this instead of rescanning the whole chi2_map under
+    // state_mu (which serialized all workers at O(points²) total cost).
+    std::atomic<float>           running_min{std::numeric_limits<float>::infinity()};
     int                          fits_by_level_local[8] = {0,0,0,0,0,0,0,0};
     std::mutex                   fits_by_level_mu;
 
@@ -310,25 +314,12 @@ AMRResult run_amr(EvalFn eval,
                 cmax = std::max(cmax, it->second);
             }
         }
-        // Targets are Δχ² values; offset by current global min seen so far.
-        const float global_min = result.min_chi2;  // result is captured by ref later; safe here in single-threaded init? Actually we need atomic.
-        // Workaround: track running min via atomic.
-        // (See the running_min atomic below.)
-        (void)global_min;
-        // The straddle test compares raw χ² values to (running_min + target).
-        // To keep the hot path lock-free we read the running min from an atomic
-        // that's updated alongside state_mu; here we read a snapshot.
+        // Targets are Δχ² values; offset by the current global min seen so
+        // far. The running min is maintained lock-free at result insertion;
+        // combine with the local corner min as a robust snapshot.
         std::vector<float> shifted_targets;
         shifted_targets.reserve(opts.contour_levels.size());
-        // Re-acquire state_mu briefly to read running min via maps; we use the
-        // smaller of the local cmin and the just-read pool min as a robust
-        // global-min estimate.
-        float gmin;
-        {
-            std::lock_guard<std::mutex> lk(state_mu);
-            gmin = std::numeric_limits<float>::infinity();
-            for (const auto &kv : chi2_map) gmin = std::min(gmin, kv.second);
-        }
+        const float gmin = std::min(cmin, running_min.load(std::memory_order_relaxed));
         for (float t : opts.contour_levels) shifted_targets.push_back(gmin + t);
         const bool straddled = straddles_any(cmin, cmax, shifted_targets, opts.delta_widen);
 
@@ -445,16 +436,29 @@ AMRResult run_amr(EvalFn eval,
             EvalResult r = eval(req);
             total_fits.fetch_add(1, std::memory_order_relaxed);
 
-            std::vector<int> affected_cells;
+            // Maintain the running global minimum (lock-free CAS).
+            float cur_min = running_min.load(std::memory_order_relaxed);
+            while (r.chi2 < cur_min &&
+                   !running_min.compare_exchange_weak(cur_min, r.chi2, std::memory_order_relaxed)) {}
+
+            // corner_counts is a deque that register_cell grows under state_mu;
+            // navigating it (operator[]) concurrently with a push_back is a data
+            // race even though the pointed-to atomics are stable. Snapshot the
+            // atomic pointers under the lock, then fetch_sub outside it.
+            std::vector<std::pair<int, std::atomic<int>*>> affected_cells;
             {
                 std::lock_guard<std::mutex> lk(state_mu);
                 chi2_map[req.key]    = r.chi2;
                 bestfit_map[req.key] = std::move(r.best_fit);
                 auto it = corner_to_cells.find(req.key);
-                if (it != corner_to_cells.end()) affected_cells = it->second;
+                if (it != corner_to_cells.end()) {
+                    affected_cells.reserve(it->second.size());
+                    for (int cidx : it->second)
+                        affected_cells.emplace_back(cidx, corner_counts[cidx].get());
+                }
             }
-            for (int cidx : affected_cells) {
-                const int prev = corner_counts[cidx]->fetch_sub(1, std::memory_order_acq_rel);
+            for (auto &[cidx, count_ptr] : affected_cells) {
+                const int prev = count_ptr->fetch_sub(1, std::memory_order_acq_rel);
                 if (prev <= 1) {
                     // This corner was the last one missing → cell is classifiable.
                     classify_and_maybe_subdivide(cidx);
@@ -501,16 +505,12 @@ AMRResult run_amr(EvalFn eval,
         // (A): single pass.
         const int reclass_pass = 0;
 
-        // (B): final-gmin filter setup. Done once.
-        float final_gmin;
+        // (B): final-gmin filter setup. Done once; all workers have joined so
+        // the running min is final.
+        const float final_gmin = running_min.load(std::memory_order_relaxed);
         std::vector<float> final_targets;
-        {
-            std::lock_guard<std::mutex> lk(state_mu);
-            final_gmin = std::numeric_limits<float>::infinity();
-            for (const auto &kv : chi2_map) final_gmin = std::min(final_gmin, kv.second);
-            final_targets.reserve(opts.contour_levels.size());
-            for (float t : opts.contour_levels) final_targets.push_back(final_gmin + t);
-        }
+        final_targets.reserve(opts.contour_levels.size());
+        for (float t : opts.contour_levels) final_targets.push_back(final_gmin + t);
         // Safety margin in χ² units beyond opts.delta_widen on each side of
         // the straddle band. Absorbs gmin drift from any new corner evals
         // scheduled during this reclass pass.
@@ -591,9 +591,7 @@ AMRResult run_amr(EvalFn eval,
         for (int i = 0; i < 8; ++i) result.fits_by_level[i] = fits_by_level_local[i];
     }
     if (!result.chi2_map.empty()) {
-        float gmin = std::numeric_limits<float>::infinity();
-        for (const auto &kv : result.chi2_map) gmin = std::min(gmin, kv.second);
-        result.min_chi2 = gmin;
+        result.min_chi2 = running_min.load(std::memory_order_relaxed);
     }
     // Expose the leaf cells + bounds for AMR mesh visualization. Caller
     // (PROsurf::PlotAMRMesh) draws each leaf as a TBox sized by its step in
