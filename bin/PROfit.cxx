@@ -2145,18 +2145,17 @@ int main(int argc, char* argv[])
             if (do_bkg_subtract) {
                 Eigen::VectorXf bkg_full      = build_subchannel_mask_spec(
                     config, cv_plot, bkg_subchannels, io);
-                // Pass `io` explicitly: the 1-arg CollapseMatrix uses
-                // config.i_prime, which is wrong when this loop iterates over
-                // multiple plottable variables (io may differ from i_prime).
                 Eigen::VectorXf bkg_collapsed = CollapseMatrix(config, bkg_full, io);
+
                 cv_plot.Spec() -= bkg_full;
-                // PROdata holds a const spec; rebuild via the (spec, error) ctor.
                 data_plot = PROdata(Eigen::VectorXf(data_plot.Spec() - bkg_collapsed),
                                     data_plot.Error());
-                errband_plot.error_point -= bkg_collapsed;
-                errband_plot.error_down  -= bkg_collapsed;
-                errband_plot.error_up    -= bkg_collapsed;
-                // errband_plot.covariance intentionally unchanged.
+
+                Eigen::VectorXf bkg_for_errband = binwidth_scale
+                    ? Eigen::VectorXf(bkg_collapsed.array() /
+                                      config.collapsed_bin_widths.at(io).array())
+                    : bkg_collapsed;
+                errband_plot.error_point -= bkg_for_errband;
             }
             auto objs = plot_channels(final_output_tag+"_PROplot_Variable_"+std::to_string(io)+"_ErrorBand.pdf", config, cv_plot, {}, data_plot,
                     errband_plot, {}, other_channel_chitexts[io], pbounds, opt | PlotOptions::DataMCRatio, io);
