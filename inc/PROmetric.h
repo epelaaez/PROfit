@@ -74,9 +74,9 @@ namespace PROfit {
              * preserved across all modes — LBFGSB depends on it.
              */
             enum GradientMode {
-                GradientCentralFull,    ///< Default: central FD on full chi². Most accurate, slowest.
+                GradientCentralFull,    ///< Central FD on full chi². Most accurate, slowest (rebuilds covariance + Cholesky per FD step).
                 GradientOneSidedFull,   ///< One-sided forward FD on full chi². ~2× faster, O(h) vs O(h²).
-                GradientCentralLin,     ///< Central FD on δ only, M frozen at base (Gauss-Newton). 5–10× faster.
+                GradientCentralLin,     ///< Default: central FD on δ only, M frozen at base (Gauss-Newton). 5–10× faster; exact at the minimum.
                 GradientOneSidedLin,    ///< One-sided FD on δ only, M frozen at base. 10–20× faster.
             };
 
@@ -241,7 +241,7 @@ namespace PROfit {
 
         protected:
             mutable std::atomic<size_t> call_count{0}; ///< Thread-safe counter of operator() invocations.
-            GradientMode gradient_mode = GradientCentralFull; ///< Default mirrors current behaviour.
+            GradientMode gradient_mode = GradientCentralLin; ///< Default: Gauss-Newton linearised gradient (M frozen at base). Use --grad-mode central-full for the legacy full-FD behaviour.
 
     };
 

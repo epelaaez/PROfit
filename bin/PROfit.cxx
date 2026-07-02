@@ -360,7 +360,7 @@ int main(int argc, char* argv[])
     app.add_option("--fit-options", global_fit_options, "Parameters for single, detailed global best fit LBFGSB. See PROfitter.h or run --fit-help for available settings.");
     app.add_option("--scan-fit-options", scan_fit_options, "Parameters for simpier, multiple best fits in PROfile/surface LBFGSB.");
     app.add_flag("--fit-help", show_fit_help, "Show detailed help for all fitting parameters (L-BFGS-B, PSO, MCMC, etc.)");
-    std::string gradient_mode_str = "central-full";
+    std::string gradient_mode_str = "central-lin";
     app.add_option("--grad-mode", gradient_mode_str,
                    "Gradient evaluation strategy passed to the metric. One of: "
                    "central-full (default; central FD on full chi^2), "
@@ -1262,11 +1262,11 @@ int main(int argc, char* argv[])
     // either of them.
     {
         const PROmetric::GradientMode gmode_a =
-            PROmetric::parseGradientMode(gradient_mode_str, PROmetric::GradientCentralFull);
+            PROmetric::parseGradientMode(gradient_mode_str, PROmetric::GradientCentralLin);
         const PROmetric::GradientMode gmode_b =
-            PROmetric::parseGradientMode(gradient_mode_str, PROmetric::GradientOneSidedLin);
+            PROmetric::parseGradientMode(gradient_mode_str, PROmetric::GradientOneSidedFull);
         if (gmode_a != gmode_b) {
-            log<LOG_WARNING>(L"%1% || Unknown --grad-mode '%2%'; falling back to central-full.")
+            log<LOG_WARNING>(L"%1% || Unknown --grad-mode '%2%'; falling back to central-lin.")
                 % __func__ % gradient_mode_str.c_str();
         }
         fitConfig.gradient_mode     = gmode_a;
