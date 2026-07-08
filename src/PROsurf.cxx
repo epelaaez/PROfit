@@ -1,6 +1,7 @@
 #include "PROsurf.h"
 #include "PROfitter.h"
 #include "PROlog.h"
+#include "PROmeshEval.h"
 #include "PRObe.h"
 
 #include <Eigen/Eigen>
@@ -762,38 +763,7 @@ PROmesh::AMRResult PROsurf::FillSurfaceAMR(
     {
         thread_local std::unique_ptr<PROmetric> tls_metric;
         if (!tls_metric) tls_metric.reset(proto->Clone());
-        PROmetric *m = tls_metric.get();
-        m->reset();
-
-        const int nphys    = (int)m->GetModel().nparams;
-        const int nspline  = (int)m->GetSysts().GetNSplines();
-        const int n_full   = nphys + nspline;
-        Eigen::VectorXf lb(n_full), ub(n_full);
-        lb << m->GetModel().lb,
-              Eigen::VectorXf::Map(m->GetSysts().spline_lo.data(), m->GetSysts().spline_lo.size());
-        ub << m->GetModel().ub,
-              Eigen::VectorXf::Map(m->GetSysts().spline_hi.data(), m->GetSysts().spline_hi.size());
-
-        // Pin the two scanned coordinates; the remaining n_full-2 parameters
-        // are optimised by PROfitter.
-        lb((int)loc_x_idx) = req.x_phys;
-        ub((int)loc_x_idx) = req.x_phys;
-        lb((int)loc_y_idx) = req.y_phys;
-        ub((int)loc_y_idx) = req.y_phys;
-        m->setBounds(lb, ub);
-
-        // Reproducible per-key seeding.
-        const uint32_t fseed = static_cast<uint32_t>(req.key & 0xffffffffu);
-        PROfitter fitter(ub, lb, fitconfig, fseed);
-
-        PROmesh::EvalResult out;
-        if (req.seeds.empty()) {
-            out.chi2 = fitter.Fit(*m);
-        } else {
-            out.chi2 = fitter.Fit(*m, req.seeds);
-        }
-        out.best_fit = fitter.best_fit;
-        return out;
+        return PROmesh::pinned_scan_eval(*tls_metric, fitconfig, loc_x_idx, loc_y_idx, req);
     };
 
     log<LOG_INFO>(L"%1% || PROsurf::FillSurfaceAMR starting AMR on [%2%, %3%] × [%4%, %5%], initial=%6%×%7%, levels=%8%, nthreads=%9%.")

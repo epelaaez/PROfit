@@ -14,6 +14,7 @@
 #include "PROAdaptiveFC.h"
 
 #include "PROlog.h"
+#include "PROmeshEval.h"
 #include "PROmodel.h"
 #include "PROchi.h"
 #include "PROCNP.h"
@@ -186,12 +187,11 @@ static ThrowGlobalFit run_throw_global_fit(
 // ====================================================================
 //  Section 1 — run_wilks_prepass
 //
-//  Copied/adapted from PROsurf::FillSurfaceAMR EvalFn (src/PROsurf.cxx:758-795).
-//  Keep parallel until the adaptive pipeline is validated, then refactor.
-//
-//  The only structural difference from PROsurf's version: this one closes over
-//  a *PROdata* (the per-throw fake dataset) and builds a fresh PROmetric per
-//  thread from it, since PROsurf takes the metric pre-built from outside.
+//  Shares the per-point fit body with PROsurf::FillSurfaceAMR via
+//  PROmesh::pinned_scan_eval (inc/PROmeshEval.h). Only metric acquisition
+//  differs: PROsurf clones a pre-built metric, while this path closes over
+//  a *PROdata* (the per-throw fake dataset) and constructs a fresh
+//  PROmetric per thread from (config, prop, systs, model, data).
 //
 //  `caller_seeds`: warm-start seeds for level-0 cell evaluations. Mirrors
 //  PROsurf::FillSurfaceAMR's caller_seeds parameter — typically the per-throw
@@ -222,8 +222,8 @@ static PROmesh::AMRResult run_wilks_prepass(
         opts.initial_seed_points = caller_seeds;
     }
 
-    // Thread-local metric clones. The first call on each thread allocates;
-    // subsequent calls reuse. Mirrors PROsurf.cxx:761-764.
+    // Thread-local metrics. The first call on each thread allocates;
+    // subsequent calls reuse. Mirrors the acquisition in PROsurf::FillSurfaceAMR.
     auto eval_fn = [&config, &prop, &systs, &model, &data, &fitconfig,
                     chi2_kind, eventbyevent, xaxis_idx, yaxis_idx]
         (const PROmesh::EvalRequest &req) -> PROmesh::EvalResult
@@ -248,36 +248,7 @@ static PROmesh::AMRResult run_wilks_prepass(
                 abort();
             }
         }
-        PROmetric *m = tls_metric.get();
-        m->reset();
-
-        const int nphys   = (int)m->GetModel().nparams;
-        const int nspline = (int)m->GetSysts().GetNSplines();
-        const int n_full  = nphys + nspline;
-        Eigen::VectorXf lb(n_full), ub(n_full);
-        lb << m->GetModel().lb,
-              Eigen::VectorXf::Map(m->GetSysts().spline_lo.data(), m->GetSysts().spline_lo.size());
-        ub << m->GetModel().ub,
-              Eigen::VectorXf::Map(m->GetSysts().spline_hi.data(), m->GetSysts().spline_hi.size());
-
-        // Pin the two scanned coords, optimise the rest.
-        lb((int)xaxis_idx) = req.x_phys;
-        ub((int)xaxis_idx) = req.x_phys;
-        lb((int)yaxis_idx) = req.y_phys;
-        ub((int)yaxis_idx) = req.y_phys;
-        m->setBounds(lb, ub);
-
-        const uint32_t fseed = static_cast<uint32_t>(req.key & 0xffffffffu);
-        PROfitter fitter(ub, lb, fitconfig, fseed);
-
-        PROmesh::EvalResult out;
-        if (req.seeds.empty()) {
-            out.chi2 = fitter.Fit(*m);
-        } else {
-            out.chi2 = fitter.Fit(*m, req.seeds);
-        }
-        out.best_fit = fitter.best_fit;
-        return out;
+        return PROmesh::pinned_scan_eval(*tls_metric, fitconfig, xaxis_idx, yaxis_idx, req);
     };
 
     log<LOG_INFO>(L"%1% || run_wilks_prepass starting AMR on [%2%, %3%] x [%4%, %5%], "
