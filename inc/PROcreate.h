@@ -84,6 +84,7 @@ namespace PROfit{
         std::vector<int> include_only_weights; ///< 1-based indices of weight universes to include; empty = all.
         float scale = 1.0f;         ///< Scale factor applied to all weights (e.g. 0.001 for weights stored as x1000).
         int num_decomp_knobs = -1;  ///< For "covariance_to_spline": number of top eigenpairs to keep as spline knobs (-1 = keep all).
+        bool include_resid_cov = true; ///< For "covariance_to_spline": if true, retain the un-kept (smaller) eigenpairs as a "<systname>_resid_cov" covariance matrix instead of dropping them.
         bool has_restrict = false;  ///< If true, clamp the knob value to [restrict_lo, restrict_hi] during evaluation and fitting.
         float restrict_lo = 0.0f;   ///< Lower clamp bound (used only when has_restrict is true).
         float restrict_hi = 0.0f;   ///< Upper clamp bound (used only when has_restrict is true).
@@ -116,6 +117,9 @@ namespace PROfit{
             }
             if (version >= 2) {
                 ar & num_decomp_knobs;
+            }
+            if (version >= 3) {
+                ar & include_resid_cov;
             }
         }
 
@@ -321,6 +325,6 @@ namespace PROfit{
 
 };
 
-BOOST_CLASS_VERSION(PROfit::SystStruct, 2)
+BOOST_CLASS_VERSION(PROfit::SystStruct, 3)
 
 #endif

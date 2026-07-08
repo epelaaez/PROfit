@@ -126,20 +126,6 @@ namespace PROfit{
     //Below are depreciated, slightly
 
     /**
-     * @brief Fill a spectrum using per-event oscillation weights derived from 2D input histograms.
-     * @details Deprecated in favour of the standard FillSpectra path.  Applies weights read from
-     * @p inweighthists rather than computing them analytically.
-     * @param inconfig      Configuration object.
-     * @param inprop        MC event store.
-     * @param inweighthists Vector of TH2D weight histograms, one per probability type.
-     * @param inmodel       Physics model (used for event classification only).
-     * @param params        Physics parameter vector.
-     * @param binned        If false (default for this overload), iterate event-by-event.
-     * @return A PROspec with weights applied from the input histograms.
-     */
-    PROspec FillWeightedSpectrumFromHist(const PROconfig &inconfig, const PROpeller &inprop, std::vector<TH2D*> inweighthists, const PROmodel &inmodel, const Eigen::VectorXf &params, bool binned = false);
-
-    /**
      * @brief Generate a spectrum with a single random systematic throw applied.
      * @details Draws a random Gaussian universe for all systematics and fills a spectrum for
      * use in covariance-matrix estimation or toy-MC studies.

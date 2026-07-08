@@ -134,11 +134,11 @@ namespace PROfit{
       bool GetReweight() const {return hist_reweight;}
 
        int GetModelRule() const{
-	return model_rule;
+        return model_rule;
       };
 
       int GetIncludeSystematics() const{
-	return include_systematics;
+        return include_systematics;
       };
 
 
@@ -389,6 +389,7 @@ namespace PROfit{
             int m_num_variation_type_covariance = 0;
             int m_num_variation_type_covariance_to_spline = 0;
             int m_num_variation_type_external_covariance = 0;
+            int m_num_variation_type_external_covariance_to_spline = 0;
             int m_num_variation_type_spline = 0;
             int m_num_variation_type_spline_to_covariance = 0;
             int m_num_variation_type_flat = 0;
@@ -441,6 +442,7 @@ namespace PROfit{
             std::map<std::string, std::pair<float,float>> m_mcgen_variation_restrict; //map of systematics with restrict="lo, hi" (clamp knob value during evaluation and fitting)
             std::map<std::string, float> m_mcgen_variation_scale; //map of systematics with scale factor to apply to weights (e.g., 0.001 for weights stored as x1000)
             std::map<std::string, int> m_mcgen_variation_num_decomp_knobs; //map of covariance_to_spline systematics to the number of eigenpairs to keep (-1 or missing = keep all)
+            std::map<std::string, bool> m_mcgen_variation_include_resid_cov; //map of covariance_to_spline systematics to whether the un-kept eigenpairs are retained as a residual covariance (missing = true)
       
             //FIX skepic
             std::vector<std::string> systematic_name;
@@ -452,6 +454,11 @@ namespace PROfit{
             std::vector<int> m_model_parameter_index;
             std::vector<std::string> m_model_parameter_names;
             std::map<std::string,int> m_model_parameter_map;
+            /// Optional per-model-parameter min/max bounds, read from the <parameter> tag's
+            /// "min"/"max" attributes. Used by normalization-style models (e.g. template_fit)
+            /// where each <parameter> names a subchannel and min/max are its scale bounds.
+            std::vector<float> m_model_parameter_min;
+            std::vector<float> m_model_parameter_max;
 
             bool m_bool_rate_only;
             //----- PUBLIC FUNCTIONS ------

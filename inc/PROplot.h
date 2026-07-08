@@ -191,7 +191,7 @@ namespace PROfit{
      * @param var_index    Variable index (default 0).
      * @param ratio_bool   If true, add a ratio panel.
      */
-    void plot_channels(const std::string &filename, const PROconfig &config, std::optional<PROspec> cv, std::optional<PROspec> best_fit, std::optional<PROdata> data, std::optional<PROerrorbar> errband, std::optional<PROerrorbar> posterrband, std::vector<TPaveText> &texts, PlotBounds &bounds, PlotOptions opt = PlotOptions::Default, int var_index = 0, bool ratio_bool = false);
+    std::map<std::string, TObject *> plot_channels(const std::string &filename, const PROconfig &config, std::optional<PROspec> cv, std::optional<PROspec> best_fit, std::optional<PROdata> data, std::optional<PROerrorbar> errband, std::optional<PROerrorbar> posterrband, std::vector<TPaveText> &texts, PlotBounds &bounds, PlotOptions opt = PlotOptions::Default, int var_index = 0, bool ratio_bool = false);
 
     /**
      * @brief Return global subchannel indices whose `m_fullnames[i]` contains `pattern` as a substring.
@@ -296,6 +296,24 @@ namespace PROfit{
      * @return 0 on success.
      */
     int plotPriorFractionalSystematicRatios(const PROconfig &config, const PROspec &spec, const PROsyst &allsplinesyst, std::string filename, int other_index);
+
+    /**
+     * @brief Produce a multi-page diagnostic PDF for every covariance_to_spline systematic.
+     * @details For each parent systematic the PDF includes: a summary page, the original vs.
+     * reconstructed fractional covariance with residual, the per-bin fractional uncertainty
+     * (sqrt of the diagonal) original vs. reconstructed, the eigenvalue scree plot and the
+     * cumulative variance, an eigenvector heatmap of the kept modes, per-knob bin-response
+     * panels, per-knob CV ± 1σ bands, and an aggregate CV band built from the original
+     * covariance vs. summed over the synthesized knobs.  Only writes the file if at least
+     * one covariance_to_spline systematic was processed.
+     * @param config    Analysis configuration.
+     * @param cv        CV spectrum (used for the ±1σ band overlays).
+     * @param syst      PROsyst whose cov2spline_debug_info map will be iterated.
+     * @param filename  Output PDF path.
+     * @param var_index Variable (binning) index.
+     * @return 0 on success, 1 if there were no covariance_to_spline systematics.
+     */
+    int plotCov2SplineChecks(const PROconfig &config, const PROspec &cv, const PROsyst &syst, const std::string &filename, int var_index);
 
     /**
      * @brief Compute a posterior error band using Markov Chain Monte Carlo sampling.

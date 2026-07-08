@@ -169,7 +169,9 @@ namespace PROfit {
              * @brief Adaptive-mesh-refinement surface scan.
              * @details Replaces the fixed 60×60-style grid scan with `PROmesh::run_amr`. Each
              * AMR grid point is evaluated by a per-thread `PROfitter::Fit` call (via a
-             * thread-local metric clone) using the AMR-supplied warm-start seeds. After AMR
+             * thread-local metric clone) using the AMR-supplied warm-start seeds; the
+             * per-point fit body is the shared `PROmesh::pinned_scan_eval`
+             * (inc/PROmeshEval.h), also used by the adaptive-FC Wilks prepass. After AMR
              * converges, the sparse evaluated map is written to a text file (one
              * (xphys, yphys, χ²) row per evaluated point), polyline contours are returned for
              * each level in `opts.contour_levels`, and the optional bilinear-reconstructed
@@ -185,6 +187,11 @@ namespace PROfit {
 
             /**
              * @brief Render the AMR mesh as a "boxes shrinking around the contour" plot.
+             * @details Thin wrapper: delegates to the shared
+             * `PROmesh::draw_amr_mesh_on_canvas` (inc/PROmeshPlot.h) — level-coloured
+             * translucent boxes with opaque outlines (a fill+outline TBox pair per leaf),
+             * contour polylines, and an info box with total and per-level fit counts —
+             * then prints to `<filename>_amr_mesh.pdf`.
              */
             void PlotAMRMesh(const PROmesh::AMRResult &amr,
                              const PROmodel &model,

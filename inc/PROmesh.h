@@ -32,6 +32,10 @@
  * edge midpoint, the two endpoint corners; for a cell center, all four corners.
  * For initial-level points (no prior context), the caller's `seed_points`
  * (typically `freq_seed_points` from a prior global fit) are used.
+ *
+ * Companions: see inc/PROmeshEval.h for the standard PROmetric/PROfitter
+ * evaluation-callback body (pinned_scan_eval) and inc/PROmeshPlot.h for the
+ * shared mesh visualisation helpers.
  */
 #ifndef PROMESH_H
 #define PROMESH_H

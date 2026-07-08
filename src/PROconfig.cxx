@@ -702,7 +702,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
             const char* inpot = pMC->Attribute("pot");
             if(inpot==NULL){
-                m_mcgen_pot.push_back(-1.0);
+                m_mcgen_pot.push_back(1.0);
             }else{
                 m_mcgen_pot.push_back(strtod(inpot,&end) );
             }
@@ -1252,7 +1252,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 }
 
                 //check for known attributes
-                const std::vector<std::string> expected_attrs = {"name", "type", "plotname", "binning", "knobvals", "tag", "prior", "center", "force_0_cv", "include_only_weights", "scale","filename", "xvar", "yvar", "restrict", "mirror", "num_decomp_knobs"};
+                const std::vector<std::string> expected_attrs = {"name", "type", "plotname", "binning", "knobvals", "tag", "prior", "center", "force_0_cv", "include_only_weights", "scale","filename", "xvar", "yvar", "restrict", "mirror", "num_decomp_knobs", "include_resid_cov"};
                 for (const tinyxml2::XMLAttribute* attr = pAllowList->FirstAttribute(); attr; attr = attr->Next()) {
                     std::string name = attr->Name();
                     if (std::find(expected_attrs.begin(), expected_attrs.end(), name) == expected_attrs.end()) {
@@ -1278,6 +1278,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 const char *yvar = pAllowList->Attribute("yvar");
                 const char *mirrored = pAllowList->Attribute("mirror");
                 const char *num_decomp_knobs = pAllowList->Attribute("num_decomp_knobs");
+                const char *include_resid_cov = pAllowList->Attribute("include_resid_cov");
 
 
                 m_mcgen_variation_type.push_back(variation_type);
@@ -1417,6 +1418,11 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 if(num_decomp_knobs) {
                     m_mcgen_variation_num_decomp_knobs[wt] = atoi(num_decomp_knobs);
                     log<LOG_INFO>(L"%1% || Parsed num_decomp_knobs=%2% for systematic %3%") % __func__ % m_mcgen_variation_num_decomp_knobs[wt] % wt.c_str();
+                }
+                if(include_resid_cov) {
+                    bool keep_resid = !(strcmp(include_resid_cov, "false") == 0 || strcmp(include_resid_cov, "no") == 0 || strcmp(include_resid_cov, "0") == 0);
+                    m_mcgen_variation_include_resid_cov[wt] = keep_resid;
+                    log<LOG_INFO>(L"%1% || Parsed include_resid_cov=%2% for systematic %3%") % __func__ % keep_resid % wt.c_str();
                 }
                 log<LOG_DEBUG>(L"%1% || Allowlisting variations: %2%") % __func__ % wt.c_str() ;
                 tinyxml2::XMLElement *pNext = pAllowList->NextSiblingElement("allowlist");
@@ -1672,16 +1678,25 @@ int PROconfig::LoadFromXML(const std::string &filename){
             }
 
 
+            // variable_index is optional: oscillation models require it (it maps the parameter
+            // to a kinematic PROpeller variable, e.g. "L/E"), but normalization models such as
+            // template_fit name a subchannel instead and carry no kinematic variable, so a
+            // missing variable_index defaults to -1 rather than being a hard error.
             const char* model_parameter_index= pModelParam->Attribute("variable_index");
             if(model_parameter_index==NULL){
-                log<LOG_ERROR>(L"%1% || ERROR: Model Params need a variable index in xml.@ line %2% in %3% ") % __func__ % __LINE__  % __FILE__;
-                log<LOG_ERROR>(L"Terminating.");
-                exit(EXIT_FAILURE);
+                m_model_parameter_index.push_back(-1);
             }else{
                 m_model_parameter_index.push_back(strtod(model_parameter_index, &end));
             }
 
-            log<LOG_DEBUG>(L"%1% || Model Param Name :  %2% and index %3% ") % __func__ % m_model_parameter_names.back().c_str() % m_model_parameter_index.back()  ;
+            // Optional scale bounds (used by template_fit-style normalization models). Default
+            // to [0, 10] when absent so a generic <parameter> tag without them is still valid.
+            const char* model_parameter_min = pModelParam->Attribute("min");
+            const char* model_parameter_max = pModelParam->Attribute("max");
+            m_model_parameter_min.push_back(model_parameter_min==NULL ? 0.0f  : (float)strtod(model_parameter_min, &end));
+            m_model_parameter_max.push_back(model_parameter_max==NULL ? 10.0f : (float)strtod(model_parameter_max, &end));
+
+            log<LOG_DEBUG>(L"%1% || Model Param Name :  %2% and index %3% (min %4%, max %5%) ") % __func__ % m_model_parameter_names.back().c_str() % m_model_parameter_index.back() % m_model_parameter_min.back() % m_model_parameter_max.back()  ;
             m_model_parameter_map[m_model_parameter_names.back()]=m_model_parameter_index.back();
             pModelParam = pModelParam->NextSiblingElement("parameter");
         }
@@ -1714,6 +1729,8 @@ int PROconfig::LoadFromXML(const std::string &filename){
             m_use_mcstats = true;
         }else if(m_mcgen_variation_type[i] == "external_covariance"){
             m_num_variation_type_external_covariance+=1;
+        }else if(m_mcgen_variation_type[i] == "external_covariance_to_spline"){
+            m_num_variation_type_external_covariance_to_spline+=1;
         } else if(m_mcgen_variation_type[i] == "hist1d"){
             m_num_variation_type_hist1d+=1;
         } else if(m_mcgen_variation_type[i] == "hist2d"){
@@ -1725,6 +1742,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
     log<LOG_INFO>(L"%1% || num_variation_type_covariance: %2% ") % __func__ % m_num_variation_type_covariance;
     log<LOG_INFO>(L"%1% || num_variation_type_covariance_to_spline: %2% ") % __func__ % m_num_variation_type_covariance_to_spline;
     log<LOG_INFO>(L"%1% || num_variation_type_external_ovariance: %2% ") % __func__ % m_num_variation_type_external_covariance;
+    log<LOG_INFO>(L"%1% || num_variation_type_external_covariance_to_spline: %2% ") % __func__ % m_num_variation_type_external_covariance_to_spline;
     log<LOG_INFO>(L"%1% || num_variation_type_flat: %2% ") % __func__ % m_num_variation_type_flat;
     log<LOG_INFO>(L"%1% || num_variation_type_norm: %2% ") % __func__ % m_num_variation_type_norm;
     log<LOG_INFO>(L"%1% || num_variation_type_spline: %2% ") % __func__ % m_num_variation_type_spline;
