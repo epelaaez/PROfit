@@ -1065,7 +1065,7 @@ void save_asimov_root(
 }
 
 // --------------------------------------------------------------------
-//  Brazil-band helpers (slice 2b substage 1, no top-up).
+//  Brazil-band helpers.
 // --------------------------------------------------------------------
 
 // Build a TH2D of per-cell inclusion fractions, IDW-interpolated between

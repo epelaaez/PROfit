@@ -1,15 +1,17 @@
 /**
  * @file PROAdaptiveFC.cxx
- * @brief Adaptive Feldman-Cousins pipeline implementation. Slice 1 only.
+ * @brief Adaptive Feldman-Cousins pipeline — top-level mode dispatcher.
  *
- * Slice 1 covers: Wilks pre-pass over N independent throws + meta-mesh
- * aggregation + diagnostic ROOT artifact. The PE bank, sequential stopping
- * rule, scheduler, and data-classification step are deferred to slice 2.
- *
- * This file deliberately *duplicates* code from src/PROfc.cxx and from
- * src/PROsurf.cxx::FillSurfaceAMR rather than refactoring shared helpers out
- * of either. The per-PE worker body and the AMR EvalFn lambda are both copied
- * with banner comments marking the duplication.
+ * run_adaptive_fc() routes each AdaptiveFCMode (build-mesh, init-bank,
+ * print-bank, asimov, brazil) to the pipeline stages implemented in the
+ * sibling translation units:
+ *   - src/PROAdaptiveFCmesh.cxx  — throws, Wilks AMR prepass, meta-mesh
+ *   - src/PROAdaptiveFCbank.cxx  — serialisation, PE worker/scheduler,
+ *                                  asimov observables, classification
+ *   - src/PROAdaptiveFCplot.cxx  — ROOT PDF / artifact output
+ * Cross-TU internals are declared in src/PROAdaptiveFCinternal.h
+ * (namespace PROfit::afc). The AMR per-point fit body and the mesh drawing
+ * are shared with PROsurf via inc/PROmeshEval.h and inc/PROmeshPlot.h.
  */
 #include "PROAdaptiveFC.h"
 #include "PROAdaptiveFCinternal.h"
@@ -630,8 +632,8 @@ AdaptiveFCResult run_adaptive_fc(
         return res;
     }
 
-    // Brazil / Classify / unknown — slice 2c+ territory.
-    log<LOG_ERROR>(L"%1% || mode '%2%' is not yet implemented in slice 2b.")
+    // Classify / unknown — not yet implemented.
+    log<LOG_ERROR>(L"%1% || mode '%2%' is not yet implemented.")
         % __func__ % (int)acfg.mode;
     progress.finish_all(false);
     return res;

@@ -44,11 +44,11 @@
 #include <boost/serialization/vector.hpp>
 
 // ====================================================================
-//  Section 5 — Slice 2a: PEBank boost serialisation, worker, scheduler,
-//  and the --mode init-bank driver.
+//  PEBank / MetaMesh / BrazilArchive boost serialisation.
 //
 //  Layout note: boost::serialization overloads must live in the boost
-//  namespace, so we close PROfit, declare the overloads, then reopen.
+//  namespace, so they are declared before namespace PROfit opens. All
+//  archive I/O for these types stays in this translation unit.
 // ====================================================================
 
 namespace boost { namespace serialization {
@@ -280,8 +280,9 @@ bool load_brazil_archive(BrazilArchive &arc_out, const std::string &path) {
 namespace afc {
 
 // --------------------------------------------------------------------
-//  Per-cell PE worker — *duplicated* from src/PROfc.cxx::fc_worker
-//  (lines 5-134). Kept parallel until adaptive pipeline is validated.
+//  Per-cell PE worker — intentionally kept parallel to
+//  src/PROfc.cxx::fc_worker (the brute-force FC); deduplicating the two
+//  is deliberately out of scope for now.
 //
 //  Differences from fc_worker:
 //    • Throws *one* PE per call (not args.todo) — outer loop lives in
@@ -568,7 +569,7 @@ void schedule_pes(const AdaptiveFCConfig &acfg,
 }
 
 // --------------------------------------------------------------------
-//  Asimov-mode helpers (slice 2b, asimov only).
+//  Asimov-mode helpers.
 // --------------------------------------------------------------------
 
 AsimovObs compute_asimov_obs(

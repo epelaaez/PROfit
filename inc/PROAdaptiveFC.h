@@ -2,19 +2,21 @@
  * @file PROAdaptiveFC.h
  * @brief Adaptive Feldman-Cousins pipeline — public surface.
  *
- * Slice 1 (done): Wilks pre-pass over N independent throws + aggregated meta-mesh
- * + diagnostic ROOT artifact.
+ * The pipeline covers: a Wilks pre-pass over N independent throws aggregated
+ * into a meta-mesh (build-mesh), PE bank generation with a deterministic
+ * per-level doubling rule (init-bank), bank inspection (print-bank), and
+ * classification of a dataset against the bank (asimov / brazil), each with
+ * diagnostic PDF and ROOT artifacts.
  *
- * Slice 2a (current): bookkeeping (PEBank + boost serialisation), sequential
- * Wilson stopping rule, and the `--mode init-bank` end-to-end path that throws
- * PEs at each MetaCell center, stops via the sequential rule, and saves a
- * versioned bank artifact.
- *
- * Slice 2b (deferred): asimov / brazil / classify modes.
- *
- * The implementation lives entirely in src/PROAdaptiveFC.cxx and is kept *parallel*
- * to src/PROfc.cxx (the existing brute-force FC). Code duplicated from there or
- * from PROsurf::FillSurfaceAMR is annotated in the .cxx with banner comments.
+ * The implementation is split across src/PROAdaptiveFC.cxx (mode dispatcher),
+ * src/PROAdaptiveFCmesh.cxx (throws, prepass, meta-mesh),
+ * src/PROAdaptiveFCbank.cxx (serialisation, PE worker/scheduler, asimov
+ * observables, classification) and src/PROAdaptiveFCplot.cxx (ROOT output),
+ * with internals declared in src/PROAdaptiveFCinternal.h. The AMR per-point
+ * fit body and the mesh drawing are shared with PROsurf via inc/PROmeshEval.h
+ * and inc/PROmeshPlot.h. The per-PE worker (run_one_pe) intentionally
+ * parallels src/PROfc.cxx::fc_worker (the brute-force FC) and remains
+ * duplicated by design.
  */
 #ifndef PRO_ADAPTIVE_FC_H
 #define PRO_ADAPTIVE_FC_H
@@ -38,24 +40,21 @@
 
 namespace PROfit {
 
-    /// Pipeline mode. Slice 1 only implements InitBank (which stops after the
-    /// meta-mesh is built and diagnostics are written). Others are placeholders
-    /// reserved for follow-up slices.
+    /// Pipeline mode, selected by the fc-adaptive `--mode` flag.
     enum class AdaptiveFCMode {
         BuildMesh, ///< Wilks prepass + meta-mesh build + diagnostics, then save <tag>_mesh.bin and exit.
         InitBank,  ///< Load <tag>_mesh.bin, generate PE bank, save <tag>_bank.bin. Errors if mesh missing.
         PrintBank, ///< Load <tag>_bank.bin and write summary PDF(s). No fitting.
         Asimov,    ///< Load <tag>_bank.bin, classify the asimov dataset, produce contour PDF + ROOT.
-        Brazil,    ///< (deferred) Brazil-band loop with bank top-up.
-        Classify,  ///< (deferred) classify real data against bank.
+        Brazil,    ///< Brazil-band throw loop: classify N pseudo-experiments against the bank.
+        Classify,  ///< (not yet implemented) Classify real data against the bank.
     };
 
     /**
      * @brief CLI-driven configuration for the adaptive FC pipeline.
      *
-     * Slice-1-relevant fields populated by the fc-adaptive subcommand. Slice-2
-     * fields (bank path, CL targets, Wilson eps, PE bounds, ROI band) are declared
-     * for forward CLI compat but ignored by slice-1 logic.
+     * Populated by the fc-adaptive subcommand in bin/PROfit.cxx; which fields
+     * are consumed depends on the selected AdaptiveFCMode.
      */
     struct AdaptiveFCConfig {
         AdaptiveFCMode mode = AdaptiveFCMode::InitBank;
@@ -100,8 +99,8 @@ namespace PROfit {
         int   n_pe_max = 5000;   ///< Hard total cap per cell (cumulative across runs).
         int   update_layer = 0;  ///< Cells below this AMR level are skipped entirely.
         int   only_layer   = -1; ///< If >= 0, update ONLY cells at exactly this level (overrides update_layer).
-        float wilson_eps = 0.05f; ///< Unused for bank generation now; kept for slice 2c classification.
-        float roi_band = 8.0f;   ///< (slice 2c, unused for now).
+        float wilson_eps = 0.05f; ///< Unused for bank generation now; reserved for the future classify mode.
+        float roi_band = 8.0f;   ///< Reserved for the future classify mode; unused for now.
         int   n_brazil_throws = 100; ///< Number of pseudo-experiment throws for --mode brazil.
     };
 
@@ -158,10 +157,10 @@ namespace PROfit {
     /**
      * @brief Wilson-interval sequential stopping rule. Pure utility — no PROfit deps.
      *
-     * Slice-2a v1 rule: stop when the Wilson 95% half-width on the Bernoulli
+     * v1 rule: stop when the Wilson 95% half-width on the Bernoulli
      * proportion estimate falls below `eps`. The spec-faithful rule (Wilson CI
-     * vs target alpha with Bonferroni-corrected milestones) is deferred to
-     * slice 2b's validation pass.
+     * vs target alpha with Bonferroni-corrected milestones) remains future
+     * work.
      *
      * All methods are constexpr-free but inlined so the helper has no link
      * dependency on the .cxx (useful for unit-testing).
@@ -194,7 +193,7 @@ namespace PROfit {
         }
 
         /**
-         * @brief Slice-2a stop rule: stop when half-width below `eps`.
+         * @brief v1 stop rule: stop when half-width below `eps`.
          *
          * `k` is the count of PEs with Δχ²(syst) − Δχ²(syst+osc) ≥ Δχ²_obs(μ).
          * `n` is the total PEs thrown at this cell so far.
@@ -230,7 +229,7 @@ namespace PROfit {
     /**
      * @brief One pseudo-experiment record in the PE bank.
      *
-     * Mirrors fc_out (inc/PROfc.h:34) but keeps only the fields slice-2a needs
+     * Mirrors fc_out (inc/PROfc.h:34) but keeps only the fields needed
      * to drive classification (the syst-only and syst+osc chi^2s and their
      * difference). Best-fit vectors are dropped to keep the bank small; they
      * can be re-derived if ever needed by re-running the throw with the same seed.
@@ -274,8 +273,8 @@ namespace PROfit {
         std::vector<std::vector<PEBankRecord>> cell_pes;
 
         // Per-cell coordinates in *model space* (log10 of physical for
-        // log-axis params; linear otherwise). Slice-2b classify code applies
-        // pow(10) when mapping back to physical for plotting.
+        // log-axis params; linear otherwise). Classification/plotting code
+        // applies pow(10) when mapping back to physical for display.
         std::vector<float> cell_center_x;
         std::vector<float> cell_center_y;
 
@@ -337,7 +336,7 @@ namespace PROfit {
      * @brief Output bundle from run_adaptive_fc.
      */
     struct AdaptiveFCResult {
-        // Slice 1 fields.
+        // Build-mesh fields.
         int  n_throws_done   = 0;
         int  n_meta_cells    = 0;
         int  n_baseline_cells = 0;
@@ -345,7 +344,7 @@ namespace PROfit {
         std::vector<int> leaves_per_throw;
         std::string diag_root_path;
 
-        // Slice 2a fields (populated by --mode init-bank).
+        // Bank fields (populated by --mode init-bank).
         std::string bank_path;        ///< Path of the saved PEBank artifact, if any.
         int64_t     total_pes_generated = 0;
         int         cells_hit_n_pe_max  = 0; ///< Number of cells that reached n_pe_max without Wilson-stopping.
