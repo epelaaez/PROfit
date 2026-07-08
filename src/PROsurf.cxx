@@ -1,6 +1,8 @@
 #include "PROsurf.h"
 #include "PROfitter.h"
 #include "PROlog.h"
+#include "PROmeshEval.h"
+#include "PROmeshPlot.h"
 #include "PRObe.h"
 
 #include <Eigen/Eigen>
@@ -762,38 +764,7 @@ PROmesh::AMRResult PROsurf::FillSurfaceAMR(
     {
         thread_local std::unique_ptr<PROmetric> tls_metric;
         if (!tls_metric) tls_metric.reset(proto->Clone());
-        PROmetric *m = tls_metric.get();
-        m->reset();
-
-        const int nphys    = (int)m->GetModel().nparams;
-        const int nspline  = (int)m->GetSysts().GetNSplines();
-        const int n_full   = nphys + nspline;
-        Eigen::VectorXf lb(n_full), ub(n_full);
-        lb << m->GetModel().lb,
-              Eigen::VectorXf::Map(m->GetSysts().spline_lo.data(), m->GetSysts().spline_lo.size());
-        ub << m->GetModel().ub,
-              Eigen::VectorXf::Map(m->GetSysts().spline_hi.data(), m->GetSysts().spline_hi.size());
-
-        // Pin the two scanned coordinates; the remaining n_full-2 parameters
-        // are optimised by PROfitter.
-        lb((int)loc_x_idx) = req.x_phys;
-        ub((int)loc_x_idx) = req.x_phys;
-        lb((int)loc_y_idx) = req.y_phys;
-        ub((int)loc_y_idx) = req.y_phys;
-        m->setBounds(lb, ub);
-
-        // Reproducible per-key seeding.
-        const uint32_t fseed = static_cast<uint32_t>(req.key & 0xffffffffu);
-        PROfitter fitter(ub, lb, fitconfig, fseed);
-
-        PROmesh::EvalResult out;
-        if (req.seeds.empty()) {
-            out.chi2 = fitter.Fit(*m);
-        } else {
-            out.chi2 = fitter.Fit(*m, req.seeds);
-        }
-        out.best_fit = fitter.best_fit;
-        return out;
+        return PROmesh::pinned_scan_eval(*tls_metric, fitconfig, loc_x_idx, loc_y_idx, req);
     };
 
     log<LOG_INFO>(L"%1% || PROsurf::FillSurfaceAMR starting AMR on [%2%, %3%] × [%4%, %5%], initial=%6%×%7%, levels=%8%, nthreads=%9%.")
@@ -866,94 +837,15 @@ void PROsurf::PlotAMRMesh(const PROmesh::AMRResult &amr,
         return;
     }
 
-    // Convert finest-integer (i, j) → linear physical (x, y). amr.x_lo etc. are
-    // in *transformed* (log/lin) space, so for log-axis params we apply pow(10, .).
-    const bool xlog = (xaxis_idx < model.is_log10.size()) ? model.is_log10[xaxis_idx] : false;
-    const bool ylog = (yaxis_idx < model.is_log10.size()) ? model.is_log10[yaxis_idx] : false;
-    auto i_to_x = [&](int i) {
-        const float t = amr.x_lo + (float)i / (float)amr.finest_nx * (amr.x_hi - amr.x_lo);
-        return xlog ? std::pow(10.0f, t) : t;
-    };
-    auto j_to_y = [&](int j) {
-        const float t = amr.y_lo + (float)j / (float)amr.finest_ny * (amr.y_hi - amr.y_lo);
-        return ylog ? std::pow(10.0f, t) : t;
-    };
-
-    const float xmin = i_to_x(0);
-    const float xmax = i_to_x(amr.finest_nx);
-    const float ymin = j_to_y(0);
-    const float ymax = j_to_y(amr.finest_ny);
-
-    // Find the deepest refinement level for the colour scale.
+    // Find the deepest refinement level for the log message.
     int max_lvl = 0;
     for (const auto &leaf : amr.leaves) max_lvl = std::max(max_lvl, leaf.level);
 
-    // Set up canvas with the same axis style as the heatmap.
+    // Delegate the rendering to the shared drawer (inc/PROmeshPlot.h).
     TCanvas c("amr_mesh", "AMR Mesh", 800, 700);
-    if (logx) c.SetLogx();
-    if (logy) c.SetLogy();
-
-    std::string xlabel = xaxis_idx < model.nparams ? model.pretty_param_names.at(xaxis_idx) : std::string("x");
-    std::string ylabel = yaxis_idx < model.nparams ? model.pretty_param_names.at(yaxis_idx) : std::string("y");
-    const std::string title = std::string("AMR mesh;") + xlabel + ";" + ylabel;
-    TH1F frame("amr_frame", title.c_str(), 1, xmin, xmax);
-    frame.SetMinimum(ymin);
-    frame.SetMaximum(ymax);
-    frame.SetStats(0);
-    frame.GetXaxis()->SetTitleSize(0.045);
-    frame.GetYaxis()->SetTitleSize(0.045);
-    frame.Draw();
-
-    // Draw each leaf cell as a TBox. Colour by level (deeper = more saturated /
-    // darker) so the eye picks out where AMR concentrated effort. Translucent
-    // fill so deeper-level cells layered on the same physical area still reveal
-    // structure when zoomed.
-    // Palette: kBlue-9 (lightest, level 0) → kBlue+3 / kViolet (deepest).
-    const int level_palette[6] = { kAzure - 9, kAzure - 4, kAzure + 1, kViolet - 4, kViolet + 1, kRed + 1 };
-    for (const auto &leaf : amr.leaves) {
-        const float xlo = i_to_x(leaf.i_bl);
-        const float xhi = i_to_x(leaf.i_bl + leaf.step);
-        const float ylo = j_to_y(leaf.j_bl);
-        const float yhi = j_to_y(leaf.j_bl + leaf.step);
-        TBox *box = new TBox(xlo, ylo, xhi, yhi);
-        const int idx = std::min(leaf.level, 5);
-        box->SetFillColorAlpha(level_palette[idx], 0.25f);
-        box->SetLineColor(kBlack);
-        box->SetLineWidth(1);
-        box->Draw();
-    }
-
-    // Overlay the contour polylines on top in distinct colours per level.
-    const int contour_colors[5] = { kRed + 1, kOrange + 7, kGreen + 2, kMagenta, kBlack };
-    for (size_t k = 0; k < amr.polylines.size(); ++k) {
-        const int col = contour_colors[k % 5];
-        for (const auto &seg : amr.polylines[k]) {
-            float x0 = seg.p0.first,  x1 = seg.p1.first;
-            float y0 = seg.p0.second, y1 = seg.p1.second;
-            if (xlog) { x0 = std::pow(10.0f, x0); x1 = std::pow(10.0f, x1); }
-            if (ylog) { y0 = std::pow(10.0f, y0); y1 = std::pow(10.0f, y1); }
-            TLine *line = new TLine(x0, y0, x1, y1);
-            line->SetLineColor(col);
-            line->SetLineWidth(2);
-            line->Draw();
-        }
-    }
-
-    // Legend with quick stats.
-    TPaveText *info = new TPaveText(0.1, 0.1, 0.3, 0.3, "NDC");
-    info->SetFillColor(kWhite);
-    info->SetBorderSize(1);
-    info->SetTextSize(0.025);
-    info->SetTextAlign(12);
-    info->AddText(Form("AMR levels: 0..%d", max_lvl));
-    info->AddText(Form("Total fits: %d", amr.total_fits));
-    info->AddText(Form("Leaf cells: %d", (int)amr.leaves.size()));
-    for (int L = 0; L <= max_lvl && L < 8; ++L) {
-        info->AddText(Form("  level %d: %d fits", L, amr.fits_by_level[L]));
-    }
-    info->Draw();
-
+    PROmesh::draw_amr_mesh_on_canvas(c, amr, model, logx, logy, xaxis_idx, yaxis_idx);
     c.Print((filename + "_amr_mesh.pdf").c_str());
+
     log<LOG_INFO>(L"%1% || AMR mesh plot written to %2%_amr_mesh.pdf (%3% leaves, max level %4%).")
         % __func__ % filename.c_str() % (int)amr.leaves.size() % max_lvl;
 }
