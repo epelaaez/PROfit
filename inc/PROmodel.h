@@ -93,8 +93,18 @@ public:
      * @param filter_by_model_rule If true (default), each event is placed in the histogram
      *                             matrix corresponding to its model_rule; if false, all events
      *                             go into component 0 (appropriate for NullModel).
+     * @param block_fn             Optional override for column (probability-type / component)
+     *                             routing. When set, the column for event @p i in reco variable
+     *                             @p v (whose reco bin is @p rbin) is block_fn(v, i, rbin); a
+     *                             negative return drops the event. Used by normalization models
+     *                             (e.g. template_fit) that route by subchannel rather than by
+     *                             model_rule. When empty, the model_rule logic above is used.
+     *
+     * @note Single pass over events per reco variable: each event lands in exactly one column,
+     *       so this is equivalent to (and J times cheaper than) a per-column scan.
      */
-    void build_hists_and_combined(const PROpeller &prop, bool filter_by_model_rule = true) {
+    void build_hists_and_combined(const PROpeller &prop, bool filter_by_model_rule = true,
+                                  const std::function<int(size_t, size_t, int)> &block_fn = {}) {
         // Compute flat physics grid size and per-ivar bin counts
         std::vector<size_t> ivar_sizes(ivars.size());
         n_phys_bins = 1;
@@ -110,25 +120,31 @@ public:
 
         for(size_t v = 0; v < nvar; ++v) {
             size_t n_reco_v = prop.variable_mc_stat_err[v].size();
-            hists[v].clear();
-            for(size_t m = 0; m < J; ++m) {
-                hists[v].emplace_back(Eigen::MatrixXf::Zero(n_reco_v, n_phys_bins));
-                Eigen::MatrixXf &h = hists[v].back();
-                for(size_t i = 0; i < prop.NEvent(); ++i) {
-                    if(filter_by_model_rule && prop.model_rule[i] != (int)m) continue;
-                    // Compute row-major flat index over ivars
-                    long int flat_phys = 0;
-                    bool valid = true;
-                    for(size_t k = 0; k < ivars.size(); ++k) {
-                        int tbin = prop.VariableBinIndex(ivars[k], i);
-                        if(tbin < 0) { valid = false; break; }
-                        flat_phys = flat_phys * (long int)ivar_sizes[k] + tbin;
-                    }
-                    if(!valid) continue;
-                    int rbin = prop.VariableBinIndex(v, i);
-                    if(rbin < 0) continue;
-                    h(rbin, flat_phys) += prop.added_weights[i];
+            hists[v].assign(J, Eigen::MatrixXf::Zero(n_reco_v, n_phys_bins));
+            for(size_t i = 0; i < prop.NEvent(); ++i) {
+                int rbin = prop.VariableBinIndex(v, i);
+                if(rbin < 0) continue;
+
+                // Determine the destination column for this event.
+                int col;
+                if(block_fn) {
+                    col = block_fn(v, i, rbin);
+                } else {
+                    col = filter_by_model_rule ? prop.model_rule[i] : 0;
                 }
+                if(col < 0 || col >= (int)J) continue;
+
+                // Compute row-major flat index over ivars
+                long int flat_phys = 0;
+                bool valid = true;
+                for(size_t k = 0; k < ivars.size(); ++k) {
+                    int tbin = prop.VariableBinIndex(ivars[k], i);
+                    if(tbin < 0) { valid = false; break; }
+                    flat_phys = flat_phys * (long int)ivar_sizes[k] + tbin;
+                }
+                if(!valid) continue;
+
+                hists[v][col](rbin, flat_phys) += prop.added_weights[i];
             }
             // Build H_combined[v] = [hists[v][0] | hists[v][1] | ... | hists[v][J-1]]
             // shape: (n_reco_v, n_phys_bins * J)
@@ -2712,6 +2728,109 @@ public:
 };
 
 /**
+ * @brief Template-fit model: floats the overall normalization of one or more subchannels.
+ * @details A non-oscillation physics model. Each floated subchannel (named by a <parameter> in
+ * the XML <model> section) becomes a free physics parameter equal to the multiplicative scale
+ * applied to that subchannel's events — default 1 (nominal), bounded to [min, max] from the
+ * parameter's "min"/"max" attributes. All non-floated subchannels are held fixed at scale 1.
+ *
+ * Construction mirrors NullModel (no truth/kinematic grid: `ivars` empty, `n_phys_bins = 1`)
+ * but is NOT trivial: the K+1 columns of H_combined separate the fixed remainder (column 0)
+ * from each floated subchannel (columns 1..K). get_probs() returns the per-column scale factors
+ * so the single GEMV in FillSpectra yields
+ *     spec = hist_fixed + sum_k scale_k * hist_subchannel_k.
+ * A template fit therefore behaves exactly like an oscillation model to the fitter/surface/MCMC
+ * code and inherits the FillSpectra phys/syst split-cache for free.
+ *
+ * @note Binned FillSpectra only. The unbinned (event-by-event) path routes columns by model_rule,
+ *       which is not meaningful for subchannel normalization; all fitting/scanning is binned.
+ */
+class PROtemplate : public PROmodel {
+public:
+    /**
+     * @brief Construct the template-fit model.
+     * @param config  Parsed configuration; supplies the floated subchannel names and scale bounds
+     *                (m_model_parameter_names / _min / _max) and the subchannel<->reco-bin mapping.
+     * @param prop    MC event store; used to build H_combined.
+     */
+    PROtemplate(const PROconfig &config, const PROpeller &prop) {
+        const size_t K = config.m_model_parameter_names.size();
+        if(K == 0) {
+            log<LOG_ERROR>(L"%1% || template_fit model needs at least one <parameter> naming a subchannel to float. Terminating.") % __func__;
+            exit(EXIT_FAILURE);
+        }
+
+        // Map each floated subchannel's global index -> column (1..K). Column 0 is the fixed
+        // remainder (every non-floated subchannel), permanently at scale 1.
+        std::unordered_map<size_t, int> subchan_to_col;
+        for(size_t k = 0; k < K; ++k) {
+            // GetSubchannelIndex terminates with a clear error if the name is not a known subchannel.
+            size_t gsi = config.GetSubchannelIndex(config.m_model_parameter_names[k]);
+            subchan_to_col[gsi] = (int)(k + 1);
+        }
+
+        // No truth grid: pure per-subchannel normalization (n_phys_bins == 1). Not trivial:
+        // we still need get_probs() + the GEMV to apply the per-column scales.
+        ivars = {};
+        is_trivial = false;
+
+        // K+1 components: column 0 fixed (=1); column k+1 returns the scale of subchannel k.
+        model_functions.push_back([](const Eigen::VectorXf &, float){ return 1.0f; });
+        prob_types.push_back(0);
+        for(size_t k = 0; k < K; ++k) {
+            model_functions.push_back([k](const Eigen::VectorXf &v, float){ return v((Eigen::Index)k); });
+            prob_types.push_back(k + 1);
+        }
+
+        // Route each event to its column by subchannel membership, derived from the reco global
+        // bin (subchannels occupy contiguous reco-bin ranges per variable).
+        std::function<int(size_t, size_t, int)> block_fn =
+            [&config, subchan_to_col](size_t v, size_t, int rbin) -> int {
+                size_t gsi = config.GetSubchannelIndexFromVariableGlobalBin((size_t)rbin, v);
+                auto it = subchan_to_col.find(gsi);
+                return it == subchan_to_col.end() ? 0 : it->second;
+            };
+        build_hists_and_combined(prop, /*filter_by_model_rule=*/false, block_fn);
+
+        nparams = K;
+        param_names.clear();
+        pretty_param_names.clear();
+        pretty_param_units.clear();
+        is_log10.assign(K, false);
+        lb          = Eigen::VectorXf(K);
+        ub          = Eigen::VectorXf(K);
+        default_val = Eigen::VectorXf(K);
+        for(size_t k = 0; k < K; ++k) {
+            param_names.push_back(config.m_model_parameter_names[k]);
+            pretty_param_names.push_back(config.m_model_parameter_names[k]);
+            pretty_param_units.push_back("");
+            lb(k)          = config.m_model_parameter_min[k];
+            ub(k)          = config.m_model_parameter_max[k];
+            default_val(k) = 1.0f; // nominal normalization
+        }
+        build_param_index();
+
+        log<LOG_INFO>(L"%1% || template_fit model: floating %2% subchannel normalization(s).") % __func__ % K;
+        for(size_t k = 0; k < K; ++k)
+            log<LOG_INFO>(L"%1% || Param %2% = '%3%' scale in [%4%, %5%], default 1.") % __func__ % k % param_names[k].c_str() % lb(k) % ub(k);
+    }
+
+    /**
+     * @brief Return the per-column scale factors for the template fit.
+     * @details Pure normalization: the scales do not depend on any kinematic grid, so @p var_arrs
+     * is ignored. Returns a (1, K+1) row [1, phys(0), ..., phys(K-1)] consumed by the single GEMV
+     * in FillSpectra.
+     */
+    Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<std::vector<float>> &) const override {
+        Eigen::MatrixXf probs(1, model_functions.size());
+        probs(0, 0) = 1.0f;
+        for(size_t k = 0; k < nparams; ++k)
+            probs(0, (Eigen::Index)(k + 1)) = phys((Eigen::Index)k);
+        return probs;
+    }
+};
+
+/**
  * @brief Factory function: construct a PROmodel subclass by name.
  * @details Reads `config.m_model_tag` to select the appropriate model and passes
  * `config.m_model_parameter_map` for variable-index lookup.
@@ -2756,8 +2875,10 @@ std::unique_ptr<PROmodel> get_model_from_string(const PROconfig& config, const P
         return std::unique_ptr<PROmodel>(new PRO3p2(prop, config.m_model_parameter_map));
     } else if(name == "LBL") {
         return std::unique_ptr<PROmodel>(new PROLBL(prop, config.m_model_parameter_map));
+    } else if(name == "template" || name == "template_fit") {
+        return std::unique_ptr<PROmodel>(new PROtemplate(config, prop));
     }
-    log<LOG_ERROR>(L"%1% || Unrecognized model name %2%. Try numudis, nueapp, nuedis, 3+1, 3+1_angles, 3+1_3(A,B,C), 3+1_decay_invis, 3+1_decay_vis, 3+2. for now. Terminating.") % __func__ % name.c_str();
+    log<LOG_ERROR>(L"%1% || Unrecognized model name %2%. Try numudis, nueapp, nuedis, 3+1, 3+1_angles, 3+1_3(A,B,C), 3+1_decay_invis, 3+2, LBL, template_fit. for now. Terminating.") % __func__ % name.c_str();
     exit(EXIT_FAILURE);
 }
 
