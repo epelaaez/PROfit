@@ -2013,6 +2013,22 @@ class PRO3p1_decay_vis_model1 : public PROmodel {
                 }
             }
 
+            // Truth-L bin width, needed to average rapid oscillations over the L bin.  The
+            // flat grid concatenates subchannel blocks along L, so skip the non-positive
+            // jumps at block boundaries (mirroring the truth-E uniformity check above).
+            float L_bin_width = 0.0f;
+            for(size_t i = n_E; i < n_flat; i += n_E) {
+                float diff = L_arr[i] - L_arr[i - n_E];
+                if(diff <= 0.0f) continue;
+                if(L_bin_width == 0.0f) { L_bin_width = diff; continue; }
+                if(std::abs(diff - L_bin_width) > 1e-4f * L_bin_width) {
+                    log<LOG_ERROR>(L"%1% || 3+1+decay requires uniform truth baseline binning, "
+                        L"found bin width of %2% when expecting %3%.") % __func__ % diff % L_bin_width;
+                    exit(EXIT_FAILURE);
+                }
+            }
+            const auto sinc = [](float x) { return std::abs(x) < 1e-4f ? 1.0f : std::sin(x) / x; };
+
             // alpha_phi = g_phi^2/(4 pi)
             // Gamma_nu4 = |Us4|^2 (1 - |Us4|^2) alpha_phi/4 m_4^2/E_4
             //           = |Us4|^2 (1 - |Us4|^2) g_phi^2/(16 pi) m_4^2/E_4
@@ -2045,7 +2061,16 @@ class PRO3p1_decay_vis_model1 : public PROmodel {
                 float L_par = L_arr[flat_par];
                 float delta = freq * L_par / E_par;
                 float expterm = std::exp(-delta * exp_prefactor);
-                float cos_mult_exp = std::cos(2.0f * delta) * expterm;
+                // Average the interference term over the truth bin rather than sampling it at
+                // the bin midpoint: at large dmsq the phase 2*delta wraps many times within
+                // one (L, E) bin, so the midpoint cos(2*delta) is an aliased pseudorandom
+                // value.  Averaging cos(2*freq*L/E) analytically over the L bin, and to first
+                // order in the phase over the E bin, damps the term by sinc factors that
+                // -> 1 for slow oscillations and -> 0 in the fully-averaged regime.  The
+                // exponential decay factor varies slowly across a bin and is left at midpoint.
+                float damp = sinc(freq * L_bin_width / E_par)
+                           * sinc(freq * L_par * E_bin_width / (E_par * E_par));
+                float cos_mult_exp = std::cos(2.0f * delta) * expterm * damp;
                 float osc_term = 1.0f - 2.0f*cos_mult_exp + expterm*expterm;
 
                 // Oscillation contribution at flat_par (parent = daughter for non-decayed events).
@@ -2081,12 +2106,17 @@ class PRO3p1_decay_vis_model1 : public PROmodel {
                     size_t flat_dst = l_idx * n_E + e_dst_idx;
                     float E_dst = E_arr[flat_dst];
                     float s_dec = 2.0f * E_dst / (E_par * E_par);        // dP/dE_d, 1/GeV
+                    // DegradationCorrection
+                    // Approximates sigma_CC ∝ E over the SBN range, i.e. weight by E_dst/E_par.
+                    // TODO: add factors here to more precisely account for the E_nu-dependent
+                    // cross section and efficiency effects.
+                    float s_dec_w = s_dec * (E_dst / E_par);
                     const long int dst_mumu = (long int)flat_dst + decay_bin_offsets[0];
                     const long int dst_mue  = (long int)flat_dst + decay_bin_offsets[1];
                     const long int dst_ee   = (long int)flat_dst + decay_bin_offsets[2];
-                    if(dst_mumu >= 0 && dst_mumu < (long int)n_flat) counts(dst_mumu, 4) += kernel_base_mumu * s_dec;
-                    if(dst_mue  >= 0 && dst_mue  < (long int)n_flat) counts(dst_mue,  5) += kernel_base_mue  * s_dec;
-                    if(dst_ee   >= 0 && dst_ee   < (long int)n_flat) counts(dst_ee,   6) += kernel_base_ee   * s_dec;
+                    if(dst_mumu >= 0 && dst_mumu < (long int)n_flat) counts(dst_mumu, 4) += kernel_base_mumu * s_dec_w;
+                    if(dst_mue  >= 0 && dst_mue  < (long int)n_flat) counts(dst_mue,  5) += kernel_base_mue  * s_dec_w;
+                    if(dst_ee   >= 0 && dst_ee   < (long int)n_flat) counts(dst_ee,   6) += kernel_base_ee   * s_dec_w;
                 }
             }
             return counts;
@@ -2179,6 +2209,22 @@ class PRO3p1_decay_vis_model2 : public PROmodel {
                 }
             }
 
+            // Truth-L bin width, needed to average rapid oscillations over the L bin.  The
+            // flat grid concatenates subchannel blocks along L, so skip the non-positive
+            // jumps at block boundaries (mirroring the truth-E uniformity check above).
+            float L_bin_width = 0.0f;
+            for(size_t i = n_E; i < n_flat; i += n_E) {
+                float diff = L_arr[i] - L_arr[i - n_E];
+                if(diff <= 0.0f) continue;
+                if(L_bin_width == 0.0f) { L_bin_width = diff; continue; }
+                if(std::abs(diff - L_bin_width) > 1e-4f * L_bin_width) {
+                    log<LOG_ERROR>(L"%1% || 3+1+decay requires uniform truth baseline binning, "
+                        L"found bin width of %2% when expecting %3%.") % __func__ % diff % L_bin_width;
+                    exit(EXIT_FAILURE);
+                }
+            }
+            const auto sinc = [](float x) { return std::abs(x) < 1e-4f ? 1.0f : std::sin(x) / x; };
+
             // alpha_e = g_e^2/(4 pi)
             // Gamma_nu4 = alpha_e / 4 m_4^2/E_4
             //           = g_e^2/(16 pi) m_4^2/E_4
@@ -2200,7 +2246,11 @@ class PRO3p1_decay_vis_model2 : public PROmodel {
                 float L_par = L_arr[flat_par];
                 float delta = freq * L_par / E_par;
                 float expterm = std::exp(-delta * exp_prefactor);
-                float cos_mult_exp = std::cos(2.0f * delta) * expterm;
+                // Average the interference term over the truth bin rather than sampling it at
+                // the bin midpoint — see the matching comment in PRO3p1_decay_vis_model1.
+                float damp = sinc(freq * L_bin_width / E_par)
+                           * sinc(freq * L_par * E_bin_width / (E_par * E_par));
+                float cos_mult_exp = std::cos(2.0f * delta) * expterm * damp;
                 float osc_term = 1.0f - 2.0f*cos_mult_exp + expterm*expterm;
 
                 // Oscillation contribution at flat_par (same as model1, g_e drives the damping)
@@ -2227,8 +2277,11 @@ class PRO3p1_decay_vis_model2 : public PROmodel {
                     size_t flat_dst = l_idx * n_E + e_dst_idx;
                     float E_dst = E_arr[flat_dst];
                     float s_dec = 2.0f * E_dst / (E_par * E_par);
-                    counts(flat_dst, 2) += kernel_base_mue * s_dec;
-                    counts(flat_dst, 3) += kernel_base_ee  * s_dec;
+                    // DegradationCorrection: weight by sigma(E_dst)/sigma(E_par) ~ E_dst/E_par
+                    // — see the matching comment in PRO3p1_decay_vis_model1.
+                    float s_dec_w = s_dec * (E_dst / E_par);
+                    counts(flat_dst, 2) += kernel_base_mue * s_dec_w;
+                    counts(flat_dst, 3) += kernel_base_ee  * s_dec_w;
                 }
             }
             return counts;
