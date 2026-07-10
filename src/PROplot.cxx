@@ -52,21 +52,27 @@ namespace PROfit{
         return matched;
     }
 
-    Eigen::VectorXf build_subchannel_mask_spec(const PROconfig &config,
-                                               const PROspec &spec,
-                                               const std::vector<size_t> &matched_subchannel_indices,
-                                               int var_index) {
-        Eigen::VectorXf mask = Eigen::VectorXf::Zero(spec.Spec().size());
+    Eigen::VectorXf build_subchannel_bin_mask(const PROconfig &config,
+                                              const std::vector<size_t> &matched_subchannel_indices,
+                                              int var_index) {
+        Eigen::VectorXf mask = Eigen::VectorXf::Zero(config.m_num_variable_bins_total[var_index]);
         for (size_t isub : matched_subchannel_indices) {
             const size_t ic    = config.GetLocalChannelIndexFromGlobalSubchannelIndex(isub);
             const size_t start = config.GetGlobalVariableBinStart(isub, var_index);
             const size_t nbins = config.m_channel_variable_bins[ic][var_index].NBins();
             for (size_t b = 0; b < nbins; ++b) {
-                const Eigen::Index idx = static_cast<Eigen::Index>(start + b);
-                mask(idx) = spec.Spec()(idx);
+                mask(static_cast<Eigen::Index>(start + b)) = 1.0f;
             }
         }
         return mask;
+    }
+
+    Eigen::VectorXf build_subchannel_mask_spec(const PROconfig &config,
+                                               const PROspec &spec,
+                                               const std::vector<size_t> &matched_subchannel_indices,
+                                               int var_index) {
+        return build_subchannel_bin_mask(config, matched_subchannel_indices, var_index)
+                   .cwiseProduct(spec.Spec());
     }
 
     std::map<std::string, std::unique_ptr<TH1D>> getCV1DHists(const PROspec &spec, const PROconfig& inconfig, bool scale, int other_index) {
@@ -292,6 +298,53 @@ namespace PROfit{
         }
 	ebar.covariance = cov/nerrorsample;
         return ebar;
+    }
+
+    PROsubtractedErrorBand getErrorBandBkgSubtracted(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const PROspec &cv_spec, const Eigen::VectorXf &cvparams, const std::vector<size_t> &bkg_subchannels, bool scale, int other_index) {
+
+        Eigen::VectorXf mask        = build_subchannel_bin_mask(config, bkg_subchannels, other_index);
+        Eigen::VectorXf bkg_cv_full = cv_spec.Spec().cwiseProduct(mask);
+        Eigen::VectorXf cv_sig      = CollapseMatrix(config, Eigen::VectorXf(cv_spec.Spec() - bkg_cv_full), other_index);
+        Eigen::VectorXf bkg_cv_coll = CollapseMatrix(config, bkg_cv_full, other_index);
+
+        size_t nerrorsample = 2500;
+
+        std::vector<Eigen::VectorXf> sig_specs;
+        std::uniform_int_distribution<uint32_t> dseed(0, std::numeric_limits<uint32_t>::max());
+
+        Eigen::MatrixXf cov = Eigen::MatrixXf::Zero(cv_sig.size(), cv_sig.size());
+        Eigen::VectorXf bkg_var = Eigen::VectorXf::Zero(cv_sig.size());
+        Eigen::VectorXf delta;
+        for(size_t i = 0; i < nerrorsample; ++i){
+            // Subtract each throw's OWN background so bkg systematic variations
+            // cancel: the band that comes out is signal-only.
+            auto [sig, bkg] = FillSystRandomThrowSplit(config, prop, syst, model, cv_spec, cvparams, dseed(PROseed::global_rng), other_index, mask);
+            sig_specs.push_back(sig.Spec());
+            delta = cv_sig - sig.Spec();
+            cov += delta * delta.transpose();
+            bkg_var += (bkg.Spec() - bkg_cv_coll).array().square().matrix();
+        }
+
+        PROsubtractedErrorBand result(cv_sig.size());
+        for(int i = 0; i < cv_sig.size(); ++i) {
+            std::vector<float> binconts(nerrorsample);
+            for(size_t j = 0; j < nerrorsample; ++j) {
+                binconts[j] = sig_specs[j](i);
+            }
+            float scale_factor = scale ? 1.0/config.collapsed_bin_widths.at(other_index)(i) :  1.0;
+            if(std::isnan(scale_factor)) scale_factor = 1;
+            std::sort(binconts.begin(), binconts.end());
+            float ehi = std::abs((binconts[2.5*840] - cv_sig(i))*scale_factor);
+            float elo = std::abs((cv_sig(i) - binconts[2.5*160])*scale_factor);
+            result.band.error_up(i) =  ehi;
+            result.band.error_down(i) =  elo;
+            result.band.error_point(i) = cv_sig(i)*scale_factor;
+        }
+        result.band.covariance = cov/nerrorsample;
+        result.bkg_cv_collapsed = bkg_cv_coll;
+        result.bkg_sigma_collapsed = (bkg_var/nerrorsample).array().sqrt();
+        result.bkg_mcstat_var_collapsed = CollapseMatrix(config, Eigen::VectorXf(cv_spec.Error().array().square().matrix().cwiseProduct(mask)), other_index);
+        return result;
     }
 
     // sort through generic PROspec and combine bins to get projection
@@ -968,7 +1021,7 @@ namespace PROfit{
         log<LOG_DEBUG>(L"%1% || Finishing Plotting 1D Histogram %2%") % __func__ % hist_titles.c_str();
     }
 
-    std::map<std::string, TObject *> plot_channels(const std::string &filename, const PROconfig &config, std::optional<PROspec> cv, std::optional<PROspec> best_fit, std::optional<PROdata> data, std::optional<PROerrorbar> errband, std::optional<PROerrorbar> posterrband, std::vector<TPaveText> &texts, PlotBounds &bounds, PlotOptions opt, int other_index, bool ratio_bool) {
+    std::map<std::string, TObject *> plot_channels(const std::string &filename, const PROconfig &config, std::optional<PROspec> cv, std::optional<PROspec> best_fit, std::optional<PROdata> data, std::optional<PROerrorbar> errband, std::optional<PROerrorbar> posterrband, std::vector<TPaveText> &texts, PlotBounds &bounds, PlotOptions opt, int other_index, bool ratio_bool, const std::vector<size_t> *skip_stack_subchannels) {
 
         log<LOG_DEBUG>(L"%1% || Starting plot_channels") % __func__;
         std::string rat_y_title = bool(opt&PlotOptions::DataMCRatio) ? "Data/MC" : "Data/Best-Fit";
@@ -1048,8 +1101,12 @@ namespace PROfit{
                     }
 
                     Eigen::VectorXf data_spec_1d = Eigen::VectorXf::Zero(channel_nbins_x);
+                    Eigen::VectorXf data_err_1d = Eigen::VectorXf::Zero(channel_nbins_x);
                     if(data){
                         data_spec_1d = make_1d_spec(data->Spec(), channel_nbins_x, channel_nbins_y, tot_offset, config.m_channel_variable_dims[channel][other_index]);
+                        // Combine per-bin errors in quadrature (summing squared errors is
+                        // what make_1d_spec's bin-sum does for dims==2; passthrough for 1D).
+                        data_err_1d = make_1d_spec(data->Error().array().square(), channel_nbins_x, channel_nbins_y, tot_offset, config.m_channel_variable_dims[channel][other_index]).array().sqrt();
                     }
 
                     PROerrorbar *errband_1d = NULL;
@@ -1124,6 +1181,7 @@ namespace PROfit{
                             for(size_t xbin = 0; xbin < channel_nbins_x; xbin++){
                                 for(size_t ybin = 0; ybin < channel_nbins_y; ybin++) {
                                     data_hist->SetBinContent(xbin+1, ybin+1, tmp_data(xbin*channel_nbins_y+ybin+tot_offset));
+                                    data_hist->SetBinError(xbin+1, ybin+1, data->Error()(xbin*channel_nbins_y+ybin+tot_offset));
                                 }
                             }
                             TPad pdata("pdata", "pdata", 0, 0, 1, 1);
@@ -1209,7 +1267,13 @@ namespace PROfit{
 
                         for(size_t subchannel = 0; subchannel < config.m_num_subchannels[channel]; ++subchannel){
                             const std::string& subchannel_name  = config.m_fullnames[global_subchannel_index];
-                            if(bool(opt&PlotOptions::CVasStack)) {
+                            // Background-subtracted subchannels are dropped from the
+                            // stack and legend (their contents are already zero); the
+                            // cv_hist sum still includes them so bookkeeping is unchanged.
+                            const bool skip_stack = skip_stack_subchannels &&
+                                std::find(skip_stack_subchannels->begin(), skip_stack_subchannels->end(),
+                                          global_subchannel_index) != skip_stack_subchannels->end();
+                            if(bool(opt&PlotOptions::CVasStack) && !skip_stack) {
                                 cvstack->Add(cv1dhists[subchannel_name].get());
                                 subplots.push_back({subchannel_name, config.m_subchannel_plotnames[channel][subchannel].c_str()});
                             }
@@ -1238,7 +1302,12 @@ namespace PROfit{
                         for(size_t bin = 0; bin < channel_nbins_x; ++bin) {
                             float scale = 1.0;
                             if(bool(opt&PlotOptions::AreaNormalized) || bool(opt&PlotOptions::BinWidthScaled)) {
-                                scale = channel_errband->GetPointY(bin) / errband_1d->error_point(bin);
+                                // Guard 0/0 when the (possibly bkg-subtracted) CV is zero
+                                // in a bin; error_point is already bin-width scaled, so
+                                // 1.0 is the exact fallback in the BinWidthScaled case.
+                                float denom = errband_1d->error_point(bin);
+                                scale = (denom != 0 && std::isfinite(denom)) ? channel_errband->GetPointY(bin) / denom : 1.0f;
+                                if(!std::isfinite(scale)) scale = 1.0f;
                             }
 
                             channel_errband->SetPointEYhigh(bin, scale*(errband_1d->error_up(bin)));
@@ -1265,6 +1334,11 @@ namespace PROfit{
                         data_hist = new TH1D(("data"+std::to_string(global_channel_index)).c_str(), "", channel_nbins_x, edges.data());
                         for(size_t bin = 0; bin < channel_nbins_x; ++bin) {
                             data_hist->SetBinContent(bin+1, data_spec_1d(bin));
+                            // SetBinError allocates Sumw2, so the Scale calls below
+                            // transform the errors correctly too. Without this ROOT
+                            // falls back to sqrt(|content|), which is wrong for
+                            // bin-width-scaled or background-subtracted data.
+                            data_hist->SetBinError(bin+1, data_err_1d(bin));
                         }
                         data_hist->SetLineColor(kBlack);
                         data_hist->SetLineWidth(2);
@@ -1284,7 +1358,9 @@ namespace PROfit{
                         for(size_t bin = 0; bin < channel_nbins_x; ++bin) {
                             float scale = 1.0;
                             if(bool(opt&PlotOptions::AreaNormalized) || bool(opt&PlotOptions::BinWidthScaled)) {
-                                scale = post_channel_errband->GetPointY(bin) / (posterrband_1d->error_point(bin));
+                                float denom = posterrband_1d->error_point(bin);
+                                scale = (denom != 0 && std::isfinite(denom)) ? post_channel_errband->GetPointY(bin) / denom : 1.0f;
+                                if(!std::isfinite(scale)) scale = 1.0f;
                             }
                             post_channel_errband->SetPointEYhigh(bin, scale*(posterrband_1d->error_up(bin)));
                             post_channel_errband->SetPointEYlow(bin, scale*(posterrband_1d->error_down(bin)));

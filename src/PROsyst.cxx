@@ -1197,6 +1197,53 @@ namespace PROfit {
 
     }
 
+    Eigen::MatrixXf PROsyst::DecomposeFractionalCovarianceFull(const PROconfig &config, const Eigen::VectorXf &cv_vec) const {
+        (void)config;
+        // Same cache/mutex pattern as DecomposeFractionalCovariance above.
+        static std::mutex decomp_full_cache_mutex;
+        {
+            std::lock_guard<std::mutex> lk(decomp_full_cache_mutex);
+            if(cv_vec.size() == last_decomp_full_spec.size() && cv_vec == last_decomp_full_spec)
+                return last_decomp_full_mat;
+        }
+        Eigen::MatrixXf full_cov = cv_vec.asDiagonal() * fractional_covariance * cv_vec.asDiagonal();
+
+        // full_cov is symmetric PSD by construction, so a self-adjoint
+        // eigendecomposition gives the same tolerance-clipped sampler as the
+        // JacobiSVD used for the (smaller) collapsed matrix, at lower cost on
+        // the full-bin dimension.
+        Eigen::SelfAdjointEigenSolver<Eigen::MatrixXf> es(full_cov);
+        if(es.info() != Eigen::Success) {
+            log<LOG_ERROR>(L"%1% | Eigendecomposition of full-space covariance failed.") % __func__;
+            exit(EXIT_FAILURE);
+        }
+        const Eigen::VectorXf &evals = es.eigenvalues();
+        const Eigen::MatrixXf &evecs = es.eigenvectors();
+
+        float tol = 1e-8f * evals.maxCoeff();
+        std::vector<int> keep;
+        for(int i = 0; i < evals.size(); ++i) {
+            if(evals(i) > tol) keep.push_back(i);
+        }
+
+        if(keep.empty()) {
+            log<LOG_ERROR>(L"%1% | All eigenvalues are below tolerance, cannot sample. Blarg.") % __func__;
+            exit(EXIT_FAILURE);
+        }
+
+        Eigen::MatrixXf sampler = Eigen::MatrixXf::Zero(full_cov.rows(), full_cov.cols());
+        for(size_t i = 0; i < keep.size(); ++i) {
+            sampler.col(i) = evecs.col(keep[i]) * std::sqrt(evals(keep[i]));
+        }
+
+        {
+            std::lock_guard<std::mutex> lk(decomp_full_cache_mutex);
+            last_decomp_full_spec = cv_vec;
+            last_decomp_full_mat = sampler;
+        }
+        return sampler;
+    }
+
     void PROsyst::PrintSplines(){
         std::cout << "=== NEW FLAT SPLINE STRUCTURE ===\n";
         for (size_t spline_idx = 0; spline_idx < splines.size(); ++spline_idx) {

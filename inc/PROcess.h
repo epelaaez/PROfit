@@ -142,6 +142,28 @@ namespace PROfit{
     PROspec FillSystRandomThrow(const PROconfig &inconfig, const PROpeller &inprop, const PROsyst &insyst, const PROmodel &model, const PROspec &cvspec, const Eigen::VectorXf &cvparams, uint32_t seed, int var_index=0);
 
     /**
+     * @brief One systematic throw, split into signal and background pieces.
+     * @details Splines are thrown exactly as in FillSystRandomThrow; the covariance
+     * systematic is thrown in FULL (uncollapsed) bin space so the background
+     * subchannels' own variation can be separated per throw, then masked and
+     * collapsed. After collapse this is distributed identically to
+     * FillSystRandomThrow's collapsed-space throw, but the RNG stream differs —
+     * this function is only used by the --bkg-subtract plotting path, so the
+     * default (no-subtraction) throws are untouched.
+     * @param inconfig     Configuration object.
+     * @param inprop       MC event store.
+     * @param insyst       Systematic object.
+     * @param model        Physics model.
+     * @param cvspec       Central-value spectrum (full binning; denominator for fractional shifts).
+     * @param cvparams     Central-value physics parameter vector.
+     * @param seed         Random seed.
+     * @param var_index    Variable index to fill.
+     * @param bkg_bin_mask Full-bin 0/1 vector marking background-subchannel bins.
+     * @return {signal, background} PROspecs, both collapsed.
+     */
+    std::pair<PROspec, PROspec> FillSystRandomThrowSplit(const PROconfig &inconfig, const PROpeller &inprop, const PROsyst &insyst, const PROmodel &model, const PROspec &cvspec, const Eigen::VectorXf &cvparams, uint32_t seed, int var_index, const Eigen::VectorXf &bkg_bin_mask);
+
+    /**
      * @brief Generate a spectrum with a single named spline systematic randomly shifted.
      * @details Throws that spline's shift from a Gaussian distribution and fills the spectrum.
      * @param inconfig    Configuration object.
