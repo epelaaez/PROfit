@@ -13,8 +13,17 @@ PROchi::PROchi(const std::string tag, const PROconfig &conin, const PROpeller &p
     fixed_index = -999;
     gradient_mode = GradientOneSidedFull; ///< Default for PROchi: one-sided forward FD on full chi² (~2× faster).
 
+    // An externally supplied posterior (PROjector projected mode) takes precedence over
+    // any XML-configured prior correlations: it already IS the full prior covariance.
+    if (systin->has_external_prior_cov) {
+        if (conin.m_mcgen_correlations.size())
+            log<LOG_WARNING>(L"%1% || Both an external prior covariance and XML prior correlations are set; using the external one.") % __func__;
+        correlated_systematics = true;
+        prior_covariance = systin->external_prior_cov;
+        prior_covariance_inv = prior_covariance.inverse();
+    }
     // Build the correlation matrix between priors if configured to
-    if (conin.m_mcgen_correlations.size()) {
+    else if (conin.m_mcgen_correlations.size()) {
         correlated_systematics = true;
         prior_covariance = Eigen::MatrixXf::Identity(syst->GetNSplines(), syst->GetNSplines());
         for (auto const &t: conin.m_mcgen_correlations) {

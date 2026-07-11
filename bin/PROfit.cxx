@@ -20,6 +20,7 @@
 #include "PROseed.h"
 #include "PROversion.h"
 #include "PROplot.h"
+#include "PROjector.h"
 #include "PRObench.h"
 
 #include "CLI11.h"
@@ -283,6 +284,7 @@ int main(int argc, char* argv[])
     std::vector<std::string> syst_list, systs_excluded;
     bool MCMC_prefit_errors = false;
     bool systs_only = false;
+    PROjectorRunConfig projector_config; // Two-stage pre-fit / projected fit (PROjector).
     bool use_fake_data = false;
     bool use_probe = false;
     int n_probe_chunks = 1; // 1 = no chunking by default. Opt in via --probe-chunks N when physics is the wall-time bottleneck.
@@ -397,6 +399,30 @@ int main(int argc, char* argv[])
     app.add_flag("--no-xrootd",noxrootd,"Do not use XRootD, which is enabled by default");
     app.add_flag("--syst-only", systs_only, "Force fitting over nuisance parameters only, currently just --fix's them");
     app.add_flag("--area-norm", area_normalized, "Make area normalized histograms.");
+
+    // PROjector: two-stage pre-fit / projected fit (see inc/PROjector.h for the scheme).
+    CLI::Option *projector_prefit_opt = app.add_option("--projector-prefit", projector_config.prefit_pattern,
+        "PROjector stage 1: wildcard (substring) matching the subchannels to PRE-FIT (whole "
+        "channels only, e.g. a detector name). Covariance systematics are promoted to "
+        "eigenmode splines, the data is masked to the matched channels, physics parameters "
+        "are fixed at CV, and running the 'global' subcommand writes the nuisance posterior "
+        "to <tag>_<output>_PROjector_constraint.bin. Requires -c PROchi.");
+    app.add_option("--projector", projector_config.constraint_file,
+        "PROjector stage 2: path to a constraint file from --projector-prefit. The pre-fit "
+        "channels are masked OUT and the saved nuisance posterior is used as a correlated "
+        "prior; any subcommand (global, profile, surface, plot, ...) then runs the projected "
+        "fit. Requires the same XML/binaries and systematic selection as the pre-fit.")
+        ->excludes(projector_prefit_opt);
+    app.add_option("--projector-knobs", projector_config.num_decomp_knobs,
+        "PROjector: number of covariance eigenmodes promoted to spline knobs in the pre-fit "
+        "(-1 = all positive modes, exact, no residual). Stored in the constraint file and "
+        "reused automatically in stage 2.")->default_val(-1);
+    app.add_option("--projector-keep-cov", projector_config.keep_covariance,
+        "PROjector: covariance systematics to NOT promote (they stay as unconstrained "
+        "covariance in both stages, e.g. detector-local systematics with no near/far correlation).");
+    app.add_flag("--projector-float-physics", projector_config.float_physics,
+        "PROjector pre-fit: float the physics parameters instead of fixing them at CV; the "
+        "saved posterior is then the physics-marginalized nuisance covariance.");
 
     auto* shape_flag = app.add_flag("--shapeonly", shapeonly, "Run a shape only analysis");
     auto* rate_flag = app.add_flag("--rateonly", rateonly, "Run a rate only analysis");
@@ -1159,6 +1185,20 @@ int main(int argc, char* argv[])
                 io++;
             }
         }
+    }
+
+    //***********************************************************************
+    //******************** PROjector pre-fit / projected fit ****************
+    //***********************************************************************
+    // Everything PROjector changes about the inputs (covariance->spline promotion, data
+    // masking, prior installation, physics fixing) happens inside this one helper so it
+    // is in place before CVParams sizing, the bounds/--fix section, and the metric
+    // construction below. See inc/PROjector.h for the scheme.
+    projector_config.force = force;
+    if(projector_config.active()) {
+        if(!PROjectorSetup(projector_config, config, variable_systs[config.i_prime],
+                    variable_data, data, fakedataparams, fixed_params, *model, chi2))
+            return 1;
     }
 
     // Empty-bin sanity check: build a default-CV spectrum and look for collapsed bins
@@ -2786,6 +2826,14 @@ int main(int argc, char* argv[])
         TFile fout((final_output_tag+"_PROglobal.root").c_str(), "RECREATE");
         for(const auto &[n, o] : drawn_objs)
             o->Write(n.c_str());
+
+        // PROjector pre-fit: the global fit above WAS the pre-fit (masked to the matched
+        // channels, physics fixed at CV unless floated); save its nuisance posterior.
+        if(projector_config.prefit_mode()) {
+            if(!PROjectorSaveConstraint(final_output_tag+"_PROjector_constraint.bin", projector_config,
+                        config, *metric, fitres.fitter.best_fit, fitres.chi2, global_fixed, chi2))
+                return 1;
+        }
     }
 
     if(*promcmc_command) {
