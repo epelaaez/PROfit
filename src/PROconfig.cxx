@@ -1952,6 +1952,54 @@ const PROconfig::Binning& PROconfig::GetChannelVariableBins(size_t channel_index
     return m_channel_variable_bins[GetLocalChannelIndexFromGlobalChannelIndex(channel_index)][other_index];
 }
 
+void PROconfig::SetActiveBins(size_t var_index, const std::vector<char> &mask) {
+    if(var_index >= m_num_variables) {
+        log<LOG_ERROR>(L"%1% || Variable index %2% out of range (%3% variables).") % __func__ % var_index % m_num_variables;
+        log<LOG_ERROR>(L"Terminating.");
+        exit(EXIT_FAILURE);
+    }
+    if(mask.size() != m_num_variable_bins_total_collapsed[var_index]) {
+        log<LOG_ERROR>(L"%1% || Active-bin mask for variable %2% has %3% entries but the variable has %4% collapsed bins.")
+            % __func__ % var_index % mask.size() % m_num_variable_bins_total_collapsed[var_index];
+        log<LOG_ERROR>(L"Terminating.");
+        exit(EXIT_FAILURE);
+    }
+    size_t n_active = 0;
+    for(char m : mask) n_active += (m != 0);
+    if(n_active == 0) {
+        log<LOG_ERROR>(L"%1% || Active-bin mask for variable %2% has no active bins; refusing to install it.") % __func__ % var_index;
+        log<LOG_ERROR>(L"Terminating.");
+        exit(EXIT_FAILURE);
+    }
+    if(m_variable_active_bins_collapsed.size() < m_num_variables)
+        m_variable_active_bins_collapsed.resize(m_num_variables);
+    m_variable_active_bins_collapsed[var_index] = mask;
+    log<LOG_INFO>(L"%1% || Installed fit-region mask for variable %2%: %3% of %4% collapsed bins active.")
+        % __func__ % var_index % n_active % mask.size();
+}
+
+void PROconfig::ClearActiveBins() {
+    m_variable_active_bins_collapsed.clear();
+}
+
+bool PROconfig::HasActiveBins(size_t var_index) const {
+    return var_index < m_variable_active_bins_collapsed.size()
+        && !m_variable_active_bins_collapsed[var_index].empty();
+}
+
+bool PROconfig::IsBinActive(size_t var_index, size_t collapsed_bin) const {
+    if(!HasActiveBins(var_index)) return true;
+    const std::vector<char> &mask = m_variable_active_bins_collapsed[var_index];
+    return collapsed_bin < mask.size() && mask[collapsed_bin] != 0;
+}
+
+size_t PROconfig::NActiveBins(size_t var_index) const {
+    if(!HasActiveBins(var_index)) return m_num_variable_bins_total_collapsed[var_index];
+    size_t n = 0;
+    for(char m : m_variable_active_bins_collapsed[var_index]) n += (m != 0);
+    return n;
+}
+
 namespace {
     std::string FormatLabelUnit(const std::string &label, const std::string &unit) {
         if(label.empty() && unit.empty()) return "";

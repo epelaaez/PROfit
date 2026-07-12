@@ -185,7 +185,24 @@ namespace PROfit {
 
     namespace {
 
+        // Install the fit region as a PROconfig active-bin mask for every variable. This is
+        // the authoritative exclusion: every metric constructed afterwards (including the
+        // fresh ones FC/AFC workers build around thrown pseudo-data) snapshots it, so
+        // masked bins can never re-enter a chi2 through regenerated data.
+        void installFitRegion(PROconfig &config, const std::vector<size_t> &matched_channels,
+                              bool complement) {
+            for(size_t io = 0; io < config.m_num_variables; ++io) {
+                Eigen::VectorXf maskv = PROjectorCollapsedMask(config, matched_channels, io, complement);
+                std::vector<char> mask(maskv.size());
+                for(Eigen::Index i = 0; i < maskv.size(); ++i)
+                    mask[(size_t)i] = maskv(i) > 0.5f ? 1 : 0;
+                config.SetActiveBins(io, mask);
+            }
+        }
+
         // Apply a collapsed-space mask to every PROdata and refresh the primary data object.
+        // With the config active-bin mask installed this is statistically redundant for the
+        // fit, but it keeps plots/error bands consistent and the excluded data blind.
         bool maskAllData(const PROconfig &config, const std::vector<size_t> &matched_channels,
                          bool complement, std::vector<PROdata> &variable_data, PROdata &data) {
             const size_t nvar = std::min(variable_data.size(), config.m_num_variables);
@@ -197,8 +214,10 @@ namespace PROfit {
                     continue;
                 }
                 Eigen::VectorXf mask = PROjectorCollapsedMask(config, matched_channels, io, complement);
-                variable_data[io] = PROdata(mask.cwiseProduct(variable_data[io].Spec()),
-                                            mask.cwiseProduct(variable_data[io].Error()));
+                PROdata masked(mask.cwiseProduct(variable_data[io].Spec()),
+                               mask.cwiseProduct(variable_data[io].Error()));
+                masked.hash = variable_data[io].hash;
+                variable_data[io] = std::move(masked);
             }
             data = variable_data[config.i_prime];
             if(data.Spec().sum() <= 0) {
@@ -221,11 +240,14 @@ namespace PROfit {
             log<LOG_ERROR>(L"%1% || --projector-prefit and --projector are mutually exclusive.") % __func__;
             return false;
         }
-        if(chi2_name != "PROchi") {
-            log<LOG_ERROR>(L"%1% || PROjector requires the PROchi metric: PROchi drops zero-data (masked) bins from the chi2, "
-                    L"which is the Gaussian marginalization the bin masking relies on. %2% does not. Re-run with -c PROchi.")
-                % __func__ % chi2_name.c_str();
-            return false;
+        // All three metrics honor the config fit-region (active-bin) mask, so any of them
+        // is legal here. Poisson gets a reminder that it ignores covariance-type
+        // systematics: anything left unpromoted (residual modes, --projector-keep-cov,
+        // mcstat) silently drops out of a Poisson fit.
+        if(chi2_name == "Poisson") {
+            log<LOG_WARNING>(L"%1% || PROjector with the Poisson metric: covariance-type systematics are ignored by "
+                    L"PROpoisson, so any unpromoted covariance (residual eigenmodes, --projector-keep-cov, mcstat) "
+                    L"will not enter the fit. Prefer --projector-knobs -1 and no kept covariances.") % __func__;
         }
 
         log<LOG_WARNING>(L"%1% || ############### PROjector %2% mode ###############")
@@ -238,6 +260,7 @@ namespace PROfit {
             PROjectorPromoteCovariance(config, systs, config.i_prime,
                                        pjconf.num_decomp_knobs, pjconf.keep_covariance);
 
+            installFitRegion(config, matched_channels, /*complement=*/false);
             if(!maskAllData(config, matched_channels, /*complement=*/false, variable_data, data)) return false;
 
             if(!pjconf.float_physics) {
@@ -311,11 +334,20 @@ namespace PROfit {
             systs.has_external_prior_cov = true;
             systs.external_prior_cov = c.covariance;
 
+            // Fits (Pull) use the FULL correlated posterior; pseudo-experiment throws
+            // (FC, Brazil bands, adaptive FC) go through ThrowRestrictedSplinePull, which
+            // samples each nuisance's marginal N(center, sigma) only. Correlated throwing
+            // is a known limitation — flag it so FC coverage studies are read accordingly.
+            log<LOG_WARNING>(L"%1% || PROjector: nuisance THROWS (fc, brazil bands, pseudo-experiments) sample the "
+                    L"constrained posterior's marginal widths only; posterior correlations enter the chi2 pull "
+                    L"but are not sampled in throws.") % __func__;
+
             for(size_t i = 0; i < c.nuisance_names.size(); ++i) {
                 log<LOG_INFO>(L"%1% || PROjector prior %2% : center %3% width %4%")
                     % __func__ % c.nuisance_names[i].c_str() % c.centers(i) % widths(i);
             }
 
+            installFitRegion(config, matched_channels, /*complement=*/true);
             if(!maskAllData(config, matched_channels, /*complement=*/true, variable_data, data)) return false;
 
             log<LOG_INFO>(L"%1% || PROjector projected fit ready: pre-fit channels masked out, %2% constrained nuisance parameters.")
@@ -356,8 +388,11 @@ namespace PROfit {
             return false;
         }
 
-        const Eigen::VectorXf lb = metric.lb.size() == static_cast<Eigen::Index>(nparams) ? metric.lb : metric.LowerBound();
-        const Eigen::VectorXf ub = metric.ub.size() == static_cast<Eigen::Index>(nparams) ? metric.ub : metric.UpperBound();
+        // Deliberately NOT metric.lb/ub: PROfitter::calcFreqSeedPoints leaves the metric's
+        // bounds pinned (lb==ub) at scan candidates when its minima loop does not run.
+        // LowerBound()/UpperBound() rebuild the true box from the model + spline bounds.
+        const Eigen::VectorXf lb = metric.LowerBound();
+        const Eigen::VectorXf ub = metric.UpperBound();
 
         std::vector<size_t> free_idx;
         for(size_t i = 0; i < nparams; ++i)

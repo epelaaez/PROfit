@@ -22,9 +22,12 @@
  *   consumed by PROchi::Pull). Any subcommand (global, profile, surface, plot, ...)
  *   then runs as the constrained "projected" fit.
  *
- * Restrictions (v1): PROchi metric only (PROchi drops zero-data bins from the chi2,
- * which is exactly Gaussian marginalization over the masked-out bins; PROCNP/Poisson
- * keep them). The pattern must select WHOLE channels in collapsed space.
+ * Bin exclusion is enforced by the PROconfig fit-region (active-bin) mask, which every
+ * metric (PROchi/PROCNP/PROpoisson) snapshots at construction — including the fresh
+ * metrics FC and adaptive-FC workers build around thrown pseudo-data, so regenerated
+ * data can never leak masked bins back into a chi2. The excluded data is additionally
+ * zeroed for display/blindness. The pattern must select WHOLE channels in collapsed
+ * space (the chi2 lives in collapsed bins).
  */
 #ifndef PROJECTOR_H_
 #define PROJECTOR_H_

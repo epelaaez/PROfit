@@ -406,7 +406,7 @@ int main(int argc, char* argv[])
         "channels only, e.g. a detector name). Covariance systematics are promoted to "
         "eigenmode splines, the data is masked to the matched channels, physics parameters "
         "are fixed at CV, and running the 'global' subcommand writes the nuisance posterior "
-        "to <tag>_<output>_PROjector_constraint.bin. Requires -c PROchi.");
+        "to <tag>_<output>_PROjector_constraint.bin.");
     app.add_option("--projector", projector_config.constraint_file,
         "PROjector stage 2: path to a constraint file from --projector-prefit. The pre-fit "
         "channels are masked OUT and the saved nuisance posterior is used as a correlated "
@@ -1054,33 +1054,12 @@ int main(int argc, char* argv[])
                 Eigen::MatrixXf L_chol = variable_systs[io].DecomposeFractionalCovariance(config, cv_for_L.Spec());
 
                 Eigen::VectorXf throws = fakedataparams;
+                // Shared truncated-Gaussian helper: samples each spline's actual prior
+                // N(center, sigma) within its restrict bounds, OOB-safe (never spins
+                // forever on unreachable bounds; clamps to the in-range value nearest
+                // the prior center and warns).
                 for (size_t i = 0; i < nspline; ++i) {
-                    // Guard against spline_has_restrict / restrict_lo / restrict_hi being
-                    // shorter than the spline list (e.g. covariance_to_spline knobs that
-                    // don't populate them) -- an OOB read here gives garbage bounds.
-                    const bool has_r = i < variable_systs[io].spline_has_restrict.size()
-                                       && variable_systs[io].spline_has_restrict[i];
-                    float tlo = has_r ? variable_systs[io].spline_restrict_lo[i] : variable_systs[io].spline_lo[i];
-                    float thi = has_r ? variable_systs[io].spline_restrict_hi[i] : variable_systs[io].spline_hi[i];
-                    if (tlo > thi) { const float t = tlo; tlo = thi; thi = t; }  // tolerate inverted bounds
-                    // Rejection-sample N(0,1) truncated to [tlo, thi], but NEVER loop forever:
-                    // if the range is unreachable (deep tail / degenerate / bad restrict),
-                    // fall back to the in-range value nearest the CV (0) and warn which spline.
-                    const int max_attempts = 10000;
-                    int attempts = 0;
-                    float x = d(PROseed::global_rng);
-                    while ((x < tlo || x > thi) && ++attempts < max_attempts)
-                        x = d(PROseed::global_rng);
-                    if (x < tlo || x > thi) {
-                        x = (0.0f < tlo) ? tlo : (0.0f > thi ? thi : 0.0f);
-                        const std::string sname = i < variable_systs[io].spline_names.size()
-                            ? variable_systs[io].spline_names[i] : ("spline#" + std::to_string(i));
-                        log<LOG_WARNING>(L"%1% || Pseudo-experiment: spline '%2%' (index %3%) has throw bounds "
-                                         L"[%4%, %5%] unreachable by a unit Gaussian after %6% draws; clamping to %7%. "
-                                         L"Check its knobvals / restrict attribute.")
-                            % __func__ % sname.c_str() % (int)i % tlo % thi % max_attempts % x;
-                    }
-                    throws((int)(i + nphys)) = x;
+                    throws((int)(i + nphys)) = ThrowRestrictedSplinePull(variable_systs[io], i, PROseed::global_rng, d);
                 }
 
                 const int nbins_coll = config.m_num_variable_bins_total_collapsed[io];
@@ -1216,6 +1195,9 @@ int main(int argc, char* argv[])
 
         int n_zero = 0, n_tiny = 0;
         for(Eigen::Index b = 0; b < collapsed_cv.size(); ++b) {
+            // Bins outside the fit region (PROjector / future bin-off masks) never enter
+            // a chi2, so an empty CV there is not a problem.
+            if(!config.IsBinActive(io, (size_t)b)) continue;
             if(collapsed_cv(b) <= 0.0f) {
                 log<LOG_ERROR>(L"%1% || Default-CV collapsed bin %2% has %3% expected events (<=0). Empty-bin would make CNP/stat covariance singular.") % __func__ % (long)b % collapsed_cv(b);
                 ++n_zero;
@@ -1681,8 +1663,12 @@ int main(int argc, char* argv[])
             for(size_t i = 0; i < 1000; ++i) {
                 Eigen::VectorXf throwp = fakeDataParams;
                 Eigen::VectorXf throwC = Eigen::VectorXf::Constant(config.m_num_variable_bins_total_collapsed[config.i_prime], 0);
+                // Shared truncated-Gaussian helper: samples each spline's actual prior
+                // N(center, sigma) within its restrict bounds (the raw d(rng) here
+                // ignored both, which was wrong for XML priors and for PROjector's
+                // constrained posterior).
                 for(size_t i = 0; i < metric->GetSysts().GetNSplines(); i++)
-                    throwp(i+N_phys_params) = d(PROseed::global_rng);
+                    throwp(i+N_phys_params) = ThrowRestrictedSplinePull(metric->GetSysts(), i, PROseed::global_rng, d);
                 for(size_t i = 0; i < config.m_num_variable_bins_total_collapsed[config.i_prime]; i++)
                     throwC(i) = d(PROseed::global_rng);
                 bool binned = (eventbyevent ? PROmetric::EventByEvent : PROmetric::BinnedChi2) != 0;
@@ -3522,7 +3508,8 @@ std::map<std::string, TObject *> draw_fit_result(const PROconfig &config, const 
     }
 
     if(fitres.fitter.best_fit.size()) {
-        std::string hname = "#chi^{2}/nbins = " + to_string(fitres.chi2) + "/" + to_string(config.m_num_variable_bins_total_collapsed[config.i_prime]);
+        // NActiveBins == total bins unless a fit-region mask (e.g. PROjector) is installed.
+        std::string hname = "#chi^{2}/nbins = " + to_string(fitres.chi2) + "/" + to_string(config.NActiveBins(config.i_prime));
         PROspec bf = FillSpectra(config, prop, syst, model, fitres.fitter.best_fit, true, config.i_prime);
         // Concatenated bins across all channels share no common x-axis, so use bin-index axis.
         TH1D post_hist("ph", hname.c_str(), config.m_num_variable_bins_total_collapsed[config.i_prime], 0, config.m_num_variable_bins_total_collapsed[config.i_prime]);
