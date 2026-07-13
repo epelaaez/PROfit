@@ -90,7 +90,7 @@ namespace PROfit{
 
         public:
 
-            uint32_t hash; ///< MurmurHash3 of the PROconfig used to create this spectrum; used for serialisation consistency checks.
+            uint32_t hash = 0; ///< MurmurHash3 of the PROconfig used to create this spectrum; used for serialisation consistency checks. Zero-initialized: PROspecs serialized inside SystStructs (p_cv/p_multi_spec) never call save(), and an uninitialized hash writes nondeterministic bytes into _syst.bin.
 
             /** @brief Boost serialisation support — serialises nbins, spec, error, and hash. */
             template<class Archive>

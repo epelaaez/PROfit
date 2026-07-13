@@ -62,7 +62,7 @@ private:
     Eigen::VectorXf eigenvector_multiplication(const Eigen::VectorXf& a, const Eigen::VectorXf& b) const;
 
 public:
-    uint32_t hash; ///< MurmurHash3 of the PROconfig used to create this data; checked during serialisation.
+    uint32_t hash = 0; ///< MurmurHash3 of the PROconfig used to create this data; checked during serialisation. Zero-initialized so copies made before save() never carry (or serialize) indeterminate bytes.
 
     /** @brief Boost serialisation support — serialises nbins, spec, error, and hash. */
     template<class Archive>
