@@ -445,12 +445,16 @@ int main(int argc, char* argv[])
     std::string bkg_subtract_pattern = "";
     proplot_command->add_option("--bkg-subtract", bkg_subtract_pattern,
         "Wildcard (substring) matching one or more subchannel names; that "
-        "background's central-value prediction is subtracted from data, CV, "
-        "best-fit, and the error band points at plot time. The error band's "
-        "spread/covariance is unchanged (Var(X - constant) = Var(X)), so the "
-        "systematic uncertainty on the background continues to appear in the "
-        "band. Example: --bkg-subtract numu_bkg matches every "
-        "<detector>_numu_bkg subchannel.");
+        "background's central-value prediction is subtracted from data and CV "
+        "at plot time (publication convention). The error band shows "
+        "signal-only systematics: each systematic throw's own background is "
+        "subtracted, so background variations cancel out of the band. The "
+        "background's uncertainty moves onto the data points instead, which "
+        "become N - bkg_CV with errors sqrt(N + sigma_bkg_syst^2 + "
+        "sigma_bkg_MCstat^2). Note the signal-background systematic "
+        "correlation is retained in the band but not in the data errors. "
+        "Example: --bkg-subtract numu_bkg matches every <detector>_numu_bkg "
+        "subchannel.");
 
     //PROfc, Feldmand-Cousins
     CLI::App *profc_command = app.add_subcommand("fc", "Run Feldman-Cousins for this injected signal");
@@ -1775,6 +1779,8 @@ int main(int argc, char* argv[])
             }
         }
         const bool do_bkg_subtract = !bkg_subchannels.empty();
+        if (do_bkg_subtract && area_normalized)
+            log<LOG_WARNING>(L"%1% || --bkg-subtract combined with area normalization: normalization uses the subtracted integral; interpret error bands with care.") % __func__;
 
         PlotOptions opt = PlotOptions::CVasStack;
         std::vector<TPaveText> notext;
@@ -1796,7 +1802,8 @@ int main(int argc, char* argv[])
                     config, cv_plot, bkg_subchannels, io);
                 cv_plot.Spec() -= bkg_full;
             }
-            auto objs = plot_channels(final_output_tag+"_PROplot_Variable_"+std::to_string(io)+"_CV.pdf", config, cv_plot, {}, {}, {}, {}, notext, pbounds, opt, io);
+            auto objs = plot_channels(final_output_tag+"_PROplot_Variable_"+std::to_string(io)+"_CV.pdf", config, cv_plot, {}, {}, {}, {}, notext, pbounds, opt, io,
+                    false, do_bkg_subtract ? &bkg_subchannels : nullptr);
             cv_objs.push_back(objs);
         }
 
@@ -2321,6 +2328,9 @@ int main(int argc, char* argv[])
                         TPaveText chi2text(0.59, 0.50, 0.89, 0.59, "NDC");
                         if(io==config.i_prime){
                             log<LOG_INFO>(L"%1% || On channel %2%:") % __func__ % global_channel_index ;
+                            // Intentionally uses the UNsubtracted CV and data even under
+                            // --bkg-subtract: the chi2 is numerically invariant under the
+                            // subtraction, and the fit machinery stays untouched.
                             double chival = allcov_metric->getSingleChannelChi(global_channel_index, variable_cvs[io], io);
                             int ndf = config.m_channel_variable_bins[ic][io].NBinsAlong(0) - bool(opt&PlotOptions::AreaNormalized);
                             log<LOG_INFO>(L"%1% || -- the datamc chi^2/ndof is %2%/%3% .") % __func__ % chival % ndf;
@@ -2351,34 +2361,30 @@ int main(int argc, char* argv[])
         std::vector<PROerrorbar> other_err_bands;
         std::vector<std::map<std::string, TObject*>> errband_objs;
         for(size_t io = 0; io < config.m_num_variables; ++io) {
-            if(!config.m_channel_variable_plot_bool.at(io)) { errband_objs.push_back({}); continue; } // For now skip the L/E 250 bin. 
-            other_err_bands.push_back(getErrorBand(config, prop, variable_systs[io], *model, variable_cvs[io], CVParams, binwidth_scale, io));
-
-            // --bkg-subtract: shift CV, data, and error band by the bkg CV.
-            // Var(X - const) = Var(X), so covariance / band width are unchanged;
-            // only the central positions slide. The bkg's systematic uncertainty
-            // remains embedded in `covariance` and therefore in error_up/down
-            // around the shifted point.
-            PROspec     cv_plot      = variable_cvs[io];
-            PROdata     data_plot    = variable_data[io];
-            PROerrorbar errband_plot = other_err_bands.back();
+            if(!config.m_channel_variable_plot_bool.at(io)) { errband_objs.push_back({}); continue; } // For now skip the L/E 250 bin.
+            PROspec cv_plot   = variable_cvs[io];
+            PROdata data_plot = variable_data[io];
             if (do_bkg_subtract) {
-                Eigen::VectorXf bkg_full      = build_subchannel_mask_spec(
-                    config, cv_plot, bkg_subchannels, io);
-                Eigen::VectorXf bkg_collapsed = CollapseMatrix(config, bkg_full, io);
-
-                cv_plot.Spec() -= bkg_full;
-                data_plot = PROdata(Eigen::VectorXf(data_plot.Spec() - bkg_collapsed),
-                                    data_plot.Error());
-
-                Eigen::VectorXf bkg_for_errband = binwidth_scale
-                    ? Eigen::VectorXf(bkg_collapsed.array() /
-                                      config.collapsed_bin_widths.at(io).array())
-                    : bkg_collapsed;
-                errband_plot.error_point -= bkg_for_errband;
+                // Publication convention: the band shows signal-only systematics
+                // (each throw's own bkg is subtracted inside
+                // getErrorBandBkgSubtracted, so bkg variations cancel); the bkg's
+                // systematic and MC-stat uncertainty moves onto the data points.
+                // Everything here is in unscaled counts; width/area scaling of the
+                // data happens once inside plot_channels.
+                PROsubtractedErrorBand sub = getErrorBandBkgSubtracted(config, prop, variable_systs[io],
+                        *model, variable_cvs[io], CVParams, bkg_subchannels, binwidth_scale, io);
+                other_err_bands.push_back(sub.band);
+                cv_plot.Spec() -= build_subchannel_mask_spec(config, cv_plot, bkg_subchannels, io);
+                Eigen::VectorXf new_err = (data_plot.Error().array().square()
+                                           + sub.bkg_sigma_collapsed.array().square()
+                                           + sub.bkg_mcstat_var_collapsed.array()).sqrt();
+                data_plot = PROdata(Eigen::VectorXf(data_plot.Spec() - sub.bkg_cv_collapsed), new_err);
+            } else {
+                other_err_bands.push_back(getErrorBand(config, prop, variable_systs[io], *model, variable_cvs[io], CVParams, binwidth_scale, io));
             }
             auto objs = plot_channels(final_output_tag+"_PROplot_Variable_"+std::to_string(io)+"_ErrorBand.pdf", config, cv_plot, {}, data_plot,
-                    errband_plot, {}, other_channel_chitexts[io], pbounds, opt | PlotOptions::DataMCRatio, io);
+                    other_err_bands.back(), {}, other_channel_chitexts[io], pbounds, opt | PlotOptions::DataMCRatio, io,
+                    false, do_bkg_subtract ? &bkg_subchannels : nullptr);
             errband_objs.push_back(objs);
         }
 

@@ -426,6 +426,46 @@ namespace PROfit {
         return PROspec(final_spec, final_spec.array().sqrt());
     }
 
+    std::pair<PROspec, PROspec> FillSystRandomThrowSplit(const PROconfig &inconfig, const PROpeller &inprop, const PROsyst &insyst, const PROmodel &model, const PROspec &cvspec, const Eigen::VectorXf &cvparams, uint32_t seed, int var_index, const Eigen::VectorXf &bkg_bin_mask) {
+        int nbins = inconfig.m_num_variable_bins_total[var_index];
+
+        Eigen::VectorXf params = cvparams;
+
+        // Local generator seeded per call, as in FillSystRandomThrow.
+        std::mt19937 rng{seed};
+        std::vector<std::normal_distribution<float>> d_spline;
+        for(size_t i = 0; i < insyst.GetNSplines(); ++i)
+            d_spline.emplace_back(insyst.spline_centers(i), insyst.spline_priors(i));
+        std::normal_distribution<float> d_cov;
+        std::vector<float> throws;
+        for(size_t i = 0; i < insyst.GetNSplines(); i++) {
+            throws.push_back(d_spline[i](rng));
+        }
+        // Covariance throw in FULL bin space (nbins normals rather than
+        // nbins_collapsed) so the bkg subchannels' variation is separable.
+        Eigen::VectorXf throwF = Eigen::VectorXf::Constant(nbins, 0);
+        for(int i = 0; i < nbins; i++)
+            throwF(i) = d_cov(rng);
+
+        for(size_t i = 0; i < throws.size(); i++) {
+            params(i + model.nparams) = throws.at(i);
+        }
+
+        Eigen::VectorXf full = FillSpectra(inconfig, inprop, insyst, model, params, true, var_index).Spec();
+        if(insyst.GetNCovar() != 0)
+            full += insyst.DecomposeFractionalCovarianceFull(inconfig, cvspec.Spec()) * throwF;
+
+        Eigen::VectorXf bkg_full = full.cwiseProduct(bkg_bin_mask);
+        Eigen::VectorXf sig_full = full - bkg_full;
+
+        Eigen::VectorXf sig_collapsed = CollapseMatrix(inconfig, sig_full, var_index);
+        Eigen::VectorXf bkg_collapsed = CollapseMatrix(inconfig, bkg_full, var_index);
+
+        // abs() before sqrt: covariance throws can drive bins negative.
+        return {PROspec(sig_collapsed, sig_collapsed.array().abs().sqrt()),
+                PROspec(bkg_collapsed, bkg_collapsed.array().abs().sqrt())};
+    }
+
     PROspec FillSplineRandomThrow(const PROconfig &inconfig, const PROpeller &inprop, const PROsyst &insyst,  const PROmodel &model,  const Eigen::VectorXf &cvparams, int spline, uint32_t seed, int other_index) {
         int nbins =  inconfig.m_num_variable_bins_total[other_index];
         Eigen::VectorXf spec = Eigen::VectorXf::Constant(nbins, 0);
