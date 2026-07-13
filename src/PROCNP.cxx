@@ -17,6 +17,14 @@ PROCNP::PROCNP(const std::string tag, const PROconfig &conin, const PROpeller &p
     fixed_index = -999;
     gradient_mode = GradientOneSidedFull; ///< Default for PROCNP: one-sided forward FD on full chi² (~2× faster).
 
+    // Snapshot the config's fit-region mask (if any). Unlike PROchi, CNP keeps
+    // zero-data bins (mu/2 substitution), so the mask is the ONLY exclusion
+    // mechanism here: the chi2 below is reduced to cnp_active_idx.
+    snapshotActiveBins(conin);
+    if(hasActiveBinMask())
+        for(Eigen::Index i = 0; i < datain.Spec().size(); ++i)
+            if(binActive(i)) cnp_active_idx.push_back(i);
+
     // Build the correlation matrix between priors if configured to
     if (conin.m_mcgen_correlations.size()) {
         correlated_systematics = true;
@@ -126,6 +134,17 @@ float PROCNP::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
 
     Eigen::VectorXf delta = CollapseMatrix(config, result.Spec()) - normdata;
 
+    // Fit-region mask: reduce to the active bins (Gaussian marginalization over the
+    // rest). Explicit temporaries — assigning an indexed view of M back to M aliases.
+    const Eigen::Map<const Eigen::Matrix<Eigen::Index, Eigen::Dynamic, 1>>
+        aidx(cnp_active_idx.data(), (Eigen::Index)cnp_active_idx.size());
+    if(hasActiveBinMask()) {
+        Eigen::MatrixXf Mred = M(aidx, aidx);
+        Eigen::VectorXf dred = delta(aidx);
+        M = std::move(Mred);
+        delta = std::move(dred);
+    }
+
     float pull = Pull(subvector2);
     float dmsq_penalty = 0;
     float covar_portion = delta.dot(M.llt().solve(delta));
@@ -188,6 +207,10 @@ float PROCNP::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
             }
             Eigen::MatrixXf gM = CollapsedScaledCovariance(config, syst->fractional_covariance, rl.Spec());
             gM.diagonal() += new_stat;
+            if(hasActiveBinMask()) {
+                Eigen::MatrixXf gMred = gM(aidx, aidx);
+                gM = std::move(gMred);
+            }
             return gM;
         };
 
@@ -199,6 +222,10 @@ float PROCNP::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
             PROspec rl = FillSpectra(config, peller, *syst, model, param_at, fs_cache,
                                      strat != EventByEvent, config.i_prime);
             delta_out = CollapseMatrix(config, rl.Spec()) - normdata;
+            if(hasActiveBinMask()) {
+                Eigen::VectorXf dred = delta_out(aidx);
+                delta_out = std::move(dred);
+            }
             return true;
         };
 
@@ -211,6 +238,10 @@ float PROCNP::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
                                      strat != EventByEvent, config.i_prime);
             Eigen::MatrixXf gM_lo = rebuild_gM_at(param_at, i_perturbed, rl);
             Eigen::VectorXf dl    = CollapseMatrix(config, rl.Spec()) - normdata;
+            if(hasActiveBinMask()) {
+                Eigen::VectorXf dlred = dl(aidx);
+                dl = std::move(dlred);
+            }
             Eigen::VectorXf nuis  = param_at.segment(model.nparams, nsyst);
             chi2_out = dl.dot(gM_lo.llt().solve(dl)) + Pull(nuis);
             return true;
@@ -322,6 +353,15 @@ float PROCNP::getSingleChannelChi(size_t global_channel_index, const PROspec &cv
     size_t nbin = config.m_channel_variable_bins[config.GetLocalChannelIndexFromGlobalChannelIndex(global_channel_index)][var_index].NBins();
     size_t startBin = config.GetCollapsedGlobalVariableBinStart(global_channel_index,var_index);
 
+    // Restrict to this channel's active bins (mask is snapshotted for i_prime only).
+    const bool masked = (var_index == (size_t)config.i_prime) && hasActiveBinMask();
+    std::vector<Eigen::Index> local_idx;
+    for(size_t b = 0; b < nbin; ++b)
+        if(!masked || binActive((Eigen::Index)(startBin + b)))
+            local_idx.push_back((Eigen::Index)(startBin + b));
+    if(local_idx.empty()) return 0.0f;
+    const Eigen::Map<const Eigen::Matrix<Eigen::Index, Eigen::Dynamic, 1>>
+        idx(local_idx.data(), (Eigen::Index)local_idx.size());
 
     Eigen::VectorXf normdata = shape_only
         ? data.Normalize(config,cv)
@@ -332,18 +372,15 @@ float PROCNP::getSingleChannelChi(size_t global_channel_index, const PROspec &cv
         collapsed_stat_covariance(i,i) = data.Spec()(i) == 0 ? collapsed_cv(i)/2 :
             3 / (1.0 / normdata(i) + 2.0 / collapsed_cv(i));
 
-    Eigen::MatrixXf sub_collapsed_stat_covariance = collapsed_stat_covariance.block(startBin, startBin, nbin, nbin);
-
-    Eigen::MatrixXf M(nbin, nbin);
+    Eigen::MatrixXf M;
     if(syst->GetNCovar()){
         Eigen::MatrixXf collapsed_full_covariance = CollapsedScaledCovariance(config, syst->fractional_covariance, cv.Spec());
-        Eigen::MatrixXf sub_collapsed_full_covariance = collapsed_full_covariance.block(startBin, startBin, nbin, nbin);
-        M = sub_collapsed_full_covariance + sub_collapsed_stat_covariance;
+        M = collapsed_full_covariance(idx, idx) + collapsed_stat_covariance(idx, idx);
     } else {
-        M = sub_collapsed_stat_covariance;
+        M = collapsed_stat_covariance(idx, idx);
     }
 
-    Eigen::VectorXf delta = (CollapseMatrix(config, cv.Spec()) - normdata).segment(startBin, nbin);
+    Eigen::VectorXf delta = (CollapseMatrix(config, cv.Spec()) - normdata)(idx);
     float covar_portion = delta.dot(M.llt().solve(delta));
     float value = covar_portion;
 

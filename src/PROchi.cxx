@@ -13,8 +13,17 @@ PROchi::PROchi(const std::string tag, const PROconfig &conin, const PROpeller &p
     fixed_index = -999;
     gradient_mode = GradientOneSidedFull; ///< Default for PROchi: one-sided forward FD on full chi² (~2× faster).
 
+    // An externally supplied posterior (PROjector projected mode) takes precedence over
+    // any XML-configured prior correlations: it already IS the full prior covariance.
+    if (systin->has_external_prior_cov) {
+        if (conin.m_mcgen_correlations.size())
+            log<LOG_WARNING>(L"%1% || Both an external prior covariance and XML prior correlations are set; using the external one.") % __func__;
+        correlated_systematics = true;
+        prior_covariance = systin->external_prior_cov;
+        prior_covariance_inv = prior_covariance.inverse();
+    }
     // Build the correlation matrix between priors if configured to
-    if (conin.m_mcgen_correlations.size()) {
+    else if (conin.m_mcgen_correlations.size()) {
         correlated_systematics = true;
         prior_covariance = Eigen::MatrixXf::Identity(syst->GetNSplines(), syst->GetNSplines());
         for (auto const &t: conin.m_mcgen_correlations) {
@@ -48,13 +57,17 @@ PROchi::PROchi(const std::string tag, const PROconfig &conin, const PROpeller &p
     //     error handling there.
     collapsed_stat_covariance = data.Spec().array().cwiseMax(1).matrix().asDiagonal();
 
+    // Snapshot the config's fit-region mask (if any): bins outside it never enter the
+    // chi2, independent of their data content. See PROmetric::snapshotActiveBins.
+    snapshotActiveBins(conin);
+
     // Default-mode cache: in non-shape_only mode normdata == data.Spec() is constant
     // across all operator() invocations, so non_empty_indices and the reduced stat
     // covariance are constant. Build them once here and reuse them.
     if(!shape_only) {
         const Eigen::VectorXf &nd = data.Spec();
         for(Eigen::Index i = 0; i < nd.size(); ++i)
-            if(nd(i) > 0) nec_indices.push_back(i);
+            if(nd(i) > 0 && binActive(i)) nec_indices.push_back(i);
         if(!nec_indices.empty()) {
             Eigen::VectorXf reduced_diag(nec_indices.size());
             for(size_t k = 0; k < nec_indices.size(); ++k)
@@ -134,9 +147,9 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
     Eigen::MatrixXf rstat_local;
     if(!nec_valid) {
         for(Eigen::Index i = 0; i < normdata.size(); ++i)
-            if(normdata(i) > 0) nei_local.push_back(i);
+            if(normdata(i) > 0 && binActive(i)) nei_local.push_back(i);
         if(nei_local.empty()) {
-            log<LOG_ERROR>(L"%1% || ERROR: All data bins are empty!") % __func__;
+            log<LOG_ERROR>(L"%1% || ERROR: All (active) data bins are empty!") % __func__;
             throw std::runtime_error("All data bins are empty in PROchi.");
         }
         const Eigen::Map<const Eigen::Matrix<Eigen::Index, Eigen::Dynamic, 1>>
@@ -392,21 +405,29 @@ float PROchi::getSingleChannelChi(size_t global_channel_index, const PROspec & c
     size_t nbin = config.m_channel_variable_bins[config.GetLocalChannelIndexFromGlobalChannelIndex(global_channel_index)][var_index].NBins();
     size_t startBin = config.GetCollapsedGlobalVariableBinStart(global_channel_index, var_index);
 
+    // Restrict to this channel's active bins. Only meaningful for the fitting variable
+    // (the mask snapshot is for i_prime); other variables see every bin active.
+    const bool masked = (var_index == (size_t)config.i_prime) && hasActiveBinMask();
+    std::vector<Eigen::Index> local_idx;
+    for(size_t b = 0; b < nbin; ++b)
+        if(!masked || binActive((Eigen::Index)(startBin + b)))
+            local_idx.push_back((Eigen::Index)(startBin + b));
+    if(local_idx.empty()) return 0.0f;
+    const Eigen::Map<const Eigen::Matrix<Eigen::Index, Eigen::Dynamic, 1>>
+        idx(local_idx.data(), (Eigen::Index)local_idx.size());
 
     if(shape_only)
         collapsed_stat_covariance = (data.Normalize(config,cv)).matrix().asDiagonal();
 
-    Eigen::MatrixXf M(nbin, nbin);
+    Eigen::MatrixXf M;
     if(syst->GetNCovar()){
         Eigen::MatrixXf collapsed_full_covariance = CollapsedScaledCovariance(config, syst->fractional_covariance, cv.Spec());
-        Eigen::MatrixXf sub_collapsed_full_covariance = collapsed_full_covariance.block(startBin, startBin, nbin, nbin);
-        Eigen::MatrixXf sub_collapsed_stat_covariance = collapsed_stat_covariance.block(startBin, startBin, nbin, nbin);
-        M = sub_collapsed_full_covariance + sub_collapsed_stat_covariance;
+        M = collapsed_full_covariance(idx, idx) + collapsed_stat_covariance(idx, idx);
     } else {
-        M = collapsed_stat_covariance.block(startBin, startBin, nbin, nbin);
+        M = collapsed_stat_covariance(idx, idx);
     }
 
-    Eigen::VectorXf delta = (CollapseMatrix(config, cv.Spec()) - (shape_only ? data.Normalize(config,cv) : data.Spec())).segment(startBin, nbin);
+    Eigen::VectorXf delta = (CollapseMatrix(config, cv.Spec()) - (shape_only ? data.Normalize(config,cv) : data.Spec()))(idx);
     float covar_portion = delta.dot(M.llt().solve(delta));
     float value = covar_portion;//pull;
 

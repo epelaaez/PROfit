@@ -376,6 +376,16 @@ namespace PROfit{
 
             std::vector<std::vector<std::pair<float,float>>> m_variable_bin_to_edges;
 
+            /** @brief Runtime-only fit region in COLLAPSED bin space, one mask per variable.
+             *  @details Empty outer/inner vector = no mask = every bin active. Set via
+             *  SetActiveBins() BEFORE any PROmetric is constructed: metrics snapshot the
+             *  mask in their constructors, so later changes are not seen by existing
+             *  metrics (by design — the mask is read-only during fitting and may be read
+             *  concurrently by FC/MCMC worker threads). Deliberately NOT hashed and NOT
+             *  serialized: it is per-run analysis state (PROjector, future bin-off
+             *  studies), not part of the analysis definition. */
+            std::vector<std::vector<char>> m_variable_active_bins_collapsed;
+
             std::vector<Eigen::MatrixXf> variable_collapsing_matrices;
             // Sparse companions to variable_collapsing_matrices (one nonzero per row).
             // Used by CollapseMatrix in the chi^2 inner loop; built once in construct_variable_collapsing_matrices.
@@ -526,6 +536,28 @@ namespace PROfit{
              */
             std::string GetChannelXAxisTitle(size_t channel_index) const;
             std::string GetChannelXAxisTitle(size_t channel_index, size_t other_index) const;
+
+            /**
+             * @brief Install a runtime fit-region mask over the collapsed bins of one variable.
+             * @details Fatal error if the mask size does not match the variable's collapsed bin
+             * count or if every bin is inactive. Must be called before metric construction to
+             * take effect (metrics snapshot the mask in their constructors).
+             * @param var_index  Variable (binning) index.
+             * @param mask       One entry per collapsed bin; nonzero = active (included in fits).
+             */
+            void SetActiveBins(size_t var_index, const std::vector<char> &mask);
+
+            /** @brief Remove all runtime fit-region masks (every bin active again). */
+            void ClearActiveBins();
+
+            /** @brief True if a fit-region mask has been installed for this variable. */
+            bool HasActiveBins(size_t var_index) const;
+
+            /** @brief True if the collapsed bin is in the fit region (always true when no mask is set). */
+            bool IsBinActive(size_t var_index, size_t collapsed_bin) const;
+
+            /** @brief Number of active collapsed bins for this variable (= total bins when no mask is set). Use for dof counting. */
+            size_t NActiveBins(size_t var_index) const;
 
             /* Function: return the unit string for a channel's variable
              * (e.g. "MeV"), preferring the per-variable <bins unit="..."> entry

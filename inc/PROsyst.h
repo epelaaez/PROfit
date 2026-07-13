@@ -281,6 +281,8 @@ namespace PROfit {
             std::vector<int> spline_binnings;        ///< Binning-scheme index for each spline.
             Eigen::VectorXf spline_priors;           ///< Prior width (sigma) for each spline nuisance parameter.
             Eigen::VectorXf spline_centers;          ///< Prior centre for each spline nuisance parameter.
+            bool has_external_prior_cov = false;     ///< If true, metrics use external_prior_cov as a fully correlated Gaussian prior (PROjector).
+            Eigen::MatrixXf external_prior_cov;      ///< Absolute prior covariance over the spline nuisance parameters (used with spline_centers).
             std::map<std::string, Cov2SplineDebugInfo> cov2spline_debug_info; ///< Debug info per "covariance_to_spline" systematic, keyed by parent systname.
         private:
             std::map<std::string, std::pair<size_t, SystType>> syst_map; ///< Map from systematic name to (index, type).

@@ -20,6 +20,7 @@
 #include "PROseed.h"
 #include "PROversion.h"
 #include "PROplot.h"
+#include "PROjector.h"
 #include "PRObench.h"
 
 #include "CLI11.h"
@@ -283,6 +284,7 @@ int main(int argc, char* argv[])
     std::vector<std::string> syst_list, systs_excluded;
     bool MCMC_prefit_errors = false;
     bool systs_only = false;
+    PROjectorRunConfig projector_config; // Two-stage pre-fit / projected fit (PROjector).
     bool use_fake_data = false;
     bool use_probe = false;
     int n_probe_chunks = 1; // 1 = no chunking by default. Opt in via --probe-chunks N when physics is the wall-time bottleneck.
@@ -397,6 +399,30 @@ int main(int argc, char* argv[])
     app.add_flag("--no-xrootd",noxrootd,"Do not use XRootD, which is enabled by default");
     app.add_flag("--syst-only", systs_only, "Force fitting over nuisance parameters only, currently just --fix's them");
     app.add_flag("--area-norm", area_normalized, "Make area normalized histograms.");
+
+    // PROjector: two-stage pre-fit / projected fit (see inc/PROjector.h for the scheme).
+    CLI::Option *projector_prefit_opt = app.add_option("--projector-prefit", projector_config.prefit_pattern,
+        "PROjector stage 1: wildcard (substring) matching the subchannels to PRE-FIT (whole "
+        "channels only, e.g. a detector name). Covariance systematics are promoted to "
+        "eigenmode splines, the data is masked to the matched channels, physics parameters "
+        "are fixed at CV, and running the 'global' subcommand writes the nuisance posterior "
+        "to <tag>_<output>_PROjector_constraint.bin.");
+    app.add_option("--projector", projector_config.constraint_file,
+        "PROjector stage 2: path to a constraint file from --projector-prefit. The pre-fit "
+        "channels are masked OUT and the saved nuisance posterior is used as a correlated "
+        "prior; any subcommand (global, profile, surface, plot, ...) then runs the projected "
+        "fit. Requires the same XML/binaries and systematic selection as the pre-fit.")
+        ->excludes(projector_prefit_opt);
+    app.add_option("--projector-knobs", projector_config.num_decomp_knobs,
+        "PROjector: number of covariance eigenmodes promoted to spline knobs in the pre-fit "
+        "(-1 = all positive modes, exact, no residual). Stored in the constraint file and "
+        "reused automatically in stage 2.")->default_val(-1);
+    app.add_option("--projector-keep-cov", projector_config.keep_covariance,
+        "PROjector: covariance systematics to NOT promote (they stay as unconstrained "
+        "covariance in both stages, e.g. detector-local systematics with no near/far correlation).");
+    app.add_flag("--projector-float-physics", projector_config.float_physics,
+        "PROjector pre-fit: float the physics parameters instead of fixing them at CV; the "
+        "saved posterior is then the physics-marginalized nuisance covariance.");
 
     auto* shape_flag = app.add_flag("--shapeonly", shapeonly, "Run a shape only analysis");
     auto* rate_flag = app.add_flag("--rateonly", rateonly, "Run a rate only analysis");
@@ -1028,33 +1054,12 @@ int main(int argc, char* argv[])
                 Eigen::MatrixXf L_chol = variable_systs[io].DecomposeFractionalCovariance(config, cv_for_L.Spec());
 
                 Eigen::VectorXf throws = fakedataparams;
+                // Shared truncated-Gaussian helper: samples each spline's actual prior
+                // N(center, sigma) within its restrict bounds, OOB-safe (never spins
+                // forever on unreachable bounds; clamps to the in-range value nearest
+                // the prior center and warns).
                 for (size_t i = 0; i < nspline; ++i) {
-                    // Guard against spline_has_restrict / restrict_lo / restrict_hi being
-                    // shorter than the spline list (e.g. covariance_to_spline knobs that
-                    // don't populate them) -- an OOB read here gives garbage bounds.
-                    const bool has_r = i < variable_systs[io].spline_has_restrict.size()
-                                       && variable_systs[io].spline_has_restrict[i];
-                    float tlo = has_r ? variable_systs[io].spline_restrict_lo[i] : variable_systs[io].spline_lo[i];
-                    float thi = has_r ? variable_systs[io].spline_restrict_hi[i] : variable_systs[io].spline_hi[i];
-                    if (tlo > thi) { const float t = tlo; tlo = thi; thi = t; }  // tolerate inverted bounds
-                    // Rejection-sample N(0,1) truncated to [tlo, thi], but NEVER loop forever:
-                    // if the range is unreachable (deep tail / degenerate / bad restrict),
-                    // fall back to the in-range value nearest the CV (0) and warn which spline.
-                    const int max_attempts = 10000;
-                    int attempts = 0;
-                    float x = d(PROseed::global_rng);
-                    while ((x < tlo || x > thi) && ++attempts < max_attempts)
-                        x = d(PROseed::global_rng);
-                    if (x < tlo || x > thi) {
-                        x = (0.0f < tlo) ? tlo : (0.0f > thi ? thi : 0.0f);
-                        const std::string sname = i < variable_systs[io].spline_names.size()
-                            ? variable_systs[io].spline_names[i] : ("spline#" + std::to_string(i));
-                        log<LOG_WARNING>(L"%1% || Pseudo-experiment: spline '%2%' (index %3%) has throw bounds "
-                                         L"[%4%, %5%] unreachable by a unit Gaussian after %6% draws; clamping to %7%. "
-                                         L"Check its knobvals / restrict attribute.")
-                            % __func__ % sname.c_str() % (int)i % tlo % thi % max_attempts % x;
-                    }
-                    throws((int)(i + nphys)) = x;
+                    throws((int)(i + nphys)) = ThrowRestrictedSplinePull(variable_systs[io], i, PROseed::global_rng, d);
                 }
 
                 const int nbins_coll = config.m_num_variable_bins_total_collapsed[io];
@@ -1161,6 +1166,20 @@ int main(int argc, char* argv[])
         }
     }
 
+    //***********************************************************************
+    //******************** PROjector pre-fit / projected fit ****************
+    //***********************************************************************
+    // Everything PROjector changes about the inputs (covariance->spline promotion, data
+    // masking, prior installation, physics fixing) happens inside this one helper so it
+    // is in place before CVParams sizing, the bounds/--fix section, and the metric
+    // construction below. See inc/PROjector.h for the scheme.
+    projector_config.force = force;
+    if(projector_config.active()) {
+        if(!PROjectorSetup(projector_config, config, variable_systs[config.i_prime],
+                    variable_data, data, fakedataparams, fixed_params, *model, chi2))
+            return 1;
+    }
+
     // Empty-bin sanity check: build a default-CV spectrum and look for collapsed bins
     // that would make stat-only / CNP statistics singular (CV<=0) or untrustworthy (CV<1).
     {
@@ -1176,6 +1195,9 @@ int main(int argc, char* argv[])
 
         int n_zero = 0, n_tiny = 0;
         for(Eigen::Index b = 0; b < collapsed_cv.size(); ++b) {
+            // Bins outside the fit region (PROjector / future bin-off masks) never enter
+            // a chi2, so an empty CV there is not a problem.
+            if(!config.IsBinActive(io, (size_t)b)) continue;
             if(collapsed_cv(b) <= 0.0f) {
                 log<LOG_ERROR>(L"%1% || Default-CV collapsed bin %2% has %3% expected events (<=0). Empty-bin would make CNP/stat covariance singular.") % __func__ % (long)b % collapsed_cv(b);
                 ++n_zero;
@@ -1641,8 +1663,12 @@ int main(int argc, char* argv[])
             for(size_t i = 0; i < 1000; ++i) {
                 Eigen::VectorXf throwp = fakeDataParams;
                 Eigen::VectorXf throwC = Eigen::VectorXf::Constant(config.m_num_variable_bins_total_collapsed[config.i_prime], 0);
+                // Shared truncated-Gaussian helper: samples each spline's actual prior
+                // N(center, sigma) within its restrict bounds (the raw d(rng) here
+                // ignored both, which was wrong for XML priors and for PROjector's
+                // constrained posterior).
                 for(size_t i = 0; i < metric->GetSysts().GetNSplines(); i++)
-                    throwp(i+N_phys_params) = d(PROseed::global_rng);
+                    throwp(i+N_phys_params) = ThrowRestrictedSplinePull(metric->GetSysts(), i, PROseed::global_rng, d);
                 for(size_t i = 0; i < config.m_num_variable_bins_total_collapsed[config.i_prime]; i++)
                     throwC(i) = d(PROseed::global_rng);
                 bool binned = (eventbyevent ? PROmetric::EventByEvent : PROmetric::BinnedChi2) != 0;
@@ -2786,6 +2812,14 @@ int main(int argc, char* argv[])
         TFile fout((final_output_tag+"_PROglobal.root").c_str(), "RECREATE");
         for(const auto &[n, o] : drawn_objs)
             o->Write(n.c_str());
+
+        // PROjector pre-fit: the global fit above WAS the pre-fit (masked to the matched
+        // channels, physics fixed at CV unless floated); save its nuisance posterior.
+        if(projector_config.prefit_mode()) {
+            if(!PROjectorSaveConstraint(final_output_tag+"_PROjector_constraint.bin", projector_config,
+                        config, *metric, fitres.fitter.best_fit, fitres.chi2, global_fixed, chi2))
+                return 1;
+        }
     }
 
     if(*promcmc_command) {
@@ -3474,7 +3508,8 @@ std::map<std::string, TObject *> draw_fit_result(const PROconfig &config, const 
     }
 
     if(fitres.fitter.best_fit.size()) {
-        std::string hname = "#chi^{2}/nbins = " + to_string(fitres.chi2) + "/" + to_string(config.m_num_variable_bins_total_collapsed[config.i_prime]);
+        // NActiveBins == total bins unless a fit-region mask (e.g. PROjector) is installed.
+        std::string hname = "#chi^{2}/nbins = " + to_string(fitres.chi2) + "/" + to_string(config.NActiveBins(config.i_prime));
         PROspec bf = FillSpectra(config, prop, syst, model, fitres.fitter.best_fit, true, config.i_prime);
         // Concatenated bins across all channels share no common x-axis, so use bin-index axis.
         TH1D post_hist("ph", hname.c_str(), config.m_num_variable_bins_total_collapsed[config.i_prime], 0, config.m_num_variable_bins_total_collapsed[config.i_prime]);

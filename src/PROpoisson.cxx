@@ -13,9 +13,13 @@ namespace {
     // vectorised 0*log(0) would be NaN. A non-positive prediction with data in
     // the bin is infinitely disfavored in principle; it gets a large finite
     // penalty so the minimizer can still move away from it.
-    float BakerCousinsChi2(const Eigen::VectorXf &vmc, const Eigen::VectorXf &vdata) {
+    // When a fit-region mask is given, bin b is skipped unless active[b + offset]
+    // is nonzero (offset supports channel-local segments with a global mask).
+    float BakerCousinsChi2(const Eigen::VectorXf &vmc, const Eigen::VectorXf &vdata,
+                           const std::vector<char> *active = nullptr, Eigen::Index offset = 0) {
         float sum = 0.0f;
         for(Eigen::Index b = 0; b < vmc.size(); ++b) {
+            if(active && !active->empty() && !(*active)[(size_t)(b + offset)]) continue;
             const float s = vmc(b), n = vdata(b);
             if(n <= 0.0f) {
                 if(s > 0.0f) sum += s;
@@ -31,8 +35,12 @@ namespace {
 
 
 PROpoisson::PROpoisson(const std::string tag, const PROconfig &conin, const PROpeller &pin, const PROsyst *systin, const PROmodel &modelin, const PROdata &datain, EvalStrategy strat, bool shape_only, std::vector<float> physics_param_fixed) : PROmetric(), model_tag(tag), config(conin), peller(pin), syst(systin), model(modelin), data(datain), strat(strat), shape_only(shape_only), physics_param_fixed(physics_param_fixed), correlated_systematics(false) {
-    last_value = 0.0; last_param = Eigen::VectorXf::Zero(model.nparams+syst->GetNSplines()); 
+    last_value = 0.0; last_param = Eigen::VectorXf::Zero(model.nparams+syst->GetNSplines());
     fixed_index = -999;
+
+    // Snapshot the config's fit-region mask (if any); masked bins are skipped in
+    // the Baker-Cousins sum and contribute zero gradient.
+    snapshotActiveBins(conin);
 
     if(syst->GetNCovar()) {
         log<LOG_WARNING>(L"%1% || Warning: Using a systematics object with covariance systematics with"
@@ -115,7 +123,7 @@ float PROpoisson::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &grad
         ? data.Normalize(config,result)
         : data.Spec();
     const Eigen::VectorXf vmc = CollapseMatrix(config, result.Spec());
-    float poisson = BakerCousinsChi2(vmc, vdata);
+    float poisson = BakerCousinsChi2(vmc, vdata, &active_bins);
     float pull = Pull(subvector2);
     float value = poisson + pull;
 
@@ -154,6 +162,9 @@ float PROpoisson::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &grad
             // Guard against zero/negative s entries.
             w_base.resize(vmc_base.size());
             for (long b = 0; b < vmc_base.size(); ++b) {
+                // Masked-out bins get zero sensitivity so they contribute nothing to
+                // the linearised chain rule w_base . ds/dtheta.
+                if (!binActive(b)) { w_base(b) = 0.0f; continue; }
                 const float s = vmc_base(b);
                 w_base(b) = (s > 0.0f) ? 2.0f * (1.0f - vdata_base(b) / s) : 0.0f;
             }
@@ -189,7 +200,7 @@ float PROpoisson::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &grad
             // (shape_only re-normalises to perturbed result like the original).
             const Eigen::VectorXf vdata_l = shape_only ? data.Normalize(config, rl) : data.Spec();
             const Eigen::VectorXf vmc_l   = CollapseMatrix(config, rl.Spec());
-            float pois = BakerCousinsChi2(vmc_l, vdata_l);
+            float pois = BakerCousinsChi2(vmc_l, vdata_l, &active_bins);
             Eigen::VectorXf nuis = param_at.segment(nparams - nsyst, nsyst);
             chi2_out = pois + Pull(nuis);
             return true;
@@ -305,11 +316,14 @@ float PROpoisson::getSingleChannelChi(size_t global_channel_index, const PROspec
 
 
     //const Eigen::VectorXf &vdata = data.Spec().segment(startBin, nbin);
-    const Eigen::VectorXf vdata = (shape_only 
+    const Eigen::VectorXf vdata = (shape_only
         ? data.Normalize(config,cv)
         : data.Spec()).segment(startBin, nbin);
     const Eigen::VectorXf vmc = CollapseMatrix(config, cv.Spec()).segment(startBin, nbin);
-    float poisson = BakerCousinsChi2(vmc, vdata);
+    // Mask applies only to the fitting variable (mask snapshot is for i_prime);
+    // startBin offsets the channel-local segment into the global mask.
+    const bool masked = (var_index == (size_t)config.i_prime) && hasActiveBinMask();
+    float poisson = BakerCousinsChi2(vmc, vdata, masked ? &active_bins : nullptr, (Eigen::Index)startBin);
     //float pull = Pull(subvector2);
     float value = poisson; //+ pull
 

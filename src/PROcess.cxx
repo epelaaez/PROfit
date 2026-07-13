@@ -493,18 +493,26 @@ namespace PROfit {
         float thi = has_r ? insyst.spline_restrict_hi[i] : insyst.spline_hi[i];
         if (tlo > thi) { const float t = tlo; tlo = thi; thi = t; }
 
+        // Sample the spline's ACTUAL prior N(center, sigma), not a hardcoded N(0,1):
+        // center/sigma default to 0/1 (identical behaviour for legacy configs) but honor
+        // XML-configured priors and PROjector's constrained posterior. Note only the
+        // MARGINAL width is sampled here — prior correlations (XML correlations or a
+        // PROjector external prior covariance) are not reflected in per-spline throws.
+        const float mu  = i < (size_t)insyst.spline_centers.size() ? insyst.spline_centers((Eigen::Index)i) : 0.0f;
+        const float sig = i < (size_t)insyst.spline_priors.size() ? std::abs(insyst.spline_priors((Eigen::Index)i)) : 1.0f;
+
         const int max_attempts = 10000;
         int attempts = 0;
-        float x = d(rng);
+        float x = mu + sig * d(rng);
         while ((x < tlo || x > thi) && ++attempts < max_attempts)
-            x = d(rng);
+            x = mu + sig * d(rng);
         if (x < tlo || x > thi) {
-            x = (0.0f < tlo) ? tlo : (0.0f > thi ? thi : 0.0f);
+            x = (mu < tlo) ? tlo : (mu > thi ? thi : mu);
             const std::string sname = i < insyst.spline_names.size()
                 ? insyst.spline_names[i] : ("spline#" + std::to_string(i));
             log<LOG_WARNING>(L"%1% || spline '%2%' (index %3%) has throw bounds [%4%, %5%] unreachable "
-                             L"by a unit Gaussian after %6% draws; clamping to %7%. Check its knobvals / restrict attribute.")
-                % __func__ % sname.c_str() % (int)i % tlo % thi % max_attempts % x;
+                             L"by its N(%6%, %7%) prior after %8% draws; clamping to %9%. Check its knobvals / restrict attribute.")
+                % __func__ % sname.c_str() % (int)i % tlo % thi % mu % sig % max_attempts % x;
         }
         return x;
     }
