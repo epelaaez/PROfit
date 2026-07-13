@@ -106,6 +106,7 @@ namespace PROmesh {
         std::vector<MeshCell>                         leaves;       ///< Un-refined cells of the final mesh — drives AMR visualisation.
         int              finest_nx = 0;               ///< Total finest-integer span on x  (= initial_nx × 2^max_levels).
         int              finest_ny = 0;               ///< Total finest-integer span on y.
+        int              max_levels = 0;              ///< AMR refinement depth actually used (clamped opts.max_levels). finest_nx = initial_nx << max_levels.
         float            x_lo = 0.0f, x_hi = 0.0f;    ///< Scan bounds in transformed (log/lin) space, as passed to run_amr.
         float            y_lo = 0.0f, y_hi = 0.0f;
         float            min_chi2 = 0.0f;             ///< Global min χ² seen across all evaluations (NOT offset).

@@ -53,15 +53,17 @@ static size_t resolve_axis_index(const std::string &name,
         loc != model.param_names.end()) {
         return std::distance(model.param_names.begin(), loc);
     }
+    // Spline axes index the FULL [physics | spline] parameter vector that the
+    // callers pin/bound, so the spline position must be offset by nparams.
     if (auto loc = std::find(systs.spline_names.begin(), systs.spline_names.end(), name);
         loc != systs.spline_names.end()) {
-        return std::distance(systs.spline_names.begin(), loc);
+        return model.nparams + std::distance(systs.spline_names.begin(), loc);
     }
     for (const auto &[xml_name, plot_name] : config.m_mcgen_variation_plotname_map) {
         if (name == plot_name) {
             if (auto loc = std::find(systs.spline_names.begin(), systs.spline_names.end(), xml_name);
                 loc != systs.spline_names.end()) {
-                return std::distance(systs.spline_names.begin(), loc);
+                return model.nparams + std::distance(systs.spline_names.begin(), loc);
             }
         }
     }
@@ -317,10 +319,16 @@ AdaptiveFCResult run_adaptive_fc(
         silent_cfg.push_back({n_cells, "_silent"});
         MultiPROgressBar silent_progress(silent_cfg);
 
+        // Throw-invariant: CV spectrum + covariance decomposition (an SVD)
+        // hoisted out of the per-throw loop.
+        PROspec brazil_cv = FillSpectra(config, prop, systs, *model, fakeDataParams,
+                                        acfg.binned, config.i_prime);
+        Eigen::MatrixXf brazil_L = systs.DecomposeFractionalCovariance(config, brazil_cv.Spec());
+
         for (int t_new = 0; t_new < n_new; ++t_new) {
             const int t_abs = n_existing + t_new;
             PROdata throw_data = generate_pseudo_experiment_data(
-                config, prop, systs, *model, fakeDataParams, acfg.binned, proseed);
+                config, prop, systs, *model, fakeDataParams, acfg.binned, brazil_L, proseed);
 
             AsimovObs obs = compute_asimov_obs(
                 config, prop, systs, *model, fitconfig, throw_data,

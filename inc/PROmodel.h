@@ -190,15 +190,22 @@ public:
      * @param param_name  The parameter name as listed in param_names.
      * @param value       The parameter value in the fitter's internal space.
      * @return The value in linear space: 10^value if is_log10[i] is true, otherwise value unchanged.
+     * @details The const char* overload is the one string literals bind to; it does an
+     * allocation-free linear scan over the (2-7 entry) name list — this runs inside
+     * get_probs / model_constraint on every metric evaluation, where the previous
+     * std::string temporary + hash lookup per call was measurable.
      */
-    inline float maybe_convert_log(const std::string &param_name, float value) const {
-        auto it = param_name_to_index.find(param_name);
-        if(it == param_name_to_index.end()){
-            log<LOG_ERROR>(L"%1% || Parameter name '%2%' not found in this model. Terminating.") % __func__ % param_name.c_str();
-            exit(EXIT_FAILURE);
+    inline float maybe_convert_log(const char *param_name, float value) const {
+        for(size_t i = 0; i < param_names.size(); ++i) {
+            if(param_names[i] == param_name)
+                return is_log10[i] ? std::pow(10.0f, value) : value;
         }
-        size_t idx = it->second;
-        return is_log10[idx] ? std::pow(10.0f, value) : value;
+        log<LOG_ERROR>(L"%1% || Parameter name '%2%' not found in this model. Terminating.") % __func__ % param_name;
+        exit(EXIT_FAILURE);
+    }
+
+    inline float maybe_convert_log(const std::string &param_name, float value) const {
+        return maybe_convert_log(param_name.c_str(), value);
     }
 
     virtual ~PROmodel(){}

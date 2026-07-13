@@ -6,6 +6,7 @@
 #include "PROlog.h"
 #include "PROtocall.h"
 #include <Eigen/Eigen>
+#include <mutex>
 #include <random>
 
 namespace PROfit {
@@ -67,7 +68,8 @@ namespace PROfit {
                 }
 
                 log<LOG_INFO>(L"%1% || Converting spline '%2%' to covariance matrix using spline2cov") % __func__ % syst.systname.c_str();
-                Eigen::MatrixXf frac_cov = spline2cov(spline_idx, config, prop, *model, cvparams, 42);
+                // Disjoint seed range per converted spline (spline2cov draws 500 throws at seed..seed+499).
+                Eigen::MatrixXf frac_cov = spline2cov(spline_idx, config, prop, *model, cvparams, 42u + (uint32_t)spline_idx * 500u);
                 spline_priors  = saved_priors;
                 spline_centers = saved_centers;
                 Eigen::MatrixXf corr = GenerateCorrMatrix(frac_cov);
@@ -254,41 +256,38 @@ namespace PROfit {
         PROsyst ret;
         Eigen::VectorXf tmp_priors = spline_priors;
         Eigen::VectorXf tmp_centers = spline_centers;
-        for(const auto &[name, spair]: syst_map) {
+        // Iterate in the ORIGINAL spline/covariance order, not syst_map's
+        // alphabetical order: spline position defines the parameter-vector
+        // layout, so a reordered copy would silently misalign any parameter or
+        // seed vector built against this object.
+        for(size_t idx = 0; idx < spline_names.size(); ++idx) {
+            const std::string &name = spline_names[idx];
             if(std::find(systs.begin(), systs.end(), name) != systs.end()) continue;
-            const auto &[idx, stype] = spair;
-            switch(stype) {
-                case SystType::Spline:
-                    {
-                        ret.syst_map[name] = std::make_pair(ret.splines.size(), SystType::Spline);
-                        ret.spline_names.push_back(name);
-                        Spline spline_copy;//Create explicit deep copy of the Spline
-                        spline_copy.bins = splines[idx].bins;
-                        spline_copy.segments_per_bin = splines[idx].segments_per_bin;
-                        spline_copy.segments = splines[idx].segments;  // vector copy
-                        ret.splines.push_back(std::move(spline_copy));
-                        ret.spline_hi.push_back(spline_hi[idx]);
-                        ret.spline_lo.push_back(spline_lo[idx]);
-                        ret.spline_has_restrict.push_back(spline_has_restrict[idx]);
-                        ret.spline_restrict_lo.push_back(spline_restrict_lo[idx]);
-                        ret.spline_restrict_hi.push_back(spline_restrict_hi[idx]);
-                        ret.spline_binnings.push_back(spline_binnings[idx]);
-                        tmp_priors(ret.n_splines) = spline_priors(idx);
-                        tmp_centers(ret.n_splines) = spline_centers(idx);
-                        ++ret.n_splines;
-                        break;
-                    }
-                case SystType::Covariance:
-                    ret.syst_map[name] = std::make_pair(ret.covmat.size(), SystType::Covariance);
-                    ret.covar_names.push_back(name);
-                    ret.covmat.push_back(covmat[idx]);
-                    ret.corrmat.push_back(corrmat[idx]);
-                    ++ret.n_covar;
-                    break;
-                default:
-                    log<LOG_ERROR>(L"%1% || Unrecognized syst type %2% for syst %3%.") % __func__ % static_cast<int>(stype) % name.c_str();
-                    break;
-            }
+            ret.syst_map[name] = std::make_pair(ret.splines.size(), SystType::Spline);
+            ret.spline_names.push_back(name);
+            Spline spline_copy;//Create explicit deep copy of the Spline
+            spline_copy.bins = splines[idx].bins;
+            spline_copy.segments_per_bin = splines[idx].segments_per_bin;
+            spline_copy.segments = splines[idx].segments;  // vector copy
+            ret.splines.push_back(std::move(spline_copy));
+            ret.spline_hi.push_back(spline_hi[idx]);
+            ret.spline_lo.push_back(spline_lo[idx]);
+            ret.spline_has_restrict.push_back(spline_has_restrict[idx]);
+            ret.spline_restrict_lo.push_back(spline_restrict_lo[idx]);
+            ret.spline_restrict_hi.push_back(spline_restrict_hi[idx]);
+            ret.spline_binnings.push_back(spline_binnings[idx]);
+            tmp_priors(ret.n_splines) = spline_priors(idx);
+            tmp_centers(ret.n_splines) = spline_centers(idx);
+            ++ret.n_splines;
+        }
+        for(size_t idx = 0; idx < covar_names.size(); ++idx) {
+            const std::string &name = covar_names[idx];
+            if(std::find(systs.begin(), systs.end(), name) != systs.end()) continue;
+            ret.syst_map[name] = std::make_pair(ret.covmat.size(), SystType::Covariance);
+            ret.covar_names.push_back(name);
+            ret.covmat.push_back(covmat[idx]);
+            ret.corrmat.push_back(corrmat[idx]);
+            ++ret.n_covar;
         }
         ret.spline_priors = tmp_priors.segment(0, ret.n_splines);
         ret.spline_centers = tmp_centers.segment(0, ret.n_splines);
@@ -308,7 +307,8 @@ namespace PROfit {
                 case SystType::Spline: {
                                            ret.syst_map[name] = std::make_pair(ret.covmat.size(), SystType::Covariance);
                                            ret.covar_names.push_back(name);
-                                           Eigen::MatrixXf cov = spline2cov(idx, config, prop, model,params, seed);
+                                           // Disjoint seed range per spline (spline2cov draws 500 throws at seed..seed+499).
+                                           Eigen::MatrixXf cov = spline2cov(idx, config, prop, model,params, seed + (uint32_t)idx * 500u);
                                            Eigen::MatrixXf cor = GenerateCorrMatrix(cov);
                                            ret.covmat.push_back(cov);
                                            ret.corrmat.push_back(cor);
@@ -336,8 +336,11 @@ namespace PROfit {
         Eigen::MatrixXf cv = FillSpectra(config, prop, *this, model, params , true, other_index).Spec();
 
         std::vector<Eigen::VectorXf> specs;
+        // Distinct seed per throw: FillSplineRandomThrow now uses its seed
+        // argument on every call (it used to hold a function-local static RNG
+        // that ignored the seed after the first-ever call).
         for(size_t i = 0; i < 500; ++i){
-            specs.push_back(FillSplineRandomThrow(config, prop, *this, model, params, spline, seed, other_index).Spec());
+            specs.push_back(FillSplineRandomThrow(config, prop, *this, model, params, spline, seed + (uint32_t)i, other_index).Spec());
         }
 
         int nbins = config.m_num_variable_bins_total[other_index];
@@ -1117,8 +1120,17 @@ namespace PROfit {
     }
 
     Eigen::MatrixXf PROsyst::DecomposeFractionalCovariance(const PROconfig &config, const Eigen::VectorXf &cv_vec) const {
-        if(cv_vec.size() == last_decomp_spec.size() && cv_vec == last_decomp_spec)
-          return last_decomp_mat;
+        // The mutable last_decomp_* cache is written from this const method;
+        // metric clones and throw helpers share PROsyst objects across
+        // threads, so guard the cache. Function-local mutex keeps PROsyst
+        // copyable; contention is irrelevant on this cold path (the SVD below
+        // dominates).
+        static std::mutex decomp_cache_mutex;
+        {
+            std::lock_guard<std::mutex> lk(decomp_cache_mutex);
+            if(cv_vec.size() == last_decomp_spec.size() && cv_vec == last_decomp_spec)
+                return last_decomp_mat;
+        }
         Eigen::MatrixXf full_cov = cv_vec.asDiagonal() * fractional_covariance * cv_vec.asDiagonal();
         Eigen::MatrixXf coll = other_index < 0 ? CollapseMatrix(config, full_cov) : CollapseMatrix(config, full_cov, other_index);
         /*Eigen::LDLT<Eigen::MatrixXf> ldlt(coll);
@@ -1176,8 +1188,11 @@ namespace PROfit {
             fallback_sampler.col(i) = U.col(keep[i]) * std::sqrt(S(keep[i]));
         }
 
-        last_decomp_spec = cv_vec;
-        last_decomp_mat = fallback_sampler;
+        {
+            std::lock_guard<std::mutex> lk(decomp_cache_mutex);
+            last_decomp_spec = cv_vec;
+            last_decomp_mat = fallback_sampler;
+        }
         return fallback_sampler;
 
     }

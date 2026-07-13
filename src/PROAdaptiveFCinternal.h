@@ -60,6 +60,7 @@ PROdata generate_pseudo_experiment_data(
     const PROmodel  &model,
     const Eigen::VectorXf &fakeDataParams,
     bool binned,
+    const Eigen::MatrixXf &L_chol,
     PROseed &proseed);
 
 // --------------------------------------------------------------------

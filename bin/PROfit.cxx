@@ -362,14 +362,14 @@ int main(int argc, char* argv[])
     app.add_option("--fit-options", global_fit_options, "Parameters for single, detailed global best fit LBFGSB. See PROfitter.h or run --fit-help for available settings.");
     app.add_option("--scan-fit-options", scan_fit_options, "Parameters for simpier, multiple best fits in PROfile/surface LBFGSB.");
     app.add_flag("--fit-help", show_fit_help, "Show detailed help for all fitting parameters (L-BFGS-B, PSO, MCMC, etc.)");
-    std::string gradient_mode_str = "one-sided-full";
+    std::string gradient_mode_str = "central-lin";
     app.add_option("--grad-mode", gradient_mode_str,
                    "Gradient evaluation strategy passed to the metric. One of: "
                    "central-full (central FD on full chi^2; most accurate, slowest), "
-                   "one-sided-full (default; forward FD on full chi^2; ~2x faster, O(h)), "
-                   "central-lin (central FD on delta only, M frozen at base; Gauss-Newton, ~5-10x), "
+                   "one-sided-full (forward FD on full chi^2; ~2x faster, O(h)), "
+                   "central-lin (default; central FD on delta only, M frozen at base; Gauss-Newton, ~5-10x), "
                    "one-sided-lin (forward FD on delta only, M frozen at base; ~10-20x).")
-        ->default_str("one-sided-full");
+        ->default_str("central-lin");
 
     app.add_option("--inject-systs", injected_systs, "Systematic shifts to inject. Map of name and shift value in sigmas. Only spline systs are supported right now.");
     app.add_option("--inject-systs-cv", cv_injected_systs, "Systematic shifts to inject.  as CV Map of name and shift value in sigmas. Only spline systs are supported right now.");
@@ -1270,11 +1270,11 @@ int main(int argc, char* argv[])
     // either of them.
     {
         const PROmetric::GradientMode gmode_a =
-            PROmetric::parseGradientMode(gradient_mode_str, PROmetric::GradientOneSidedFull);
+            PROmetric::parseGradientMode(gradient_mode_str, PROmetric::GradientCentralLin);
         const PROmetric::GradientMode gmode_b =
-            PROmetric::parseGradientMode(gradient_mode_str, PROmetric::GradientOneSidedLin);
+            PROmetric::parseGradientMode(gradient_mode_str, PROmetric::GradientOneSidedFull);
         if (gmode_a != gmode_b) {
-            log<LOG_WARNING>(L"%1% || Unknown --grad-mode '%2%'; falling back to one-sided-full.")
+            log<LOG_WARNING>(L"%1% || Unknown --grad-mode '%2%'; falling back to central-lin.")
                 % __func__ % gradient_mode_str.c_str();
         }
         fitConfig.gradient_mode     = gmode_a;
@@ -2740,11 +2740,12 @@ int main(int argc, char* argv[])
         if (needs_outer_throws_bar) afc_progress.finish_all();
         else                         afc_progress.finish_all(false);
         log<LOG_INFO>(L"%1% || fc-adaptive done: throws=%2%, meta_cells=%3% (baseline=%4%, refined=%5%), "
-                      L"diag=%6%, bank=%7% (pes=%8%, mean/cell=%9%, capped=%10%).")
+                      L"diag=%6%, bank=%7% (pes=%8%, mean/cell=%9%, topped_up=%10%, capped=%11%).")
             % __func__ % ares.n_throws_done % ares.n_meta_cells
             % ares.n_baseline_cells % ares.n_refined_cells % ares.diag_root_path.c_str()
             % (ares.bank_path.empty() ? "<not written>" : ares.bank_path.c_str())
-            % (int64_t)ares.total_pes_generated % ares.mean_pes_per_cell % ares.cells_hit_n_pe_max;
+            % (int64_t)ares.total_pes_generated % ares.mean_pes_per_cell
+            % ares.cells_topped_up % ares.cells_hit_n_pe_max;
     }
 
     //***********************************************************************

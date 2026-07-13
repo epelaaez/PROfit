@@ -20,6 +20,7 @@
 #include "PROcess.h"
 #include "PROtocall.h"
 #include "PROserial.h"
+#include "MurmurHash3.h"
 
 #include <Eigen/Eigen>
 
@@ -279,6 +280,15 @@ bool load_brazil_archive(BrazilArchive &arc_out, const std::string &path) {
 
 namespace afc {
 
+// Truncated-Gaussian nuisance throws use the shared, bounded, OOB-safe
+// ThrowRestrictedSplinePull from PROcess.h (pattern from commit 000b3d0).
+static float throw_restricted_spline(const PROsyst &systs, size_t i,
+                                     std::mt19937 &rng,
+                                     std::normal_distribution<float> &d)
+{
+    return ThrowRestrictedSplinePull(systs, i, rng, d);
+}
+
 // --------------------------------------------------------------------
 //  Per-cell PE worker — intentionally kept parallel to
 //  src/PROfc.cxx::fc_worker (the brute-force FC); deduplicating the two
@@ -361,13 +371,9 @@ static PEBankRecord run_one_pe(const AdaptivePEArgs &args)
         lb_osc((int)j)  = lo; ub_osc((int)j)  = hi;
     }
 
-    // Throw splines (Gaussian, respecting restrict ranges).
+    // Throw splines (Gaussian, respecting restrict ranges; bounded + OOB-safe).
     for (size_t i = 0; i < nspline; ++i) {
-        const float tlo = systs.spline_has_restrict[i] ? systs.spline_restrict_lo[i] : systs.spline_lo[i];
-        const float thi = systs.spline_has_restrict[i] ? systs.spline_restrict_hi[i] : systs.spline_hi[i];
-        do {
-            throws((int)(i + nphys)) = d(rng);
-        } while (throws((int)(i + nphys)) < tlo || throws((int)(i + nphys)) > thi);
+        throws((int)(i + nphys)) = throw_restricted_spline(systs, i, rng, d);
     }
 
     // Stat throw vector.
@@ -375,9 +381,12 @@ static PEBankRecord run_one_pe(const AdaptivePEArgs &args)
     Eigen::VectorXf throwC(nbins_coll);
     for (int i = 0; i < nbins_coll; ++i) throwC(i) = d(rng);
 
-    // Build fake-data spectrum.
-    PROchi::EvalStrategy strat = args.binned ? PROchi::BinnedChi2 : PROchi::EventByEvent;
-    PROspec shifted = FillSpectra(config, prop, systs, model, throws, strat);
+    // Build fake-data spectrum. Fill the i_prime variable explicitly: the
+    // previous call passed an EvalStrategy enum where FillSpectra takes
+    // `bool binned` and let var_index default to 0, while the CollapseMatrix
+    // below collapses with the i_prime matrix — wrong-variable physics when
+    // i_prime != 0.
+    PROspec shifted = FillSpectra(config, prop, systs, model, throws, args.binned, config.i_prime);
     PROspec newSpec = PROspec::PoissonVariation(
         PROspec(CollapseMatrix(config, shifted.Spec()) + (*args.L) * throwC,
                 CollapseMatrix(config, shifted.Error())),
@@ -420,6 +429,13 @@ static PEBankRecord run_one_pe(const AdaptivePEArgs &args)
 }
 
 } // anonymous
+
+// --------------------------------------------------------------------
+//  schedule_pes — owns a threadpool and hands out cell-jobs to workers.
+//  The PE budget policy is the additive doubling rule below (the Wilson
+//  sequential stopping rule this comment used to mention was never wired
+//  in and has been removed as dead code).
+// --------------------------------------------------------------------
 
 // Drive PE generation for every MetaCell using a deterministic doubling rule.
 //
@@ -486,17 +502,26 @@ void schedule_pes(const AdaptiveFCConfig &acfg,
             % __func__ % acfg.n_pe_min % acfg.n_pe_max % acfg.update_layer;
     }
 
-    std::uniform_int_distribution<uint32_t> dseed(0, std::numeric_limits<uint32_t>::max());
+    // Deterministic per-PE seeding: seeds are derived from (base, cell, PE
+    // index) via MurmurHash3, NOT drawn from a per-thread RNG stream. With the
+    // work-stealing scheduler below, which thread claims which cell depends on
+    // OS scheduling — per-thread streams made the bank irreproducible even
+    // with a fixed --global-seed.
+    const uint32_t pe_seed_base = (*proseed.getThreadSeeds())[0];
+    auto pe_seed_for = [pe_seed_base](int cell, int pe_index) -> uint32_t {
+        const uint32_t key[2] = {(uint32_t)cell, (uint32_t)pe_index};
+        uint32_t out = 0;
+        MurmurHash3_x86_32(key, sizeof(key), pe_seed_base, &out);
+        return out;
+    };
 
     std::atomic<int> next_cell{0};
-    std::mutex log_mutex;
     std::atomic<int64_t> total_pes{0};
     std::atomic<int> cells_skipped_layer{0};  ///< level < update_layer
     std::atomic<int> cells_at_cap{0};         ///< existing already >= n_pe_max
     std::atomic<int> cells_topped_up{0};      ///< added PEs this run
 
-    auto worker = [&](int thread_idx) {
-        std::mt19937 thread_rng((*proseed.getThreadSeeds())[thread_idx]);
+    auto worker = [&](int) {
         while (true) {
             int c = next_cell.fetch_add(1);
             if (c >= n_cells) break;
@@ -538,7 +563,7 @@ void schedule_pes(const AdaptiveFCConfig &acfg,
                 args.yaxis_idx = yaxis_idx;
                 args.cell_x_model = cell_x_model[c];
                 args.cell_y_model = cell_y_model[c];
-                args.seed = dseed(thread_rng);
+                args.seed = pe_seed_for(c, i);
 
                 PEBankRecord rec = run_one_pe(args);
                 local_pes.push_back(rec);
@@ -556,7 +581,8 @@ void schedule_pes(const AdaptiveFCConfig &acfg,
     for (auto &th : tpool) th.join();
 
     result_out.total_pes_generated = total_pes.load();
-    result_out.cells_hit_n_pe_max  = cells_topped_up.load(); ///< Repurposed: cells that actually got new PEs.
+    result_out.cells_hit_n_pe_max  = cells_at_cap.load();
+    result_out.cells_topped_up     = cells_topped_up.load();
     result_out.mean_pes_per_cell   = n_cells > 0 ? (float)total_pes.load() / (float)n_cells : 0.0f;
 
     log<LOG_INFO>(L"%1% || schedule_pes done: cells=%2%, total_pes=%3%, mean=%4%, "

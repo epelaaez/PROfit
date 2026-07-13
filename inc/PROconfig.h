@@ -237,13 +237,6 @@ namespace PROfit{
     class PROconfig {
         private:
 
-            //indicator of whether each channel/detector/subchannel is used
-            std::vector<bool> m_mode_bool;
-            std::vector<bool> m_detector_bool;
-            std::vector<bool> m_channel_bool;
-            std::vector<std::vector<bool>>  m_subchannel_bool;
-
-
             //map from subchannel name/index to global index and channel index
             std::unordered_map<std::string, size_t> m_map_fullname_subchannel_index;
             std::vector<size_t> m_vec_subchannel_index; //vector of global subchannel index, in increasing order
@@ -255,7 +248,8 @@ namespace PROfit{
             /* Function: construct a matrix T, which will be used to collapse matrix and vectors */
             void construct_variable_collapsing_matrices();
 
-            /* Function: remove any mode/detector/channel/subchannels in the configuration xml that are not used from consideration
+            /* Function: finalize mode/detector/channel/subchannel counts and build the list of
+             * subchannel fullnames. (The old `use="false"` disable mechanism has been removed.)
             */
             void remove_unused_channel();
 

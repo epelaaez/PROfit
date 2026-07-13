@@ -104,34 +104,39 @@ namespace log_impl {
      */
     class formatted_log_t {
         public:
-            formatted_log_t( log_level_t level, const wchar_t* msg ) : level(level), fmt(msg) {}
+            formatted_log_t( log_level_t level, const wchar_t* msg ) : level(level), raw_msg(msg), fmt(msg) {}
             ~formatted_log_t() {
                 static const int SUPPRESS_AFTER = 1000;
-                thread_local static std::unordered_map<std::wstring, int> msg_counts;
-                std::wstring formatted_msg = boost::str(fmt);
-                int& count = msg_counts[formatted_msg];
+
+                // Fully below both verbosities: skip formatting AND counting.
+                // (Previously every call — including hot-loop LOG_DEBUGs at
+                // default verbosity — paid a full boost::str materialization
+                // plus a map insert keyed on the formatted string.)
+                const bool to_console = level <= GLOBAL_LEVEL;
+                const bool to_file = LOGGING_TO_FILE && LOG_FILE_STREAM.is_open() && level <= FILE_LEVEL;
+                if (!to_console && !to_file) return;
+
+                // Suppression is counted per format TEMPLATE (call site), not per
+                // formatted string: messages embedding changing values used to
+                // defeat both the suppression and the map's memory bound.
+                thread_local static std::unordered_map<const wchar_t*, int> msg_counts;
+                int& count = msg_counts[raw_msg];
                 count++;
+                if (count > SUPPRESS_AFTER + 1) return;
+                const bool announce_suppress = (count == SUPPRESS_AFTER + 1);
 
-                // Check against console verbosity
-                if ( level <= GLOBAL_LEVEL ) {
-                    if (count <= SUPPRESS_AFTER) {
-                        *OSTREAM << level << L" " << fmt << endl;
-                    } else if (count == SUPPRESS_AFTER + 1) {
-                        *OSTREAM << level << L" " << fmt << L" (suppressing further cases)" << endl;
-                    }
+                if (to_console) {
+                    *OSTREAM << level << L" " << fmt;
+                    if (announce_suppress) *OSTREAM << L" (suppressing further cases)";
+                    *OSTREAM << endl;
                 }
-
-                // Check against file verbosity (can be different from console)
-                if(LOGGING_TO_FILE && LOG_FILE_STREAM.is_open() && level <= FILE_LEVEL) {
-                    if (count <= SUPPRESS_AFTER) {
-                        LOG_FILE_STREAM << level << L" " << fmt << endl;
-                        LOG_FILE_STREAM.flush();
-                    } else if (count == SUPPRESS_AFTER + 1) {
-                        LOG_FILE_STREAM << level << L" " << fmt << L" (suppressing further cases)" << endl;
-                        LOG_FILE_STREAM.flush();
-                    }
+                if (to_file) {
+                    LOG_FILE_STREAM << level << L" " << fmt;
+                    if (announce_suppress) LOG_FILE_STREAM << L" (suppressing further cases)";
+                    LOG_FILE_STREAM << endl;
+                    LOG_FILE_STREAM.flush();
                 }
-            }        
+            }
             
             template <typename T> 
                 formatted_log_t& operator %(T value) {
@@ -187,6 +192,7 @@ namespace log_impl {
 
         protected:
             log_level_t     level;
+            const wchar_t*  raw_msg;   ///< Format template pointer; suppression-count key.
             boost::wformat      fmt;
     };
 

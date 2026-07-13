@@ -33,10 +33,6 @@ namespace PROfit{
     }
 
 
-    int FindSubchannelIndexFromGlobalBin(const PROconfig &inconfig, int global_bin, int var_index ){
-        return inconfig.GetSubchannelIndexFromVariableGlobalBin(global_bin,var_index);
-    }
-
     Eigen::MatrixXf CollapseMatrix(const PROconfig &inconfig, const Eigen::MatrixXf& full_matrix){
         const Eigen::SparseMatrix<float>& T = inconfig.GetCollapsingMatrixSparse();
         const Eigen::Index num_bin_before_collapse = T.rows();
@@ -56,6 +52,20 @@ namespace PROfit{
             exit(EXIT_FAILURE);
         }
         return Eigen::VectorXf(T.transpose() * full_vector);
+    }
+
+    Eigen::MatrixXf CollapsedScaledCovariance(const PROconfig &inconfig, const Eigen::MatrixXf& frac_cov, const Eigen::VectorXf& spec){
+        const Eigen::SparseMatrix<float>& T = inconfig.GetCollapsingMatrixSparse();
+        if(frac_cov.rows() != T.rows() || frac_cov.cols() != T.rows() || spec.size() != T.rows()){
+            log<LOG_ERROR>(L"%1% || Dimension mismatch: frac_cov %2%x%3%, spec %4%, expected %5%.")
+                % __func__ % frac_cov.rows() % frac_cov.cols() % spec.size() % T.rows();
+            log<LOG_ERROR>(L"Terminating.");
+            exit(EXIT_FAILURE);
+        }
+        // S = diag(spec) * T stays sparse (same pattern as T, rows scaled).
+        Eigen::SparseMatrix<float> S = spec.asDiagonal() * T;
+        Eigen::MatrixXf FS = frac_cov * S;               // dense (N x m), no N x N temporary
+        return Eigen::MatrixXf(S.transpose() * FS);      // dense (m x m)
     }
 
     Eigen::MatrixXf CollapseMatrix(const PROconfig &inconfig, const Eigen::MatrixXf& full_matrix, int other_index){
@@ -116,42 +126,50 @@ namespace PROfit{
     
     Eigen::MatrixXf ComputeSquareRootCovariance(
             const Eigen::MatrixXf& covariance,
-            bool use_ldlt,  [[maybe_unused]] float svd_tol  ) {
+            bool use_ldlt, float svd_tol  ) {
 
         if (use_ldlt) {
             // --- LDLT decomposition (faster for symmetric matrices) ---
+            // Note LDLT reports Success even for indefinite input; sqrt of a
+            // negative D entry would silently produce NaNs (e.g. from a
+            // rank-deficient sample covariance in MCMC proposal tuning), so
+            // clamp negative entries to zero with a warning.
             Eigen::LDLT<Eigen::MatrixXf> ldlt(covariance);
             if (ldlt.info() != Eigen::Success) {
                 throw std::runtime_error("LDLT decomposition failed.");
             }
 
+            Eigen::VectorXf D = ldlt.vectorD();
+            int n_clamped = 0;
+            for (Eigen::Index i = 0; i < D.size(); ++i) {
+                if (D(i) < 0) { D(i) = 0; ++n_clamped; }
+            }
+            if (n_clamped > 0) {
+                log<LOG_WARNING>(L"%1% || Covariance is not positive semi-definite: clamped %2% negative LDLT pivot(s) to zero before taking the square root.")
+                    % __func__ % n_clamped;
+            }
+
             // L = P^T * L_p * D^{1/2}
              Eigen::MatrixXf Lp = ldlt.matrixL();
-             Eigen::VectorXf D_sqrt = ldlt.vectorD().array().sqrt();
+             Eigen::VectorXf D_sqrt = D.array().sqrt();
              Eigen::PermutationMatrix<Eigen::Dynamic, Eigen::Dynamic> P(ldlt.transpositionsP());
              return  P.transpose() * Lp * D_sqrt.asDiagonal();
         } else {
 
-        Eigen::JacobiSVD<Eigen::MatrixXf> svd(covariance, Eigen::ComputeThinU | Eigen::ComputeThinV);
-        const auto& U = svd.matrixU();
-        const auto& S = svd.singularValues();
-        Eigen::VectorXf S_sqrt = S.array().sqrt();
+            Eigen::JacobiSVD<Eigen::MatrixXf> svd(covariance, Eigen::ComputeThinU | Eigen::ComputeThinV);
+            const auto& U = svd.matrixU();
+            const auto& S = svd.singularValues();
 
-        //float tol = 1e-8f * S.maxCoeff(); // Some cutoff? is this value impactful on out matricies? need to test
-        //std::vector<int> keep;
-        //for (int i = 0; i < S.size(); ++i) {
-        //    if (S(i) > tol) keep.push_back(i);
-        //}
+            // Zero singular values below the relative tolerance (svd_tol < 0
+            // means keep everything, the historical behavior).
+            Eigen::VectorXf S_kept = S;
+            if (svd_tol > 0 && S.size() > 0) {
+                const float tol = svd_tol * S.maxCoeff();
+                for (Eigen::Index i = 0; i < S_kept.size(); ++i)
+                    if (S_kept(i) < tol) S_kept(i) = 0;
+            }
+            Eigen::VectorXf S_sqrt = S_kept.array().sqrt();
 
-        //if (keep.empty()) {
-        //    log<LOG_ERROR>(L"%1% | All singular values are below tolerance, cannot sample. Blarg.") % __func__;
-        //    exit(EXIT_FAILURE);
-        //}
-        //going to keep only the singular values that give meaningful variance
-        //Eigen::MatrixXf fallback_sampler = Eigen::MatrixXf::Zero(covariance.rows(), covariance.cols());
-        //for (size_t i = 0; i < keep.size(); ++i) {
-        //        fallback_sampler.col(i) = U.col(keep[i]) * std::sqrt(S(keep[i]));
-        //}
             return U*S_sqrt.asDiagonal();
         }
     }

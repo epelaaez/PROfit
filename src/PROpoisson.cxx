@@ -3,7 +3,31 @@
 #include "PROdata.h"
 #include "PROlog.h"
 #include "PROtocall.h"
+
+#include <cmath>
 using namespace PROfit;
+
+namespace {
+    // Baker-Cousins Poisson chi²: 2 Σ_b [ s_b - n_b + n_b ln(n_b/s_b) ].
+    // The n_b → 0 limit is handled exactly (the bin contributes 2 s_b); a
+    // vectorised 0*log(0) would be NaN. A non-positive prediction with data in
+    // the bin is infinitely disfavored in principle; it gets a large finite
+    // penalty so the minimizer can still move away from it.
+    float BakerCousinsChi2(const Eigen::VectorXf &vmc, const Eigen::VectorXf &vdata) {
+        float sum = 0.0f;
+        for(Eigen::Index b = 0; b < vmc.size(); ++b) {
+            const float s = vmc(b), n = vdata(b);
+            if(n <= 0.0f) {
+                if(s > 0.0f) sum += s;
+            } else if(s > 0.0f) {
+                sum += s - n + n * std::log(n / s);
+            } else {
+                sum += 1e8f;
+            }
+        }
+        return 2.0f * sum;
+    }
+}
 
 
 PROpoisson::PROpoisson(const std::string tag, const PROconfig &conin, const PROpeller &pin, const PROsyst *systin, const PROmodel &modelin, const PROdata &datain, EvalStrategy strat, bool shape_only, std::vector<float> physics_param_fixed) : PROmetric(), model_tag(tag), config(conin), peller(pin), syst(systin), model(modelin), data(datain), strat(strat), shape_only(shape_only), physics_param_fixed(physics_param_fixed), correlated_systematics(false) {
@@ -66,6 +90,7 @@ float PROpoisson::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &grad
 
 
 float PROpoisson::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient, bool rungradient){
+    call_count++;
     size_t nparams = model.nparams+syst->GetNSplines();
     size_t nsyst = syst->GetNSplines();
     log<LOG_DEBUG>(L"%1% || nparams is %2%, nsyst is %3% ") % __func__ % nparams % nsyst;    
@@ -74,18 +99,23 @@ float PROpoisson::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &grad
     Eigen::VectorXf subvector1 = param.segment(0, nparams - nsyst);
     if(model.model_constraint){
         if(!model.model_constraint(subvector1)){
+            // Keep value and gradient consistent for the minimizer.
+            if(rungradient) gradient.setZero();
             return 1e10;
         }
     }
     Eigen::VectorXf subvector2 = param.segment(nparams - nsyst, nsyst);
-    
-    PROspec result = FillSpectra(config, peller, *syst, model, param, fs_cache, strat == BinnedChi2);
+
+    // strat != EventByEvent (not == BinnedChi2): matches the FD gradient
+    // helpers so BinnedGrad uses one consistent spectrum model and keeps the
+    // fill cache valid.
+    PROspec result = FillSpectra(config, peller, *syst, model, param, fs_cache, strat != EventByEvent);
 
     const Eigen::VectorXf vdata = shape_only
         ? data.Normalize(config,result)
         : data.Spec();
     const Eigen::VectorXf vmc = CollapseMatrix(config, result.Spec());
-    float poisson = 2 * (vmc.array() - vdata.array() + vdata.array() * (vdata.array() / vmc.array()).log()).sum();
+    float poisson = BakerCousinsChi2(vmc, vdata);
     float pull = Pull(subvector2);
     float value = poisson + pull;
 
@@ -159,12 +189,15 @@ float PROpoisson::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &grad
             // (shape_only re-normalises to perturbed result like the original).
             const Eigen::VectorXf vdata_l = shape_only ? data.Normalize(config, rl) : data.Spec();
             const Eigen::VectorXf vmc_l   = CollapseMatrix(config, rl.Spec());
-            float pois = 2.0f * (vmc_l.array() - vdata_l.array() +
-                                 vdata_l.array() * (vdata_l.array() / vmc_l.array()).log()).sum();
+            float pois = BakerCousinsChi2(vmc_l, vdata_l);
             Eigen::VectorXf nuis = param_at.segment(nparams - nsyst, nsyst);
             chi2_out = pois + Pull(nuis);
             return true;
         };
+
+        // One reusable work vector: perturb component i in place and restore,
+        // instead of two full parameter-vector copies per FD parameter.
+        Eigen::VectorXf param_work = param;
 
         for (size_t i = 0; i < nparams; i++) {
             if (is_fixed.size() > 0 && is_fixed.at(i)) {
@@ -190,13 +223,16 @@ float PROpoisson::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &grad
             const int  sign          = boundary_step ? (at_lower ? 1 : -1) : 1;
             const bool use_central   = !boundary_step && !one_sided;
 
-            Eigen::VectorXf param_plus  = param;  param_plus(i)  = param(i) + sign * h;
-            Eigen::VectorXf param_minus = param;  param_minus(i) = param(i) - sign * h;
-
             if (linearised) {
                 Eigen::VectorXf vmc_plus, vmc_minus;
-                bool ok_plus  = compute_vmc_at(param_plus,  vmc_plus);
-                bool ok_minus = use_central ? compute_vmc_at(param_minus, vmc_minus) : true;
+                param_work(i) = param(i) + sign * h;
+                bool ok_plus  = compute_vmc_at(param_work,  vmc_plus);
+                bool ok_minus = true;
+                if (use_central) {
+                    param_work(i) = param(i) - sign * h;
+                    ok_minus = compute_vmc_at(param_work, vmc_minus);
+                }
+                param_work(i) = param(i);
 
                 Eigen::VectorXf ds_dtheta;
                 if (use_central) {
@@ -221,12 +257,18 @@ float PROpoisson::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &grad
             } else {
                 if (use_central) {
                     float chi2_plus = 1e10f, chi2_minus = 1e10f;
-                    compute_chi2_at(param_plus,  chi2_plus);
-                    compute_chi2_at(param_minus, chi2_minus);
+                    param_work(i) = param(i) + sign * h;
+                    compute_chi2_at(param_work,  chi2_plus);
+                    param_work(i) = param(i) - sign * h;
+                    compute_chi2_at(param_work, chi2_minus);
+                    param_work(i) = param(i);
                     gradient(i) = (chi2_plus - chi2_minus) / (2.0f * h);
                 } else {
                     float chi2_one = 0.0f;
-                    if (!compute_chi2_at(param_plus, chi2_one)) {
+                    param_work(i) = param(i) + sign * h;
+                    const bool ok_one = compute_chi2_at(param_work, chi2_one);
+                    param_work(i) = param(i);
+                    if (!ok_one) {
                         gradient(i) = sign * 1e10f;
                         if (!std::isfinite(gradient(i))) gradient(i) = 0.0f;
                         continue;
@@ -255,7 +297,10 @@ float PROpoisson::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &grad
 
 float PROpoisson::getSingleChannelChi(size_t global_channel_index, const PROspec &cv, size_t var_index) {
 
-    size_t nbin = config.m_channel_variable_bins[global_channel_index][var_index].NBins();
+    // m_channel_variable_bins is indexed by LOCAL channel index (PROchi and
+    // PROCNP convert the same way); using the global index breaks any config
+    // with more than one mode x detector.
+    size_t nbin = config.m_channel_variable_bins[config.GetLocalChannelIndexFromGlobalChannelIndex(global_channel_index)][var_index].NBins();
     size_t startBin = config.GetCollapsedGlobalVariableBinStart(global_channel_index,var_index);
 
 
@@ -264,7 +309,7 @@ float PROpoisson::getSingleChannelChi(size_t global_channel_index, const PROspec
         ? data.Normalize(config,cv)
         : data.Spec()).segment(startBin, nbin);
     const Eigen::VectorXf vmc = CollapseMatrix(config, cv.Spec()).segment(startBin, nbin);
-    float poisson = 2 * (vmc.array() - vdata.array() + vdata.array() * (vdata.array() / vmc.array()).log()).sum();
+    float poisson = BakerCousinsChi2(vmc, vdata);
     //float pull = Pull(subvector2);
     float value = poisson; //+ pull
 
