@@ -21,10 +21,12 @@
 #include "PROgress.h"
 #include "PROversion.h"
 #include "PROmesh.h"
+#include "PRObe.h"
 
 #include <Eigen/Eigen>
 
 #include <atomic>
+#include <mutex>
 
 #include "TGraphAsymmErrors.h"
 #include "TMarker.h"
@@ -108,8 +110,21 @@ namespace PROfit {
             std::vector<float> values1_up;   ///< Upper 1-sigma boundary values.
             std::vector<float> values1_down; ///< Lower 1-sigma boundary values.
 
-            float newglob;                  ///< Updated global minimum chi-squared found during the scan.
-            Eigen::VectorXf newglob_param;  ///< Full parameter vector at the updated global minimum.
+            float newglob = 0;              ///< Informational only: lower chi-squared found during the scan, if any (never read by consumers; logged in the constructor's merge loop).
+            Eigen::VectorXf newglob_param;  ///< Full parameter vector at that lower minimum (informational only).
+
+            /** @brief Shared warm-start bank for the profile scans: for each scanned
+             *  parameter, every completed (scanned value, best-fit vector) pair from ALL
+             *  threads, tasks, and chunks. Each new scan-point fit is seeded from the
+             *  entry of the SAME parameter closest in scanned value -- robust to the
+             *  center-out walk order, to --probe-chunks splitting one parameter across
+             *  threads, and to dynamic task dispatch. Guarded by seed_bank_mutex
+             *  (contention is negligible: bank ops are microseconds vs ~0.1-1 s fits).
+             *  Note: a spline's full scan is a single task, so spline seeding is
+             *  deterministic regardless of thread count; chunked physics parameters may
+             *  see completion-order-dependent (but still valid) seeds. */
+            std::vector<std::vector<ScanPoint>> seed_bank;
+            std::mutex seed_bank_mutex;     ///< Guards seed_bank.
 
             PROfile(const PROconfig &config, const PROsyst &systs, const PROmodel &model, PROmetric &metric, PROseed &proseed, const PROfitterConfig &fitconfig, std::string filename, float minchi = 0, bool with_osc = false, int nThreads = 1, const std::vector<Eigen::VectorXf> &seed_points = {}, const Eigen::VectorXf& true_params = Eigen::VectorXf(), bool use_probe = false, int n_physics_chunks = 1 ) ;
 

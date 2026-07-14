@@ -301,6 +301,26 @@ float PROfitter::Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed
 
         if(run_progress)progress->increment_bar(2);
         for(size_t s = 0; s < seed_points.size();s++){
+            // Candidate guarantee: the (bound-clamped) seed is itself a valid
+            // point whose chi2 costs one evaluation. Record it BEFORE the LBFGS
+            // refinement: a seed that is already at/near a minimum routinely
+            // makes the More-Thuente line search throw ("step became smaller
+            // than the minimum value allowed" — float-level chi2 changes cannot
+            // satisfy the Wolfe conditions), and previously that discarded the
+            // known-good seed entirely, leaving the much cruder LHS/PSO value
+            // as the result. This is what produced spiky PROfile curves: scan
+            // points whose every seed refinement threw sat several chi2 units
+            // above their neighbours. With the seed recorded first, refinement
+            // failure degrades to "keep the seed's own chi2".
+            {
+                Eigen::VectorXf x0 = seed_points.at(s).cwiseMax(lb).cwiseMin(ub);
+                Eigen::VectorXf g0 = Eigen::VectorXf::Zero(x0.size());
+                const float f0 = metric(x0, g0, false);
+                if (std::isfinite(f0) && f0 < chimin) {
+                    best_fit = x0;
+                    chimin = f0;
+                }
+            }
             bool seed_success = false;
             for (size_t attempt = 1; attempt <= fitconfig.n_max_local_retries; ++attempt) {
                 try {
@@ -332,7 +352,7 @@ float PROfitter::Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed
             }
 
             if (!seed_success) {
-                log<LOG_WARNING>(L"%1% || All seed-point minimization attempts failed, keeping current best (chi %2%)") % __func__ % chimin;
+                log<LOG_WARNING>(L"%1% || Seed-point refinement failed; keeping best-so-far (chi %2%, includes the seed's own chi2 as a candidate)") % __func__ % chimin;
             }
         }
     }
