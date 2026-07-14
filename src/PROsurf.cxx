@@ -564,8 +564,14 @@ std::vector<surfOut> PROsurf::PointHelper(const PROfitterConfig &fitconfig, std:
         int nparams = local_metric->GetModel().nparams + local_metric->GetSysts().GetNSplines() - 2;
 
         if(nparams == 0) {
-            Eigen::VectorXf empty_vec,
-                params = Eigen::VectorXf::Map(physics_params.data(), physics_params.size());
+            // Zero free parameters: one metric evaluation, no PROfitter.
+            // Map grid values by AXIS INDEX — grid_val is stored [y, x] while
+            // the parameter vector is model-ordered, so the old positional
+            // Map() was transposed whenever (x_idx, y_idx) != (1, 0)
+            // (e.g. swapped --xvar/--yvar).
+            Eigen::VectorXf empty_vec, params(2);
+            params((int)x_idx) = physics_params[1];
+            params((int)y_idx) = physics_params[0];
             output.chi = (*local_metric)(params, empty_vec, false);
             output.best_fit = params;
             outs.push_back(output);
