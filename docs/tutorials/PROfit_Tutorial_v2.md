@@ -68,6 +68,11 @@ numbers should match.
 8. [Feldman-Cousins: `fc` and `fc-adaptive`](#8-feldman-cousins-fc-and-fc-adaptive)
 9. [PROjector — two-stage pre-fit / projected fits](#9-projector--two-stage-pre-fit--projected-fits)
 
+Appendices:
+
+* [Appendix A: regenerating every plot in this tutorial](#appendix-a-regenerating-every-plot-in-this-tutorial)
+* [Appendix B: available physics models](#appendix-b-available-physics-models-incpromodelh)
+
 ---
 
 # 1. PROfit conceptual introduction
@@ -1125,7 +1130,7 @@ on the promoted spline parameters.
 
 ---
 
-# Appendix: regenerating every plot in this tutorial
+# Appendix A: regenerating every plot in this tutorial
 
 ```bash
 # from the repository root, after building:
@@ -1141,7 +1146,7 @@ overrides (`PROFIT_BIN`, `PROFIT_TEST_MCDIR`, `NTHREADS`, `SEED`).
 
 ---
 
-# Appendix: available physics models (`inc/PROmodel.h`)
+# Appendix B: available physics models (`inc/PROmodel.h`)
 
 The `<model tag="...">` in your XML selects one of the models below. A few
 conventions apply to all of them:
