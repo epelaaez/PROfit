@@ -11,6 +11,31 @@ that script produces.
 > branch of PROfit v2.X. If commands here disagree with `PROfit --help` on your
 > checkout, trust the binary.
 
+Useful contacts and links:
+
+* GitHub: [markrosslonergan/Elephant_Vanishes](https://github.com/markrosslonergan/Elephant_Vanishes)
+* Slack: **#profit** (shortbaseline/SBN workspace)
+* Listserv: profit@listserv.fnal.gov
+
+> **Versioning:** this tutorial targets the **v2 release line** (development
+> branch `project-SBN-dev`). Breaking XML changes were made in the v1→v2
+> update, so v1.x XMLs will **not** work with v2 binaries, and bugfixes are
+> not back-ported to the v1.1 line — use v2.1.1+ for anything new.
+
+### Getting set up
+
+PROfit needs ROOT, Boost, HDF5, and CMake (on the FNAL gpvms set these up
+from cvmfs inside an SL7 container first; on your own machine apt-get or
+homebrew versions are fine). Then:
+
+```bash
+git clone https://github.com/markrosslonergan/Elephant_Vanishes.git
+cd Elephant_Vanishes/build
+cmake ..
+make -j4            # → build/bin/PROfit
+export PATH=$PATH:$PWD/bin   # optional
+```
+
 The configuration used throughout is `working_dir/Neutrino2026/fake_sbn_v2.xml`:
 a **fake** two-detector (ND + FD) SBN-style setup with a νe appearance search
 (`nueapp` model: `dmsq`, `sinsq2thme`), two channels (`nue`, `numu`), and a
@@ -52,6 +77,19 @@ oscillation analyses. You describe your entire analysis — MC files, event
 selections, binning, oscillation model, and systematics — in a single XML
 file, and PROfit turns that into spectra, covariance matrices, response
 splines, and fits.
+
+In a nutshell, PROfit's job is two-fold:
+
+1. Build, work with, and understand the **systematic uncertainty** of a
+   Monte-Carlo prediction — a.k.a. *the Error Bar*.
+2. Given data (or fake data) and those systematics, **fit a physics model**,
+   so we can quantify what the data tells us about the model *within* that
+   uncertainty.
+
+Equally important is what PROfit is **not**: a full end-to-end analysis
+framework. It expects a *final-stage* selection as input — arbitrary cuts,
+binnings, and variables are all handled well, but they are meant for studying
+sub-categories of a finished selection, not for developing one from scratch.
 
 The data flow, start to finish:
 
@@ -144,6 +182,19 @@ Multi-detector configs are first-class: each detector gets its own contiguous
 block of bins, and every channel is replicated per detector. The `pot` sets
 the target exposure each MC file is scaled to.
 
+Three things to keep in mind:
+
+* `mode` and `detector` are **just bookkeeping labels** — they organize the
+  spectra and never change the physics. You can use them for run periods
+  (`run1`/`run2`) or TPC halves just as well as for ν/ν̄ running.
+* A channel is replicated with the **same binning** in every detector. If you
+  need different binnings per detector, define separate channels inside one
+  dummy detector instead (e.g. `sbndnumu` + `icarusnumu`) — at the cost of
+  handling the relative POT scaling yourself in the branch weights.
+* **Never put underscores inside a name.** The fullname is built by joining
+  the four levels with `_`; an underscore inside a name breaks the substring
+  bookkeeping.
+
 ### Channels, binnings, and subchannels
 
 ```xml
@@ -178,10 +229,18 @@ histograms in `plot`.
 
 `tag` selects the physics model implemented in `inc/PROmodel.h`
 (`numudis` = 3+1 νμ disappearance with parameters `dmsq`, `sinsq2thmm`;
-`nueapp` = 3+1 νμ→νe appearance with `dmsq`, `sinsq2thme`). Each *rule* is an
-oscillation-weight function; every MC branch declares which rule applies to
-it. The `<parameter>` line tells the model which channel variable holds true
-L/E (variable index 1, i.e. the second `<bins>` entry).
+`nueapp` = 3+1 νμ→νe appearance with `dmsq`, `sinsq2thme`; also available:
+`nuedis`, the full three-parameter `3+1` (|Ue4|², |Uμ4|², Δm² with a
+unitarity constraint), and several re-parameterized `3+1_*` variants — see
+section 7 for why those exist, and the model appendix at the bottom of this
+document for every model's parameters, bounds, and rules). Each *rule* is an
+oscillation-weight
+function; **rule 0 always means "no oscillation" and is the default**. Every
+MC branch declares which rule applies to it, so e.g. intrinsic backgrounds
+sit on rule 0 while the fullosc component oscillates. The `<parameter>` line
+tells the model which channel variable holds true L/E (variable index 1,
+i.e. the second `<bins>` entry). The XML model block is pure bookkeeping —
+the actual oscillation logic lives in `PROmodel.h`.
 
 ### MC files and branches
 
@@ -205,11 +264,18 @@ L/E (variable index 1, i.e. the second `<bins>` entry).
 ```
 
 Each `<branch>` fills one subchannel: `additional_weight` is an arbitrary
-TTree formula (here also doing the truth-category selection), `model_rule`
-picks the oscillation rule, and the `<variable>` list maps one formula to
-each `<bins>` entry of the channel, **in order**. `<friend>` trees carry the
-systematic weight branches. Branches with `incl_systematics="false"` (the
-cosmics here) get no systematic variations at all.
+TTree formula (here also doing the truth-category selection — anything a
+`TTreeFormula` can do is allowed), `model_rule` picks the oscillation rule,
+and the `<variable>` list maps one formula to each `<bins>` entry of the
+channel, **in order**. `<friend>` trees carry the systematic weight branches
+(multisigma/multisim/variation trees). Branches with
+`incl_systematics="false"` (the cosmics here) get no systematic variations
+at all.
+
+Two MCFile details worth knowing: `filename` can be a single ROOT file **or a
+plain-text filelist** of ROOT files, and the `pot` attribute is the
+*generated* POT of that file — events are scaled from it up to the detector
+`pot` declared at the top of the XML.
 
 ### Systematics: the `<variation_list>`
 
@@ -224,24 +290,42 @@ cosmics here) get no systematic variations at all.
 </variation_list>
 ```
 
-The main `type`s:
+The five main `type`s:
 
 | type | Source | Becomes | Fit parameter? |
 |---|---|---|---|
+| `covariance` | multisim universes | fractional covariance matrix | no — marginalized analytically in the χ² |
 | `spline` | multisigma knobs (±1,2,3σ universes) | per-bin cubic response spline | yes, one per systematic, in σ units |
-| `covariance` | multisim universes | fractional covariance matrix | no — marginalized analytically |
-| `norm` / `flat` | you, in the XML | flat normalisation covariance on matching subchannels (`pattern:fraction`) | no |
-| `mcstat` | MC statistics | diagonal MC-stat covariance | no |
+| `mcstat` | finite MC statistics | diagonal MC-stat covariance | no |
+| `norm` | you, in the XML (`pattern:fraction`) | ONE spline parameter giving a flat ±fraction normalisation on every subchannel whose fullname contains the pattern — 100% correlated inside the match, uncorrelated outside | yes (a spline; fraction must be < 0.333) |
+| `flat` | you, in the XML (`pattern:fraction`) | diagonal-only covariance — the error is uncorrelated bin-by-bin | no |
 
-Extra per-systematic attributes worth knowing: `prior=` / `center=` override
-the default N(0,1) Gaussian pull on a spline, `<correlation>` blocks make
-spline priors correlated, `binning=` lets a spline live on its own coarser
-binning, and `mode="covariance_to_spline"` with `num_decomp_knobs=` promotes
-a covariance to its leading eigenmode splines (the same machinery PROjector
-uses — see section 9).
+`mcstat` you will almost always want on (finite MC statistics IS a
+systematic on the prediction); `norm` is the right tool for flux
+normalisations, POT/fiducial-volume errors and flat detector systematics
+(note the `nu_ICARUS:0.02`-style entries showing up as fit parameters in the
+global-fit tables later); `flat` is mostly for sensitivity tests and
+worst-case scenarios.
 
-Note the flat norms use the substring convention: `nu_ND_numu:0.02` is a 2%
-normalisation on every subchannel whose fullname contains `nu_ND_numu`.
+The `<allowlist>` attributes:
+
+* `type` — the method, as above.
+* `plotname` — label used on plots.
+* `tag` — a grouping label so whole sets of systematics can be
+  included/excluded and, importantly, grouped in the fractional-systematics
+  plots (comma-separated multi-tags are allowed but a few functions dislike
+  them).
+* `binning` — which variable's bins the systematic response is built on
+  (`var0`, `var1`, ... in the order of the `<bins>`/`<variable>` entries;
+  default `var0`). E.g. cross-section splines are often better built in true
+  energy, detector systematics in the reco variable.
+* `knobvals` — for splines, the knob values if not stored in the file, as a
+  space-separated list (default `-3 -2 -1 0 1 2 3`).
+* `prior=` / `center=` — override the default N(0,1) Gaussian pull;
+  `<correlation>` blocks make spline priors correlated.
+* `mode="covariance_to_spline"` with `num_decomp_knobs=` promotes a
+  covariance to its leading eigenmode splines (the same machinery PROjector
+  uses — see section 9). `restrict` bounds a spline's allowed range.
 
 ---
 
@@ -323,12 +407,25 @@ multithreaded runs are statistically equivalent but not byte-identical.
 `--grad-mode central-lin` is exact at minima and fine for scans; use
 `central-full` for final publication-quality runs.
 
-### Housekeeping
+### Logging and housekeeping
 
-`-n/--nthread N` parallelizes all fitting code. `-l/--log file.log` +
-`-w/--file-verbosity 4` writes a full debug log while keeping the terminal at
-`-v 3`. `-b/--progress` adds a progress bar where applicable. `-m/--max N`
-truncates the MC event loop (quick tests).
+`-v` sets terminal verbosity (1 Error → 4 Debug), `-l/--log file` saves all
+messages to a log file *in addition* to the terminal, `-w/--file-verbosity`
+sets the log file's verbosity independently, and `-b/--progress` draws
+progress bars where applicable (messy combined with high verbosity). A
+common pattern — quiet terminal, full log, progress bars:
+
+```bash
+PROfit -x tutorial.xml -t TUT -v 1 -w 3 --log fit.log --progress ... profile
+```
+
+Log files are cheap and strongly encouraged: the full fitter configuration
+and the global best-fit tables are printed there, which makes checking on
+past runs painless. Fair warning: Info/Debug output from multithreaded scans
+interleaves and can be hard to read.
+
+`-n/--nthread N` parallelizes all fitting code. `-m/--max N` truncates the
+MC event loop (quick tests only).
 
 ---
 
@@ -358,7 +455,7 @@ Outputs (one `Variable_<i>` set per plotted binning of each channel):
 * `TUT_plotcv_PROplot_Variable_0_ErrorBand.pdf` — CV + full systematic band
 * `TUT_plotcv_PROplot_Variable_2_*.pdf`, ... — same for the other variables
 * `TUT_plotcv_PROplot_Covar.pdf` — all covariance matrices, per systematic and total
-* `TUT_plotcv_fractional_systematics.pdf` — fractional uncertainty per bin, broken down by systematic `tag`
+* `TUT_plotcv_fractional_systematics.pdf` — fractional uncertainty per bin, one panel per systematic `tag` plus a summary (the `tag=` attributes in the variation list control this grouping — without them you get one unreadable 30-line legend)
 * `TUT_plotcv_ratio_fractional_systematics.pdf` — same as a ratio
 * `TUT_plotcv_PROplot.root` — everything above as ROOT objects
 
@@ -387,8 +484,17 @@ PROfit -x tutorial.xml -t TUT -o plotinj --seed 405 -i dmsq 1 sinsq2thme 0.01 pl
 ```
 
 You now additionally get `TUT_plotinj_PROplot_Osc.pdf` (oscillated vs
-unoscillated spectra) and the "data" points in the error-band plot become the
-injected fake data.
+unoscillated spectra — a handy debugging view of the raw oscillation
+pattern) and the "data" points in the error-band plot become the injected
+fake data.
+
+A note on the two injection families: `--inject` (and `--inject-systs`)
+modify the **fake data** while the prediction stays at CV — the "can I
+recover an injected signal?" workflow used throughout this tutorial.
+`--inject-cv` (and `--inject-systs-cv`) instead modify the **prediction's
+central value**, e.g. to make an oscillated spectrum the null hypothesis.
+They can be combined — inject one point as truth and a different one as the
+CV — to study fitting under a wrong model.
 
 > 📷 **PLOT PLACEHOLDER** — `TUT_plotinj_PROplot_Osc.pdf`
 > <!-- <img src="UPLOAD_URL_HERE" width="600"/> -->
@@ -440,7 +546,10 @@ PROfit -x tutorial.xml -t TUT -o plotbsub --seed 405 plot --bkg-subtract backgro
 > <!-- <img src="UPLOAD_URL_HERE" width="600"/> -->
 
 Other useful toggles to try yourself: `--area-norm`, `--scale-by-width`,
-`--scale FD 0.5` (half the far-detector POT), `--poisson-throw`.
+`--scale FD 0.5` (half the far-detector POT), `--poisson-throw`. And when
+comparing plots from different runs, PROfit's auto-ranging gets in the way —
+pin the axes with `--plot-bounds ymax 1800 ratmin 0.5 ratmax 1.5` so the two
+PDFs are directly comparable by eye.
 
 ---
 
@@ -488,6 +597,21 @@ Flux1                :  <sigma>
 ```
 
 Remember the physics values are printed in **log10 space** for this model.
+
+### Where the time goes
+
+The minimization itself is usually the *fast* part of `global`. The **pre-fit
+error band** is built by throwing a few thousand spectra from the priors and
+covariances (random — fix `--seed`, and bump the sample count for
+publication-quality plots, since sparsely-filled bins jitter). The **post-fit
+error band, correlation matrix, and posteriors** come from an MCMC sampled
+around the best fit (tens of thousands of samples after burn-in): post-fit
+pulls can be strongly correlated, so marginal errors must be sampled
+simultaneously rather than read off one parameter at a time. This MCMC
+covariance is also the *trusted* post-fit covariance — the L-BFGS internal
+Hessian is only a limited-memory approximation. Everything the fitter used
+(preset values, seeds, exceptions) is printed to the log, so past fits stay
+auditable.
 
 ### How the fit actually works
 
@@ -560,8 +684,13 @@ PROfit -x tutorial.xml -t TUT -o globcnp --seed 405 -n 8 -c PROCNP global
 PROfit -x tutorial.xml -t TUT -o globpoi --seed 405 -n 8 -c Poisson global
 ```
 
-`PROCNP` is recommended when bins can be low-statistics; `Poisson` ignores
-covariance systematics entirely (it will warn you).
+`PROchi` is the classic Pearson χ² (statistical + systematic covariance plus
+Gaussian pulls); `PROCNP` swaps the statistical variance for the combined
+Neyman-Pearson form `3/(1/d + 2/μ)` ([X. Ji et al.](https://arxiv.org/pdf/1903.07185))
+and is the **recommended** choice whenever bins can be low-statistics;
+`Poisson` is the Baker-Cousins likelihood-ratio sum and ignores
+covariance-type systematics entirely (it will warn you). Adding a new metric
+is deliberately easy — they all implement the same `PROmetric` interface.
 
 ---
 
@@ -578,7 +707,12 @@ Options:
 
 `profile` first runs the full global fit (identical to `global`), then scans
 **every parameter one at a time** — each physics parameter and each spline —
-profiling (re-minimizing) over all the others at each scan point.
+profiling (re-minimizing) over all the others at each scan point. Do the
+arithmetic before you hit enter: the legacy scan is ~18 points per parameter,
+so this config's 2 physics + 14 nuisance parameters mean roughly **300 full
+minimizations** on top of the global fit. This is where `-n` starts to
+matter (the harmonic seeds and the cross-thread warm-start bank are what
+keep each individual scan fit cheap).
 
 ```bash
 PROfit -x tutorial.xml -t TUT -o prof1 --seed 405 -n 8 \
@@ -588,7 +722,7 @@ PROfit -x tutorial.xml -t TUT -o prof1 --seed 405 -n 8 \
 Outputs:
 
 * `TUT_prof1_PROfile.pdf` — the Δχ² curve for every parameter (physics first, then all nuisances with the prior in dashed red)
-* `TUT_prof1_PROfile_1sigma.pdf` (+ `_1sigma_detailed.pdf`) — post-fit ±1σ summary for all nuisance parameters at a glance
+* `TUT_prof1_PROfile_1sigma.pdf` (+ `_1sigma_detailed.pdf`) — post-fit ±1σ summary for all nuisance parameters at a glance (red star = injected truth, blue = global best fit, black = the per-profile minima on the scan grid)
 * `TUT_prof1_PROfile_hists.pdf` — pre-fit vs post-fit spectra (same as global's)
 * `TUT_prof1_PROfile_postfit_correlation_matrix.pdf`, `_postfit_posteriors.pdf`
 * `TUT_prof1_PROfile.root` — every profile as a TGraph, plus the 1σ summary
@@ -606,10 +740,23 @@ Outputs:
 > <!-- <img src="UPLOAD_URL_HERE" width="700"/> -->
 
 How to read `PROfile.pdf`: each nuisance panel shows the profiled Δχ²
-(black) against the dashed-red prior (a 1σ Gaussian pull by construction).
-A post-fit curve narrower than the prior means the data constrains that
-systematic; a shifted minimum means the fit pulled it (watch for correlated
-pairs sharing a pull, e.g. two normalisations covering for each other).
+(black) against the dashed-red prior (a 1σ Gaussian pull by construction),
+with the dotted Δχ²=1 line marking the "1σ error". Black narrower than red
+means the data **constrains** that systematic beyond its prior; black on top
+of red means you are effectively **insensitive** to it (an injected shift in
+such a systematic will simply not be recovered — that's physics, not a fit
+failure); a shifted minimum means the fit **pulled** it (watch for
+correlated pairs sharing a pull, e.g. two normalisations covering for each
+other). An occasional "kink" in a black curve is the scan fit landing in a
+local minimum (usually a Δm² harmonic) at one point — a stronger preset
+generally smooths it out.
+
+Two benign log messages you may notice: the routine L-BFGS-B line-search
+throws mentioned earlier, and a `Warning. A lower global best fit was found
+during PROfile...`. The scan runs hundreds more fits than `global` did, so
+occasionally it stumbles on a marginally lower χ² in degenerate phase space
+— tiny differences are expected, large ones mean your global preset is too
+weak.
 
 ### PRObe: the adaptive scan
 
@@ -686,8 +833,15 @@ PROfit -x tutorial.xml -t TUT -o surf1 --seed 405 -n 8 --log surf1.log \
 This is 900 profiled fits, so it's the first genuinely slow thing in the
 tutorial — grid size and thread count are your levers. Outputs:
 
-* `TUT_surf1_surface.txt` — plain-text grid: `xval yval chi2 p0 p1 ...` (the best-fit nuisance values at every point)
-* `TUT_surf1_surf.root` — the same as a TTree plus a TH2D
+* `TUT_surf1_surface.txt` — plain-text grid. The header records the grid
+  dimensions, the `Fixed indices` (which parameter-vector entries are the y
+  and x axes), and the full parameter order; then one row per grid point:
+  `xval yval chi2 p0 p1 ...` with the best fit of **every** parameter at that
+  point. Everything needed to reconstruct the surface externally.
+* `TUT_surf1_surf.root` — the Δχ² TH2D plus a `BestFitTree` whose
+  `map<string,float>` branch holds the per-point best fits (heads-up:
+  `TTree::Draw` on such split-object leaves returns garbage — read the branch
+  objects properly)
 * `TUT_surf1_surface.pdf` — a quick-look contour plot
 * `TUT_surf1_global_fit.txt` — the global best fit
 
@@ -706,6 +860,25 @@ still applies:
 PROfit -x tutorial.xml -t TUT -o surfstat --seed 405 -n 8 --statonly surface -g 30 $AXES
 PROfit -x tutorial.xml -t TUT -o surfnoflux --seed 405 -n 8 --exclude-systs Flux1 Flux2 Flux3 surface -g 30 $AXES
 ```
+
+### PROcurve: watching the pulls along a 1D path
+
+`--curve-mode x1 y1 x2 y2` (values in the axes' native — here log10 — space)
+replaces the 2D scan with a 1D walk from point A to point B across the
+(x, y) plane, fitting the nuisances at each step and plotting how every pull
+evolves along the path. It's the quickest way to see *which* systematics
+bend to absorb an oscillation signal as you approach it. `-g` sets the
+number of points on the path.
+
+```bash
+PROfit -x tutorial.xml -t TUT -o curve1 --seed 405 -n 8 \
+    surface $AXES -g 20 --curve-mode -3 -1 -1 1
+```
+
+> 📷 **PLOT PLACEHOLDER** — `TUT_curve1_PROcurve.pdf`
+> (path across the plane + every nuisance parameter's best-fit value along it,
+> here from (sin²2θμe, Δm²) = (10⁻³, 0.1 eV²) to (10⁻¹, 10 eV²))
+> <!-- <img src="UPLOAD_URL_HERE" width="800"/> -->
 
 ### Adaptive mesh refinement: `--surface-amr`
 
@@ -747,6 +920,22 @@ PROfit -x tutorial.xml -t TUT -o surfbrz --seed 405 -n 16 --log surfbrz.log \
 > 📷 **PLOT PLACEHOLDER** — `TUT_surfbrz_surface.pdf`
 > (median sensitivity with ±1σ/±2σ Brazil bands)
 > <!-- <img src="UPLOAD_URL_HERE" width="600"/> -->
+
+### A note on models: parameterize in the variable you plot
+
+The scan axes are the *model's* parameters — so pick the model whose
+parameters ARE the plot you want. The naive way to make a
+(sin²2θμe, Δm²) contour from a full 3+1 fit is a 3D grid in
+(|Ue4|², |Uμ4|², Δm²) projected down afterwards, which is both brutally
+expensive (a 60³ grid is days of CPU where 60² is hours) and messy: many 3D
+points map to the same sin²2θμe, the grid spacing doesn't map smoothly, and
+for FC you risk the global best fit not lying on your grid at all — which
+invalidates the calibration. That's why `PROmodel.h` carries re-parameterized
+3+1 variants (`3+1_angles` and effective-amplitude parameterizations like the
+sin²2θμe-focused one): the plotted quantity becomes a direct 2D scan axis and
+PROfit's minimizer profiles smoothly over the leftover mixing freedom at each
+point. A full 3D scan is still the right tool for *understanding* 3+1 — but
+if the end goal is a contour in an effective angle, fit in that angle.
 
 ---
 
@@ -949,3 +1138,198 @@ The script localizes the XML, processes once, and runs every command shown
 above with fixed seeds. Outputs land in `docs/tutorials/tutorial_run/` (set
 `TUTORIAL_OUTDIR` to change). See the script header for the environment
 overrides (`PROFIT_BIN`, `PROFIT_TEST_MCDIR`, `NTHREADS`, `SEED`).
+
+---
+
+# Appendix: available physics models (`inc/PROmodel.h`)
+
+The `<model tag="...">` in your XML selects one of the models below. A few
+conventions apply to all of them:
+
+* **Parameter names** (`param_names`) are what you use everywhere on the
+  command line: `-i/--inject`, `--inject-cv`, `--fix`, `--xvar/--yvar`.
+  Injection values are given in **linear** units (`-i dmsq 1` = 1 eV²).
+* **Fit space**: parameters marked *log10* are fitted (and printed in
+  best-fit tables) as log10 of the physical value; the bounds and defaults
+  below are quoted in linear units for readability.
+* **Rules**: `model_rule` on each MC `<branch>` picks which probability
+  function weights that branch's events. **Rule 0 is always "no oscillation"
+  (weight 1)** — the default for intrinsic/background components.
+* **Constraints**: some models carry a `model_constraint` that rejects
+  unphysical parameter combinations (e.g. 3+1 unitarity) during the fit.
+* All oscillation models need the `<parameter name="L/E" .../>` entry in the
+  model block pointing at the true-L/E variable (exception: `numudisTEST`
+  and `template_fit`, noted below).
+
+### `nullmodel`
+
+No physics parameters at all — rule 0 only. For pure-systematics setups
+(constraint studies, template validation) where nothing oscillates.
+
+### `numudis` — 3+1 νμ disappearance
+
+P(νμ→νμ) = 1 − sin²2θμμ · sin²(1.267 Δm² L/E).
+
+| # | name | meaning | fit space | bounds | default |
+|---|---|---|---|---|---|
+| 0 | `dmsq` | Δm²₄₁ [eV²] | log10 | 10⁻² – 10² | 10⁻² |
+| 1 | `sinsq2thmm` | sin²2θμμ | log10 | 0 – 1 | 10⁻¹⁰ |
+
+Rules: **0** = no osc, **1** = νμ survival (apply to your νμ-CC signal).
+
+### `numudisTEST` — two-variable validation twin
+
+Identical physics and parameters to `numudis`, but built on two separate
+model variables `L` and `E` (both must be `<parameter>` entries) instead of
+one `L/E`. Exists to validate the machinery — the two should produce
+identical spectra.
+
+### `nueapp` — 3+1 νμ→νe appearance
+
+P(νμ→νe) = sin²2θμe · sin²(1.267 Δm² L/E). The model used throughout this
+tutorial.
+
+| # | name | meaning | fit space | bounds | default |
+|---|---|---|---|---|---|
+| 0 | `dmsq` | Δm²₄₁ [eV²] | log10 | 10⁻² – 10² | 10⁻² |
+| 1 | `sinsq2thme` | sin²2θμe | log10 | 10⁻¹⁰ – 1 | 10⁻¹⁰ |
+
+Rules: **0** = no osc, **1** = νμ→νe appearance (apply to the fullosc
+subchannel).
+
+### `nuedis` — 3+1 νe disappearance
+
+| # | name | meaning | fit space | bounds | default |
+|---|---|---|---|---|---|
+| 0 | `dmsq` | Δm²₄₁ [eV²] | log10 | 10⁻² – 10² | 10⁻² |
+| 1 | `sinsq2thee` | sin²2θee | log10 | 0 – 1 | 10⁻¹⁰ |
+
+Rules: **0** = no osc, **1** = νe survival.
+
+### `3+1` — full three-parameter 3+1 (mixing elements)
+
+The most physical parameterization: all three SBL channels driven
+simultaneously by the extended-PMNS elements, with the **unitarity
+constraint |Ue4|² + |Uμ4|² < 1** enforced via `model_constraint`.
+
+| # | name | meaning | fit space | bounds | default |
+|---|---|---|---|---|---|
+| 0 | `dmsq` | Δm²₄₁ [eV²] | log10 | 10⁻² – 10² | 10⁻² |
+| 1 | `Ue4^2` | \|Ue4\|² | log10 | 0 – ~1 | 10⁻⁸ |
+| 2 | `Um4^2` | \|Uμ4\|² | log10 | 0 – ~1 | 10⁻⁸ |
+
+Rules: **0** = no osc, **1** = νμ→νμ, **2** = νμ→νe, **3** = νe→νe — so one
+XML can simultaneously disappear the νμ-CC sample (rule 1), appear the
+fullosc component (rule 2), and disappear the intrinsic νe (rule 3).
+
+### `3+1_angles` — 3+1 in mixing angles
+
+Same physics and rules (0–3) as `3+1`, re-parameterized in angles, with the
+unitarity constraint.
+
+| # | name | meaning | fit space | bounds | default |
+|---|---|---|---|---|---|
+| 0 | `dmsq` | Δm²₄₁ [eV²] | log10 | 10⁻² – 10² | 10⁻² |
+| 1 | `sinsq2th14` | sin²2θ₁₄ | log10 | 0 – ~1 | 10⁻⁸ |
+| 2 | `sinsqth24` | sin²θ₂₄ | log10 | 0 – ~1 | 10⁻⁸ |
+
+### `3+1_3A` / `3+1_3B` / `3+1_3C` — effective-amplitude 3+1 variants
+
+Full 3+1 physics (rules **0–3** as above), re-parameterized so that the
+*effective amplitude you want to plot* is a direct scan axis and the
+leftover mixing freedom is a single nuisance-like third parameter that
+PROfit profiles smoothly at each grid point (see the surface-section note on
+parameterizations).
+
+**`3+1_3A`** — sin²2θee-focused; ratio parameter is exactly sin²θ₂₄
+(= sin²2θμe / sin²2θee). No extra constraint needed.
+
+| # | name | fit space | bounds | default |
+|---|---|---|---|---|
+| 0 | `dmsq` [eV²] | log10 | 10⁻² – 10² | 10⁻² |
+| 1 | `sinsq2thee` | log10 | 0 – ~1 | 10⁻⁸ |
+| 2 | `sinsqth24` | log10 | 0 – ~1 | 10⁻⁸ |
+
+**`3+1_3B`** — sin²2θμμ-focused; `sB` is the ratio
+sin²2θμe / sin²2θμμ (= |Ue4|² / (1−|Uμ4|²)). Unitarity constraint enforced.
+
+| # | name | fit space | bounds | default |
+|---|---|---|---|---|
+| 0 | `dmsq` [eV²] | log10 | 10⁻² – 10² | 10⁻² |
+| 1 | `sinsq2thmumu` | log10 | 0 – ~1 | 10⁻⁸ |
+| 2 | `sB` | log10 | 0 – ~1 | 10⁻⁸ |
+
+**`3+1_3C`** — sin²2θμe-focused (the one to use for direct appearance
+contours); `xi` is the log geometric ratio ξ = ½·log(|Ue4|²/|Uμ4|²)
+(ξ = 0 ⇒ equal mixing, ξ > 0 ⇒ electron-dominated). Unitarity constraint
+√(sin²2θμe)·cosh(ξ) < 1.
+
+| # | name | fit space | bounds | default |
+|---|---|---|---|---|
+| 0 | `dmsq` [eV²] | log10 | 10⁻² – 10² | 10⁻² |
+| 1 | `sinsq2thmue` | log10 | 0 – ~1 | 10⁻⁸ |
+| 2 | `xi` | **linear** | −10 – 10 | 0 |
+
+### `3+1_decay_invis` — 3+1 with invisible sterile decay
+
+The `3+1` mixing-element model extended with an invisible-decay coupling;
+combined unitarity + positivity constraint. Rules **0–3** as in `3+1`.
+
+| # | name | meaning | fit space | bounds | default |
+|---|---|---|---|---|---|
+| 0 | `dmsq` | Δm²₄₁ [eV²] | log10 | 10⁻² – 10² | 10⁻² |
+| 1 | `Ue4^2` | \|Ue4\|² | log10 | 0 – ~1 | 10⁻⁸ |
+| 2 | `Um4^2` | \|Uμ4\|² | log10 | 0 – ~1 | 10⁻⁸ |
+| 3 | `g2` | decay coupling g² | **linear** | 0 – 10 | 0 |
+
+### `3+2` — two-sterile model
+
+Seven parameters with a CP phase, so ν and ν̄ appearance differ. Unitarity
+constraints |Ue4|²+|Ue5|² ≤ 1 and |Uμ4|²+|Uμ5|² ≤ 1.
+
+| # | name | meaning | fit space | bounds | default |
+|---|---|---|---|---|---|
+| 0 | `dmsq41` | Δm²₄₁ [eV²] | log10 | 10⁻² – 10² | 10⁻¹ |
+| 1 | `dmsq51` | Δm²₅₁ [eV²] | log10 | 10⁻² – 10² | 1 |
+| 2 | `Ue4sq` | \|Ue4\|² | log10 | 10⁻⁵ – ~0.98 | 10⁻⁴ |
+| 3 | `Um4sq` | \|Uμ4\|² | log10 | 10⁻⁵ – ~0.98 | 10⁻⁴ |
+| 4 | `Ue5sq` | \|Ue5\|² | log10 | 10⁻⁵ – ~0.98 | 10⁻⁴ |
+| 5 | `Um5sq` | \|Uμ5\|² | log10 | 10⁻⁵ – ~0.98 | 10⁻⁴ |
+| 6 | `phi54` | CP phase φ₅₄ [rad] | **linear** | 0 – 2π | 0 |
+
+Rules: **0** = no osc, **1** = νμ→νμ, **2** = νμ→νe, **3** = νe→νe,
+**4** = ν̄μ→ν̄e (the CP-conjugate appearance — give your antineutrino
+fullosc branch rule 4).
+
+### `LBL` — full three-flavour long-baseline (NuFastLBL)
+
+Standard 3ν oscillations, all parameters fitted in **linear** space with
+bounds spanning the global-fit allowed ranges.
+
+| # | name | meaning | bounds | default |
+|---|---|---|---|---|
+| 0 | `dmsq_21` | Δm²₂₁ [eV²] | 6×10⁻⁵ – 9×10⁻⁵ | 7.5×10⁻⁵ |
+| 1 | `dmsq_31` | Δm²₃₁ [eV²] | −3×10⁻³ – 3×10⁻³ | 10⁻³ |
+| 2 | `sinsqt12` | sin²θ₁₂ | 0.2 – 0.4 | 0.3 |
+| 3 | `sinsqt13` | sin²θ₁₃ | 0.01 – 0.04 | 0.025 |
+| 4 | `sinsqt23` | sin²θ₂₃ | 0.3 – 0.7 | 0.5 |
+| 5 | `delta_CP` | δ_CP [rad] | −π – π | 0 |
+
+Rules cover the full 3×3 matrix: **0** = no osc, **1** = Pee, **2** = Peμ,
+**3** = Peτ, **4** = Pμe, **5** = Pμμ, **6** = Pμτ, **7** = Pτe,
+**8** = Pτμ, **9** = Pττ.
+
+### `template` / `template_fit` — per-subchannel normalization fit
+
+Not an oscillation model: each `<parameter name="...">` in the model block
+names a **subchannel** whose normalization floats as one linear scale
+parameter (bounds from the parameter's `min`/`max` attributes, default 1);
+every non-floated subchannel stays fixed at 1. `model_rule` is ignored —
+events are routed by subchannel membership. Needs no L/E variable. Useful
+for sideband/template fits and cross-section-style normalization studies.
+
+---
+
+*Why is the repository called "Elephant Vanishes"? Old habit — all of Mark's
+git repos are named after the book he was reading when he created them.
+This one was Haruki Murakami's* The Elephant Vanishes.

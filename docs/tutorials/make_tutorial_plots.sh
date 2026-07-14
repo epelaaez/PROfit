@@ -116,6 +116,7 @@ run_step surf1    surface -g 30 "${AXES[@]}"
 run_step surfstat --statonly surface -g 30 "${AXES[@]}"
 run_step surfamr  surface "${AXES[@]}" --surface-amr --amr-initial 10 --amr-levels 3 \
                   --amr-levels-chi2 2.30 5.99
+run_step curve1   surface "${AXES[@]}" -g 20 --curve-mode -3 -1 -1 1
 if [ "$RUN_EXPENSIVE" = "1" ]; then
     run_step surfnoflux --exclude-systs Flux1 Flux2 Flux3 surface -g 30 "${AXES[@]}"
     run_step surfbrz    surface "${AXES[@]}" --surface-amr --amr-initial 10 --amr-levels 2 \
