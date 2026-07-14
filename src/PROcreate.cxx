@@ -486,6 +486,11 @@ namespace PROfit {
                     sv.back().scale = inconfig.m_mcgen_variation_scale.at(sys_name);
                     log<LOG_INFO>(L"%1% || Setting scale=%2% for systematic %3%") % __func__ % sv.back().scale % sys_name.c_str();
                 }
+                // Check if inflate is set for this systematic
+                if(inconfig.m_mcgen_variation_inflate.find(sys_name) != inconfig.m_mcgen_variation_inflate.end()) {
+                    sv.back().inflate = inconfig.m_mcgen_variation_inflate.at(sys_name);
+                    log<LOG_INFO>(L"%1% || Setting inflate=%2% for systematic %3%") % __func__ % sv.back().inflate % sys_name.c_str();
+                }
                 if(sys_mode == "spline" || sys_mode == "spline_to_covariance") {
                     bool override_knobs = inconfig.m_mcgen_variation_knobval_override.find(sys_name) != inconfig.m_mcgen_variation_knobval_override.end();
                     if(!override_knobs && map_systematic_knob_vals.find(sys_name) == map_systematic_knob_vals.end()) {

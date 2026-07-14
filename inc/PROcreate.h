@@ -83,6 +83,7 @@ namespace PROfit{
         bool force_0_cv = false;    ///< If true, normalise spline shifts by the shift at knob=0.
         std::vector<int> include_only_weights; ///< 1-based indices of weight universes to include; empty = all.
         float scale = 1.0f;         ///< Scale factor applied to all weights (e.g. 0.001 for weights stored as x1000).
+        float inflate = 1.0f;       ///< Uncertainty inflation factor: spline ratios are scaled about 1 (ratio -> 1 + inflate*(ratio-1)) before interpolation; covariance matrices are scaled by inflate^2.
         int num_decomp_knobs = -1;  ///< For "covariance_to_spline": number of top eigenpairs to keep as spline knobs (-1 = keep all).
         bool include_resid_cov = true; ///< For "covariance_to_spline": if true, retain the un-kept (smaller) eigenpairs as a "<systname>_resid_cov" covariance matrix instead of dropping them.
         bool has_restrict = false;  ///< If true, clamp the knob value to [restrict_lo, restrict_hi] during evaluation and fitting.
@@ -120,6 +121,9 @@ namespace PROfit{
             }
             if (version >= 3) {
                 ar & include_resid_cov;
+            }
+            if (version >= 4) {
+                ar & inflate;
             }
         }
 
@@ -325,6 +329,6 @@ namespace PROfit{
 
 };
 
-BOOST_CLASS_VERSION(PROfit::SystStruct, 3)
+BOOST_CLASS_VERSION(PROfit::SystStruct, 4)
 
 #endif

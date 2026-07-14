@@ -414,10 +414,16 @@ namespace PROfit {
 
         std::string sysname = syst.GetSysName();
 
-        //generate matrix only if it's not already in the map 
+        //generate matrix only if it's not already in the map
         if(syst_map.find(sysname) == syst_map.end()){
             std::pair<Eigen::MatrixXf, Eigen::MatrixXf> matrices = PROsyst::GenerateCovarMatrices(syst);
 
+            // If inflate is set, scale the covariance by inflate^2 (uncertainty scales by inflate).
+            // The correlation matrix is unchanged by a constant scaling.
+            if(syst.inflate != 1.0f) {
+                log<LOG_INFO>(L"%1% || Applying inflate=%2% (covariance x %3%) for systematic %4%") % __func__ % syst.inflate % (syst.inflate * syst.inflate) % sysname.c_str();
+                matrices.first *= syst.inflate * syst.inflate;
+            }
 
             syst_map[sysname] = {covmat.size(), SystType::Covariance};
             covmat.push_back(matrices.first);
@@ -540,6 +546,12 @@ namespace PROfit {
     void PROsyst::LoadExternalCovarianceMatrix(const PROconfig &config, const SystStruct& syst){
         std::string matrixname = syst.GetSysName();
         Eigen::MatrixXf fracM = LoadExternalFractionalCovariance(config, syst);
+
+        // If inflate is set, scale the covariance by inflate^2 (uncertainty scales by inflate).
+        if(syst.inflate != 1.0f) {
+            log<LOG_INFO>(L"%1% || Applying inflate=%2% (covariance x %3%) for systematic %4%") % __func__ % syst.inflate % (syst.inflate * syst.inflate) % matrixname.c_str();
+            fracM *= syst.inflate * syst.inflate;
+        }
 
         // Generate correlation matrix from fractional covariance
         Eigen::MatrixXf corrM = PROsyst::GenerateCorrMatrix(fracM);
@@ -765,6 +777,16 @@ namespace PROfit {
             PROspec ratio_at_0 = ratios[knob0_index];
             for (size_t i = 0; i < ratios.size(); ++i) {
                 ratios[i] = ratios[i] / ratio_at_0;
+            }
+        }
+
+        // If inflate is set, scale the spline shifts about 1 (ratio -> 1 + inflate*(ratio - 1))
+        // before interpolation, inflating the uncertainty while keeping the no-shift value of 1 fixed.
+        if (syst.inflate != 1.0f) {
+            log<LOG_INFO>(L"%1% || Applying inflate=%2% to spline shifts for systematic %3%") % __func__ % syst.inflate % syst.systname.c_str();
+            for (PROspec& ratio : ratios) {
+                Eigen::VectorXf& v = ratio.Spec();
+                v = (1.0f + syst.inflate * (v.array() - 1.0f)).matrix();
             }
         }
 
