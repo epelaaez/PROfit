@@ -118,8 +118,9 @@ run_test t04statonly      --use-fake-data --statonly global
 run_test t05inject        --use-fake-data -i dmsq 1 sinsq2thme 0.01 global
 run_test t06pseudoexp     --use-fake-data --pseudo-experiment global
 
-# --- 2. Profile ---------------------------------------------------------------
+# --- 2. Profile (legacy 18-point scan, and the PRObe adaptive scan) -----------
 run_test t07profile       --use-fake-data profile
+run_test t07probe         --use-fake-data profile --probe
 
 # --- 3. Surfaces --------------------------------------------------------------
 run_test t08surface       --use-fake-data surface -g 4 "${AXES[@]}"

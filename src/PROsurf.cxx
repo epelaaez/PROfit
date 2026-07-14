@@ -10,6 +10,7 @@
 #include <chrono>
 #include <cmath>
 #include <future>
+#include <memory>
 #include <algorithm>
 #include <functional>
 #include <fstream>
@@ -210,6 +211,84 @@ void PROsurf::FillSurfaceStat(const PROconfig &config, const PROfitterConfig &fi
     delete local_metric;
 }
 
+namespace {
+
+// PROfile's cross-thread seed_bank exposed through the shared ScanPointStore
+// interface, bound to one scanned parameter. All access serialized by the
+// bank mutex; store ops are microseconds against ~0.1-1 s fits, so a single
+// mutex is plenty.
+struct ProfileBankView final : public ScanPointStore {
+    PROfile &prof;
+    int param_idx;
+    ProfileBankView(PROfile &p, int idx) : prof(p), param_idx(idx) {}
+
+    std::vector<ScanPoint> snapshot() const override {
+        std::lock_guard<std::mutex> lock(prof.seed_bank_mutex);
+        if(param_idx < 0 || param_idx >= (int)prof.seed_bank.size()) return {};
+        return prof.seed_bank[param_idx];
+    }
+    Eigen::VectorXf nearest_bf(float value) const override {
+        std::lock_guard<std::mutex> lock(prof.seed_bank_mutex);
+        if(param_idx < 0 || param_idx >= (int)prof.seed_bank.size()) return {};
+        const auto &entries = prof.seed_bank[param_idx];
+        if(entries.empty()) return {};
+        size_t nearest = 0;
+        float best_d = std::fabs(entries[0].value - value);
+        for(size_t k = 1; k < entries.size(); ++k) {
+            const float d = std::fabs(entries[k].value - value);
+            if(d < best_d) { best_d = d; nearest = k; }
+        }
+        return entries[nearest].best_fit;
+    }
+    bool has_close(float value, float tol) const override {
+        std::lock_guard<std::mutex> lock(prof.seed_bank_mutex);
+        if(param_idx < 0 || param_idx >= (int)prof.seed_bank.size()) return false;
+        for(const auto &e : prof.seed_bank[param_idx])
+            if(std::fabs(e.value - value) < tol) return true;
+        return false;
+    }
+    void add(const ScanPoint &pt) override {
+        if(pt.best_fit.size() == 0) return;
+        std::lock_guard<std::mutex> lock(prof.seed_bank_mutex);
+        if(param_idx < 0 || param_idx >= (int)prof.seed_bank.size()) return;
+        prof.seed_bank[param_idx].push_back(pt);
+    }
+};
+
+// Scan-space bounds for the profile fits: physics from the model (with_osc)
+// or pinned (syst-only), splines from their restrict/lo-hi ranges. Single
+// home of logic previously duplicated between the osc / non-osc branches.
+// Syst-only pinning uses the physics values of the caller's FIRST seed (the
+// global best fit — the same point minchi was computed at); model default_val
+// is only the fallback when no seeds exist. Pinning at default_val while the
+// CV/injected physics differed biased every knob_chi of a syst-only profile.
+void buildScanBounds(const PROmodel &model, const PROsyst &systs, bool with_osc,
+                     const Eigen::VectorXf *seed_physics,
+                     Eigen::VectorXf &lb, Eigen::VectorXf &ub) {
+    const int nparams = (int)model.nparams + (int)systs.GetNSplines();
+    lb = Eigen::VectorXf::Constant(nparams, -3.0);
+    ub = Eigen::VectorXf::Constant(nparams, 3.0);
+    const size_t nphys = model.nparams;
+    for(size_t j = 0; j < nphys; ++j) {
+        if(with_osc) {
+            lb(j) = model.lb(j);
+            ub(j) = model.ub(j);
+        } else {
+            const float pin = (seed_physics && (long)seed_physics->size() > (long)j)
+                              ? (*seed_physics)((int)j) : model.default_val(j);
+            lb(j) = pin;
+            ub(j) = pin;
+        }
+    }
+    for(int j = (int)nphys; j < nparams; ++j) {
+        const size_t si = j - nphys;
+        lb(j) = systs.spline_has_restrict[si] ? systs.spline_restrict_lo[si] : systs.spline_lo[si];
+        ub(j) = systs.spline_has_restrict[si] ? systs.spline_restrict_hi[si] : systs.spline_hi[si];
+    }
+}
+
+} // anonymous namespace
+
 std::vector<profOut> PROfile::PROfilePointHelper(const PROsyst *systs, const PROfitterConfig &fitconfig, std::atomic<int> *task_counter, const std::vector<ScanTask> *tasks, float minchi, bool with_osc, MultiPROgressBar& progressbar, const std::vector<Eigen::VectorXf> &seed_points, uint32_t seed, bool use_probe, std::atomic<int>* tasks_remaining, int bar_index_offset, std::atomic<uint64_t>* max_thread_wall_us) {
 
     // Per-thread wall start. When max_thread_wall_us is non-null, we atomically
@@ -217,55 +296,21 @@ std::vector<profOut> PROfile::PROfilePointHelper(const PROsyst *systs, const PRO
     // worst-case thread wall for parallelism-efficiency reporting.
     const auto thread_t0 = std::chrono::steady_clock::now();
 
-
     std::vector<profOut> outs;
-    // Make a local copy for this thread
-    PROmetric *local_metric = metric.Clone();
-    int nparams = local_metric->GetModel().nparams + systs->GetNSplines();
-    int nstep = 18;
+    // Thread-local metric clone; unique_ptr so an escaping exception cannot leak it.
+    std::unique_ptr<PROmetric> local_metric(metric.Clone());
+    const int nparams = local_metric->GetModel().nparams + systs->GetNSplines();
+    constexpr int nstep = 18; ///< Legacy uniform scan: nstep+1 fixed-value fits per parameter.
 
     Eigen::VectorXf ub, lb, tub, tlb;
-
-
-    if(with_osc) {
-        lb = Eigen::VectorXf::Constant(nparams, -3.0);
-        ub = Eigen::VectorXf::Constant(nparams, 3.0);
-        size_t nphys = local_metric->GetModel().nparams;
-        //set physics to correct values
-        for(size_t j=0; j<nphys; j++){
-            ub(j) = local_metric->GetModel().ub(j);
-            lb(j) = local_metric->GetModel().lb(j); 
-        }
-        //upper lower bounds for splines
-        for(int j = nphys; j < nparams; ++j) {
-            size_t si = j - nphys;
-            lb(j) = systs->spline_has_restrict[si] ? systs->spline_restrict_lo[si] : systs->spline_lo[si];
-            ub(j) = systs->spline_has_restrict[si] ? systs->spline_restrict_hi[si] : systs->spline_hi[si];
-        }
-    } else {
-        // Syst-only mode: create full-size bounds but fix physics params at seed values
-        lb = Eigen::VectorXf::Constant(nparams, -3.0);
-        ub = Eigen::VectorXf::Constant(nparams, 3.0);
-        size_t nphys = local_metric->GetModel().nparams;
-        // Fix physics parameters at model default values
-        for(size_t j=0; j<nphys; j++){
-            float fixed_val = local_metric->GetModel().default_val(j);
-            ub(j) = fixed_val;
-            lb(j) = fixed_val;
-        }
-        // Spline bounds as normal
-        for(int j = nphys; j < nparams; ++j) {
-            size_t si = j - nphys;
-            lb(j) = systs->spline_has_restrict[si] ? systs->spline_restrict_lo[si] : systs->spline_lo[si];
-            ub(j) = systs->spline_has_restrict[si] ? systs->spline_restrict_hi[si] : systs->spline_hi[si];
-        }
-    }
+    buildScanBounds(local_metric->GetModel(), *systs, with_osc,
+                    seed_points.empty() ? nullptr : &seed_points.front(), lb, ub);
 
     // Dynamic dispatch: pull the next available task from the shared atomic counter.
     // Each task represents "scan parameter task.param_idx over [task.sub_lb, task.sub_ub]".
     // Most parameters generate a single task spanning their full range; physics
     // parameters may be split into multiple chunked tasks via --probe-chunks. Each task
-    // runs atomically (Phase 0..4 of PRObe, or the legacy 18-uniform scan) on whichever
+    // runs atomically (PRObe phases, or the legacy 18-uniform scan) on whichever
     // thread grabs it.
     while (true) {
         int t_idx = task_counter->fetch_add(1);
@@ -290,10 +335,59 @@ std::vector<profOut> PROfile::PROfilePointHelper(const PROsyst *systs, const PRO
         log<LOG_INFO>(L"%1% || Worker picked task #%2%: param %3% on [%4%, %5%]")
             % __func__ % t_idx % i % task.sub_lb % task.sub_ub;
 
+        // Shared task epilogue (previously duplicated byte-for-byte in both
+        // branches): sort this task's points, hand them to the dispatcher, and
+        // complete the parameter's progress bar when its last task finishes.
+        auto finish_task = [&]() {
+            output.sort();
+            outs.push_back(std::move(output));
+            if (tasks_remaining) {
+                const int bar_idx = (int)which_spline - bar_index_offset;
+                const int prev = tasks_remaining[bar_idx].fetch_sub(1);
+                if (prev <= 1 && fitconfig.progress_bar) {
+                    progressbar.complete_bar(bar_idx);
+                }
+            }
+        };
 
-        Eigen::VectorXf last_bf;
+        // Task-level isolation: one pathological parameter/point must not abort
+        // the whole profile (it previously unwound through std::async, leaked
+        // the metric clone and stranded the progress display thread). Per-fit
+        // failures are already absorbed inside ScanFitContext::fitAt; this
+        // catches anything escaping the scan logic itself.
+        try {
 
-        // ---- PRObe path: adaptive importance sampling for the Δχ²=1 band ----
+        // The shared per-parameter store and fit executor: every fit of this
+        // task (either branch) seeds from globals + nearest banked point,
+        // deposits into the bank, and advances one RNG stream. The base seed
+        // is spaced by task so no two tasks share a per-fit seed sequence
+        // (101 > any per-task fit count).
+        ProfileBankView store(*this, i);
+        std::function<void()> on_fit_cb;
+        if (fitconfig.progress_bar) {
+            const int bar_idx_for_cb = (int)which_spline - bar_index_offset;
+            on_fit_cb = [&progressbar, bar_idx_for_cb]() {
+                progressbar.increment_bar(bar_idx_for_cb);
+            };
+        }
+        ScanFitContext ctx{*local_metric, tlb, tub, which_spline, fitconfig,
+                           seed + (uint32_t)t_idx * 101u, seed_points, store, on_fit_cb};
+
+        // Fixed parameter (--fix / lb==ub): one fit at the pinned value, same
+        // for both scan strategies (PRObe previously returned an EMPTY scan
+        // here, breaking Plot's 1-point special case under --probe).
+        if (tlb(i) == tub(i)) {
+            auto out = ctx.fitAt(tlb(i));
+            if (out.ok) {
+                output.knob_vals.push_back(out.pt.value);
+                output.knob_chis.push_back(out.pt.chi2 - minchi);
+                output.knob_bfs.push_back(out.pt.best_fit);
+            }
+            finish_task();
+            continue;
+        }
+
+        // ---- PRObe path: adaptive importance sampling for the dchi2=1 band ----
         // Default off; enabled per-call via use_probe. Produces the same profOut
         // shape as the legacy 18-uniform scan so all downstream plotting works.
         if(use_probe){
@@ -310,32 +404,28 @@ std::vector<profOut> PROfile::PROfilePointHelper(const PROsyst *systs, const PRO
             // nuisance. Splines are never chunked so task_is_chunk = false for them.
             bool task_is_chunk = false;
             if (isphys) {
-                float full_lb_cmp = local_metric->GetModel().lb(which_spline);
-                float full_ub_cmp = local_metric->GetModel().ub(which_spline);
-                if (std::isinf(full_lb_cmp)) full_lb_cmp = -3.0f;
-                if (std::isinf(full_ub_cmp)) full_ub_cmp =  3.0f;
+                const float full_lb_cmp = finite_or(local_metric->GetModel().lb(which_spline), -3.0f);
+                const float full_ub_cmp = finite_or(local_metric->GetModel().ub(which_spline),  3.0f);
                 task_is_chunk = (task.sub_lb > full_lb_cmp + 1e-4f) ||
                                 (task.sub_ub < full_ub_cmp - 1e-4f);
             }
             opts.may_have_spikes = isphys;
-            opts.target_dchi2    = 1.0f;          // 1σ band
+            opts.target_dchi2    = 1.0f;          // 1 sigma band
             if (task_is_chunk) {
                 // Reduce per-chunk fit count: 5 anchors + 5 coarse instead of 9+9.
-                // With chunks=N, total points across the param ≈ N×10 vs unchunked 18,
+                // With chunks=N, total points across the param ~ N x 10 vs unchunked 18,
                 // so coverage is comparable while per-chunk wall time drops by ~50%.
                 opts.anchor_sigmas = {0.0f, -0.6f, 0.6f, -1.3f, 1.3f};
                 opts.coarse_n      = 5;
             }
-            // sigma_init: nuisances are already in σ-units; for physics, derive
-            // from this task's sub-range (chunk width / 6 ≈ a 3σ half-width within
+            // sigma_init: nuisances are already in sigma-units; for physics, derive
+            // from this task's sub-range (chunk width / 6 ~ a 3 sigma half-width within
             // the chunk). For unchunked tasks this is the full-range / 6 as before.
             float scale = 1.0f;
             if(isphys){
-                float plb_m = task.sub_lb;
-                float pub_m = task.sub_ub;
-                if(std::isinf(plb_m)) plb_m = -3.0f;
-                if(std::isinf(pub_m)) pub_m =  3.0f;
-                float width = pub_m - plb_m;
+                const float plb_m = finite_or(task.sub_lb, -3.0f);
+                const float pub_m = finite_or(task.sub_ub,  3.0f);
+                const float width = pub_m - plb_m;
                 scale = (std::isfinite(width) && width > 0.0f) ? width / 6.0f : 1.0f;
             }
             opts.sigma_init = scale;
@@ -351,20 +441,10 @@ std::vector<profOut> PROfile::PROfilePointHelper(const PROsyst *systs, const PRO
                              ? global_bf
                              : 0.5f * (task.sub_lb + task.sub_ub);
 
-            // Live progress callback: PRObe invokes this after each accepted fit
-            // so the bar advances during the scan, not in a burst at the end.
-            // increment_bar is internally thread-safe (per-bar mutex), so multiple
-            // PRObe scans running on different threads can all call it.
-            if (fitconfig.progress_bar) {
-                const int bar_idx_for_cb = (int)which_spline - bar_index_offset;
-                opts.on_fit = [&progressbar, bar_idx_for_cb]() {
-                    progressbar.increment_bar(bar_idx_for_cb);
-                };
-            }
-
-            PRObe::CrossingResult r = PRObe::chi2_crossing_1d(
-                *local_metric, which_spline, tlb, tub, bf_value,
-                seed_points, fitconfig, seed + (uint32_t)t_idx, opts);
+            // All seeding (globals + bank-nearest per fit), bank deposits,
+            // dedup against other chunks' points, and live progress run inside
+            // ctx / the shared store now.
+            PRObe::CrossingResult r = PRObe::chi2_crossing_1d(ctx, bf_value, opts);
 
             for(size_t k = 0; k < r.theta.size(); ++k){
                 output.knob_vals.push_back(r.theta[k]);
@@ -374,116 +454,72 @@ std::vector<profOut> PROfile::PROfilePointHelper(const PROsyst *systs, const PRO
             log<LOG_INFO>(L"%1% || PRObe done for spline #%2%: %3% fits, surrogate=%4%")
                 % __func__ % which_spline % r.n_fits % (int)r.used_surrogate;
 
-            output.sort();
-            outs.push_back(output);
-
-            // If this was the last task for the param, mark its bar as complete.
-            if (tasks_remaining) {
-                const int bar_idx = (int)which_spline - bar_index_offset;
-                const int prev = tasks_remaining[bar_idx].fetch_sub(1);
-                if (prev <= 1 && fitconfig.progress_bar) {
-                    progressbar.complete_bar(bar_idx);
-                }
-            }
+            finish_task();
             continue; // skip the legacy 18-uniform loop below
         }
 
         //first get what values to sample
         std::vector<float> test_values;
 
-        //if not physis do normal
-        
-        
-        if(lb(which_spline)==ub(which_spline)){//its fixed. Dont run it
-            test_values.push_back(ub(which_spline));
-        }else{
-            if(!isphys){
-                //if lower bound is 0 or both pos/both negative (aka not sym around zero)
-                if(lb(which_spline)==0 || (lb(which_spline)*ub(which_spline) >0) ){
-                    for (int j = 0; j <= nstep; ++j) {
-                        float which_value =  std::isinf(lb(which_spline)) ? -3 + (ub(which_spline) - (-3)) * j / (float)nstep :   lb(which_spline) + (ub(which_spline) - lb(which_spline)) * j / (float)nstep;
-                        test_values.push_back(which_value);       
-                    }
-                }else{
-                    for (int j = 0; j <= nstep; ++j) {
-                        int k;
-                        if (j <= nstep - nstep / 2) {
-                            k = nstep / 2 + j;  // Forward direction
-                        } else {
-                            k = nstep - j;  // Backward direction
-                        }
-                        float which_value =  std::isinf(lb(which_spline)) ? -3 + (ub(which_spline) - (-3)) * k / (float)nstep :   lb(which_spline) + (ub(which_spline) - lb(which_spline)) * k / (float)nstep;
-                        test_values.push_back(which_value);       
-                    }
+        if(!isphys){
+            //if lower bound is 0 or both pos/both negative (aka not sym around zero)
+            if(lb(which_spline)==0 || (lb(which_spline)*ub(which_spline) >0) ){
+                for (int j = 0; j <= nstep; ++j) {
+                    float which_value = finite_or(lb(which_spline), -3.0f) + (ub(which_spline) - finite_or(lb(which_spline), -3.0f)) * j / (float)nstep;
+                    test_values.push_back(which_value);
                 }
             }else{
-                //if its physics, grab seed points, need to include those
-                std::vector<float> seed_values(seed_points.size());
-                std::transform(seed_points.begin(), seed_points.end(), seed_values.begin(), [which_spline](const auto& vec) { return vec[which_spline]; });
-                float mod = 0.5;
-                while(test_values.size()<nstep*1.5){
-                    test_values = combined_sparse_seed(std::isinf(lb(which_spline)) ? -3 : lb(which_spline), ub(which_spline), seed_values, nstep*mod, 2);
-                    mod=mod*1.2;
+                // Center-out walk: mid -> top, then jump back to just below mid
+                // -> bottom. The seed bank's nearest-by-value lookup makes the
+                // jump seamless (the old previous-point chaining did not).
+                for (int j = 0; j <= nstep; ++j) {
+                    int k;
+                    if (j <= nstep - nstep / 2) {
+                        k = nstep / 2 + j;  // Forward direction
+                    } else {
+                        k = nstep - j;  // Backward direction
+                    }
+                    float which_value = finite_or(lb(which_spline), -3.0f) + (ub(which_spline) - finite_or(lb(which_spline), -3.0f)) * k / (float)nstep;
+                    test_values.push_back(which_value);
                 }
-                log<LOG_INFO>(L"%1% || PROfileing over physics parameter number %2% has %3% uniform points, and %4% local ones for a total of %5% points. ") % __func__ %  which_spline % int(nstep*0.5) %int((2*2+1)*seed_values.size()) % test_values.size();
             }
+        }else{
+            //if its physics, grab seed points, need to include those
+            std::vector<float> seed_values(seed_points.size());
+            std::transform(seed_points.begin(), seed_points.end(), seed_values.begin(), [which_spline](const auto& vec) { return vec[which_spline]; });
+            float mod = 0.5;
+            while(test_values.size()<nstep*1.5){
+                test_values = combined_sparse_seed(finite_or(lb(which_spline), -3.0f), ub(which_spline), seed_values, nstep*mod, 2);
+                mod=mod*1.2;
+            }
+            log<LOG_INFO>(L"%1% || PROfileing over physics parameter number %2% has %3% uniform points, and %4% local ones for a total of %5% points. ") % __func__ %  which_spline % int(nstep*0.5) %int((2*2+1)*seed_values.size()) % test_values.size();
         }
 
-        //log<LOG_INFO>(L"%1% || PLONK which_spline %2% has testpt order %3% ") % __func__ %  which_spline % test_values;
-        //and minimize
-
-        Eigen::VectorXf cv_best_fit;
-        float last_val = 0;
+        // Legacy fixed-grid scan, one shared-executor fit per value. Failed
+        // fits (exception / non-finite chi2) are skipped rather than recorded,
+        // so the knob arrays stay consistent.
         for(auto &which_value: test_values){
-            float fx;
-            output.knob_vals.push_back(which_value);
-
-            tlb[which_spline] = which_value;
-            tub[which_spline] = which_value;
-
-            local_metric->setBounds(tlb,tub);
-            local_metric->fixSpline(which_spline,which_value);
-
-            PROfitter fitter(tub, tlb, fitconfig, seed+i);
-
-            std::vector<Eigen::VectorXf> test_seeds = seed_points;
-            if(last_bf.size()>0){
-                if(which_value*last_val<0){//have we flipper around the CV, if so lets take the best value from that and NOT init. 
-                    test_seeds.push_back(cv_best_fit);
-                }else{
-                    test_seeds.push_back(last_bf);
-                }
-            }
-
-            fx = fitter.Fit(*local_metric, test_seeds);
-            output.knob_chis.push_back(fx - minchi);
-            output.knob_bfs.push_back(fitter.best_fit);
-            last_bf = fitter.best_fit;
-            if(cv_best_fit.size()==0){cv_best_fit=last_bf;}
+            auto out = ctx.fitAt(which_value);
+            if(!out.ok) continue;
+            output.knob_vals.push_back(out.pt.value);
+            output.knob_chis.push_back(out.pt.chi2 - minchi);
+            output.knob_bfs.push_back(out.pt.best_fit);
 
             std::string spec_string = "";
-            for(auto &f : fitter.best_fit) spec_string+=" "+std::to_string(f); 
-            log<LOG_INFO>(L"%1% || Fixed value of spline # %2% is value %3%, has a chi post of : %4% (i %5% nstep %6% ") % __func__ % which_spline % which_value % fx % i % nstep;
+            for(auto &f : out.pt.best_fit) spec_string+=" "+std::to_string(f);
+            log<LOG_INFO>(L"%1% || Fixed value of spline # %2% is value %3%, has a chi post of : %4% (i %5% nstep %6% ") % __func__ % which_spline % which_value % out.pt.chi2 % i % nstep;
             log<LOG_INFO>(L"%1% || at a BF param value of @ %2%") % __func__ %  spec_string.c_str();
-
-            last_val = which_value;
-            if(fitconfig.progress_bar)progressbar.increment_bar((int)which_spline - bar_index_offset);
-
         }    //end step loop
-        output.sort();
-        outs.push_back(output);
+        if(output.knob_vals.empty())
+            log<LOG_ERROR>(L"%1% || Every scan-point fit of parameter %2% failed; its profile will be empty.") % __func__ % which_spline;
+        finish_task();
 
-        // If this was the last task for the param, mark its bar as complete.
-        if (tasks_remaining) {
-            const int bar_idx = (int)which_spline - bar_index_offset;
-            const int prev = tasks_remaining[bar_idx].fetch_sub(1);
-            if (prev <= 1 && fitconfig.progress_bar) {
-                progressbar.complete_bar(bar_idx);
-            }
+        } catch(const std::exception &e) {
+            log<LOG_ERROR>(L"%1% || Task #%2% (param %3%) aborted with '%4%'; emitting %5% completed point(s) and continuing.")
+                % __func__ % t_idx % i % e.what() % output.knob_vals.size();
+            finish_task();
         }
     }//end thread
-
-    delete local_metric;
 
     // Max-merge our wall time into the dispatcher's atomic. CAS loop because
     // std::atomic<uint64_t>::fetch_max isn't standard until C++26.
@@ -550,13 +586,23 @@ std::vector<surfOut> PROsurf::PointHelper(const PROfitterConfig &fitconfig, std:
         local_metric->setBounds(lb,ub);
 
         PROfitter fitter(ub, lb, fitconfig, seed+(uint32_t)i);
-        // Warm-start: on this thread's first pulled point, seed from the global
-        // best-fit (seed_pt) when available; on subsequent points fall back to
-        // the most-recent fit's best_fit. With dynamic dispatch the previous
-        // fit may not be a grid neighbour, but it is still inside the explored
-        // region and is a useful seed.
+        // Warm-start: seed from the CLOSEST point in (x, y) grid space that this
+        // thread has already fitted, not the most recently pulled one — with
+        // dynamic dispatch the previous pull can be far across the surface,
+        // while the nearest explored point is the best predictor of the local
+        // minimum. Distance is Euclidean in the grid's own coordinates (log10
+        // values on log axes), i.e. the fit's parameter space. The thread's
+        // first point seeds from the global best fit (seed_pt) when available.
         if(!outs.empty()){
-            output.chi = fitter.Fit(*local_metric, outs.back().best_fit);
+            size_t nearest = 0;
+            float best_d2 = std::numeric_limits<float>::max();
+            for(size_t k = 0; k < outs.size(); ++k){
+                const float dx = outs[k].grid_val[1] - physics_params[1];
+                const float dy = outs[k].grid_val[0] - physics_params[0];
+                const float d2 = dx*dx + dy*dy;
+                if(d2 < best_d2){ best_d2 = d2; nearest = k; }
+            }
+            output.chi = fitter.Fit(*local_metric, outs[nearest].best_fit);
         }else if(seed_pt.size() > 0){
             output.chi = fitter.Fit(*local_metric, seed_pt);
         }else{
@@ -978,7 +1024,12 @@ void PROsurf::PlotCurve(const PROconfig &config, const PROmodel &model, const PR
 
 
 std::vector<float> findMinAndBounds(TGraph *g, float val, float lo, float hi) {
-    float step = 0.001;
+    // Walk resolution for the crossing search. This directly floors the
+    // precision of the reported sigma boundaries AND its cost is (hi-lo)/step
+    // TGraph::Eval calls per side, so scale with the range instead of walking
+    // a wide axis at fixed 1e-3.
+    constexpr float kMinWalkStep = 0.001f;
+    const float step = std::max(kMinWalkStep, (hi - lo) / 10000.0f);
     int n = g->GetN();
     float minY = 1e9, minX = 0;
     for (int i = 0; i < n; ++i) {
@@ -1043,14 +1094,24 @@ PROfile::PROfile(const PROconfig &config, const PROsyst &systs, const PROmodel &
     for(const auto &name: systs.spline_names) names.push_back(name);
 
     int loopSize = nparams;
+    if(loopSize == 0){
+        // No scanned parameters at all (e.g. syst-only with zero splines):
+        // nothing to profile; bail before the thread setup below divides by /
+        // clamps to a zero thread count.
+        log<LOG_WARNING>(L"%1% || No parameters to profile (nparams == 0); returning empty PROfile.") % __func__;
+        return;
+    }
     if(nThreads>loopSize){
         nThreads = loopSize;
         log<LOG_INFO>(L"%1% || nThreads is < loopSize (nparams) : %2% <  %3%. Setting equal ") % __func__ % nThreads % loopSize ;
     }
 
-    int chunkSize = loopSize / nThreads;
+    std::vector<std::future<std::vector<profOut>>> futures;
 
-    std::vector<std::future<std::vector<profOut>>> futures; 
+    // Cross-thread warm-start bank: one slot per full-vector parameter, filled by
+    // every completed scan-point fit and queried for the nearest-in-value seed.
+    // Must be sized before any worker thread launches.
+    seed_bank.assign(model.nparams + systs.GetNSplines(), {});
 
     // Resolve dispatcher state up-front so the progress-bar config knows per-bar totals.
     const int nparams_helper = (int)model.nparams + (int)systs.GetNSplines();
@@ -1130,14 +1191,17 @@ PROfile::PROfile(const PROconfig &config, const PROsyst &systs, const PROmodel &
             pl = model.lb(i);
             pu = model.ub(i);
         } else {
+            // Match buildScanBounds: a restrict range, when present, IS the
+            // spline's scan range (previously tasks used the unrestricted
+            // lo/hi, silently overriding the restrict on the scanned axis).
             int s = i - (int)model.nparams;
-            pl = systs.spline_lo[s];
-            pu = systs.spline_hi[s];
+            pl = systs.spline_has_restrict[s] ? systs.spline_restrict_lo[s] : systs.spline_lo[s];
+            pu = systs.spline_has_restrict[s] ? systs.spline_restrict_hi[s] : systs.spline_hi[s];
         }
         if (use_probe && isphys && chunks > 1) {
             // Substitute finite ±3 for ±inf so the split arithmetic is sane.
-            const float plf = std::isinf(pl) ? -3.0f : pl;
-            const float puf = std::isinf(pu) ?  3.0f : pu;
+            const float plf = finite_or(pl, -3.0f);
+            const float puf = finite_or(pu,  3.0f);
             for (int k = 0; k < chunks; ++k) {
                 ScanTask t;
                 t.param_idx = i;
@@ -1694,6 +1758,11 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
     // Post-fit ±1σ bars (blue): centered on the global best-fit, width from MCMC
     // 16th/84th percentile quantiles.  For oscillation physics parameters (no entry
     // in param_err_lo/hi), fall back to the profile interval.
+    // CONTRACT with the caller (bin/PROfit.cxx profile block): init_seed is the
+    // FULL parameter vector while param_err_lo/hi are indexed over the SPLINE
+    // block only (post_param_lo/hi from getMCMCErrorBand). The vec_idx /
+    // syst_idx arithmetic below is the only thing tying the two conventions
+    // together — changing either side's indexing breaks the other silently.
     TGraphAsymmErrors todraw = onesig;
     for(int i = 0; i < nBins; ++i) {
         int vec_idx = with_osc ? i : (i + (int)model.nparams);
