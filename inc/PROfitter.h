@@ -114,7 +114,7 @@ namespace PROfit {
         /// GradientOneSidedFull for ~2× speedup, or to one of the *Lin variants for
         /// the Gauss-Newton-style linearised gradient (5–20× speedup, exact at minimum).
         /// See PROmetric::GradientMode for the full mode matrix.
-        PROmetric::GradientMode gradient_mode = PROmetric::GradientOneSidedFull;
+        PROmetric::GradientMode gradient_mode = PROmetric::GradientCentralLin;
 
         /** @brief Default constructor — leaves all parameters at their default values. */
         PROfitterConfig(){};
@@ -574,7 +574,15 @@ namespace PROfit {
              * @param n_datapoint Number of data bins used in the fit.
              * @return Rescaled parameter covariance matrix.
              */
-            Eigen::MatrixXf ScaledCovariance(float chi2, int n_datapoint) const {return Covariance()*chi2/float(n_datapoint-best_fit.size());}
+            Eigen::MatrixXf ScaledCovariance(float chi2, int n_datapoint) const {
+                const long ndof = (long)n_datapoint - (long)best_fit.size();
+                if(ndof <= 0) {
+                    log<LOG_WARNING>(L"%1% || ScaledCovariance: n_datapoint (%2%) <= nparams (%3%); returning unscaled covariance.")
+                        % __func__ % n_datapoint % best_fit.size();
+                    return Covariance();
+                }
+                return Covariance()*chi2/float(ndof);
+            }
 
 
     };

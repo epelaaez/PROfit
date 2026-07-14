@@ -71,10 +71,13 @@ namespace PROfit {
 
     std::string convertToXRootD(std::string fname_orig){
         std::string fname_use = fname_orig;
-        if(fname_orig.find("pnfs")!=std::string::npos ){
-            std::string p = "/pnfs";
-            std::string::size_type i = fname_orig.find(p);
-            fname_orig.erase(i,p.length());
+        // Search for "/pnfs" directly: testing for "pnfs" but erasing at
+        // find("/pnfs") threw std::out_of_range for paths containing "pnfs"
+        // without the leading slash.
+        const std::string p = "/pnfs";
+        std::string::size_type i = fname_orig.find(p);
+        if(i != std::string::npos){
+            fname_orig.erase(i, p.length());
             fname_use = "root://fndca1.fnal.gov:1094/pnfs/fnal.gov/usr"+fname_orig;
         }
         return fname_use;
@@ -1206,6 +1209,19 @@ namespace PROfit {
 
             float additional_weight = syst_additional_weight.at(i); // extra per-systematic weights, unrelated to the per-event additional_weight set in the xml file
             auto map_iter = eventweight_map.find(var_syst_objs.front()->GetSysName());
+            // The spline/covariance/covariance_to_spline paths below dereference
+            // map_iter; a missing weight name (branch typo, absent friend tree)
+            // must fail loudly here instead of dereferencing the end iterator.
+            const std::string &sys_mode = var_syst_objs.front()->mode;
+            const bool needs_weights = (sys_mode == "spline" || sys_mode == "spline_to_covariance" ||
+                                        sys_mode == "covariance" || sys_mode == "covariance_to_spline");
+            if(needs_weights && map_iter == eventweight_map.end()){
+                log<LOG_ERROR>(L"%1% || ERROR: systematic '%2%' (mode %3%) has no entry in the event weight map. "
+                               L"Check that the variation name matches a weight branch in the input files.")
+                    % __func__ % var_syst_objs.front()->GetSysName().c_str() % sys_mode.c_str();
+                log<LOG_ERROR>(L"Terminating.");
+                exit(EXIT_FAILURE);
+            }
             int spline_bin = (var_syst_objs.front()->mode == "covariance") ? -1: var_bin_indices[var_syst_objs.front()->binning];
 
             if(var_syst_objs.front()->mode == "spline" || var_syst_objs.front()->mode == "spline_to_covariance") {
@@ -1257,6 +1273,15 @@ namespace PROfit {
                 }
                 for(int iuni = 0; iuni < var_syst_objs.front()->GetNUniverse(); ++iuni){
                     float raw_weight = static_cast<float>(map_iter->second->at(iuni));
+                    // Same non-finite guard the spline path applies at its w:
+                    // one NaN/inf universe weight would silently NaN the whole
+                    // covariance (later zeroed by toFiniteMatrix, hiding the
+                    // bad input). Warn so the input problem is visible.
+                    if(std::isnan(raw_weight) || std::isinf(raw_weight)){
+                        log<LOG_WARNING>(L"%1% || Non-finite universe weight %2% for covariance systematic '%3%' universe %4%; using 1.")
+                            % __func__ % raw_weight % var_syst_objs.front()->GetSysName().c_str() % iuni;
+                        raw_weight = 1;
+                    }
                     float scaled_weight = raw_weight * var_syst_objs.front()->scale; // apply scale factor (default 1.0)
                     float sys_wei = run_syst ? additional_weight * scaled_weight :  1.0;
                     if(std::isnan(sys_wei) || std::isinf(sys_wei)) {
@@ -1280,6 +1305,11 @@ namespace PROfit {
                     so->FillCV(spline_bin, mc_weight);
                 for(int iuni = 0; iuni < var_syst_objs.front()->GetNUniverse(); ++iuni){
                     float raw_weight = static_cast<float>(map_iter->second->at(iuni));
+                    if(std::isnan(raw_weight) || std::isinf(raw_weight)){
+                        log<LOG_WARNING>(L"%1% || Non-finite universe weight %2% for covariance_to_spline systematic '%3%' universe %4%; using 1.")
+                            % __func__ % raw_weight % var_syst_objs.front()->GetSysName().c_str() % iuni;
+                        raw_weight = 1;
+                    }
                     float scaled_weight = raw_weight * var_syst_objs.front()->scale;
                     float sys_wei = run_syst ? additional_weight * scaled_weight : 1.0;
                     if(std::isnan(sys_wei) || std::isinf(sys_wei)) {

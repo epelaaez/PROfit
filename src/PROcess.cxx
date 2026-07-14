@@ -56,6 +56,10 @@ namespace PROfit {
         const bool ctx_changed = (cache.last_var_index != (int)var_index ||
                                   cache.last_syst_ptr != &insyst ||
                                   cache.last_model_ptr != &inmodel);
+        if(ctx_changed) {
+            cache.phys_grid_valid = false;
+            cache.unweighted_sums.clear();
+        }
 
         // ---- Systematic-weights half (depends only on shifts) ----
         // Three branches for the systw vector:
@@ -107,9 +111,13 @@ namespace PROfit {
                 Eigen::VectorXf spline_shifts_one(nbins_binning);
                 for(size_t b = 0; b < nbins_binning; ++b)
                     spline_shifts_one(b) = insyst.GetSplineShift((int)j, shifts(j), (int)b);
-                const auto &hist = inprop.variable_hist_storage(binning, var_index);
-                Eigen::VectorXf weighted_sum   = hist.transpose() * spline_shifts_one;
-                Eigen::VectorXf unweighted_sum = hist.colwise().sum().transpose();
+                // Transpose-free migration GEMV; the (constant) column sums are
+                // cached per binning instead of recomputed every call.
+                Eigen::VectorXf weighted_sum = inprop.variable_hist_storage.WeightedColSum(binning, var_index, spline_shifts_one);
+                auto it_us = cache.unweighted_sums.find(binning);
+                if(it_us == cache.unweighted_sums.end())
+                    it_us = cache.unweighted_sums.emplace(binning, inprop.variable_hist_storage.UnweightedColSum(binning, var_index)).first;
+                const Eigen::VectorXf &unweighted_sum = it_us->second;
                 for(size_t k = 0; k < nbins_var; ++k)
                     new_factor_j(k) = (unweighted_sum(k) > 0) ? weighted_sum(k) / unweighted_sum(k)
                                                               : 1.0f;
@@ -154,9 +162,11 @@ namespace PROfit {
                     Eigen::VectorXf spline_shifts_loc(nbins_binning);
                     for(size_t b = 0; b < nbins_binning; ++b)
                         spline_shifts_loc(b) = insyst.GetSplineShift(i, shifts(i), (int)b);
-                    const auto &hist = inprop.variable_hist_storage(binning, var_index);
-                    Eigen::VectorXf weighted_sum   = hist.transpose() * spline_shifts_loc;
-                    Eigen::VectorXf unweighted_sum = hist.colwise().sum().transpose();
+                    Eigen::VectorXf weighted_sum = inprop.variable_hist_storage.WeightedColSum(binning, var_index, spline_shifts_loc);
+                    auto it_us = cache.unweighted_sums.find(binning);
+                    if(it_us == cache.unweighted_sums.end())
+                        it_us = cache.unweighted_sums.emplace(binning, inprop.variable_hist_storage.UnweightedColSum(binning, var_index)).first;
+                    const Eigen::VectorXf &unweighted_sum = it_us->second;
                     for(size_t k = 0; k < nbins_var; ++k) {
                         const float f = (unweighted_sum(k) > 0) ? weighted_sum(k) / unweighted_sum(k)
                                                                 : 1.0f;
@@ -180,21 +190,27 @@ namespace PROfit {
             if(inmodel.is_trivial) {
                 result = inmodel.H_combined[var_index].col(0);
             } else {
-                const size_t N_ivars = inmodel.ivars.size();
-                std::vector<size_t> ivar_sizes(N_ivars);
-                for(size_t k = 0; k < N_ivars; ++k)
-                    ivar_sizes[k] = inprop.variable_midbin[inmodel.ivars[k]].size();
+                // Flat physics grid: constant across the whole fit (depends only
+                // on the model's ivars and the propagator's midbins) — build it
+                // once and reuse from the cache.
+                if(!cache.phys_grid_valid) {
+                    const size_t N_ivars = inmodel.ivars.size();
+                    std::vector<size_t> ivar_sizes(N_ivars);
+                    for(size_t k = 0; k < N_ivars; ++k)
+                        ivar_sizes[k] = inprop.variable_midbin[inmodel.ivars[k]].size();
 
-                std::vector<std::vector<float>> var_arrs(N_ivars, std::vector<float>(inmodel.n_phys_bins));
-                for(long int flat = 0; flat < inmodel.n_phys_bins; ++flat) {
-                    long int rem = flat;
-                    for(int k = (int)N_ivars - 1; k >= 0; --k) {
-                        var_arrs[k][flat] = inprop.variable_midbin[inmodel.ivars[k]][rem % ivar_sizes[k]];
-                        rem /= (long int)ivar_sizes[k];
+                    cache.phys_grid.assign(N_ivars, std::vector<float>(inmodel.n_phys_bins));
+                    for(long int flat = 0; flat < inmodel.n_phys_bins; ++flat) {
+                        long int rem = flat;
+                        for(int k = (int)N_ivars - 1; k >= 0; --k) {
+                            cache.phys_grid[k][flat] = inprop.variable_midbin[inmodel.ivars[k]][rem % ivar_sizes[k]];
+                            rem /= (long int)ivar_sizes[k];
+                        }
                     }
+                    cache.phys_grid_valid = true;
                 }
 
-                auto probs = inmodel.get_probs(phys, var_arrs);
+                auto probs = inmodel.get_probs(phys, cache.phys_grid);
                 Eigen::Map<const Eigen::VectorXf> probs_flat(probs.data(), probs.size());
                 result = inmodel.H_combined[var_index] * probs_flat;
             }
@@ -208,9 +224,10 @@ namespace PROfit {
 
         // systw_to_use points to either cache.last_systw (full hit / full recompute) or
         // to the local perturbed vector built by the Tier 1.3 incremental path.
-        Eigen::VectorXf final_spec  = systw_to_use->cwiseProduct(cache.last_result);
-        Eigen::VectorXf final_error = final_spec.array().abs().sqrt();
-        return PROspec(final_spec, final_error);
+        // The chi² metrics — the only users of this cached overload — never read
+        // the error vector, so skip the per-call abs+sqrt and return zero errors.
+        Eigen::VectorXf final_spec = systw_to_use->cwiseProduct(cache.last_result);
+        return PROspec(final_spec, Eigen::VectorXf::Zero(final_spec.size()));
     }
 
 
@@ -239,22 +256,19 @@ namespace PROfit {
                 } else {
                     // Case 2: Different binning - use matrix-vector multiplication
                     const size_t nbins_binning = inconfig.m_num_variable_bins_total[binning];
-                    
+
                     // Get all spline shifts for this systematic
                     Eigen::VectorXf spline_shifts(nbins_binning);
                     for(size_t j = 0; j < nbins_binning; ++j) {
                         spline_shifts(j) = insyst.GetSplineShift(i, shifts(i), j);
                     }
-                    
-                    // Get the histogram matrix
-                    const auto& hist = inprop.variable_hist_storage(binning, var_index);
-                    
-                    // Compute weighted and unweighted sums using matrix operations
+
+                    // Compute weighted and unweighted sums transpose-free:
                     // weighted_sum[k] = sum_j(spline_shifts[j] * hist(j, k))
                     // unweighted_sum[k] = sum_j(hist(j, k))
-                    Eigen::VectorXf weighted_sum = hist.transpose() * spline_shifts;
-                    Eigen::VectorXf unweighted_sum = hist.colwise().sum().transpose();
-                    
+                    Eigen::VectorXf weighted_sum = inprop.variable_hist_storage.WeightedColSum(binning, var_index, spline_shifts);
+                    Eigen::VectorXf unweighted_sum = inprop.variable_hist_storage.UnweightedColSum(binning, var_index);
+
                     // Apply the ratio where unweighted > 0
                     for(size_t k = 0; k < nbins_var; ++k) {
                         if(unweighted_sum(k) > 0) {
@@ -322,14 +336,22 @@ namespace PROfit {
             }
 
             for(size_t i = 0; i < inprop.NEvent(); ++i) {
+                // Out-of-range events have bin index -1; PROspec::Fill does no
+                // bounds checking, so filling would corrupt memory.
+                const int reco_bin = inprop.VariableBinIndex(var_index, i);
+                if(reco_bin < 0) continue;
+
                 float oscw = inmodel.is_trivial ? 1.0f : probs(i, inprop.model_rule[i]);
                 float add_w = inprop.added_weights[i];
-                const int reco_bin = inprop.VariableBinIndex(var_index, i);
 
                 float systw = 1;
-                for(int j = 0; j < shifts.size(); ++j) {
+                // Iterate up to insyst.GetNSplines(), not shifts.size(): params
+                // may be over-sized when shared across variables with different
+                // spline counts (the binned path above already does this).
+                for(int j = 0; j < (int)insyst.GetNSplines(); ++j) {
                     int binning = insyst.spline_binnings[j];
                     const int spline_bin = inprop.VariableBinIndex(binning, i);
+                    if(spline_bin < 0) continue; // outside this spline's binning: no shift
                     systw *= insyst.GetSplineShift(j, shifts[j], spline_bin);
                 }
                 float finalw = oscw * systw * add_w;
@@ -346,8 +368,10 @@ namespace PROfit {
 
         Eigen::VectorXf params = cvparams;
 
-        // TODO: We should think about centralizing rng in a thread-safe/thread-aware way
-        static std::mt19937 rng{seed};
+        // Local generator seeded per call: a function-local static ignored the
+        // seed argument after the first-ever call and raced across threads.
+        // Callers are responsible for passing distinct seeds per throw.
+        std::mt19937 rng{seed};
         std::vector<std::normal_distribution<float>> d_spline;
         for(size_t i = 0; i < insyst.GetNSplines(); ++i)
             d_spline.emplace_back(insyst.spline_centers(i), insyst.spline_priors(i));
@@ -402,12 +426,54 @@ namespace PROfit {
         return PROspec(final_spec, final_spec.array().sqrt());
     }
 
+    std::pair<PROspec, PROspec> FillSystRandomThrowSplit(const PROconfig &inconfig, const PROpeller &inprop, const PROsyst &insyst, const PROmodel &model, const PROspec &cvspec, const Eigen::VectorXf &cvparams, uint32_t seed, int var_index, const Eigen::VectorXf &bkg_bin_mask) {
+        int nbins = inconfig.m_num_variable_bins_total[var_index];
+
+        Eigen::VectorXf params = cvparams;
+
+        // Local generator seeded per call, as in FillSystRandomThrow.
+        std::mt19937 rng{seed};
+        std::vector<std::normal_distribution<float>> d_spline;
+        for(size_t i = 0; i < insyst.GetNSplines(); ++i)
+            d_spline.emplace_back(insyst.spline_centers(i), insyst.spline_priors(i));
+        std::normal_distribution<float> d_cov;
+        std::vector<float> throws;
+        for(size_t i = 0; i < insyst.GetNSplines(); i++) {
+            throws.push_back(d_spline[i](rng));
+        }
+        // Covariance throw in FULL bin space (nbins normals rather than
+        // nbins_collapsed) so the bkg subchannels' variation is separable.
+        Eigen::VectorXf throwF = Eigen::VectorXf::Constant(nbins, 0);
+        for(int i = 0; i < nbins; i++)
+            throwF(i) = d_cov(rng);
+
+        for(size_t i = 0; i < throws.size(); i++) {
+            params(i + model.nparams) = throws.at(i);
+        }
+
+        Eigen::VectorXf full = FillSpectra(inconfig, inprop, insyst, model, params, true, var_index).Spec();
+        if(insyst.GetNCovar() != 0)
+            full += insyst.DecomposeFractionalCovarianceFull(inconfig, cvspec.Spec()) * throwF;
+
+        Eigen::VectorXf bkg_full = full.cwiseProduct(bkg_bin_mask);
+        Eigen::VectorXf sig_full = full - bkg_full;
+
+        Eigen::VectorXf sig_collapsed = CollapseMatrix(inconfig, sig_full, var_index);
+        Eigen::VectorXf bkg_collapsed = CollapseMatrix(inconfig, bkg_full, var_index);
+
+        // abs() before sqrt: covariance throws can drive bins negative.
+        return {PROspec(sig_collapsed, sig_collapsed.array().abs().sqrt()),
+                PROspec(bkg_collapsed, bkg_collapsed.array().abs().sqrt())};
+    }
+
     PROspec FillSplineRandomThrow(const PROconfig &inconfig, const PROpeller &inprop, const PROsyst &insyst,  const PROmodel &model,  const Eigen::VectorXf &cvparams, int spline, uint32_t seed, int other_index) {
         int nbins =  inconfig.m_num_variable_bins_total[other_index];
         Eigen::VectorXf spec = Eigen::VectorXf::Constant(nbins, 0);
 
-        // TODO: We should think about centralizing rng in a thread-safe/thread-aware way
-        static std::mt19937 rng{seed};
+        // Local generator seeded per call: a function-local static ignored the
+        // seed argument after the first-ever call and raced across threads.
+        // Callers are responsible for passing distinct seeds per throw.
+        std::mt19937 rng{seed};
         std::normal_distribution<float> d(insyst.spline_centers(spline), insyst.spline_priors(spline));
         float spline_throw = d(rng);
         Eigen::VectorXf params = cvparams;
@@ -416,8 +482,38 @@ namespace PROfit {
         bool binned = true;//dont want to faf around with event by event here lets be honst
         if (binned){
             spec = FillSpectra(inconfig, inprop, insyst, model, params, binned, other_index).Spec();
-        } 
+        }
 
         return PROspec(spec, spec.array().sqrt());
+    }
+
+    float ThrowRestrictedSplinePull(const PROsyst &insyst, size_t i, std::mt19937 &rng, std::normal_distribution<float> &d) {
+        const bool has_r = i < insyst.spline_has_restrict.size() && insyst.spline_has_restrict[i];
+        float tlo = has_r ? insyst.spline_restrict_lo[i] : insyst.spline_lo[i];
+        float thi = has_r ? insyst.spline_restrict_hi[i] : insyst.spline_hi[i];
+        if (tlo > thi) { const float t = tlo; tlo = thi; thi = t; }
+
+        // Sample the spline's ACTUAL prior N(center, sigma), not a hardcoded N(0,1):
+        // center/sigma default to 0/1 (identical behaviour for legacy configs) but honor
+        // XML-configured priors and PROjector's constrained posterior. Note only the
+        // MARGINAL width is sampled here — prior correlations (XML correlations or a
+        // PROjector external prior covariance) are not reflected in per-spline throws.
+        const float mu  = i < (size_t)insyst.spline_centers.size() ? insyst.spline_centers((Eigen::Index)i) : 0.0f;
+        const float sig = i < (size_t)insyst.spline_priors.size() ? std::abs(insyst.spline_priors((Eigen::Index)i)) : 1.0f;
+
+        const int max_attempts = 10000;
+        int attempts = 0;
+        float x = mu + sig * d(rng);
+        while ((x < tlo || x > thi) && ++attempts < max_attempts)
+            x = mu + sig * d(rng);
+        if (x < tlo || x > thi) {
+            x = (mu < tlo) ? tlo : (mu > thi ? thi : mu);
+            const std::string sname = i < insyst.spline_names.size()
+                ? insyst.spline_names[i] : ("spline#" + std::to_string(i));
+            log<LOG_WARNING>(L"%1% || spline '%2%' (index %3%) has throw bounds [%4%, %5%] unreachable "
+                             L"by its N(%6%, %7%) prior after %8% draws; clamping to %9%. Check its knobvals / restrict attribute.")
+                % __func__ % sname.c_str() % (int)i % tlo % thi % mu % sig % max_attempts % x;
+        }
+        return x;
     }
 };

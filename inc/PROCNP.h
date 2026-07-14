@@ -67,6 +67,7 @@ namespace PROfit{
             Eigen::VectorXf cnp_cached_phys;       ///< Last physics subvector used to fill cnp_cached_collapsed_cv.
             Eigen::VectorXf cnp_cached_collapsed_cv; ///< Cached collapsed noshift CV spectrum.
             bool cnp_cv_cache_valid = false;       ///< True iff cnp_cached_collapsed_cv matches cnp_cached_phys.
+            std::vector<Eigen::Index> cnp_active_idx; ///< Active collapsed bins from the fit-region mask; empty when no mask is set.
 
             /// Returns CollapseMatrix(FillSpectra(noshiftvec built from `phys`)). Hits the
             /// cache when `phys` matches the last cached call; otherwise recomputes.

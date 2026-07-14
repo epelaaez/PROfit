@@ -13,6 +13,8 @@
 
 #include <Eigen/Eigen>
 #include <cstdint>
+#include <map>
+#include <random>
 
 // PROfit include 
 #include "PROconfig.h"
@@ -61,11 +63,24 @@ namespace PROfit{
         const PROsyst *last_syst_ptr = nullptr;
         const PROmodel *last_model_ptr = nullptr;
 
+        /// Flat physics grid passed to get_probs — depends only on the model's
+        /// ivars and the propagator's midbin vectors, i.e. constant across an
+        /// entire fit. Built once on first use and reused (it used to be
+        /// reallocated and refilled on every physics-changed call).
+        std::vector<std::vector<float>> phys_grid;
+        bool phys_grid_valid = false;
+
+        /// Per-cross-binning column sums of the migration histograms
+        /// (constant per (binning, var_index)); keyed by binning index.
+        std::map<size_t, Eigen::VectorXf> unweighted_sums;
+
         /// Mark cache contents stale; next call recomputes both halves.
         void invalidate() {
             last_var_index = -1;
             last_syst_ptr = nullptr;
             last_model_ptr = nullptr;
+            phys_grid_valid = false;
+            unweighted_sums.clear();
         }
     };
 
@@ -127,6 +142,28 @@ namespace PROfit{
     PROspec FillSystRandomThrow(const PROconfig &inconfig, const PROpeller &inprop, const PROsyst &insyst, const PROmodel &model, const PROspec &cvspec, const Eigen::VectorXf &cvparams, uint32_t seed, int var_index=0);
 
     /**
+     * @brief One systematic throw, split into signal and background pieces.
+     * @details Splines are thrown exactly as in FillSystRandomThrow; the covariance
+     * systematic is thrown in FULL (uncollapsed) bin space so the background
+     * subchannels' own variation can be separated per throw, then masked and
+     * collapsed. After collapse this is distributed identically to
+     * FillSystRandomThrow's collapsed-space throw, but the RNG stream differs —
+     * this function is only used by the --bkg-subtract plotting path, so the
+     * default (no-subtraction) throws are untouched.
+     * @param inconfig     Configuration object.
+     * @param inprop       MC event store.
+     * @param insyst       Systematic object.
+     * @param model        Physics model.
+     * @param cvspec       Central-value spectrum (full binning; denominator for fractional shifts).
+     * @param cvparams     Central-value physics parameter vector.
+     * @param seed         Random seed.
+     * @param var_index    Variable index to fill.
+     * @param bkg_bin_mask Full-bin 0/1 vector marking background-subchannel bins.
+     * @return {signal, background} PROspecs, both collapsed.
+     */
+    std::pair<PROspec, PROspec> FillSystRandomThrowSplit(const PROconfig &inconfig, const PROpeller &inprop, const PROsyst &insyst, const PROmodel &model, const PROspec &cvspec, const Eigen::VectorXf &cvparams, uint32_t seed, int var_index, const Eigen::VectorXf &bkg_bin_mask);
+
+    /**
      * @brief Generate a spectrum with a single named spline systematic randomly shifted.
      * @details Throws that spline's shift from a Gaussian distribution and fills the spectrum.
      * @param inconfig    Configuration object.
@@ -140,6 +177,21 @@ namespace PROfit{
      * @return A PROspec with the specified spline thrown.
      */
     PROspec FillSplineRandomThrow(const PROconfig &inconfig, const PROpeller &inprop, const PROsyst &insyst,  const PROmodel &model,  const Eigen::VectorXf &cvparams, int spline, uint32_t seed, int other_index=0);
+
+    /**
+     * @brief Throw one nuisance pull from N(0,1) truncated to spline @p i's allowed range.
+     * @details Never loops forever: OOB-safe spline_has_restrict lookup (covariance_to_spline
+     * knobs may not populate it), inverted-bounds tolerance, and bounded rejection attempts
+     * with a clamp-to-nearest-in-range fallback plus warning (pattern from commit 000b3d0).
+     * Shared by the FC pseudo-experiment generators (PROfc, PROAdaptiveFC) and the
+     * pseudo-experiment CLI path.
+     * @param insyst  Systematic object holding the spline bounds.
+     * @param i       0-based spline index.
+     * @param rng     Generator to draw from (caller owns seeding/threading).
+     * @param d       N(0,1) distribution to draw with.
+     * @return The truncated Gaussian pull.
+     */
+    float ThrowRestrictedSplinePull(const PROsyst &insyst, size_t i, std::mt19937 &rng, std::normal_distribution<float> &d);
 
 };
 

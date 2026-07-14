@@ -20,6 +20,7 @@
 #include "PROseed.h"
 #include "PROversion.h"
 #include "PROplot.h"
+#include "PROjector.h"
 #include "PRObench.h"
 
 #include "CLI11.h"
@@ -283,6 +284,7 @@ int main(int argc, char* argv[])
     std::vector<std::string> syst_list, systs_excluded;
     bool MCMC_prefit_errors = false;
     bool systs_only = false;
+    PROjectorRunConfig projector_config; // Two-stage pre-fit / projected fit (PROjector).
     bool use_fake_data = false;
     bool use_probe = false;
     int n_probe_chunks = 1; // 1 = no chunking by default. Opt in via --probe-chunks N when physics is the wall-time bottleneck.
@@ -362,14 +364,14 @@ int main(int argc, char* argv[])
     app.add_option("--fit-options", global_fit_options, "Parameters for single, detailed global best fit LBFGSB. See PROfitter.h or run --fit-help for available settings.");
     app.add_option("--scan-fit-options", scan_fit_options, "Parameters for simpier, multiple best fits in PROfile/surface LBFGSB.");
     app.add_flag("--fit-help", show_fit_help, "Show detailed help for all fitting parameters (L-BFGS-B, PSO, MCMC, etc.)");
-    std::string gradient_mode_str = "one-sided-full";
+    std::string gradient_mode_str = "central-lin";
     app.add_option("--grad-mode", gradient_mode_str,
                    "Gradient evaluation strategy passed to the metric. One of: "
                    "central-full (central FD on full chi^2; most accurate, slowest), "
-                   "one-sided-full (default; forward FD on full chi^2; ~2x faster, O(h)), "
-                   "central-lin (central FD on delta only, M frozen at base; Gauss-Newton, ~5-10x), "
+                   "one-sided-full (forward FD on full chi^2; ~2x faster, O(h)), "
+                   "central-lin (default; central FD on delta only, M frozen at base; Gauss-Newton, ~5-10x), "
                    "one-sided-lin (forward FD on delta only, M frozen at base; ~10-20x).")
-        ->default_str("one-sided-full");
+        ->default_str("central-lin");
 
     app.add_option("--inject-systs", injected_systs, "Systematic shifts to inject. Map of name and shift value in sigmas. Only spline systs are supported right now.");
     app.add_option("--inject-systs-cv", cv_injected_systs, "Systematic shifts to inject.  as CV Map of name and shift value in sigmas. Only spline systs are supported right now.");
@@ -397,6 +399,30 @@ int main(int argc, char* argv[])
     app.add_flag("--no-xrootd",noxrootd,"Do not use XRootD, which is enabled by default");
     app.add_flag("--syst-only", systs_only, "Force fitting over nuisance parameters only, currently just --fix's them");
     app.add_flag("--area-norm", area_normalized, "Make area normalized histograms.");
+
+    // PROjector: two-stage pre-fit / projected fit (see inc/PROjector.h for the scheme).
+    CLI::Option *projector_prefit_opt = app.add_option("--projector-prefit", projector_config.prefit_pattern,
+        "PROjector stage 1: wildcard (substring) matching the subchannels to PRE-FIT (whole "
+        "channels only, e.g. a detector name). Covariance systematics are promoted to "
+        "eigenmode splines, the data is masked to the matched channels, physics parameters "
+        "are fixed at CV, and running the 'global' subcommand writes the nuisance posterior "
+        "to <tag>_<output>_PROjector_constraint.bin.");
+    app.add_option("--projector", projector_config.constraint_file,
+        "PROjector stage 2: path to a constraint file from --projector-prefit. The pre-fit "
+        "channels are masked OUT and the saved nuisance posterior is used as a correlated "
+        "prior; any subcommand (global, profile, surface, plot, ...) then runs the projected "
+        "fit. Requires the same XML/binaries and systematic selection as the pre-fit.")
+        ->excludes(projector_prefit_opt);
+    app.add_option("--projector-knobs", projector_config.num_decomp_knobs,
+        "PROjector: number of covariance eigenmodes promoted to spline knobs in the pre-fit "
+        "(-1 = all positive modes, exact, no residual). Stored in the constraint file and "
+        "reused automatically in stage 2.")->default_val(-1);
+    app.add_option("--projector-keep-cov", projector_config.keep_covariance,
+        "PROjector: covariance systematics to NOT promote (they stay as unconstrained "
+        "covariance in both stages, e.g. detector-local systematics with no near/far correlation).");
+    app.add_flag("--projector-float-physics", projector_config.float_physics,
+        "PROjector pre-fit: float the physics parameters instead of fixing them at CV; the "
+        "saved posterior is then the physics-marginalized nuisance covariance.");
 
     auto* shape_flag = app.add_flag("--shapeonly", shapeonly, "Run a shape only analysis");
     auto* rate_flag = app.add_flag("--rateonly", rateonly, "Run a rate only analysis");
@@ -445,12 +471,16 @@ int main(int argc, char* argv[])
     std::string bkg_subtract_pattern = "";
     proplot_command->add_option("--bkg-subtract", bkg_subtract_pattern,
         "Wildcard (substring) matching one or more subchannel names; that "
-        "background's central-value prediction is subtracted from data, CV, "
-        "best-fit, and the error band points at plot time. The error band's "
-        "spread/covariance is unchanged (Var(X - constant) = Var(X)), so the "
-        "systematic uncertainty on the background continues to appear in the "
-        "band. Example: --bkg-subtract numu_bkg matches every "
-        "<detector>_numu_bkg subchannel.");
+        "background's central-value prediction is subtracted from data and CV "
+        "at plot time (publication convention). The error band shows "
+        "signal-only systematics: each systematic throw's own background is "
+        "subtracted, so background variations cancel out of the band. The "
+        "background's uncertainty moves onto the data points instead, which "
+        "become N - bkg_CV with errors sqrt(N + sigma_bkg_syst^2 + "
+        "sigma_bkg_MCstat^2). Note the signal-background systematic "
+        "correlation is retained in the band but not in the data errors. "
+        "Example: --bkg-subtract numu_bkg matches every <detector>_numu_bkg "
+        "subchannel.");
 
     //PROfc, Feldmand-Cousins
     CLI::App *profc_command = app.add_subcommand("fc", "Run Feldman-Cousins for this injected signal");
@@ -1024,33 +1054,12 @@ int main(int argc, char* argv[])
                 Eigen::MatrixXf L_chol = variable_systs[io].DecomposeFractionalCovariance(config, cv_for_L.Spec());
 
                 Eigen::VectorXf throws = fakedataparams;
+                // Shared truncated-Gaussian helper: samples each spline's actual prior
+                // N(center, sigma) within its restrict bounds, OOB-safe (never spins
+                // forever on unreachable bounds; clamps to the in-range value nearest
+                // the prior center and warns).
                 for (size_t i = 0; i < nspline; ++i) {
-                    // Guard against spline_has_restrict / restrict_lo / restrict_hi being
-                    // shorter than the spline list (e.g. covariance_to_spline knobs that
-                    // don't populate them) -- an OOB read here gives garbage bounds.
-                    const bool has_r = i < variable_systs[io].spline_has_restrict.size()
-                                       && variable_systs[io].spline_has_restrict[i];
-                    float tlo = has_r ? variable_systs[io].spline_restrict_lo[i] : variable_systs[io].spline_lo[i];
-                    float thi = has_r ? variable_systs[io].spline_restrict_hi[i] : variable_systs[io].spline_hi[i];
-                    if (tlo > thi) { const float t = tlo; tlo = thi; thi = t; }  // tolerate inverted bounds
-                    // Rejection-sample N(0,1) truncated to [tlo, thi], but NEVER loop forever:
-                    // if the range is unreachable (deep tail / degenerate / bad restrict),
-                    // fall back to the in-range value nearest the CV (0) and warn which spline.
-                    const int max_attempts = 10000;
-                    int attempts = 0;
-                    float x = d(PROseed::global_rng);
-                    while ((x < tlo || x > thi) && ++attempts < max_attempts)
-                        x = d(PROseed::global_rng);
-                    if (x < tlo || x > thi) {
-                        x = (0.0f < tlo) ? tlo : (0.0f > thi ? thi : 0.0f);
-                        const std::string sname = i < variable_systs[io].spline_names.size()
-                            ? variable_systs[io].spline_names[i] : ("spline#" + std::to_string(i));
-                        log<LOG_WARNING>(L"%1% || Pseudo-experiment: spline '%2%' (index %3%) has throw bounds "
-                                         L"[%4%, %5%] unreachable by a unit Gaussian after %6% draws; clamping to %7%. "
-                                         L"Check its knobvals / restrict attribute.")
-                            % __func__ % sname.c_str() % (int)i % tlo % thi % max_attempts % x;
-                    }
-                    throws((int)(i + nphys)) = x;
+                    throws((int)(i + nphys)) = ThrowRestrictedSplinePull(variable_systs[io], i, PROseed::global_rng, d);
                 }
 
                 const int nbins_coll = config.m_num_variable_bins_total_collapsed[io];
@@ -1157,6 +1166,20 @@ int main(int argc, char* argv[])
         }
     }
 
+    //***********************************************************************
+    //******************** PROjector pre-fit / projected fit ****************
+    //***********************************************************************
+    // Everything PROjector changes about the inputs (covariance->spline promotion, data
+    // masking, prior installation, physics fixing) happens inside this one helper so it
+    // is in place before CVParams sizing, the bounds/--fix section, and the metric
+    // construction below. See inc/PROjector.h for the scheme.
+    projector_config.force = force;
+    if(projector_config.active()) {
+        if(!PROjectorSetup(projector_config, config, variable_systs[config.i_prime],
+                    variable_data, data, fakedataparams, fixed_params, *model, chi2))
+            return 1;
+    }
+
     // Empty-bin sanity check: build a default-CV spectrum and look for collapsed bins
     // that would make stat-only / CNP statistics singular (CV<=0) or untrustworthy (CV<1).
     {
@@ -1172,6 +1195,9 @@ int main(int argc, char* argv[])
 
         int n_zero = 0, n_tiny = 0;
         for(Eigen::Index b = 0; b < collapsed_cv.size(); ++b) {
+            // Bins outside the fit region (PROjector / future bin-off masks) never enter
+            // a chi2, so an empty CV there is not a problem.
+            if(!config.IsBinActive(io, (size_t)b)) continue;
             if(collapsed_cv(b) <= 0.0f) {
                 log<LOG_ERROR>(L"%1% || Default-CV collapsed bin %2% has %3% expected events (<=0). Empty-bin would make CNP/stat covariance singular.") % __func__ % (long)b % collapsed_cv(b);
                 ++n_zero;
@@ -1270,11 +1296,11 @@ int main(int argc, char* argv[])
     // either of them.
     {
         const PROmetric::GradientMode gmode_a =
-            PROmetric::parseGradientMode(gradient_mode_str, PROmetric::GradientOneSidedFull);
+            PROmetric::parseGradientMode(gradient_mode_str, PROmetric::GradientCentralLin);
         const PROmetric::GradientMode gmode_b =
-            PROmetric::parseGradientMode(gradient_mode_str, PROmetric::GradientOneSidedLin);
+            PROmetric::parseGradientMode(gradient_mode_str, PROmetric::GradientOneSidedFull);
         if (gmode_a != gmode_b) {
-            log<LOG_WARNING>(L"%1% || Unknown --grad-mode '%2%'; falling back to one-sided-full.")
+            log<LOG_WARNING>(L"%1% || Unknown --grad-mode '%2%'; falling back to central-lin.")
                 % __func__ % gradient_mode_str.c_str();
         }
         fitConfig.gradient_mode     = gmode_a;
@@ -1637,8 +1663,12 @@ int main(int argc, char* argv[])
             for(size_t i = 0; i < 1000; ++i) {
                 Eigen::VectorXf throwp = fakeDataParams;
                 Eigen::VectorXf throwC = Eigen::VectorXf::Constant(config.m_num_variable_bins_total_collapsed[config.i_prime], 0);
+                // Shared truncated-Gaussian helper: samples each spline's actual prior
+                // N(center, sigma) within its restrict bounds (the raw d(rng) here
+                // ignored both, which was wrong for XML priors and for PROjector's
+                // constrained posterior).
                 for(size_t i = 0; i < metric->GetSysts().GetNSplines(); i++)
-                    throwp(i+N_phys_params) = d(PROseed::global_rng);
+                    throwp(i+N_phys_params) = ThrowRestrictedSplinePull(metric->GetSysts(), i, PROseed::global_rng, d);
                 for(size_t i = 0; i < config.m_num_variable_bins_total_collapsed[config.i_prime]; i++)
                     throwC(i) = d(PROseed::global_rng);
                 bool binned = (eventbyevent ? PROmetric::EventByEvent : PROmetric::BinnedChi2) != 0;
@@ -1775,6 +1805,8 @@ int main(int argc, char* argv[])
             }
         }
         const bool do_bkg_subtract = !bkg_subchannels.empty();
+        if (do_bkg_subtract && area_normalized)
+            log<LOG_WARNING>(L"%1% || --bkg-subtract combined with area normalization: normalization uses the subtracted integral; interpret error bands with care.") % __func__;
 
         PlotOptions opt = PlotOptions::CVasStack;
         std::vector<TPaveText> notext;
@@ -1796,7 +1828,8 @@ int main(int argc, char* argv[])
                     config, cv_plot, bkg_subchannels, io);
                 cv_plot.Spec() -= bkg_full;
             }
-            auto objs = plot_channels(final_output_tag+"_PROplot_Variable_"+std::to_string(io)+"_CV.pdf", config, cv_plot, {}, {}, {}, {}, notext, pbounds, opt, io);
+            auto objs = plot_channels(final_output_tag+"_PROplot_Variable_"+std::to_string(io)+"_CV.pdf", config, cv_plot, {}, {}, {}, {}, notext, pbounds, opt, io,
+                    false, do_bkg_subtract ? &bkg_subchannels : nullptr);
             cv_objs.push_back(objs);
         }
 
@@ -2321,6 +2354,9 @@ int main(int argc, char* argv[])
                         TPaveText chi2text(0.59, 0.50, 0.89, 0.59, "NDC");
                         if(io==config.i_prime){
                             log<LOG_INFO>(L"%1% || On channel %2%:") % __func__ % global_channel_index ;
+                            // Intentionally uses the UNsubtracted CV and data even under
+                            // --bkg-subtract: the chi2 is numerically invariant under the
+                            // subtraction, and the fit machinery stays untouched.
                             double chival = allcov_metric->getSingleChannelChi(global_channel_index, variable_cvs[io], io);
                             int ndf = config.m_channel_variable_bins[ic][io].NBinsAlong(0) - bool(opt&PlotOptions::AreaNormalized);
                             log<LOG_INFO>(L"%1% || -- the datamc chi^2/ndof is %2%/%3% .") % __func__ % chival % ndf;
@@ -2351,34 +2387,30 @@ int main(int argc, char* argv[])
         std::vector<PROerrorbar> other_err_bands;
         std::vector<std::map<std::string, TObject*>> errband_objs;
         for(size_t io = 0; io < config.m_num_variables; ++io) {
-            if(!config.m_channel_variable_plot_bool.at(io)) { errband_objs.push_back({}); continue; } // For now skip the L/E 250 bin. 
-            other_err_bands.push_back(getErrorBand(config, prop, variable_systs[io], *model, variable_cvs[io], CVParams, binwidth_scale, io));
-
-            // --bkg-subtract: shift CV, data, and error band by the bkg CV.
-            // Var(X - const) = Var(X), so covariance / band width are unchanged;
-            // only the central positions slide. The bkg's systematic uncertainty
-            // remains embedded in `covariance` and therefore in error_up/down
-            // around the shifted point.
-            PROspec     cv_plot      = variable_cvs[io];
-            PROdata     data_plot    = variable_data[io];
-            PROerrorbar errband_plot = other_err_bands.back();
+            if(!config.m_channel_variable_plot_bool.at(io)) { errband_objs.push_back({}); continue; } // For now skip the L/E 250 bin.
+            PROspec cv_plot   = variable_cvs[io];
+            PROdata data_plot = variable_data[io];
             if (do_bkg_subtract) {
-                Eigen::VectorXf bkg_full      = build_subchannel_mask_spec(
-                    config, cv_plot, bkg_subchannels, io);
-                Eigen::VectorXf bkg_collapsed = CollapseMatrix(config, bkg_full, io);
-
-                cv_plot.Spec() -= bkg_full;
-                data_plot = PROdata(Eigen::VectorXf(data_plot.Spec() - bkg_collapsed),
-                                    data_plot.Error());
-
-                Eigen::VectorXf bkg_for_errband = binwidth_scale
-                    ? Eigen::VectorXf(bkg_collapsed.array() /
-                                      config.collapsed_bin_widths.at(io).array())
-                    : bkg_collapsed;
-                errband_plot.error_point -= bkg_for_errband;
+                // Publication convention: the band shows signal-only systematics
+                // (each throw's own bkg is subtracted inside
+                // getErrorBandBkgSubtracted, so bkg variations cancel); the bkg's
+                // systematic and MC-stat uncertainty moves onto the data points.
+                // Everything here is in unscaled counts; width/area scaling of the
+                // data happens once inside plot_channels.
+                PROsubtractedErrorBand sub = getErrorBandBkgSubtracted(config, prop, variable_systs[io],
+                        *model, variable_cvs[io], CVParams, bkg_subchannels, binwidth_scale, io);
+                other_err_bands.push_back(sub.band);
+                cv_plot.Spec() -= build_subchannel_mask_spec(config, cv_plot, bkg_subchannels, io);
+                Eigen::VectorXf new_err = (data_plot.Error().array().square()
+                                           + sub.bkg_sigma_collapsed.array().square()
+                                           + sub.bkg_mcstat_var_collapsed.array()).sqrt();
+                data_plot = PROdata(Eigen::VectorXf(data_plot.Spec() - sub.bkg_cv_collapsed), new_err);
+            } else {
+                other_err_bands.push_back(getErrorBand(config, prop, variable_systs[io], *model, variable_cvs[io], CVParams, binwidth_scale, io));
             }
             auto objs = plot_channels(final_output_tag+"_PROplot_Variable_"+std::to_string(io)+"_ErrorBand.pdf", config, cv_plot, {}, data_plot,
-                    errband_plot, {}, other_channel_chitexts[io], pbounds, opt | PlotOptions::DataMCRatio, io);
+                    other_err_bands.back(), {}, other_channel_chitexts[io], pbounds, opt | PlotOptions::DataMCRatio, io,
+                    false, do_bkg_subtract ? &bkg_subchannels : nullptr);
             errband_objs.push_back(objs);
         }
 
@@ -2761,11 +2793,12 @@ int main(int argc, char* argv[])
         if (needs_outer_throws_bar) afc_progress.finish_all();
         else                         afc_progress.finish_all(false);
         log<LOG_INFO>(L"%1% || fc-adaptive done: throws=%2%, meta_cells=%3% (baseline=%4%, refined=%5%), "
-                      L"diag=%6%, bank=%7% (pes=%8%, mean/cell=%9%, capped=%10%).")
+                      L"diag=%6%, bank=%7% (pes=%8%, mean/cell=%9%, topped_up=%10%, capped=%11%).")
             % __func__ % ares.n_throws_done % ares.n_meta_cells
             % ares.n_baseline_cells % ares.n_refined_cells % ares.diag_root_path.c_str()
             % (ares.bank_path.empty() ? "<not written>" : ares.bank_path.c_str())
-            % (int64_t)ares.total_pes_generated % ares.mean_pes_per_cell % ares.cells_hit_n_pe_max;
+            % (int64_t)ares.total_pes_generated % ares.mean_pes_per_cell
+            % ares.cells_topped_up % ares.cells_hit_n_pe_max;
     }
 
     //***********************************************************************
@@ -2800,6 +2833,14 @@ int main(int argc, char* argv[])
         TFile fout((final_output_tag+"_PROglobal.root").c_str(), "RECREATE");
         for(const auto &[n, o] : drawn_objs)
             o->Write(n.c_str());
+
+        // PROjector pre-fit: the global fit above WAS the pre-fit (masked to the matched
+        // channels, physics fixed at CV unless floated); save its nuisance posterior.
+        if(projector_config.prefit_mode()) {
+            if(!PROjectorSaveConstraint(final_output_tag+"_PROjector_constraint.bin", projector_config,
+                        config, *metric, fitres.fitter.best_fit, fitres.chi2, global_fixed, chi2))
+                return 1;
+        }
     }
 
     if(*promcmc_command) {
@@ -3488,7 +3529,8 @@ std::map<std::string, TObject *> draw_fit_result(const PROconfig &config, const 
     }
 
     if(fitres.fitter.best_fit.size()) {
-        std::string hname = "#chi^{2}/nbins = " + to_string(fitres.chi2) + "/" + to_string(config.m_num_variable_bins_total_collapsed[config.i_prime]);
+        // NActiveBins == total bins unless a fit-region mask (e.g. PROjector) is installed.
+        std::string hname = "#chi^{2}/nbins = " + to_string(fitres.chi2) + "/" + to_string(config.NActiveBins(config.i_prime));
         PROspec bf = FillSpectra(config, prop, syst, model, fitres.fitter.best_fit, true, config.i_prime);
         // Concatenated bins across all channels share no common x-axis, so use bin-index axis.
         TH1D post_hist("ph", hname.c_str(), config.m_num_variable_bins_total_collapsed[config.i_prime], 0, config.m_num_variable_bins_total_collapsed[config.i_prime]);

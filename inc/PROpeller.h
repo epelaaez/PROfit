@@ -106,6 +106,25 @@ namespace PROfit{
 
 
             /**
+             * @brief w^T-style weighted sum over the logical histogram H(rowvar, colvar):
+             * returns per-colvar-bin totals with @p w weighting the rowvar bins.
+             * @details Avoids operator()(rowvar, colvar) for the lower triangle: binding an
+             * Eigen::Ref<const MatrixXf> to the transposed view there forces a full-matrix
+             * copy on every access; here the transpose is folded into the GEMV instead.
+             */
+            Eigen::VectorXf WeightedColSum(size_t rowvar, size_t colvar, const Eigen::VectorXf &w) const {
+                if (rowvar <= colvar) return data[compute_index(rowvar, colvar)].transpose() * w;
+                return data[compute_index(colvar, rowvar)] * w;
+            }
+
+            /// Column sums of the logical histogram H(rowvar, colvar) (per-colvar-bin totals),
+            /// transpose-free like WeightedColSum.
+            Eigen::VectorXf UnweightedColSum(size_t rowvar, size_t colvar) const {
+                if (rowvar <= colvar) return data[compute_index(rowvar, colvar)].colwise().sum().transpose();
+                return data[compute_index(colvar, rowvar)].rowwise().sum();
+            }
+
+            /**
              * @brief Mutable access to the matrix for variable pair (i, j) for filling.
              * @param i  Row variable index; must satisfy i ≤ j.
              * @param j  Column variable index.

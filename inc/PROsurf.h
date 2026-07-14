@@ -21,10 +21,12 @@
 #include "PROgress.h"
 #include "PROversion.h"
 #include "PROmesh.h"
+#include "PRObe.h"
 
 #include <Eigen/Eigen>
 
 #include <atomic>
+#include <mutex>
 
 #include "TGraphAsymmErrors.h"
 #include "TMarker.h"
@@ -108,8 +110,21 @@ namespace PROfit {
             std::vector<float> values1_up;   ///< Upper 1-sigma boundary values.
             std::vector<float> values1_down; ///< Lower 1-sigma boundary values.
 
-            float newglob;                  ///< Updated global minimum chi-squared found during the scan.
-            Eigen::VectorXf newglob_param;  ///< Full parameter vector at the updated global minimum.
+            float newglob = 0;              ///< Informational only: lower chi-squared found during the scan, if any (never read by consumers; logged in the constructor's merge loop).
+            Eigen::VectorXf newglob_param;  ///< Full parameter vector at that lower minimum (informational only).
+
+            /** @brief Shared warm-start bank for the profile scans: for each scanned
+             *  parameter, every completed (scanned value, best-fit vector) pair from ALL
+             *  threads, tasks, and chunks. Each new scan-point fit is seeded from the
+             *  entry of the SAME parameter closest in scanned value -- robust to the
+             *  center-out walk order, to --probe-chunks splitting one parameter across
+             *  threads, and to dynamic task dispatch. Guarded by seed_bank_mutex
+             *  (contention is negligible: bank ops are microseconds vs ~0.1-1 s fits).
+             *  Note: a spline's full scan is a single task, so spline seeding is
+             *  deterministic regardless of thread count; chunked physics parameters may
+             *  see completion-order-dependent (but still valid) seeds. */
+            std::vector<std::vector<ScanPoint>> seed_bank;
+            std::mutex seed_bank_mutex;     ///< Guards seed_bank.
 
             PROfile(const PROconfig &config, const PROsyst &systs, const PROmodel &model, PROmetric &metric, PROseed &proseed, const PROfitterConfig &fitconfig, std::string filename, float minchi = 0, bool with_osc = false, int nThreads = 1, const std::vector<Eigen::VectorXf> &seed_points = {}, const Eigen::VectorXf& true_params = Eigen::VectorXf(), bool use_probe = false, int n_physics_chunks = 1 ) ;
 
@@ -169,7 +184,9 @@ namespace PROfit {
              * @brief Adaptive-mesh-refinement surface scan.
              * @details Replaces the fixed 60×60-style grid scan with `PROmesh::run_amr`. Each
              * AMR grid point is evaluated by a per-thread `PROfitter::Fit` call (via a
-             * thread-local metric clone) using the AMR-supplied warm-start seeds. After AMR
+             * thread-local metric clone) using the AMR-supplied warm-start seeds; the
+             * per-point fit body is the shared `PROmesh::pinned_scan_eval`
+             * (inc/PROmeshEval.h), also used by the adaptive-FC Wilks prepass. After AMR
              * converges, the sparse evaluated map is written to a text file (one
              * (xphys, yphys, χ²) row per evaluated point), polyline contours are returned for
              * each level in `opts.contour_levels`, and the optional bilinear-reconstructed
@@ -185,6 +202,11 @@ namespace PROfit {
 
             /**
              * @brief Render the AMR mesh as a "boxes shrinking around the contour" plot.
+             * @details Thin wrapper: delegates to the shared
+             * `PROmesh::draw_amr_mesh_on_canvas` (inc/PROmeshPlot.h) — level-coloured
+             * translucent boxes with opaque outlines (a fill+outline TBox pair per leaf),
+             * contour polylines, and an info box with total and per-level fit counts —
+             * then prints to `<filename>_amr_mesh.pdf`.
              */
             void PlotAMRMesh(const PROmesh::AMRResult &amr,
                              const PROmodel &model,

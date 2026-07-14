@@ -42,14 +42,6 @@ namespace PROfit{
     int FindGlobalVariableBin(const PROconfig &inconfig, const BranchVariable::Value &other_value, const std::string& subchannel_fullname, int other_index);
 
 
-    /* Function: given a global bin index in the full vector, return the index of the subchannle this bin belongs to
-     * Parameter:
-     * 	 	inconfig:     a reference to PROconfig object, needed for calculating index 
-     * 	 	global_bin:   global bin index. It can be a global true bin index, or global reco bin index
-     * 	 		      Default to true.
-     */
-    int FindSubchannelIndexFromVariableGlobalBin(const PROconfig &inconfig, int global_bin, int var_index=0);
-
     /**
      * @brief Collapse a full mode×detector×channel×subchannel covariance matrix to the channel level.
      * @details Uses the primary collapsing matrix (variable index i_prime) from @p inconfig.
@@ -59,6 +51,20 @@ namespace PROfit{
      * @return Collapsed covariance matrix.
      */
     Eigen::MatrixXf CollapseMatrix(const PROconfig &inconfig, const Eigen::MatrixXf& full_matrix);
+
+    /**
+     * @brief Collapsed, spectrum-scaled covariance: T^T diag(spec) F diag(spec) T.
+     * @details Computes S^T F S with S = diag(spec)*T kept sparse, so the full-binning
+     * dense N x N matrix diag(spec)*F*diag(spec) is never materialized. This is the
+     * per-evaluation systematic covariance used by the chi^2 metrics — algebraically
+     * identical to CollapseMatrix(config, spec.asDiagonal()*F*spec.asDiagonal()) but
+     * without the two dense N x N temporaries per call.
+     * @param inconfig    Analysis configuration providing the collapsing matrix (i_prime).
+     * @param frac_cov    Fractional covariance on the full (uncollapsed) binning.
+     * @param spec        Spectrum used for the diagonal scaling (full binning).
+     * @return Collapsed m x m covariance matrix.
+     */
+    Eigen::MatrixXf CollapsedScaledCovariance(const PROconfig &inconfig, const Eigen::MatrixXf& frac_cov, const Eigen::VectorXf& spec);
 
     /**
      * @brief Collapse a full spectrum vector to the channel level using the primary variable.
