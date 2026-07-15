@@ -861,9 +861,15 @@ namespace PROfit {
 
         //ensure hash is correctly assigned
         inprop.hash=inconfig.hash;
-        //finished, so make sure MCstat is ok
+        // Convert the accumulated per-bin sum of squared weights into the sqrt of the
+        // Kish effective count, sqrt(N_eff) = Sum(w)/sqrt(Sum(w^2)), using the CV Sum(w)
+        // from the pre-binned hist diagonal. PROsyst's square().inverse() then gives the
+        // exact fractional MC-stat variance Sum(w^2)/Sum(w)^2 for arbitrary event weights
+        // (reduces to 1/N when all weights in a bin are equal).
         for(size_t i = 0; i < inconfig.m_num_variables; ++i) {
-            inprop.variable_mc_stat_err[i]=inprop.variable_mc_stat_err[i].array().sqrt();
+            Eigen::ArrayXf sumw  = inprop.variable_hist_storage(i,i).diagonal().array();
+            Eigen::ArrayXf sumw2 = inprop.variable_mc_stat_err[i].array();
+            inprop.variable_mc_stat_err[i] = (sumw2 > 0).select(sumw / sumw2.sqrt(), 0.0f).matrix();
         }
 
 
