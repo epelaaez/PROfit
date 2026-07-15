@@ -1190,7 +1190,7 @@ namespace PROfit {
 
         for(size_t io = 0; io < inconfig.m_num_variables; ++io) {
             if(var_bin_indices[io] >= 0) {
-                inprop.variable_mc_stat_err[io](var_bin_indices[io]) += 1;
+                inprop.variable_mc_stat_err[io](var_bin_indices[io]) += mc_weight * mc_weight;
                 for(size_t jo = io; jo < inconfig.m_num_variables; ++jo) {
 
                     if(var_bin_indices[jo]<0)continue;
