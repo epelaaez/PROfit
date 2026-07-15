@@ -8,6 +8,7 @@
 <a href="https://github.com/markrosslonergan/Elephant_Vanishes/actions/workflows/cmake-single-platform.yml"><img src="https://github.com/markrosslonergan/Elephant_Vanishes/actions/workflows/cmake-single-platform.yml/badge.svg" alt="Build"></a>
 <a href="https://markrosslonergan.github.io/Elephant_Vanishes/"><img src="https://github.com/markrosslonergan/Elephant_Vanishes/actions/workflows/doxygen-pages.yml/badge.svg" alt="Docs"></a>
 <a href="https://github.com/markrosslonergan/Elephant_Vanishes/tags"><img src="https://img.shields.io/github/v/tag/markrosslonergan/Elephant_Vanishes?label=release" alt="Latest release"></a>
+<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
 </p>
 
 ---
@@ -56,7 +57,10 @@ and statistically rigorous fits and confidence regions.
 
 Built on [Eigen](https://gitlab.com/libeigen/eigen) for all internal linear algebra,
 [LBFGSpp](https://github.com/yixuan/LBFGSpp),
- and ROOT for input/output and some plot making
+ and ROOT for input/output and some plot making. Long-baseline oscillation
+probabilities use the vendored
+[NuFast-LBL](https://github.com/PeterDenton/NuFast-LBL) algorithm (see
+[Acknowledgements & citations](#acknowledgements--citations)).
 
 ## Documentation
 
@@ -178,6 +182,25 @@ PROfit is deliberately a *fitting* framework, not an end-to-end analysis
 framework: it expects a final-stage selection as input and gives you fast,
 reproducible statistical inference on top of it.
 
+## Acknowledgements & citations
+
+PROfit builds on the following third-party code. Vendored files retain their
+original license headers in-tree; the remaining dependencies are fetched and
+built automatically by CMake.
+
+| Component | How it's used | License |
+|---|---|---|
+| [NuFast-LBL](https://github.com/PeterDenton/NuFast-LBL) | Vendored in [`src/NuFastLBL.cxx`](src/NuFastLBL.cxx) — fast long-baseline oscillation probabilities in matter | MIT (© 2024 Peter B. Denton) |
+| [LBFGSpp](https://github.com/yixuan/LBFGSpp) | Fetched ([our fork](https://github.com/markrosslonergan/LBFGSpp)) — the L-BFGS-B bounded local minimizer at the heart of every fit | MIT (© Yixuan Qiu) |
+| [Eigen](https://gitlab.com/libeigen/eigen) 3.4.0 | Fetched — all internal linear algebra | MPL2 |
+| [CLI11](https://github.com/CLIUtils/CLI11) 2.3.2 | Vendored in [`inc/CLI11.h`](inc/CLI11.h) — command-line interface | 3-clause BSD (University of Cincinnati / Henry Schreiner) |
+| [TinyXML2](https://github.com/leethomason/tinyxml2) 9.0.0 | Fetched — XML configuration parsing | zlib |
+| [MurmurHash3](https://github.com/aappleby/smhasher) | Vendored in [`inc/MurmurHash3.h`](inc/MurmurHash3.h) — XML hashing for binary-cache validation | Public domain (Austin Appleby) |
+
+**Please cite:** if you use the LBL oscillation model in a publication, cite
+the NuFast paper, [arXiv:2405.02400](https://arxiv.org/abs/2405.02400) (the
+vendored source header points there too).
+
 ## Versioning
 
 Development happens on the **`project-SBN-dev`** branch (the v2 release
@@ -197,3 +220,9 @@ tests/run_short_tests.sh ref      # baseline
 tests/run_short_tests.sh mine
 tests/compare_tags.sh ref mine    # semantic diff of all outputs
 ```
+
+## License
+
+PROfit is released under the [MIT License](LICENSE). Vendored third-party
+code retains its original licenses — see
+[Acknowledgements & citations](#acknowledgements--citations).
