@@ -33,6 +33,10 @@ PROspec PROspec::PoissonVariation(const PROspec &s, uint32_t seed) {
         }
     }
 
+    // A thrown spectrum is unit-weight counts: its stat error is sqrt(N), not
+    // the N that Fill's sum-of-weights-squared gives for a single N-weight fill.
+    newSpec.error = newSpec.spec.array().sqrt();
+
     return newSpec;
 }
 
