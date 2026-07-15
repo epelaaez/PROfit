@@ -3,7 +3,7 @@
  * @brief Implementation of the non-oscillation models NullModel and PROtemplate.
  * @author PROfit Collaboration
  */
-#include "PROmodelSimple.h"
+#include "PROmodels/PROmodelSimple.h"
 
 #include <unordered_map>
 

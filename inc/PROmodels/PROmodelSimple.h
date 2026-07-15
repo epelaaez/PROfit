@@ -3,7 +3,7 @@
  * @brief Non-oscillation physics models: NullModel and PROtemplate.
  * @author PROfit Collaboration
  *
- * @details Public header (NullModel is constructed directly in bin/PROfit.cxx).
+ * @details NullModel is also constructed directly (e.g. in bin/PROfit.cxx).
  *   - NullModel   — no oscillation; all events receive probability 1.
  *   - PROtemplate — template fit; floats subchannel normalizations as physics parameters.
  */

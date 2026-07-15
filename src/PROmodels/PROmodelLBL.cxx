@@ -3,7 +3,7 @@
  * @brief Implementation of the PROLBL three-flavour long-baseline model.
  * @author PROfit Collaboration
  */
-#include "PROmodelLBL.h"
+#include "PROmodels/PROmodelLBL.h"
 #include "NuFastLBL.h"
 
 #include <cmath>

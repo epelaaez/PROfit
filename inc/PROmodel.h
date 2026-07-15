@@ -11,11 +11,11 @@
  *
  * Concrete models live in family files; only the factory constructs them
  * (exception: NullModel, used directly by bin/PROfit.cxx):
- *   - inc/PROmodelSimple.h             — NullModel, PROtemplate (non-oscillation; public).
- *   - src/PROmodels/PROmodel2flav.h    — PROnumudis, PROnumudisTEST, PROnueapp, PROnuedis.
- *   - src/PROmodels/PROmodel3p1.h      — PRO3p1 and variants (_angles, _3A, _3B, _3C, _decay_invis).
- *   - src/PROmodels/PROmodel3p2.h      — PRO3p2.
- *   - src/PROmodels/PROmodelLBL.h      — PROLBL (NuFastLBL three-flavour matter oscillations).
+ *   - inc/PROmodels/PROmodelSimple.h — NullModel, PROtemplate (non-oscillation).
+ *   - inc/PROmodels/PROmodel2flav.h  — PROnumudis, PROnumudisTEST, PROnueapp, PROnuedis.
+ *   - inc/PROmodels/PROmodel3p1.h    — PRO3p1 and variants (_angles, _3A, _3B, _3C, _decay_invis).
+ *   - inc/PROmodels/PROmodel3p2.h    — PRO3p2.
+ *   - inc/PROmodels/PROmodelLBL.h    — PROLBL (NuFastLBL three-flavour matter oscillations).
  */
 #ifndef PROMODEL_H
 #define PROMODEL_H

@@ -3,7 +3,7 @@
  * @brief Implementation of the two-flavour-like single-channel 3+1 models.
  * @author PROfit Collaboration
  */
-#include "PROmodel2flav.h"
+#include "PROmodels/PROmodel2flav.h"
 
 namespace PROfit {
 

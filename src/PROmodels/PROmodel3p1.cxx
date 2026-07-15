@@ -3,7 +3,7 @@
  * @brief Implementation of the 3+1 sterile-neutrino model family.
  * @author PROfit Collaboration
  */
-#include "PROmodel3p1.h"
+#include "PROmodels/PROmodel3p1.h"
 
 namespace PROfit {
 

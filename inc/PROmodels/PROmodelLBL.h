@@ -2,8 +2,8 @@
  * @file PROmodelLBL.h
  * @brief Standard three-flavour long-baseline oscillation model (NuFastLBL wrapper).
  * @author PROfit Collaboration
- * @internal Private header — PROLBL is constructed only via get_model_from_string
- * (src/PROmodel.cxx); do not include from public headers.
+ * @internal PROLBL is constructed only via get_model_from_string
+ * (src/PROmodel.cxx); prefer the factory over direct construction.
  */
 #ifndef PROMODELLBL_H
 #define PROMODELLBL_H

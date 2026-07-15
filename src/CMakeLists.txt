@@ -1,4 +1,4 @@
-file(GLOB HEADER_LIST CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/inc/*.h" "${PROJECT_SOURCE_DIR}/inc/PROmetrics/*.h")
+file(GLOB HEADER_LIST CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/inc/*.h" "${PROJECT_SOURCE_DIR}/inc/PROmetrics/*.h" "${PROJECT_SOURCE_DIR}/inc/PROmodels/*.h")
 
 if(MPI_ENABLE)
     add_library(PROfitLib PROconfig.cxx PROspec.cxx PROdata.cxx PROmfa.cxx PROtocall.cxx PROcreate.cxx PROsyst.cxx PROcess.cxx PROmetrics/PROchi.cxx PROmetrics/PROCNP.cxx PROmetrics/PROpoisson.cxx PROsurf.cxx PRObe.cxx PROmesh.cxx PROmeshEval.cxx PROmeshPlot.cxx PROfc.cxx PROAdaptiveFC.cxx PROAdaptiveFCmesh.cxx PROAdaptiveFCbank.cxx PROAdaptiveFCplot.cxx PROfitter.cxx PROjector.cxx PROplot.cxx PRObench.cxx PROmodel.cxx PROmodels/PROmodelSimple.cxx PROmodels/PROmodel2flav.cxx PROmodels/PROmodel3p1.cxx PROmodels/PROmodel3p2.cxx PROmodels/PROmodelLBL.cxx NuFastLBL.cxx MurmurHash3 ${CMAKE_BINARY_DIR}/PROfit_dict.cxx ${HEADER_LIST})

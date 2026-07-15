@@ -15,7 +15,7 @@
 #include "PROAdaptiveFC.h"
 #include "PROfitter.h"
 #include "PROmodel.h"
-#include "PROmodelSimple.h"
+#include "PROmodels/PROmodelSimple.h"
 #include "PROMCMC.h"
 #include "PROtocall.h"
 #include "PROseed.h"

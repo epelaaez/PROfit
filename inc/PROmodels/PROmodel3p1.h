@@ -2,8 +2,8 @@
  * @file PROmodel3p1.h
  * @brief 3+1 sterile-neutrino oscillation models in the short-baseline approximation.
  * @author PROfit Collaboration
- * @internal Private header — these models are constructed only via
- * get_model_from_string (src/PROmodel.cxx); do not include from public headers.
+ * @internal These models are constructed only via
+ * get_model_from_string (src/PROmodel.cxx); prefer the factory over direct construction.
  *
  * @details Declares the 3+1 family:
  *   - PRO3p1             — parameterised by (dmsq, |U_e4|^2, |U_mu4|^2).

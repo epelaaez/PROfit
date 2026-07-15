@@ -2,8 +2,8 @@
  * @file PROmodel3p2.h
  * @brief 3+2 sterile-neutrino oscillation model.
  * @author PROfit Collaboration
- * @internal Private header — PRO3p2 is constructed only via get_model_from_string
- * (src/PROmodel.cxx); do not include from public headers.
+ * @internal PRO3p2 is constructed only via get_model_from_string
+ * (src/PROmodel.cxx); prefer the factory over direct construction.
  */
 #ifndef PROMODEL3P2_H
 #define PROMODEL3P2_H

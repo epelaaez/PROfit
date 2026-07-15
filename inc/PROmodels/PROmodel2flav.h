@@ -2,8 +2,8 @@
  * @file PROmodel2flav.h
  * @brief Two-flavour-like 3+1 single-channel oscillation models (short-baseline approximation).
  * @author PROfit Collaboration
- * @internal Private header — these models are constructed only via
- * get_model_from_string (src/PROmodel.cxx); do not include from public headers.
+ * @internal These models are constructed only via
+ * get_model_from_string (src/PROmodel.cxx); prefer the factory over direct construction.
  *
  * @details Declares the single-channel family:
  *   - PROnumudis     — nu_mu disappearance, parameterised by (dmsq, sin^2 2theta_mumu).
