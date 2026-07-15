@@ -14,8 +14,8 @@
 
 **PROfit** is a fast, modern C++ framework for frequentist fits of
 short-baseline neutrino oscillation and BSM physics models, developed for the
-SBN/ICARUS program. You describe your entire analysis — MC files, selections,
-binning, oscillation model, and systematic uncertainties — in a single XML
+SBN/ICARUS program. You describe your entire analysis, be it MC files, selections,
+binning, oscillation model, and systematic uncertainties, in a single XML
 file, and PROfit turns it into spectra, covariance matrices, response splines,
 and statistically rigorous fits and confidence regions.
 
@@ -30,12 +30,12 @@ and statistically rigorous fits and confidence regions.
 - **Flexible systematics**: CAFAna-style response splines, SBNfit-style
   fractional covariances, flat normalizations, detector-variation samples,
   MC-stat errors, and covariance↔spline conversion via eigenmode
-  decomposition — all freely mixed, with optional Gaussian priors and
+  decomposition,  all freely mixed, with optional Gaussian priors and
   correlations.
-- **Three χ² metrics** — standard covariance (`PROchi`), combined
-  Neyman-Pearson (`PROCNP`), and Poisson (Baker-Cousins) likelihood — behind
+- **Three χ² metrics** : standard covariance (`PROchi`), combined
+  Neyman-Pearson (`PROCNP`), and Poisson  likelihood — behind
   one common interface, with analytic and Gauss-Newton gradient modes.
-- **A serious global fitter**: Latin-hypercube sampling → particle-swarm
+- **A robust global fitter**: Latin-hypercube sampling → particle-swarm
   optimization → multi-start L-BFGS-B, with tunable presets from `fast` to
   `overkill` and harmonic-oscillation seeding for Δm²-like parameters.
 - **Multithreaded 1D profiles and 2D surfaces** with cross-thread warm-start
@@ -47,24 +47,24 @@ and statistically rigorous fits and confidence regions.
 - **PROjector two-stage fits**: fit a constraining sample (e.g. a near
   detector) once, save the posterior as a correlated prior, and re-use it in
   downstream fits, profiles, surfaces, and FC — projection without
-  approximation.
+  approximation [Under Development!]
 - **Multiple physics models** out of the box (3+1, 3+2, two-flavor, LBL,
   simple scaling) with a clean base class for adding your own.
 - **Deterministic and tested**: seeded runs are bit-reproducible, and a
   regression test suite covering every major workflow ships in
   [`tests/`](tests/README.md).
 
-Built on [Eigen](https://gitlab.com/libeigen/eigen),
+Built on [Eigen](https://gitlab.com/libeigen/eigen) for all internal linear algebra,
 [LBFGSpp](https://github.com/yixuan/LBFGSpp),
-[CLI11](https://github.com/CLIUtils/CLI11), and ROOT.
+ and ROOT for input/output and some plot making
 
 ## Documentation
 
 | Resource | What it covers |
 |---|---|
-| 📖 [**Walk-through tutorial**](docs/tutorials/PROfit_Tutorial_v2.md) | The place to start. A complete v2.X walk-through: concepts, the XML format, every subcommand, Feldman-Cousins, and PROjector — with regenerable plots. |
-| 🔧 [**API reference (Doxygen)**](https://markrosslonergan.github.io/Elephant_Vanishes/) | Auto-generated class documentation, rebuilt on every push. Build locally with `make docs` (requires Doxygen). |
-| 🧪 [**Test suite guide**](tests/README.md) | Deterministic regression tests for before/after comparisons of physics-touching changes. |
+| [**Walk-through tutorial**](docs/tutorials/PROfit_Tutorial_v2.md) | The place to start. A complete v2.X walk-through: concepts, the XML format, every subcommand, Feldman-Cousins, and PROjector — with regenerable plots. |
+| [**API reference (Doxygen)**](https://markrosslonergan.github.io/Elephant_Vanishes/) | Auto-generated class documentation, rebuilt on every push. Build locally with `make docs` (requires Doxygen). |
+| [**Test suite guide**](tests/README.md) | Deterministic regression tests for before/after comparisons of physics-touching changes. |
 
 Questions? Join **#profit** on the SBN Slack, mail
 `profit@listserv.fnal.gov`, or open an
@@ -143,7 +143,7 @@ PROfit -x analysis.xml -t MyTag -n 8 profile
 PROfit -x analysis.xml -t MyTag -n 8 surface
 
 # Feldman-Cousins for an injected signal
-PROfit -x analysis.xml -t MyTag -n 8 --inject dmsq:1.0 fc
+PROfit -x analysis.xml -t MyTag -n 8 --inject dmsq 1.0 fc
 ```
 
 `PROfit --help` and `PROfit <subcommand> --help` document every option;
