@@ -16,8 +16,11 @@
 #include "PROcreate.h"
 #include "PROtocall.h"
 #include "PROsyst.h"
-#include "PROchi.h"
+#include "PROmetrics/PROchi.h"
 #include "PROmodel.h"
+#include "PROmodelSimple.h"
+#include "PROmodels/PROmodel2flav.h"   // requires -I<repo>/src (private model headers)
+#include "PROmodels/PROmodel3p1.h"
 #include "PROdata.h"
 #include "PROlog.h"
 #include "PROcess.h"
