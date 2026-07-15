@@ -208,7 +208,8 @@ namespace PROfit{
             std::vector<std::vector<int>> variable_bin_indices;
             /// Per-event values for each analysis variable; outer = variable, inner = event.
             std::vector<std::vector<float>> variable_values;
-            /// Per-variable MC statistical error vectors (sqrt of summed-weight-squared per bin).
+            /// Per-variable MC-stat effective-count vectors: sqrt(N_eff) = Sum(w)/sqrt(Sum(w^2))
+            /// per bin, so 1/this^2 is the exact fractional MC-stat variance for weighted events.
             std::vector<Eigen::VectorXf> variable_mc_stat_err;
             /// Per-variable bin centre value vectors.
             std::vector<Eigen::VectorXf> variable_midbin;

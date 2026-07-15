@@ -9,7 +9,7 @@
  *   - src/PROAdaptiveFCbank.cxx  — serialisation, PE worker/scheduler,
  *                                  asimov observables, classification
  *   - src/PROAdaptiveFCplot.cxx  — ROOT PDF / artifact output
- * Cross-TU internals are declared in src/PROAdaptiveFCinternal.h
+ * Cross-TU internals are declared in inc/PROAdaptiveFCinternal.h
  * (namespace PROfit::afc). The AMR per-point fit body and the mesh drawing
  * are shared with PROsurf via inc/PROmeshEval.h and inc/PROmeshPlot.h.
  */

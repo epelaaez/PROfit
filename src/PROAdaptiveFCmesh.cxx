@@ -13,9 +13,9 @@
 
 #include "PROlog.h"
 #include "PROmeshEval.h"
-#include "PROchi.h"
-#include "PROCNP.h"
-#include "PROpoisson.h"
+#include "PROmetrics/PROchi.h"
+#include "PROmetrics/PROCNP.h"
+#include "PROmetrics/PROpoisson.h"
 #include "PROmetric.h"
 #include "PROspec.h"
 #include "PROcess.h"

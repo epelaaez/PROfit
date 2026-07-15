@@ -1,4 +1,4 @@
-#include "PROpoisson.h"
+#include "PROmetrics/PROpoisson.h"
 #include "PROcess.h"
 #include "PROdata.h"
 #include "PROlog.h"
