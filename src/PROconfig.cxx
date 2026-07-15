@@ -1252,7 +1252,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 }
 
                 //check for known attributes
-                const std::vector<std::string> expected_attrs = {"name", "type", "plotname", "binning", "knobvals", "tag", "prior", "center", "force_0_cv", "include_only_weights", "scale","filename", "xvar", "yvar", "restrict", "mirror", "num_decomp_knobs", "include_resid_cov"};
+                const std::vector<std::string> expected_attrs = {"name", "type", "plotname", "binning", "knobvals", "tag", "prior", "center", "force_0_cv", "include_only_weights", "scale","filename", "xvar", "yvar", "restrict", "mirror", "num_decomp_knobs", "include_resid_cov", "inflate"};
                 for (const tinyxml2::XMLAttribute* attr = pAllowList->FirstAttribute(); attr; attr = attr->Next()) {
                     std::string name = attr->Name();
                     if (std::find(expected_attrs.begin(), expected_attrs.end(), name) == expected_attrs.end()) {
@@ -1273,6 +1273,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 const char *include_only_weights_str = pAllowList->Attribute("include_only_weights");
                 const char *restrict_str = pAllowList->Attribute("restrict");
                 const char *scale = pAllowList->Attribute("scale");
+                const char *inflate = pAllowList->Attribute("inflate");
                 const char *filename = pAllowList->Attribute("filename");
                 const char *xvar = pAllowList->Attribute("xvar");
                 const char *yvar = pAllowList->Attribute("yvar");
@@ -1410,6 +1411,21 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 if(scale) {
                     m_mcgen_variation_scale[wt] = std::strtof(scale, NULL);
                     log<LOG_INFO>(L"%1% || Parsed scale=%2% for systematic %3%") % __func__ % m_mcgen_variation_scale[wt] % wt.c_str();
+                }
+                if(inflate) {
+                    char *end;
+                    float inflate_val = std::strtof(inflate, &end);
+                    if(end == inflate || inflate_val <= 0) {
+                        log<LOG_ERROR>(L"%1% || ERROR! inflate attribute for systematic %2% must be a positive number, got '%3%'") % __func__ % wt.c_str() % inflate;
+                        throw std::invalid_argument(std::string("inflate attribute for systematic '") + wt + "' must be a positive number");
+                    }
+                    m_mcgen_variation_inflate[wt] = inflate_val;
+                    log<LOG_INFO>(L"%1% || Parsed inflate=%2% for systematic %3%") % __func__ % inflate_val % wt.c_str();
+                    const std::vector<std::string> inflatable_types = {"spline", "spline_to_covariance", "covariance", "external_covariance", "norm", "hist1d", "hist2d"};
+                    if(!variation_type || std::find(inflatable_types.begin(), inflatable_types.end(), variation_type) == inflatable_types.end()) {
+                        log<LOG_WARNING>(L"%1% || inflate is not supported for systematic %2% (type %3%); it will have no effect.")
+                            % __func__ % wt.c_str() % (variation_type ? variation_type : "unspecified");
+                    }
                 }
                 if(mirrored) {
                     if(strcmp(mirrored, "false") == 0 || strcmp(mirrored, "no") == 0 || strcmp(mirrored, "0") == 0)
