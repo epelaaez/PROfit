@@ -12,7 +12,7 @@
  * src/PROAdaptiveFCmesh.cxx (throws, prepass, meta-mesh),
  * src/PROAdaptiveFCbank.cxx (serialisation, PE worker/scheduler, asimov
  * observables, classification) and src/PROAdaptiveFCplot.cxx (ROOT output),
- * with internals declared in src/PROAdaptiveFCinternal.h. The AMR per-point
+ * with internals declared in inc/PROAdaptiveFCinternal.h. The AMR per-point
  * fit body and the mesh drawing are shared with PROsurf via inc/PROmeshEval.h
  * and inc/PROmeshPlot.h. The per-PE worker (run_one_pe) intentionally
  * parallels src/PROfc.cxx::fc_worker (the brute-force FC) and remains
