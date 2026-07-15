@@ -242,6 +242,13 @@ float PROfitter::Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed
     std::vector<float> chi2s_localfits;
     niter=0;
 
+    // Per-Fit tally of local-refinement failures. Individual throws are
+    // routine (near-optimal starts break the More-Thuente line search, see the
+    // seed-candidate note below) so per-attempt detail goes to LOG_DEBUG and a
+    // single LOG_WARNING summary is emitted at the end of the fit.
+    std::map<std::string, size_t> fit_exception_counts;
+    size_t n_fail_pso = 0, n_fail_seed = 0, n_fail_latin = 0, n_latin_starts = 0;
+
     bool success = false;
     best_fit = PSO.getGlobalBestPosition();
     chimin = PSO.getGlobalBestScore();
@@ -282,14 +289,16 @@ float PROfitter::Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed
 
         } catch (const std::exception &except) {
             exception_string_map[std::string(except.what())]++;
-            log<LOG_WARNING>(L"%1% || Minimization attempt %2%/%3% failed: %4%") % __func__ % attempt % fitconfig.n_max_local_retries % except.what();
+            fit_exception_counts[std::string(except.what())]++;
+            log<LOG_DEBUG>(L"%1% || Minimization attempt %2%/%3% failed: %4%") % __func__ % attempt % fitconfig.n_max_local_retries % except.what();
         }
     }
 
     if (!success) {
         // best_fit/chimin already hold the PSO best (set above); nothing valid
-        // came out of the local attempts, so just report.
-        log<LOG_WARNING>(L"%1% || All minimization attempts failed, falling back to PSO best with chi %2%") % __func__ % chimin;
+        // came out of the local attempts.
+        ++n_fail_pso;
+        log<LOG_DEBUG>(L"%1% || All minimization attempts failed, falling back to PSO best with chi %2%") % __func__ % chimin;
     }
 
 
@@ -347,18 +356,21 @@ float PROfitter::Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed
 
                 } catch (const std::exception &except) {
                     exception_string_map[std::string(except.what())]++;
-                    log<LOG_WARNING>(L"%1% || Minimization attempt %2%/%3% failed: %4%") % __func__ % attempt % fitconfig.n_max_local_retries % except.what();
+                    fit_exception_counts[std::string(except.what())]++;
+                    log<LOG_DEBUG>(L"%1% || Minimization attempt %2%/%3% failed: %4%") % __func__ % attempt % fitconfig.n_max_local_retries % except.what();
                 }
             }
 
             if (!seed_success) {
-                log<LOG_WARNING>(L"%1% || Seed-point refinement failed; keeping best-so-far (chi %2%, includes the seed's own chi2 as a candidate)") % __func__ % chimin;
+                ++n_fail_seed;
+                log<LOG_DEBUG>(L"%1% || Seed-point refinement failed; keeping best-so-far (chi %2%, includes the seed's own chi2 as a candidate)") % __func__ % chimin;
             }
         }
     }
 
 
     for(int i=0; i< fitconfig.n_localfit-1-fudge && (size_t)(i+1) < best_multistart.size(); i++){
+        ++n_latin_starts;
         success = false;
 
         //After the best best fit, do you want to do more of the latin ones?
@@ -391,13 +403,26 @@ float PROfitter::Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed
 
             } catch (const std::exception &except) {
                 exception_string_map[std::string(except.what())]++;
-                log<LOG_WARNING>(L"%1% || Minimization attempt %2%/%3% failed: %4%") % __func__ % attempt % fitconfig.n_max_local_retries % except.what();
+                fit_exception_counts[std::string(except.what())]++;
+                log<LOG_DEBUG>(L"%1% || Minimization attempt %2%/%3% failed: %4%") % __func__ % attempt % fitconfig.n_max_local_retries % except.what();
             }
         }
 
         if (!success) {
-            log<LOG_WARNING>(L"%1% || All minimization attempts failed for this start point, keeping current best (chi %2%).") % __func__ % chimin;
+            ++n_fail_latin;
+            log<LOG_DEBUG>(L"%1% || All minimization attempts failed for this start point, keeping current best (chi %2%).") % __func__ % chimin;
         }
+    }
+
+    const size_t n_fail_total = n_fail_pso + n_fail_seed + n_fail_latin;
+    if (n_fail_total > 0) {
+        std::string exc_breakdown;
+        for (const auto &[msg, count] : fit_exception_counts)
+            exc_breakdown += " " + std::to_string(count) + "x \"" + msg + "\";";
+        log<LOG_WARNING>(L"%1% || Fit summary: refinement threw on %2%/%3% start points (PSO-best %4%/1, seeds %5%/%6%, latin %7%/%8%) — benign, pre-refinement candidate chi2s retained. Exceptions:%9%")
+            % __func__ % n_fail_total % (1 + fudge + n_latin_starts)
+            % n_fail_pso % n_fail_seed % fudge % n_fail_latin % n_latin_starts
+            % exc_breakdown.c_str();
     }
 
     log<LOG_INFO>(L"%1% || FINAL has a chi %2%") % __func__ %  chimin;
