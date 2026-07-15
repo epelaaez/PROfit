@@ -208,6 +208,7 @@ namespace PROfit{
                 std::vector<std::pair<std::unique_ptr<TGraph>, std::unique_ptr<TGraph>>> bin_graphs;
                 size_t nbins = config.m_num_variable_bins_total.at(systs.spline_binnings[i]);
                 int nsegs = spline.segments_per_bin;
+                constexpr int samples_per_segment = 20;
                 bin_graphs.reserve(nbins);
 
                 for (size_t j = 0; j < nbins; ++j) {
@@ -218,25 +219,17 @@ namespace PROfit{
                     size_t seg_offset = j * nsegs;
 
                     for (int k = 0; k < nsegs; ++k) {
-                        const SplineSegment &seg = spline.segments[seg_offset + k];
-                        float lo = seg.knot;
-                        std::array<float, 4> coeffs = seg.coeffs;
-                        // Determine hi for this segment
-                        float hi;
-                        if (k < nsegs - 1) {
-                            hi = spline.segments[seg_offset + k + 1].knot;
-                        } else {
-                            hi = systs.spline_hi[i];
-                        }
-                        auto fn = [coeffs](float shift) {
-                            return coeffs[0] + coeffs[1] * shift + coeffs[2] * shift * shift + coeffs[3] * shift * shift * shift;
-                        };
-                        fixed_pts->SetPoint(fixed_pts->GetN(), lo, fn(0));
-                        if (k == nsegs - 1)
-                            fixed_pts->SetPoint(fixed_pts->GetN(), hi, fn(hi - lo));
-                        float width = (hi - lo) / 20.0f;
-                        for (int l = 0; l < 20; ++l)
-                            curve->SetPoint(curve->GetN(), lo + l * width, fn(l * width));
+                        float shift = spline.segments[seg_offset + k].knot;
+                        fixed_pts->SetPoint(k, shift, systs.GetSplineShift(i, shift, j));
+                    }
+                    fixed_pts->SetPoint(nsegs, systs.spline_hi[i], systs.GetSplineShift(i, systs.spline_hi[i], j));
+
+                    float lo = systs.spline_has_restrict[i] ? systs.spline_restrict_lo[i] : systs.spline_lo[i];
+                    float hi = systs.spline_has_restrict[i] ? systs.spline_restrict_hi[i] : systs.spline_hi[i];
+                    int samples = samples_per_segment * nsegs;
+                    for (int k = 0; k <= samples; ++k) {
+                        float shift = lo + (hi - lo) * k / samples;
+                        curve->SetPoint(k, shift, systs.GetSplineShift(i, shift, j));
                     }
                     bin_graphs.push_back(std::make_pair(std::move(fixed_pts), std::move(curve)));
                 }

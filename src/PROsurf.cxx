@@ -583,6 +583,11 @@ std::vector<surfOut> PROsurf::PointHelper(const PROfitterConfig &fitconfig, std:
         lb << local_metric->GetModel().lb, Eigen::VectorXf::Map(local_metric->GetSysts().spline_lo.data(), local_metric->GetSysts().spline_lo.size());
         Eigen::VectorXf ub(nparams+2);
         ub << local_metric->GetModel().ub, Eigen::VectorXf::Map(local_metric->GetSysts().spline_hi.data(), local_metric->GetSysts().spline_hi.size());
+        for(size_t si = 0; si < local_metric->GetSysts().GetNSplines(); ++si) {
+            if(!local_metric->GetSysts().spline_has_restrict[si]) continue;
+            lb(local_metric->GetModel().nparams + si) = local_metric->GetSysts().spline_restrict_lo[si];
+            ub(local_metric->GetModel().nparams + si) = local_metric->GetSysts().spline_restrict_hi[si];
+        }
 
         lb(x_idx) = multi_physics_params[i].grid_val[1];
         ub(x_idx) = multi_physics_params[i].grid_val[1];
@@ -1432,8 +1437,8 @@ PROfile::PROfile(const PROconfig &config, const PROsyst &systs, const PROmodel &
             hi = metric.GetModel().ub(count);
         } else {
             size_t spline_idx = with_osc ? count - metric.GetModel().nparams : count;
-            lo = metric.GetSysts().spline_lo[spline_idx];
-            hi = metric.GetSysts().spline_hi[spline_idx];
+            lo = metric.GetSysts().spline_has_restrict[spline_idx] ? metric.GetSysts().spline_restrict_lo[spline_idx] : metric.GetSysts().spline_lo[spline_idx];
+            hi = metric.GetSysts().spline_has_restrict[spline_idx] ? metric.GetSysts().spline_restrict_hi[spline_idx] : metric.GetSysts().spline_hi[spline_idx];
         }
         if(std::isinf(lo)) lo = lo < 0 ? -5 : 5;
         if(std::isinf(hi)) hi = hi < 0 ? -5 : 5;
@@ -2119,4 +2124,3 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
 
     return;
 }
-

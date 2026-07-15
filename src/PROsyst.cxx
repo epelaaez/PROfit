@@ -718,16 +718,16 @@ namespace PROfit {
         const Spline& spline = splines[spline_num];
         if (bin < 0 || bin >= spline.bins) return -1;
 
-        // Find the right segment with egments are sorted by knob value
+        // Find the right segment; segments are sorted by knob value.
         int offset = bin * spline.segments_per_bin;
         const SplineSegment* segs = &spline.segments[offset];
+        const SplineSegment* end = segs + spline.segments_per_bin;
+        const SplineSegment* seg = std::upper_bound(segs, end, shift, [](float x, const SplineSegment& s) { return x < s.knot; });
+        if (seg != segs) --seg; // seg is now the last k_i such that k_i < shift
 
-        float lowest_knobval = segs[0].knot;
-        int shiftBin = std::clamp(int(shift - lowest_knobval), 0, spline.segments_per_bin - 1);
-
-        const SplineSegment& seg = segs[shiftBin];
-        float x = shift - seg.knot;
-        const auto& c = seg.coeffs;
+        float hi = seg + 1 < end ? seg[1].knot : spline_hi[spline_num];
+        float x = (shift - seg->knot) / (hi - seg->knot); // normalize to [0, 1]
+        const auto& c = seg->coeffs;
         return c[0] + x*(c[1] + x*(c[2] + x*c[3]));
     }
 

@@ -2427,6 +2427,8 @@ int main(int argc, char* argv[])
             for(const auto &[syst_name, syst_bins]: spline_graphs) {
                 int bin = 0;
                 int binning = variable_systs[config.i_prime].spline_binnings[snum++];
+                auto plotname = config.m_mcgen_variation_plotname_map.find(syst_name);
+                std::string spline_label = plotname == config.m_mcgen_variation_plotname_map.end() ? syst_name : plotname->second;
                 bool unprinted = true;
                 chan++;
                 int col = chan%2==0 ? kRed: kBlue;
@@ -2439,18 +2441,37 @@ int main(int argc, char* argv[])
                     std::string nsubchannel = config.GetSubchannelName(sbi);
                     size_t local_channel_index = config.GetLocalChannelIndexFromGlobalSubchannelIndex(sbi);
                     std::string chan_units = config.GetChannelXAxisTitle(local_channel_index, binning);
-                    int edges_vec_sz = (int)config.m_variable_bin_to_edges[binning].size();
-                    size_t safe_bin = (edges_vec_sz>0) ? std::min((size_t)bin, (size_t)edges_vec_sz-1) : 0;
-                    std::pair<float,float> edg = config.m_variable_bin_to_edges[binning][safe_bin];
+                    const auto &bins = config.GetChannelVariableBins(local_channel_index, binning);
+                    size_t local_bin = bin - config.GetGlobalVariableBinStart(sbi, binning);
+                    std::string bin_detail;
+                    if(bins.NDim() == 2) {
+                        size_t ix = bins.ProjectIndex(local_bin, 0);
+                        size_t iy = bins.ProjectIndex(local_bin, 1);
+                        const auto ex = bins.Edges(0);
+                        const auto ey = bins.Edges(1);
+                        size_t sep = chan_units.find(';');
+                        std::string xlabel = sep == std::string::npos ? "x" : chan_units.substr(0, sep);
+                        std::string ylabel = sep == std::string::npos ? "y" : chan_units.substr(sep + 1);
+                        bin_detail = xlabel+" ["+to_string_prec(ex[ix],2)+"->"+to_string_prec(ex[ix+1],2)+"], "+
+                                     ylabel+" ["+to_string_prec(ey[iy],2)+"->"+to_string_prec(ey[iy+1],2)+"]";
+                    } else {
+                        size_t ibin = bins.ProjectIndex(local_bin, 0);
+                        const auto edges = bins.Edges(0);
+                        bin_detail = chan_units+" ["+to_string_prec(edges[ibin],2)+"->"+to_string_prec(edges[ibin+1],2)+"]";
+                    }
 
                     fixed_pts->SetMarkerColor(col);
                     fixed_pts->SetMarkerStyle(kFullCircle);
                     fixed_pts->GetXaxis()->SetTitle("#sigma");
                     fixed_pts->GetYaxis()->SetTitle("Weight");
-                    fixed_pts->SetTitle(("#splitline{"+syst_name+"}{#splitline{"+nsubchannel+" "+std::to_string(bin)+"}{"+chan_units+" ["+to_string_prec(edg.first,2)+"->"+to_string_prec(edg.second,2)+ "]}}").c_str());
+                    fixed_pts->SetTitle(("#splitline{"+spline_label+"}{#splitline{"+nsubchannel+" bin "+std::to_string(local_bin)+"}{"+bin_detail+"}}").c_str());
+                    double xlo = curve->GetX()[0];
+                    double xhi = curve->GetX()[curve->GetN()-1];
+                    double xpad = 0.05 * (xhi - xlo);
+                    fixed_pts->GetXaxis()->SetLimits(xlo - xpad, xhi + xpad);
                     fixed_pts->Draw("PA");
-                    double max_y = TMath::MaxElement(fixed_pts->GetN(), fixed_pts->GetY());
-                    double min_y = TMath::MinElement(fixed_pts->GetN(), fixed_pts->GetY());
+                    double max_y = std::max(TMath::MaxElement(fixed_pts->GetN(), fixed_pts->GetY()), TMath::MaxElement(curve->GetN(), curve->GetY()));
+                    double min_y = std::min(TMath::MinElement(fixed_pts->GetN(), fixed_pts->GetY()), TMath::MinElement(curve->GetN(), curve->GetY()));
                     double range = max_y - min_y;
                     fixed_pts->SetMaximum(max_y + 0.2 * range);
                     fixed_pts->SetMinimum(min_y);
