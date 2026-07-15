@@ -50,7 +50,7 @@
 using namespace PROfit;
 
 
-void writeVectorToFile(const std::string& filename, const std::vector<float>& dataVector) {
+/*void writeVectorToFile(const std::string& filename, const std::vector<float>& dataVector) {
     // 1. Create/Overwrite the specified ROOT file
     TFile* outFile = TFile::Open(filename.c_str(), "RECREATE");
     if (!outFile || outFile->IsZombie()) {
@@ -79,9 +79,115 @@ void writeVectorToFile(const std::string& filename, const std::vector<float>& da
     //delete outFile;
     
     std::cout << "Successfully wrote vector of size " << dataVector.size() << " to " << filename << std::endl;
+}*/
+
+std::vector<fc_out> readAnalysisFromFile(const std::string& filename,
+                                         const PROmodel &model,                                    // To parse log10 parameters
+                                         const std::vector<PROsyst>& variable_systs,         // To map spline names to Eigen indices
+                                         size_t i_prime) {                                    // Current system config index
+    std::vector<fc_out> entries;
+
+    // 1. Open the file
+    TFile* inFile = TFile::Open(filename.c_str(), "READ");
+    if (!inFile || inFile->IsZombie()) {
+        std::cerr << "Error: Could not open file " << filename << std::endl;
+        return entries;
+    }
+
+    // 2. Get the TTree
+    TTree* tree = nullptr;
+    inFile->GetObject("tree", tree);
+    if (!tree) {
+        std::cerr << "Error: Could not find TTree 'tree' in " << filename << std::endl;
+        inFile->Close();
+        delete inFile;
+        return entries;
+    }
+
+    // 3. Set up local reading buffers
+    float chi2_osc = 0;
+    float chi2_syst = 0;
+    std::map<std::string, float>* p_best_systs_osc = nullptr;
+    std::map<std::string, float>* p_best_systs = nullptr;
+    std::map<std::string, float>* p_syst_throw = nullptr;
+
+    // Allocate memory for physical parameter values matching model size
+    std::vector<float> phys_param_vals(model.nparams, 0.0f);
+
+    // 4. Bind tree branches to our buffers
+    tree->SetBranchAddress("chi2_osc", &chi2_osc);
+    tree->SetBranchAddress("chi2_syst", &chi2_syst);
+    tree->SetBranchAddress("best_systs_osc", &p_best_systs_osc);
+    tree->SetBranchAddress("best_systs", &p_best_systs);
+    tree->SetBranchAddress("syst_throw", &p_syst_throw);
+
+    // Bind physical parameter branches using the model's exact parameter names
+    for (size_t i = 0; i < model.nparams; ++i) {
+        std::string branch_name = "best_" + model.param_names[i];
+        if (tree->GetBranch(branch_name.c_str())) {
+            tree->SetBranchAddress(branch_name.c_str(), &phys_param_vals[i]);
+        } else {
+            std::cerr << "Warning: Branch " << branch_name << " not found in file." << std::endl;
+            phys_param_vals[i] = 0.0f; 
+        }
+    }
+
+    // Get the systematic size details 
+    size_t n_splines = variable_systs[i_prime].GetNSplines();
+
+    // 5. Loop over all records and reconstruct fc_out structures
+    Long64_t nEntries = tree->GetEntries();
+    entries.reserve(nEntries);
+
+    for (Long64_t entry = 0; entry < nEntries; ++entry) {
+        tree->GetEntry(entry);
+
+        fc_out fco;
+        fco.chi2_osc = chi2_osc;
+        fco.chi2_syst = chi2_syst;
+
+        // --- Reconstruct best_phys_osc (and apply inverse conversion if log-scaled) ---
+        fco.best_phys_osc.resize(model.nparams);
+        for (size_t i = 0; i < model.nparams; ++i) {
+            float val = phys_param_vals[i];
+            // If the parameter was log-scaled, the file has 10^val. We retrieve val = log10(stored_val)
+            if (model.is_log10[i]) {
+                fco.best_phys_osc(i) = (val > 0.0f) ? std::log10(val) : 0.0f; 
+            } else {
+                fco.best_phys_osc(i) = val;
+            }
+        }
+
+        // --- Reconstruct Eigen Vectors from maps ---
+        fco.best_fit_osc.setZero(n_splines);
+        fco.best_fit_syst.setZero(n_splines);
+        fco.syst_throw.setZero(n_splines);
+
+        for (size_t i = 0; i < n_splines; ++i) {
+            const std::string& spline_name = variable_systs[i_prime].spline_names[i];
+
+            if (p_best_systs_osc && p_best_systs_osc->count(spline_name)) {
+                fco.best_fit_osc(i) = (*p_best_systs_osc)[spline_name];
+            }
+            if (p_best_systs && p_best_systs->count(spline_name)) {
+                fco.best_fit_syst(i) = (*p_best_systs)[spline_name];
+            }
+            if (p_syst_throw && p_syst_throw->count(spline_name)) {
+                fco.syst_throw(i) = (*p_syst_throw)[spline_name];
+            }
+        }
+
+        entries.push_back(fco);
+    }
+
+    // Clean up ROOT IO
+    inFile->Close();
+    delete inFile;
+
+    return entries;
 }
 
-std::vector<float> readVectorFromFile(const std::string& filename) {
+/*std::vector<float> readVectorFromFile(const std::string& filename) {
     std::vector<float> resultVector;
 
     // 1. Open the specified file
@@ -118,7 +224,7 @@ std::vector<float> readVectorFromFile(const std::string& filename) {
     //delete inFile;
     
     return resultVector;
-}
+}*/
 
 // Unique key for DetVar propeller maps (names can be reused across sections).
 static std::string DetVarKey(const PROconfig& config, size_t file_index) {
@@ -2556,24 +2662,24 @@ int main(int argc, char* argv[])
                 fc_PB_configs.push_back({int(nuniv/FCthreads), "Thread " + std::to_string(i)});
         }
         MultiPROgressBar fc_progress(fc_PB_configs);
-	bool save_null_dist = true;
-	std::string pvalue_file = "chi2_null.root";
+	bool gen_null_dist = true;
+	std::string FC_file = analysis_tag+"_FC.root";
         if(reuse_dist){
-            TFile* file = TFile::Open(pvalue_file.c_str(), "READ");
+            TFile* file = TFile::Open(FC_file.c_str(), "READ");
             if (!file) {
-                save_null_dist = true; 
+                gen_null_dist = true; 
             }
 	    else {
-                save_null_dist = false;
+                gen_null_dist = false;
 	    }
 	}
-        if(save_null_dist){
+        if(gen_null_dist){
             fc_progress.initialize_display();
             fc_progress.start_display_thread(); 
         }
 
         std::vector<float> flattened_dchi2s;
-        if(save_null_dist){
+        if(gen_null_dist){
             for(size_t i = 0; i < FCthreads; i++) {
                 dchi2s.emplace_back();
                 outs.emplace_back();
@@ -2591,11 +2697,29 @@ int main(int argc, char* argv[])
 
             for(const auto& v: dchi2s) for(const auto& dchi2: v) flattened_dchi2s.push_back(dchi2);
             std::sort(flattened_dchi2s.begin(), flattened_dchi2s.end());
-            writeVectorToFile(pvalue_file, flattened_dchi2s);
+            //writeVectorToFile(FC_file, flattened_dchi2s);
 	}
-	else if(!save_null_dist){
+	else if(!gen_null_dist){
             fc_progress.finish_all();
-	    flattened_dchi2s = readVectorFromFile(pvalue_file);
+            std::vector<fc_out> flat_outs = readAnalysisFromFile(FC_file, *model, variable_systs, config.i_prime);
+            // The following code assumes non-flat, so we can just make it fake non-flat
+            outs.push_back(flat_outs);
+            float dchi2;
+            float chi2_osc;
+            float chi2_syst;
+            for(const auto &out: outs) {
+                for(const auto &fco: out) {
+                    chi2_osc  = fco.chi2_osc;
+                    chi2_syst = fco.chi2_syst;
+                    if(gof_pvalue){
+                      dchi2 = chi2_syst;
+                    }
+                    else{
+                      dchi2 = chi2_syst - chi2_osc;
+                    }
+                    flattened_dchi2s.push_back(dchi2);
+                }
+            }
 	}
 	log<LOG_INFO>(L"%1% || 90%% Feldman-Cousins delta chi2 after throwing %2% universes is %3%") 
             % __func__ % nuniv % flattened_dchi2s[0.9*flattened_dchi2s.size()];
@@ -2625,67 +2749,67 @@ int main(int argc, char* argv[])
             log<LOG_ERROR>(L"%1% || FC Corrected pval after throwing %2% universes is %3%") % __func__ % nuniv % pvalFC ;
         }
 
-	if(save_null_dist){
-            {
-                TFile fout((final_output_tag+"_FC.root").c_str(), "RECREATE");
-                fout.cd();
-                float chi2_osc, chi2_syst;
-                // One float per physics parameter — plain branches named "best_<param_name>".
-                // Vector kept alive for the full lifetime of the TTree.
-                std::vector<float> best_phys_vals(model->nparams, 0.0f);
-                std::map<std::string, float> best_systs_osc, best_systs, syst_throw;
-                TTree tree("tree", "tree");
-                tree.Branch("chi2_osc",  &chi2_osc);
-                tree.Branch("chi2_syst", &chi2_syst);
-                for(size_t i = 0; i < model->nparams; ++i)
-                    tree.Branch(("best_" + model->param_names[i]).c_str(), &best_phys_vals[i]);
-                tree.Branch("best_systs_osc", &best_systs_osc);
-                tree.Branch("best_systs",     &best_systs);
-                tree.Branch("syst_throw",     &syst_throw);
+	//if(save_null_dist){
+          {
+              TFile fout((analysis_tag+"_FC.root").c_str(), "RECREATE");
+              fout.cd();
+              float chi2_osc, chi2_syst;
+              // One float per physics parameter — plain branches named "best_<param_name>".
+              // Vector kept alive for the full lifetime of the TTree.
+              std::vector<float> best_phys_vals(model->nparams, 0.0f);
+              std::map<std::string, float> best_systs_osc, best_systs, syst_throw;
+              TTree tree("tree", "tree");
+              tree.Branch("chi2_osc",  &chi2_osc);
+              tree.Branch("chi2_syst", &chi2_syst);
+              for(size_t i = 0; i < model->nparams; ++i)
+                  tree.Branch(("best_" + model->param_names[i]).c_str(), &best_phys_vals[i]);
+              tree.Branch("best_systs_osc", &best_systs_osc);
+              tree.Branch("best_systs",     &best_systs);
+              tree.Branch("syst_throw",     &syst_throw);
 
-                for(const auto &out: outs) {
-                    for(const auto &fco: out) {
-                        chi2_osc  = fco.chi2_osc;
-                        chi2_syst = fco.chi2_syst;
-                        for(size_t i = 0; i < model->nparams; ++i) {
-                            float raw = fco.best_phys_osc.size() > (Eigen::Index)i ? fco.best_phys_osc(i) : 0.0f;
-                            best_phys_vals[i] = model->is_log10[i] ? std::pow(10.0f, raw) : raw;
-                        }
-                        for(size_t i = 0; i < variable_systs[config.i_prime].GetNSplines(); ++i) {
-                            if(!gof_pvalue) best_systs_osc[variable_systs[config.i_prime].spline_names[i]] = fco.best_fit_osc(i);
-                            best_systs[variable_systs[config.i_prime].spline_names[i]] = fco.best_fit_syst(i);
-                            syst_throw[variable_systs[config.i_prime].spline_names[i]] = fco.syst_throw(i);
-                        }
-                        tree.Fill();
-                    }
-                }
+              for(const auto &out: outs) {
+                  for(const auto &fco: out) {
+                      chi2_osc  = fco.chi2_osc;
+                      chi2_syst = fco.chi2_syst;
+                      for(size_t i = 0; i < model->nparams; ++i) {
+                          float raw = fco.best_phys_osc.size() > (Eigen::Index)i ? fco.best_phys_osc(i) : 0.0f;
+                          best_phys_vals[i] = model->is_log10[i] ? std::pow(10.0f, raw) : raw;
+                      }
+                      for(size_t i = 0; i < variable_systs[config.i_prime].GetNSplines(); ++i) {
+                          if(!gof_pvalue) best_systs_osc[variable_systs[config.i_prime].spline_names[i]] = fco.best_fit_osc(i);
+                          best_systs[variable_systs[config.i_prime].spline_names[i]] = fco.best_fit_syst(i);
+                          syst_throw[variable_systs[config.i_prime].spline_names[i]] = fco.syst_throw(i);
+                      }
+                      tree.Fill();
+                  }
+              }
 
-                tree.Write();
-            }
-            {
-                ofstream fcout(final_output_tag+"_FC.csv");
-                fcout << "chi2_osc,chi2_syst";
-                for(const std::string &name: model->param_names)
-                    fcout << ",best_" << name;
-                for(const std::string &name: variable_systs[config.i_prime].spline_names)
-                    fcout << ",best_" << name << "_osc,best_" << name << "," << name << "_throw";
-                fcout << "\r\n";
+              tree.Write();
+          }
+          {
+              ofstream fcout(analysis_tag+"_FC.csv");
+              fcout << "chi2_osc,chi2_syst";
+              for(const std::string &name: model->param_names)
+                  fcout << ",best_" << name;
+              for(const std::string &name: variable_systs[config.i_prime].spline_names)
+                  fcout << ",best_" << name << "_osc,best_" << name << "," << name << "_throw";
+              fcout << "\r\n";
 
-                for(const auto &out: outs) {
-                    for(const auto &fco: out) {
-                        fcout << fco.chi2_osc << "," << fco.chi2_syst;
-                        for(size_t i = 0; i < model->nparams; ++i) {
-                            float raw = fco.best_phys_osc.size() > (Eigen::Index)i ? fco.best_phys_osc(i) : 0.0f;
-                            float val = model->is_log10[i] ? std::pow(10.0f, raw) : raw;
-                            fcout << "," << val;
-                        }
-                        for(size_t i = 0; i < variable_systs[config.i_prime].GetNSplines(); ++i)
-                            fcout << "," << (gof_pvalue ? 0 : fco.best_fit_osc(i)) << "," << fco.best_fit_syst(i) << "," << fco.syst_throw(i);
-                        fcout << "\r\n";
-                    }
-                }
-            }
-        }
+              for(const auto &out: outs) {
+                  for(const auto &fco: out) {
+                      fcout << fco.chi2_osc << "," << fco.chi2_syst;
+                      for(size_t i = 0; i < model->nparams; ++i) {
+                          float raw = fco.best_phys_osc.size() > (Eigen::Index)i ? fco.best_phys_osc(i) : 0.0f;
+                          float val = model->is_log10[i] ? std::pow(10.0f, raw) : raw;
+                          fcout << "," << val;
+                      }
+                      for(size_t i = 0; i < variable_systs[config.i_prime].GetNSplines(); ++i)
+                          fcout << "," << (gof_pvalue ? 0 : fco.best_fit_osc(i)) << "," << fco.best_fit_syst(i) << "," << fco.syst_throw(i);
+                      fcout << "\r\n";
+                  }
+              }
+          }
+        //}
     }
 
     //***********************************************************************
