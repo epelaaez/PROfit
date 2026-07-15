@@ -4,7 +4,7 @@
  * @author PROfit Collaboration
  */
 #include "PROmodel.h"
-#include "PROmodels/PROmodelSimple.h"
+#include "PROmodelSimple.h"
 #include "PROmodels/PROmodel2flav.h"
 #include "PROmodels/PROmodel3p1.h"
 #include "PROmodels/PROmodel3p2.h"
