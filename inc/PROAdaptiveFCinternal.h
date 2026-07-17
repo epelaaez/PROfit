@@ -120,6 +120,13 @@ struct CellVerdict {
     bool  decidable = false;  ///< Bank had enough PEs to give a stable quantile.
 };
 
+// Bank-only precompute of crit_dchi2/decidable per [cl_idx][cell_idx]
+// (`included` left false). One sort per cell; reuse across many throws.
+std::vector<std::vector<CellVerdict>> compute_bank_crits(
+    const PEBank &bank,
+    const std::vector<float> &cl_targets,
+    int min_pes_for_decision);
+
 std::vector<std::vector<CellVerdict>> classify_against_bank(
     const PEBank &bank,
     const AsimovObs &obs,

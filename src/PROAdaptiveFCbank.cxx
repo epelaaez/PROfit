@@ -712,18 +712,19 @@ AsimovObs compute_asimov_obs(
     return obs;
 }
 
-// Classify every cell at every requested CL, given asimov observations and a
-// bank. Returns verdicts indexed by [cl_idx][cell_idx]. A cell with fewer than
-// `min_pes_for_decision` PEs in the bank is marked `decidable = false`.
-std::vector<std::vector<CellVerdict>> classify_against_bank(
+// Precompute per-(CL, cell) critical Δχ² thresholds from the bank alone.
+// crit_dchi2 and decidable depend only on the bank's PE lists and the CL
+// targets — not on any throw's observables — so callers classifying MANY
+// throws against one bank (brazil mode) compute this once (one sort per
+// cell) and reduce each throw to a comparison. `included` is left false.
+std::vector<std::vector<CellVerdict>> compute_bank_crits(
     const PEBank &bank,
-    const AsimovObs &obs,
     const std::vector<float> &cl_targets,
     int min_pes_for_decision)
 {
     const int n_cells = bank.n_cells;
-    std::vector<std::vector<CellVerdict>> verdicts(cl_targets.size());
-    for (auto &v : verdicts) v.assign(n_cells, CellVerdict{});
+    std::vector<std::vector<CellVerdict>> crits(cl_targets.size());
+    for (auto &v : crits) v.assign(n_cells, CellVerdict{});
 
     for (int c = 0; c < n_cells; ++c) {
         const auto &pes = bank.cell_pes[(size_t)c];
@@ -735,12 +736,29 @@ std::vector<std::vector<CellVerdict>> classify_against_bank(
         std::sort(sorted.begin(), sorted.end());
 
         for (size_t k = 0; k < cl_targets.size(); ++k) {
-            const float crit = SequentialFCTest::crit_dchi2_at_cl(sorted, cl_targets[k]);
             CellVerdict v;
-            v.crit_dchi2 = crit;
-            v.included   = (obs.dchi2_obs[(size_t)c] <= crit);
+            v.crit_dchi2 = SequentialFCTest::crit_dchi2_at_cl(sorted, cl_targets[k]);
             v.decidable  = true;
-            verdicts[k][(size_t)c] = v;
+            crits[k][(size_t)c] = v;
+        }
+    }
+    return crits;
+}
+
+// Classify every cell at every requested CL, given asimov observations and a
+// bank. Returns verdicts indexed by [cl_idx][cell_idx]. A cell with fewer than
+// `min_pes_for_decision` PEs in the bank is marked `decidable = false`.
+std::vector<std::vector<CellVerdict>> classify_against_bank(
+    const PEBank &bank,
+    const AsimovObs &obs,
+    const std::vector<float> &cl_targets,
+    int min_pes_for_decision)
+{
+    auto verdicts = compute_bank_crits(bank, cl_targets, min_pes_for_decision);
+    for (size_t k = 0; k < verdicts.size(); ++k) {
+        for (size_t c = 0; c < verdicts[k].size(); ++c) {
+            CellVerdict &v = verdicts[k][c];
+            v.included = v.decidable && (obs.dchi2_obs[c] <= v.crit_dchi2);
         }
     }
     return verdicts;

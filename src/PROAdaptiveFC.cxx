@@ -25,11 +25,13 @@
 #include <Eigen/Eigen>
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <fstream>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace PROfit {
@@ -357,6 +359,11 @@ AdaptiveFCResult run_adaptive_fc(
         //     treating undecidable as "outside" creates a phantom Brazil-band
         //     ring at the AMR refined↔baseline boundary (deep-basin cells get
         //     painted as excluded when they're really just unsampled).
+        //     crit_dchi2/decidable depend only on the bank, so they are
+        //     computed ONCE (one sort per cell, compute_bank_crits) and each
+        //     throw's classification reduces to a comparison. Throws are then
+        //     classified in parallel: no RNG, disjoint writes per throw —
+        //     bitwise deterministic for any thread count.
         std::vector<std::vector<std::vector<uint8_t>>> per_throw_verdicts(
             (size_t)n_total,
             std::vector<std::vector<uint8_t>>(
@@ -365,20 +372,29 @@ AdaptiveFCResult run_adaptive_fc(
             (size_t)n_total,
             std::vector<std::vector<uint8_t>>(
                 (size_t)n_cl, std::vector<uint8_t>((size_t)n_cells, 0)));
-        for (int t = 0; t < n_total; ++t) {
-            AsimovObs obs_t;
-            obs_t.chi2_osc_global = arc.per_throw_global_chi2[(size_t)t];
-            obs_t.dchi2_obs       = arc.per_throw_dchi2[(size_t)t];
-            obs_t.chi2_syst.assign((size_t)n_cells, 0.0f); // not stored / not needed for classify
-            auto verdicts = classify_against_bank(bank, obs_t, acfg.cl_targets, min_pes);
-            for (int k = 0; k < n_cl; ++k) {
-                for (int c = 0; c < n_cells; ++c) {
-                    const auto &v = verdicts[(size_t)k][(size_t)c];
-                    per_throw_decidable[(size_t)t][(size_t)k][(size_t)c] = v.decidable ? 1 : 0;
-                    per_throw_verdicts [(size_t)t][(size_t)k][(size_t)c] =
-                        (v.decidable && v.included) ? 1 : 0;
+        {
+            const auto bank_crits = compute_bank_crits(bank, acfg.cl_targets, min_pes);
+            std::atomic<int> next_throw{0};
+            auto classify_worker = [&]() {
+                while (true) {
+                    const int t = next_throw.fetch_add(1);
+                    if (t >= n_total) break;
+                    const auto &dchi2 = arc.per_throw_dchi2[(size_t)t];
+                    for (int k = 0; k < n_cl; ++k) {
+                        for (int c = 0; c < n_cells; ++c) {
+                            const auto &v = bank_crits[(size_t)k][(size_t)c];
+                            per_throw_decidable[(size_t)t][(size_t)k][(size_t)c] = v.decidable ? 1 : 0;
+                            per_throw_verdicts [(size_t)t][(size_t)k][(size_t)c] =
+                                (v.decidable && dchi2[(size_t)c] <= v.crit_dchi2) ? 1 : 0;
+                        }
+                    }
                 }
-            }
+            };
+            const int n_workers = std::max(1, std::min(nthreads, n_total));
+            std::vector<std::thread> pool;
+            pool.reserve((size_t)n_workers);
+            for (int i = 0; i < n_workers; ++i) pool.emplace_back(classify_worker);
+            for (auto &th : pool) th.join();
         }
 
         // (4b) Closed-contour filter. The Brazil band represents the spread of
