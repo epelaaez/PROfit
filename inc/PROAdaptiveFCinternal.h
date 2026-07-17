@@ -200,7 +200,8 @@ void plot_brazil_band_pdf(
     bool draw_truth_marker,
     float truth_x_phys,
     float truth_y_phys,
-    int n_throws);
+    const std::vector<int> &n_throws_kept,     // [cl] throws entering the band
+    const std::vector<int> &n_throws_dropped); // [cl] closed-contour throws removed
 
 void save_brazil_root(
     const PEBank &bank,
@@ -208,6 +209,7 @@ void save_brazil_root(
     const std::vector<std::vector<float>> &per_throw_dchi2,                   // [t][cell]
     const std::vector<float> &per_throw_global_chi2,                          // [t]
     const std::vector<std::vector<float>> &inclusion_frac,                    // [cl][cell]
+    const std::vector<std::vector<uint8_t>> &throw_kept,                      // [cl][t]
     const std::vector<float> &cl_targets,
     const std::string &filename,
     bool xlog_axis, bool ylog_axis);

@@ -381,11 +381,59 @@ AdaptiveFCResult run_adaptive_fc(
             }
         }
 
-        // (5) Aggregate inclusion fractions across all throws.
-        //     Sentinel: inclusion_frac < 0 marks a cell where no throw was ever
-        //     decidable. build_inclusion_th2d skips such cells from the IDW
-        //     interpolation, so the surface is filled by neighbouring decided
-        //     cells — no phantom contour ringing the AMR boundary.
+        // (4b) Closed-contour filter. The Brazil band represents the spread of
+        //     *exclusion boundaries* across throws; a throw whose allowed
+        //     region is a closed island (the contour closes around the truth
+        //     instead of excluding upward from it) answers a different
+        //     question and would bias the band. Proxy test: the bottom-left
+        //     corner of the grid (smallest x, smallest y — the no-oscillation
+        //     limit). Corner allowed → exclusion-type throw, kept; corner
+        //     excluded → closed contour, dropped for that CL. Decidability is
+        //     a property of the corner cell's PE count alone (same for every
+        //     throw and CL), so the filter is either fully active or — if the
+        //     bank is too sparse there — fully inactive, with a warning.
+        int corner_cell = -1;
+        for (int c = 0; c < n_cells; ++c) {
+            if (bank.cell_i_bl[(size_t)c] == 0 && bank.cell_j_bl[(size_t)c] == 0) {
+                corner_cell = c;
+                break;
+            }
+        }
+        std::vector<std::vector<uint8_t>> throw_kept(
+            (size_t)n_cl, std::vector<uint8_t>((size_t)n_total, 1));
+        std::vector<int> n_kept_per_cl((size_t)n_cl, n_total);
+        std::vector<int> n_dropped_per_cl((size_t)n_cl, 0);
+        if (corner_cell < 0) {
+            log<LOG_WARNING>(L"%1% || brazil: no meta-cell anchored at grid corner (0,0); closed-contour filter inactive.")
+                % __func__;
+        } else if (n_total > 0 && n_cl > 0
+                   && !per_throw_decidable[0][0][(size_t)corner_cell]) {
+            log<LOG_WARNING>(L"%1% || brazil: corner cell %2% is undecidable (< %3% PEs in bank); closed-contour filter inactive — top up the bank to enable it.")
+                % __func__ % corner_cell % min_pes;
+        } else {
+            for (int k = 0; k < n_cl; ++k) {
+                for (int t = 0; t < n_total; ++t) {
+                    if (!per_throw_verdicts[(size_t)t][(size_t)k][(size_t)corner_cell]) {
+                        throw_kept[(size_t)k][(size_t)t] = 0;
+                        ++n_dropped_per_cl[(size_t)k];
+                    }
+                }
+                n_kept_per_cl[(size_t)k] = n_total - n_dropped_per_cl[(size_t)k];
+                log<LOG_INFO>(L"%1% || brazil closed-contour filter CL=%2%: kept %3% / %4% throws (%5% dropped — corner excluded, closed allowed contour).")
+                    % __func__ % acfg.cl_targets[(size_t)k]
+                    % n_kept_per_cl[(size_t)k] % n_total % n_dropped_per_cl[(size_t)k];
+                if (n_kept_per_cl[(size_t)k] == 0) {
+                    log<LOG_WARNING>(L"%1% || brazil: ALL %2% throws dropped at CL=%3% — the band for this CL will be empty.")
+                        % __func__ % n_total % acfg.cl_targets[(size_t)k];
+                }
+            }
+        }
+
+        // (5) Aggregate inclusion fractions across kept throws only.
+        //     Sentinel: inclusion_frac < 0 marks a cell where no kept throw
+        //     was ever decidable. build_inclusion_th2d skips such cells from
+        //     the IDW interpolation, so the surface is filled by neighbouring
+        //     decided cells — no phantom contour ringing the AMR boundary.
         constexpr float kUndecidedSentinel = -1.0f;
         std::vector<std::vector<float>> inclusion_frac(
             (size_t)n_cl, std::vector<float>((size_t)n_cells, kUndecidedSentinel));
@@ -395,6 +443,7 @@ AdaptiveFCResult run_adaptive_fc(
             for (int c = 0; c < n_cells; ++c) {
                 int n_in = 0, n_decided = 0;
                 for (int t = 0; t < n_total; ++t) {
+                    if (!throw_kept[(size_t)k][(size_t)t]) continue;
                     if (per_throw_decidable[(size_t)t][(size_t)k][(size_t)c]) {
                         ++n_decided;
                         if (per_throw_verdicts[(size_t)t][(size_t)k][(size_t)c]) ++n_in;
@@ -437,11 +486,12 @@ AdaptiveFCResult run_adaptive_fc(
                               xlabel, ylabel, acfg.logx, acfg.logy,
                               xlog_axis, ylog_axis,
                               /*draw_truth_marker=*/ true,
-                              truth_x_phys, truth_y_phys, n_total);
+                              truth_x_phys, truth_y_phys,
+                              n_kept_per_cl, n_dropped_per_cl);
 
         save_brazil_root(bank, per_throw_verdicts, arc.per_throw_dchi2,
-                          arc.per_throw_global_chi2, inclusion_frac, acfg.cl_targets,
-                          brazil_root, xlog_axis, ylog_axis);
+                          arc.per_throw_global_chi2, inclusion_frac, throw_kept,
+                          acfg.cl_targets, brazil_root, xlog_axis, ylog_axis);
 
         // Populate result.
         res.bank_path    = bank_in;

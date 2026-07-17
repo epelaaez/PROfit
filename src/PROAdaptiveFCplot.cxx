@@ -862,6 +862,13 @@ static std::vector<TGraph*> extract_contour_graphs(TH2D *h, double level)
     const double levels[1] = {level};
     h->SetContour(1, levels);
 
+    // Drop any stale "contours" list from a previous extraction: if the
+    // current level yields no contour, ROOT leaves the old object in the
+    // specials list and we would return the previous call's curves.
+    if (TObject *stale = gROOT->GetListOfSpecials()->FindObject("contours")) {
+        gROOT->GetListOfSpecials()->Remove(stale);
+    }
+
     // Draw onto a hidden temp canvas to populate gROOT's contour list.
     TCanvas tmp("tmp_contour_extract", "", 200, 200);
     tmp.cd();
@@ -1170,7 +1177,8 @@ void plot_brazil_band_pdf(
     bool draw_truth_marker,
     float truth_x_phys,
     float truth_y_phys,
-    int n_throws)
+    const std::vector<int> &n_throws_kept,
+    const std::vector<int> &n_throws_dropped)
 {
     if (bank.n_cells <= 0 || cl_targets.empty()) {
         log<LOG_WARNING>(L"%1% || plot_brazil_band_pdf: empty input, skipping.") % __func__;
@@ -1354,7 +1362,14 @@ void plot_brazil_band_pdf(
         leg->SetBorderSize(0);
         leg->SetFillStyle(0);
         leg->SetTextSize(0.030);
-        leg->SetHeader(Form("CL = %.1f%%  (N_{throws} = %d)", cl * 100.0f, n_throws), "L");
+        const int n_kept = k < n_throws_kept.size()    ? n_throws_kept[k]    : 0;
+        const int n_drop = k < n_throws_dropped.size() ? n_throws_dropped[k] : 0;
+        if (n_drop > 0) {
+            leg->SetHeader(Form("CL = %.1f%%  (N_{throws} = %d, %d closed removed)",
+                                cl * 100.0f, n_kept, n_drop), "L");
+        } else {
+            leg->SetHeader(Form("CL = %.1f%%  (N_{throws} = %d)", cl * 100.0f, n_kept), "L");
+        }
 
         // Median proxy (dashed black line).
         TGraph *median_proxy = new TGraph();
@@ -1395,22 +1410,27 @@ void plot_brazil_band_pdf(
     }
 
     c.Print((filename + "]").c_str(), "pdf");
-    log<LOG_INFO>(L"%1% || brazil band PDF written to %2% (%3% CLs, %4% throws).")
-        % __func__ % filename.c_str() % (int)cl_targets.size() % n_throws;
+    log<LOG_INFO>(L"%1% || brazil band PDF written to %2% (%3% CLs).")
+        % __func__ % filename.c_str() % (int)cl_targets.size();
 }
 
 // Save brazil-band artifacts to a ROOT file:
 //   per_throw — TTree with one row per throw (throw_idx, global chi2_osc, mean
-//               dchi2 across cells, fraction of cells inside the contour).
-//   per_cell  — TTree with one row per (throw, cell): dchi2_obs, included flag.
-//   incl_clN  — TH2D of per-cell inclusion fraction (IDW-interpolated) per CL.
-//   brazil_contour_clN_qM — TGraph contour segments at each Brazil quantile.
+//               dchi2 across cells, fraction of cells inside the contour, and
+//               per-CL kept_cl_* flag: 0 = dropped by the closed-contour
+//               filter, so excluded from the inclusion_frac aggregation).
+//   incl_clN  — TH2D of per-cell inclusion fraction (IDW-interpolated) per CL,
+//               aggregated over KEPT throws only.
+//   brazil_cl_*_q* — TGraph contour segments at each Brazil quantile.
+// (Per-(throw, cell) observables are not duplicated here — they live in the
+// <tag>_brazil.bin archive.)
 void save_brazil_root(
     const PEBank &bank,
     const std::vector<std::vector<std::vector<uint8_t>>> &per_throw_verdicts, // [t][cl][cell]
     const std::vector<std::vector<float>> &per_throw_dchi2,                   // [t][cell]
     const std::vector<float> &per_throw_global_chi2,                          // [t]
     const std::vector<std::vector<float>> &inclusion_frac,                    // [cl][cell]
+    const std::vector<std::vector<uint8_t>> &throw_kept,                      // [cl][t]
     const std::vector<float> &cl_targets,
     const std::string &filename,
     bool xlog_axis, bool ylog_axis)
@@ -1433,12 +1453,14 @@ void save_brazil_root(
     float chi2_osc_global = 0.0f;
     float mean_dchi2 = 0.0f;
     std::vector<float> frac_in_per_cl(n_cl, 0.0f);
+    std::vector<int>   kept_per_cl(n_cl, 1);
     t_throw.Branch("throw_idx", &throw_idx);
     t_throw.Branch("chi2_osc_global", &chi2_osc_global);
     t_throw.Branch("mean_dchi2", &mean_dchi2);
     for (int k = 0; k < n_cl; ++k) {
         const std::string lbl = Form("%.4f", cl_targets[(size_t)k]);
         t_throw.Branch(("frac_in_cl_" + lbl).c_str(), &frac_in_per_cl[(size_t)k]);
+        t_throw.Branch(("kept_cl_"    + lbl).c_str(), &kept_per_cl[(size_t)k]);
     }
     for (int t = 0; t < n_throws; ++t) {
         throw_idx = t;
@@ -1450,6 +1472,9 @@ void save_brazil_root(
             int n_in = 0;
             for (int c = 0; c < n_cells; ++c) n_in += per_throw_verdicts[(size_t)t][(size_t)k][(size_t)c];
             frac_in_per_cl[(size_t)k] = (float)n_in / (float)std::max(1, n_cells);
+            kept_per_cl[(size_t)k] = ((size_t)k < throw_kept.size()
+                                      && (size_t)t < throw_kept[(size_t)k].size())
+                                     ? (int)throw_kept[(size_t)k][(size_t)t] : 1;
         }
         t_throw.Fill();
     }
@@ -1459,8 +1484,11 @@ void save_brazil_root(
     const float quantiles[5] = {0.025f, 0.16f, 0.5f, 0.84f, 0.975f};
     const char *q_labels[5]  = {"q025", "q16", "median", "q84", "q975"};
     for (int k = 0; k < n_cl; ++k) {
+        // upsample 4 matches plot_brazil_band_pdf so the saved contour TGraphs
+        // are the same curves as the plotted ones.
         TH2D *h_incl = build_inclusion_th2d(bank, inclusion_frac[(size_t)k], A,
-                                            Form("incl_cl_%.4f", cl_targets[(size_t)k]));
+                                            Form("incl_cl_%.4f", cl_targets[(size_t)k]),
+                                            /*upsample=*/ 4);
         h_incl->Write();
         for (int q = 0; q < 5; ++q) {
             auto segs = extract_contour_graphs(h_incl, (double)quantiles[q]);
