@@ -48,6 +48,12 @@ MetaMesh build_meta_mesh(const std::vector<PROmesh::AMRResult> &throws,
                          float p_thresh,
                          int baseline_level);
 
+// Union-merge N meta-meshes (identical finest grid + bounds, caller-validated)
+// into the coarsest tiling refining every input. Returns empty cells on a
+// tiling-invariant violation. baseline_level only affects log counters.
+MetaMesh merge_meta_meshes(const std::vector<MetaMesh> &inputs,
+                           int baseline_level);
+
 void compute_cell_centers(const MetaMesh &mm,
                           bool xlog, bool ylog,
                           std::vector<float> &cx_out,

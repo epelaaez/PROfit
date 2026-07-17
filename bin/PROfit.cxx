@@ -46,6 +46,8 @@
 #include <stdexcept>
 #include <string>
 #include <set>
+
+#include <glob.h>
 #include <vector>
 #include <chrono>
 #include "TMath.h"
@@ -343,6 +345,7 @@ int main(int argc, char* argv[])
     int   afc_only_layer   = -1;
     int   afc_n_brazil_throws = 100;
     float afc_roi_band = 8.0f;
+    std::vector<std::string> afc_merge_inputs;
 
 
     //Global Arguments for all PROfit enables subcommands.
@@ -495,12 +498,18 @@ int main(int argc, char* argv[])
         "print-bank, asimov. Each mode reads/writes <output_tag>-prefixed artifacts. "
         "Typical workflow: build-mesh -> init-bank -> print-bank / asimov.");
     afc_command->add_option("--mode", afc_mode_str,
-        "Pipeline mode: build-mesh, init-bank, print-bank, asimov. "
+        "Pipeline mode: build-mesh, init-bank, print-bank, asimov, brazil, merge-mesh, merge-bank. "
         "build-mesh: Wilks prepass -> <tag>_mesh.bin + diagnostic PDFs. "
         "init-bank: requires <tag>_mesh.bin, generates <tag>_bank.bin. "
         "print-bank: load <tag>_bank.bin and write summary PDFs. "
-        "asimov: load <tag>_bank.bin and write FC contour + verdict PDFs.")
+        "asimov: load <tag>_bank.bin and write FC contour + verdict PDFs. "
+        "merge-mesh: union-merge >=2 --merge-input mesh binaries into <tag>_mesh.bin. "
+        "merge-bank: harvest PEs from >=1 --merge-input bank binaries onto <tag>_mesh.bin.")
         ->default_str("build-mesh");
+    afc_command->add_option("--merge-input", afc_merge_inputs,
+        "Input artifact filenames for merge-mesh / merge-bank (repeatable; "
+        "glob patterns like 'run*_mesh.bin' are expanded). Output goes to the "
+        "normal <output_tag>-prefixed artifacts.")->expected(-1);
     afc_command->add_option("--throws", afc_n_throws,
         "Number of Wilks pre-pass throws (each produces one AMR mesh).")->default_val(200);
     afc_command->add_option("--prepass-amr-initial", afc_prepass_initial,
@@ -2732,6 +2741,8 @@ int main(int argc, char* argv[])
         else if (afc_mode_str == "asimov")     acfg.mode = PROfit::AdaptiveFCMode::Asimov;
         else if (afc_mode_str == "brazil")     acfg.mode = PROfit::AdaptiveFCMode::Brazil;
         else if (afc_mode_str == "classify")   acfg.mode = PROfit::AdaptiveFCMode::Classify;
+        else if (afc_mode_str == "merge-mesh") acfg.mode = PROfit::AdaptiveFCMode::MergeMesh;
+        else if (afc_mode_str == "merge-bank") acfg.mode = PROfit::AdaptiveFCMode::MergeBank;
         else {
             log<LOG_WARNING>(L"%1% || fc-adaptive: unknown --mode '%2%', defaulting to build-mesh.")
                 % __func__ % afc_mode_str.c_str();
@@ -2767,6 +2778,35 @@ int main(int argc, char* argv[])
         acfg.only_layer = afc_only_layer;
         acfg.n_brazil_throws = afc_n_brazil_throws;
         acfg.roi_band = afc_roi_band;
+
+        // Expand --merge-input entries: each may be a literal filename or a
+        // glob pattern (quoted through the shell, e.g. 'run*_mesh.bin').
+        // Unmatched patterns are kept verbatim so the merge modes report a
+        // clean per-file load error instead of silently shrinking the list.
+        for (const auto &pattern : afc_merge_inputs) {
+            glob_t g;
+            const int rc = glob(pattern.c_str(), GLOB_TILDE, nullptr, &g);
+            if (rc == 0 && g.gl_pathc > 0) {
+                for (size_t p = 0; p < g.gl_pathc; ++p)
+                    acfg.merge_inputs.push_back(g.gl_pathv[p]);
+            } else {
+                acfg.merge_inputs.push_back(pattern);
+            }
+            globfree(&g);
+        }
+        // Dedupe while preserving order (a glob plus an explicit filename can
+        // both match the same artifact).
+        {
+            std::set<std::string> seen_inputs;
+            std::vector<std::string> uniq;
+            for (auto &f : acfg.merge_inputs)
+                if (seen_inputs.insert(f).second) uniq.push_back(f);
+            acfg.merge_inputs = std::move(uniq);
+        }
+        if (!acfg.merge_inputs.empty()) {
+            log<LOG_INFO>(L"%1% || fc-adaptive: %2% merge input(s) after glob expansion.")
+                % __func__ % (int)acfg.merge_inputs.size();
+        }
 
         // Outer "AFC throws" bar is only meaningful for build-mesh (the prepass
         // throws each tick this bar via generate_throws). Other modes (init-bank,

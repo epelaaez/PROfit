@@ -543,6 +543,114 @@ MetaMesh build_meta_mesh(const std::vector<PROmesh::AMRResult> &throws,
     return mm;
 }
 
+// Union-merge N meta-meshes (same finest grid + bounds, caller-validated)
+// into the coarsest tiling that refines every input. Aligned power-of-two
+// cells from one finest grid can only be identical, nested, or disjoint, so
+// the union is canonical: a block is a leaf iff NO input subdivides it.
+// Because a block's containing leaf in each input covers the whole block
+// whenever its step >= the block's (alignment), the check at the block's
+// bottom-left bin is sufficient.
+//
+// max_levels of the output = max over inputs; per_level_refine_count is
+// carried as the element-wise max of the inputs' covering-leaf counters
+// (index-shifted where inputs had smaller max_levels) — diagnostics only.
+// baseline_level is used only for the baseline/refined log counters.
+MetaMesh merge_meta_meshes(const std::vector<MetaMesh> &inputs, int baseline_level)
+{
+    MetaMesh out;
+    const MetaMesh &ref = inputs.front();
+    out.finest_nx = ref.finest_nx;
+    out.finest_ny = ref.finest_ny;
+    out.x_lo = ref.x_lo; out.x_hi = ref.x_hi;
+    out.y_lo = ref.y_lo; out.y_hi = ref.y_hi;
+    out.max_levels = 0;
+    for (const auto &mm : inputs) out.max_levels = std::max(out.max_levels, mm.max_levels);
+
+    const int W = out.finest_nx, H = out.finest_ny;
+    const int n_levels_out = out.max_levels + 1;
+
+    // Per-input finest-bin → cell-index lookup (same layout as build_meta_mesh).
+    std::vector<std::vector<int>> id_at(inputs.size(),
+                                        std::vector<int>((size_t)W * (size_t)H, -1));
+    for (size_t m = 0; m < inputs.size(); ++m) {
+        const auto &cells = inputs[m].cells;
+        for (size_t c = 0; c < cells.size(); ++c) {
+            const auto &mc = cells[c];
+            for (int ii = mc.i_bl; ii < mc.i_bl + mc.step && ii < W; ++ii)
+                for (int jj = mc.j_bl; jj < mc.j_bl + mc.step && jj < H; ++jj)
+                    id_at[m][(size_t)ii * (size_t)H + (size_t)jj] = (int)c;
+        }
+    }
+
+    std::vector<uint8_t> covered((size_t)W * (size_t)H, 0);
+    bool hole_in_input = false;
+
+    std::function<void(int, int, int)> descend = [&](int i, int j, int level) {
+        const int step = 1 << std::max(0, out.max_levels - level);
+        bool any_finer = false;
+        for (size_t m = 0; m < inputs.size(); ++m) {
+            const int cid = id_at[m][(size_t)i * (size_t)H + (size_t)j];
+            if (cid < 0) { hole_in_input = true; continue; }
+            if (inputs[m].cells[(size_t)cid].step < step) { any_finer = true; break; }
+        }
+        if (any_finer && level < out.max_levels && step >= 2) {
+            const int half = step / 2;
+            descend(i,        j,        level + 1);
+            descend(i + half, j,        level + 1);
+            descend(i,        j + half, level + 1);
+            descend(i + half, j + half, level + 1);
+            return;
+        }
+
+        MetaCell c;
+        c.i_bl = i; c.j_bl = j; c.step = step; c.level = level;
+        c.per_level_refine_count.assign((size_t)n_levels_out, 0);
+        for (size_t m = 0; m < inputs.size(); ++m) {
+            const int cid = id_at[m][(size_t)i * (size_t)H + (size_t)j];
+            if (cid < 0) continue;
+            const auto &counts = inputs[m].cells[(size_t)cid].per_level_refine_count;
+            const int shift = out.max_levels - inputs[m].max_levels;
+            for (size_t L = 0; L < counts.size(); ++L) {
+                const size_t Lo = L + (size_t)shift;
+                if (Lo < (size_t)n_levels_out)
+                    c.per_level_refine_count[Lo] =
+                        std::max(c.per_level_refine_count[Lo], counts[L]);
+            }
+        }
+        out.cells.push_back(std::move(c));
+        if (level >= baseline_level) out.n_refined_cells++;
+        else                         out.n_baseline_cells++;
+        for (int ii = i; ii < i + step && ii < W; ++ii)
+            for (int jj = j; jj < j + step && jj < H; ++jj)
+                covered[(size_t)ii * (size_t)H + (size_t)jj]++;
+    };
+
+    const int S0 = 1 << out.max_levels;
+    for (int i = 0; i < W; i += S0)
+        for (int j = 0; j < H; j += S0)
+            descend(i, j, 0);
+
+    size_t n_holes = 0, n_overlaps = 0;
+    for (size_t p = 0; p < covered.size(); ++p) {
+        if (covered[p] == 0) ++n_holes;
+        else if (covered[p] > 1) ++n_overlaps;
+    }
+    if (n_holes || n_overlaps || hole_in_input) {
+        log<LOG_ERROR>(L"%1% || merge_meta_meshes: tiling invariant violated "
+                       L"(%2% holes, %3% overlaps, input_hole=%4%). This is a bug or a corrupt input mesh.")
+            % __func__ % (int)n_holes % (int)n_overlaps % (int)hole_in_input;
+        out.cells.clear();
+        return out;
+    }
+
+    log<LOG_INFO>(L"%1% || merge_meta_meshes: %2% inputs -> %3% cells "
+                  L"(baseline=%4%, refined=%5%), finest=%6%x%7%, max_levels=%8%.")
+        % __func__ % (int)inputs.size() % (int)out.cells.size()
+        % out.n_baseline_cells % out.n_refined_cells
+        % W % H % out.max_levels;
+    return out;
+}
+
 // Compute per-cell (x, y) coords for every MetaCell — Option A: PE bank at
 // each cell center.
 //

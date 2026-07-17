@@ -28,10 +28,13 @@
 #include <atomic>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <fstream>
 #include <memory>
 #include <string>
 #include <thread>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace PROfit {
@@ -105,6 +108,197 @@ AdaptiveFCResult run_adaptive_fc(
     const size_t yaxis_idx = resolve_axis_index(acfg.yvar, *model, systs, config, 0);
     log<LOG_INFO>(L"%1% || resolved xvar='%2%' -> idx=%3%; yvar='%4%' -> idx=%5%.")
         % __func__ % acfg.xvar.c_str() % (int)xaxis_idx % acfg.yvar.c_str() % (int)yaxis_idx;
+
+    // ---- Mode: merge-mesh ---------------------------------------------------
+    // Union-merge >= 2 mesh binaries (--merge-input, filenames or globs
+    // expanded by the CLI) into <tag>_mesh.bin. No fitting; typical use is
+    // combining meshes produced independently (e.g. grid jobs) before
+    // merge-bank + init-bank top-up.
+    if (acfg.mode == AdaptiveFCMode::MergeMesh) {
+        if (acfg.merge_inputs.size() < 2) {
+            log<LOG_ERROR>(L"%1% || merge-mesh: need >= 2 --merge-input mesh binaries, got %2%.")
+                % __func__ % (int)acfg.merge_inputs.size();
+            return res;
+        }
+        std::vector<MetaMesh> inputs(acfg.merge_inputs.size());
+        for (size_t m = 0; m < acfg.merge_inputs.size(); ++m) {
+            if (!load_mesh(inputs[m], acfg.merge_inputs[m])) {
+                log<LOG_ERROR>(L"%1% || merge-mesh: failed to load %2%.")
+                    % __func__ % acfg.merge_inputs[m].c_str();
+                return res;
+            }
+            log<LOG_INFO>(L"%1% || merge-mesh input %2%: %3% (%4% cells, finest=%5%x%6%, max_levels=%7%).")
+                % __func__ % (int)m % acfg.merge_inputs[m].c_str()
+                % (int)inputs[m].cells.size() % inputs[m].finest_nx
+                % inputs[m].finest_ny % inputs[m].max_levels;
+        }
+        const MetaMesh &mref = inputs.front();
+        for (size_t m = 1; m < inputs.size(); ++m) {
+            const MetaMesh &mm2 = inputs[m];
+            if (mm2.finest_nx != mref.finest_nx || mm2.finest_ny != mref.finest_ny
+                || mm2.x_lo != mref.x_lo || mm2.x_hi != mref.x_hi
+                || mm2.y_lo != mref.y_lo || mm2.y_hi != mref.y_hi) {
+                log<LOG_ERROR>(L"%1% || merge-mesh: %2% has an incompatible grid "
+                               L"(finest %3%x%4% box [%5%,%6%]x[%7%,%8%] vs reference %9%x%10% [%11%,%12%]x[%13%,%14%]). "
+                               L"Meshes must share finest resolution and bounds; refusing to merge.")
+                    % __func__ % acfg.merge_inputs[m].c_str()
+                    % mm2.finest_nx % mm2.finest_ny % mm2.x_lo % mm2.x_hi % mm2.y_lo % mm2.y_hi
+                    % mref.finest_nx % mref.finest_ny % mref.x_lo % mref.x_hi % mref.y_lo % mref.y_hi;
+                return res;
+            }
+        }
+
+        MetaMesh merged = merge_meta_meshes(inputs, acfg.baseline_level);
+        if (merged.cells.empty()) {
+            log<LOG_ERROR>(L"%1% || merge-mesh: merge failed (see errors above).") % __func__;
+            return res;
+        }
+        const std::string mesh_out = acfg.output_tag + "_mesh.bin";
+        if (save_mesh(merged, mesh_out)) {
+            log<LOG_INFO>(L"%1% || merge-mesh: wrote %2% (%3% cells). "
+                          L"Next: --mode merge-bank with the input banks, then --mode init-bank to top up.")
+                % __func__ % mesh_out.c_str() % (int)merged.cells.size();
+        }
+        res.n_meta_cells     = (int)merged.cells.size();
+        res.n_baseline_cells = merged.n_baseline_cells;
+        res.n_refined_cells  = merged.n_refined_cells;
+        return res;
+    }
+
+    // ---- Mode: merge-bank ---------------------------------------------------
+    // Harvest PEs from >= 1 bank binaries (--merge-input) onto this tag's
+    // <tag>_mesh.bin (produced by merge-mesh). A PE is a Δχ² sample thrown at
+    // a cell CENTER, so it is carried over only where a merged-mesh cell has
+    // the exact same footprint (i_bl, j_bl, step) — same footprint ⇒ same
+    // center ⇒ same truth point ⇒ poolable. PEs from cells that changed
+    // refinement are unusable at the new centers and are dropped (reported).
+    // Bitwise-identical PEs (same per-PE seed AND dchi2 — i.e. two banks
+    // generated with the same --seed) are deduplicated: pooling correlated
+    // duplicates would silently inflate the effective statistics.
+    //
+    // NOTE: mesh/bank binaries carry no XML/fit-config provenance, so this
+    // CANNOT verify the input banks came from the same config, metric,
+    // preset, and grad-mode. Pooling banks with mismatched fit settings
+    // mixes different Δχ² distributions — that discipline is on the caller.
+    if (acfg.mode == AdaptiveFCMode::MergeBank) {
+        if (acfg.merge_inputs.empty()) {
+            log<LOG_ERROR>(L"%1% || merge-bank: need >= 1 --merge-input bank binaries.") % __func__;
+            return res;
+        }
+        const std::string mesh_in = acfg.output_tag + "_mesh.bin";
+        MetaMesh mm;
+        if (!load_mesh(mm, mesh_in)) {
+            log<LOG_ERROR>(L"%1% || merge-bank: required mesh artifact %2% not found. "
+                           L"Run --mode merge-mesh (or build-mesh) first.")
+                % __func__ % mesh_in.c_str();
+            return res;
+        }
+
+        const bool xlog = (xaxis_idx < model->is_log10.size()) ? model->is_log10[xaxis_idx] : acfg.logx;
+        const bool ylog = (yaxis_idx < model->is_log10.size()) ? model->is_log10[yaxis_idx] : acfg.logy;
+        std::vector<float> cell_x_model, cell_y_model;
+        compute_cell_centers(mm, xlog, ylog, cell_x_model, cell_y_model);
+
+        PEBank bank;
+        bank.finest_nx  = mm.finest_nx;
+        bank.finest_ny  = mm.finest_ny;
+        bank.max_levels = mm.max_levels;
+        bank.x_lo = mm.x_lo; bank.x_hi = mm.x_hi;
+        bank.y_lo = mm.y_lo; bank.y_hi = mm.y_hi;
+        bank.n_cells = (int)mm.cells.size();
+        bank.cell_center_x = cell_x_model;
+        bank.cell_center_y = cell_y_model;
+        bank.cell_pes.assign(mm.cells.size(), {});
+        std::unordered_map<uint64_t, int> footprint_to_idx;
+        footprint_to_idx.reserve(mm.cells.size());
+        auto footprint_key = [](int i_bl, int j_bl, int step) -> uint64_t {
+            return ((uint64_t)(uint32_t)i_bl << 42)
+                 | ((uint64_t)(uint32_t)j_bl << 21)
+                 |  (uint64_t)(uint32_t)step;
+        };
+        for (size_t c = 0; c < mm.cells.size(); ++c) {
+            const auto &mc = mm.cells[c];
+            bank.cell_i_bl.push_back(mc.i_bl);
+            bank.cell_j_bl.push_back(mc.j_bl);
+            bank.cell_step.push_back(mc.step);
+            bank.cell_level.push_back(mc.level);
+            footprint_to_idx[footprint_key(mc.i_bl, mc.j_bl, mc.step)] = (int)c;
+        }
+
+        // Per-cell dedupe keys: (PE seed, bit pattern of dchi2).
+        std::vector<std::unordered_set<uint64_t>> seen(mm.cells.size());
+        auto pe_key = [](const PEBankRecord &r) -> uint64_t {
+            uint32_t bits;
+            std::memcpy(&bits, &r.dchi2, sizeof(bits));
+            return ((uint64_t)r.seed << 32) | (uint64_t)bits;
+        };
+
+        int64_t total_carried = 0, total_dups = 0, total_dropped = 0;
+        for (const auto &path : acfg.merge_inputs) {
+            PEBank in;
+            if (!load_bank(in, path)) {
+                log<LOG_ERROR>(L"%1% || merge-bank: failed to load %2%.") % __func__ % path.c_str();
+                return res;
+            }
+            if (in.finest_nx != mm.finest_nx || in.finest_ny != mm.finest_ny
+                || in.x_lo != mm.x_lo || in.x_hi != mm.x_hi
+                || in.y_lo != mm.y_lo || in.y_hi != mm.y_hi) {
+                log<LOG_ERROR>(L"%1% || merge-bank: %2% has an incompatible grid footprint; refusing to merge.")
+                    % __func__ % path.c_str();
+                return res;
+            }
+            int64_t carried = 0, dups = 0, dropped_pes = 0;
+            int matched_cells = 0, dropped_cells = 0;
+            for (int c = 0; c < in.n_cells; ++c) {
+                const auto it = footprint_to_idx.find(
+                    footprint_key(in.cell_i_bl[(size_t)c], in.cell_j_bl[(size_t)c],
+                                  in.cell_step[(size_t)c]));
+                const auto &pes = in.cell_pes[(size_t)c];
+                if (it == footprint_to_idx.end()) {
+                    ++dropped_cells;
+                    dropped_pes += (int64_t)pes.size();
+                    continue;
+                }
+                ++matched_cells;
+                const int mi = it->second;
+                for (const auto &pe : pes) {
+                    if (seen[(size_t)mi].insert(pe_key(pe)).second) {
+                        bank.cell_pes[(size_t)mi].push_back(pe);
+                        ++carried;
+                    } else {
+                        ++dups;
+                    }
+                }
+            }
+            log<LOG_INFO>(L"%1% || merge-bank input %2%: cells matched=%3% dropped=%4%; "
+                          L"PEs carried=%5%, duplicate-seed dropped=%6%, unmatched-cell dropped=%7%.")
+                % __func__ % path.c_str() % matched_cells % dropped_cells
+                % (long long)carried % (long long)dups % (long long)dropped_pes;
+            if (dups > 0) {
+                log<LOG_WARNING>(L"%1% || merge-bank: %2% bitwise-identical PEs dropped from %3% — "
+                                 L"input banks share RNG seeds. Generate grid banks with distinct --seed values.")
+                    % __func__ % (long long)dups % path.c_str();
+            }
+            total_carried += carried; total_dups += dups; total_dropped += dropped_pes;
+        }
+
+        int empty_cells = 0;
+        for (const auto &v : bank.cell_pes) if (v.empty()) ++empty_cells;
+        const std::string bank_out = acfg.output_tag + "_bank.bin";
+        if (save_bank(bank, bank_out)) {
+            res.bank_path = bank_out;
+            log<LOG_INFO>(L"%1% || merge-bank: wrote %2% — %3% cells, %4% PEs carried "
+                          L"(%5% duplicates + %6% unmatched dropped), %7% cells still empty. "
+                          L"Next: --mode init-bank -o %8% to top up to criterion.")
+                % __func__ % bank_out.c_str() % bank.n_cells % (long long)total_carried
+                % (long long)total_dups % (long long)total_dropped % empty_cells
+                % acfg.output_tag.c_str();
+        }
+        res.n_meta_cells = bank.n_cells;
+        res.total_pes_generated = total_carried;
+        res.mean_pes_per_cell = bank.n_cells > 0 ? (float)total_carried / (float)bank.n_cells : 0.0f;
+        return res;
+    }
 
     // ---- Mode: print-bank ---------------------------------------------------
     // Loads an existing bank artifact and writes a summary PDF. No fitting.
