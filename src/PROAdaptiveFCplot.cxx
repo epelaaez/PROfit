@@ -20,6 +20,8 @@
 #include <climits>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
+#include <cstring>
 #include <memory>
 #include <string>
 #include <vector>
@@ -39,6 +41,7 @@
 #include "TObjArray.h"
 #include "TPad.h"
 #include "TPaveText.h"
+#include "TKey.h"
 #include "TROOT.h"
 #include "TStyle.h"
 #include "TTree.h"
@@ -1173,32 +1176,61 @@ static TH2D *build_inclusion_th2d(const PEBank &bank,
     return h;
 }
 
-// Flag the finest-grid bins traversed by the Brazil quantile contours — the
-// SAME curves plot_brazil_band_pdf draws and save_brazil_root stores:
-// marching squares on the 4x-upsampled IDW inclusion surface. Compared to
-// flagging raw per-cell quantile crossings, this (a) inherits the
-// closed-contour filter through the aggregated inclusion fractions, and
-// (b) is naturally noise-suppressed: the IDW average over the 4 nearest
-// decided cells smooths single-cell statistical dips of the near-1 basin
-// plateau back above the 0.975 level, so contour fragments are flagged only
-// where the plotted band actually shows them. Undecidable regions are filled
-// by IDW from decided neighbours, so a contour running into unsampled
-// territory is followed there too — refinement + init-bank top-up is what
-// makes those cells decidable.
+// Flag the finest-grid bins traversed by the SAVED Brazil quantile contours:
+// the TGraphs save_brazil_root wrote to <tag>_brazil.root
+// (brazil_cl_<CL>_<qlabel>_seg<N>) — the exact curve objects the band PDF
+// drew. Nothing is recomputed here: the brazil archive grows on every brazil
+// invocation and the inclusion surface depends on the current bank and
+// min-PE settings, so re-deriving contours at cleanup time can silently
+// disagree with the band the user is looking at. Reading the artifact makes
+// mesh and plot consistent by construction.
 //
+// `quantiles` must be among the five levels save_brazil_root stores
+// (0.025, 0.16, 0.5, 0.84, 0.975); others are warned about and skipped.
+// Graphs are used for every CL in `cl_targets` (empty = all CLs present).
 // Each polyline segment is rasterized at sub-bin steps (no gaps at bin
 // corners); `halo` then dilates the flagged set by that many finest bins
 // (Chebyshev) so the mesh brackets the curve on both sides.
-std::vector<uint8_t> flag_bins_on_brazil_contours(
+std::vector<uint8_t> flag_bins_from_saved_brazil_contours(
     const PEBank &bank,
-    const std::vector<std::vector<float>> &inclusion_frac, // [cl][cell]
+    const std::string &brazil_root_path,
+    const std::vector<float> &cl_targets,
     const std::vector<float> &quantiles,
     bool xlog_axis, bool ylog_axis,
-    int halo)
+    int halo,
+    int &n_curves_used)
 {
     const int W = bank.finest_nx, H = bank.finest_ny;
     std::vector<uint8_t> flags((size_t)W * (size_t)H, 0);
-    AxisXform A{bank.x_lo, bank.x_hi, bank.y_lo, bank.y_hi, W, H, xlog_axis, ylog_axis};
+    n_curves_used = 0;
+
+    // Quantile -> saved-label mapping; must match save_brazil_root.
+    static const struct { float q; const char *label; } kQuantileTable[5] = {
+        {0.025f, "q025"}, {0.16f, "q16"}, {0.5f, "median"},
+        {0.84f, "q84"}, {0.975f, "q975"}};
+    std::vector<std::string> want_substr;
+    for (float q : quantiles) {
+        bool found = false;
+        for (const auto &e : kQuantileTable) {
+            if (std::fabs(q - e.q) < 1e-4f) {
+                want_substr.push_back(std::string("_") + e.label + "_seg");
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            log<LOG_WARNING>(L"%1% || quantile %2% has no saved contour "
+                             L"(saved levels: 0.025 0.16 0.5 0.84 0.975); skipping.")
+                % __func__ % q;
+        }
+    }
+    if (want_substr.empty()) return flags;
+
+    TFile fin(brazil_root_path.c_str(), "READ");
+    if (fin.IsZombie()) {
+        log<LOG_ERROR>(L"%1% || could not open %2%.") % __func__ % brazil_root_path.c_str();
+        return flags;
+    }
 
     // Physical -> finest-grid fractional coordinate (inverse of i_to_x/j_to_y).
     auto phys_to_fi = [&](float x) -> float {
@@ -1215,35 +1247,44 @@ std::vector<uint8_t> flag_bins_on_brazil_contours(
         flags[(size_t)i * (size_t)H + (size_t)j] = 1;
     };
 
-    for (size_t k = 0; k < inclusion_frac.size(); ++k) {
-        TH2D *h = build_inclusion_th2d(bank, inclusion_frac[k], A,
-                                       Form("cleanup_incl_cl%zu", k), /*upsample=*/ 4);
-        for (float q : quantiles) {
-            auto segs = extract_contour_graphs(h, (double)q);
-            for (TGraph *g : segs) {
-                float prev_fi = 0.0f, prev_fj = 0.0f;
-                for (int p = 0; p < g->GetN(); ++p) {
-                    const float fi = phys_to_fi((float)g->GetPointX(p));
-                    const float fj = phys_to_fj((float)g->GetPointY(p));
-                    if (p == 0) {
-                        flag_at(fi, fj);
-                    } else {
-                        const float d = std::max(std::fabs(fi - prev_fi),
-                                                 std::fabs(fj - prev_fj));
-                        const int nstep = std::max(1, (int)std::ceil(d * 2.0f));
-                        for (int s = 1; s <= nstep; ++s) {
-                            const float t = (float)s / (float)nstep;
-                            flag_at(prev_fi + t * (fi - prev_fi),
-                                    prev_fj + t * (fj - prev_fj));
-                        }
-                    }
-                    prev_fi = fi; prev_fj = fj;
+    TIter it(fin.GetListOfKeys());
+    while (TKey *key = (TKey*)it()) {
+        if (std::strcmp(key->GetClassName(), "TGraph") != 0) continue;
+        TString nm(key->GetName());
+        if (!nm.BeginsWith("brazil_cl_")) continue;
+        float cl = -1.0f;
+        if (std::sscanf(nm.Data(), "brazil_cl_%f_", &cl) != 1) continue;
+        bool cl_ok = cl_targets.empty();
+        for (float c : cl_targets) if (std::fabs(c - cl) < 1e-3f) { cl_ok = true; break; }
+        if (!cl_ok) continue;
+        bool label_ok = false;
+        for (const auto &s : want_substr) if (nm.Contains(s.c_str())) { label_ok = true; break; }
+        if (!label_ok) continue;
+
+        TGraph *g = (TGraph*)key->ReadObj();
+        if (!g || g->GetN() <= 0) { delete g; continue; }
+        float prev_fi = 0.0f, prev_fj = 0.0f;
+        for (int p = 0; p < g->GetN(); ++p) {
+            const float fi = phys_to_fi((float)g->GetPointX(p));
+            const float fj = phys_to_fj((float)g->GetPointY(p));
+            if (p == 0) {
+                flag_at(fi, fj);
+            } else {
+                const float d = std::max(std::fabs(fi - prev_fi),
+                                         std::fabs(fj - prev_fj));
+                const int nstep = std::max(1, (int)std::ceil(d * 2.0f));
+                for (int s = 1; s <= nstep; ++s) {
+                    const float t = (float)s / (float)nstep;
+                    flag_at(prev_fi + t * (fi - prev_fi),
+                            prev_fj + t * (fj - prev_fj));
                 }
-                delete g;
             }
+            prev_fi = fi; prev_fj = fj;
         }
-        delete h;
+        delete g;
+        ++n_curves_used;
     }
+    fin.Close();
 
     if (halo > 0) {
         std::vector<uint8_t> dilated = flags;

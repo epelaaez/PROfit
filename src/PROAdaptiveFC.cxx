@@ -788,11 +788,10 @@ AdaptiveFCResult run_adaptive_fc(
     // Post-brazil mesh refinement targeting the Brazil ±2σ band edges, which
     // often fall in coarse baseline cells (the Wilks prepass only refined
     // around the Asimov contour, not the throw spread). Reads THIS tag's
-    // <tag>_bank.bin + <tag>_brazil.bin — no new fits or throws — recomputes
-    // the per-cell inclusion fractions (same classification + closed-contour
-    // filter as --mode brazil), traces the PLOTTED quantile contours
-    // (--cleanup-quantiles, default 0.025 / 0.975: the ±2σ band edges) on the
-    // same smoothed surface the band PDF uses, and writes
+    // <tag>_bank.bin (grid geometry only) + <tag>_brazil.root, takes the
+    // SAVED band-edge contour TGraphs (--cleanup-quantiles, default
+    // 0.025 / 0.975 — the exact curves the band PDF drew; nothing is
+    // recomputed, so mesh and plot cannot disagree), and writes
     // <tag>_cleanup_mesh.bin: finest cells along the curves (± --cleanup-halo
     // bins), coarsest tiling elsewhere. Same finest grid + bounds as the
     // bank, so it union-merges with the mesh that made the band:
@@ -803,50 +802,39 @@ AdaptiveFCResult run_adaptive_fc(
     //   ... -o v2   --mode init-bank  ...   (top up the new fine cells)
     //   ... -o v2   --mode brazil     ...   (re-throw; archives are per-mesh)
     if (acfg.mode == AdaptiveFCMode::BrazilCleanup) {
-        const std::string bank_in    = acfg.output_tag + "_bank.bin";
-        const std::string brazil_bin = acfg.output_tag + "_brazil.bin";
+        const std::string bank_in     = acfg.output_tag + "_bank.bin";
+        const std::string brazil_root = acfg.output_tag + "_brazil.root";
         PEBank bank;
         if (!load_bank(bank, bank_in)) {
             log<LOG_ERROR>(L"%1% || brazil-cleanup: failed to load %2%.") % __func__ % bank_in.c_str();
             return res;
         }
-        BrazilArchive arc;
-        if (!load_brazil_archive(arc, brazil_bin)
-            || arc.n_cells != bank.n_cells
-            || arc.finest_nx != bank.finest_nx
-            || arc.finest_ny != bank.finest_ny) {
-            log<LOG_ERROR>(L"%1% || brazil-cleanup: %2% missing or mismatched with the bank. "
-                           L"Run --mode brazil (same -o) first.") % __func__ % brazil_bin.c_str();
-            return res;
-        }
-        const int n_total = (int)arc.per_throw_dchi2.size();
-        const int min_pes = std::max(10, acfg.n_pe_min);
         if (acfg.cleanup_quantiles.empty()) {
             log<LOG_ERROR>(L"%1% || brazil-cleanup: empty --cleanup-quantiles.") % __func__;
             return res;
         }
-        log<LOG_INFO>(L"%1% || brazil-cleanup: bank=%2% (%3% cells), archive=%4% (%5% throws), "
-                      L"%6% CLs, %7% quantile levels, min_pes=%8%.")
-            % __func__ % bank_in.c_str() % bank.n_cells % brazil_bin.c_str() % n_total
-            % (int)acfg.cl_targets.size() % (int)acfg.cleanup_quantiles.size() % min_pes;
+        log<LOG_INFO>(L"%1% || brazil-cleanup: bank=%2% (%3% cells, grid geometry), contours from %4%, "
+                      L"%5% CLs requested, %6% quantile levels, halo=%7%.")
+            % __func__ % bank_in.c_str() % bank.n_cells % brazil_root.c_str()
+            % (int)acfg.cl_targets.size() % (int)acfg.cleanup_quantiles.size()
+            % acfg.cleanup_halo;
 
-        BrazilAggregation agg =
-            aggregate_brazil_throws(bank, arc, acfg.cl_targets, min_pes, nthreads);
-
-        // Flag the finest-grid bins traversed by the PLOTTED band-edge
-        // contours: flag_bins_on_brazil_contours runs the same 4x-upsampled
-        // IDW surface + marching squares as plot_brazil_band_pdf, so the mesh
-        // refines exactly the curves the band PDF shows. The IDW smoothing
-        // also suppresses single-cell statistical dips of the near-1 basin
-        // plateau (which a raw per-cell crossing test flags as spurious
-        // wiggles), and carries the contour through undecidable regions —
-        // where refinement + top-up is what makes them decidable.
         const int W = bank.finest_nx, H = bank.finest_ny;
         const bool xlog_axis = (xaxis_idx < model->is_log10.size()) ? model->is_log10[xaxis_idx] : acfg.logx;
         const bool ylog_axis = (yaxis_idx < model->is_log10.size()) ? model->is_log10[yaxis_idx] : acfg.logy;
-        std::vector<uint8_t> flags = flag_bins_on_brazil_contours(
-            bank, agg.inclusion_frac, acfg.cleanup_quantiles,
-            xlog_axis, ylog_axis, acfg.cleanup_halo);
+        int n_curves_used = 0;
+        std::vector<uint8_t> flags = flag_bins_from_saved_brazil_contours(
+            bank, brazil_root, acfg.cl_targets, acfg.cleanup_quantiles,
+            xlog_axis, ylog_axis, acfg.cleanup_halo, n_curves_used);
+        if (n_curves_used == 0) {
+            log<LOG_ERROR>(L"%1% || brazil-cleanup: no matching contour TGraphs in %2% "
+                           L"(need brazil_cl_<CL>_<q>_seg* for the requested --cl / --cleanup-quantiles). "
+                           L"Run --mode brazil (same -o) first, and check the CLs match.")
+                % __func__ % brazil_root.c_str();
+            return res;
+        }
+        log<LOG_INFO>(L"%1% || brazil-cleanup: %2% saved contour curve(s) used.")
+            % __func__ % n_curves_used;
         const int n_flagged = (int)std::count(flags.begin(), flags.end(), (uint8_t)1);
         if (n_flagged == 0) {
             log<LOG_WARNING>(L"%1% || brazil-cleanup: no quantile crossings found "

@@ -1101,14 +1101,17 @@ The Wilks prepass refines the mesh around the *Asimov* contour, but the
 Brazil ±2σ band edges — the P(included) = 0.025 and 0.975 contours of the
 throw ensemble — spread beyond it, often into coarse baseline cells where
 the band looks blocky. `brazil-cleanup` closes that loop: it reads the
-finished bank + brazil archive (**no fits, no throws — it runs in seconds**),
-recomputes the per-cell inclusion fractions (closed-contour throws removed,
-same as `brazil`), traces the **plotted** quantile contours
-(`--cleanup-quantiles`, default `0.025 0.975` — extracted from the same
-smoothed surface as the band PDF, so the refined region is exactly the
-curves you see), and writes `<tag>_<out>_cleanup_mesh.bin`: finest cells
-along the contours ± `--cleanup-halo` bins (default 1), coarsest tiling
-elsewhere. It shares the finest grid with the original mesh by construction,
+bank (grid geometry) and the **saved contour curves in
+`<tag>_<out>_brazil.root`** (**no fits, no throws, nothing recomputed — it
+runs in seconds**), rasterizes the requested quantile curves
+(`--cleanup-quantiles`, default `0.025 0.975`; any of the five saved levels
+0.025/0.16/0.5/0.84/0.975 works) onto the finest grid, and writes
+`<tag>_<out>_cleanup_mesh.bin`: finest cells along the curves ±
+`--cleanup-halo` bins (default 1), coarsest tiling elsewhere. Because the
+curves come from the brazil ROOT artifact itself, the refined region is
+*by construction* the same contours the band PDF drew — run it on the
+`_brazil.root` from the same brazil invocation as the band you are looking
+at. It shares the finest grid with the original mesh by construction,
 so it union-merges with it:
 
 ```bash
