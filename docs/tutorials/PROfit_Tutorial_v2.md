@@ -351,7 +351,7 @@ Subcommands:
   profile      Make a 1D profiled chi2 for each physics and nuisence parameter.
   plot         Make plots of CV, or injected point with error bars and covariance.
   fc           Run Feldman-Cousins for this injected signal
-  fc-adaptive  Adaptive Feldman-Cousins. Sub-modes: build-mesh, init-bank, print-bank, asimov, brazil.
+  fc-adaptive  Adaptive Feldman-Cousins. Sub-modes: build-mesh, init-bank, print-bank, asimov, brazil, merge-mesh, merge-bank.
   global       Just do a single global fit.
   mcmc         Get bayesian posteriors using MCMC
   scale-test   Run timing benchmarks for FillSpectra / metric / fit hot paths.
@@ -994,6 +994,8 @@ init-bank   →  <tag>_<out>_bank.bin      (pseudo-experiment bank: PEs per meta
 print-bank  →  summary PDFs               (bank occupancy diagnostics)
 asimov      →  FC contour + verdict PDFs  (classify the Asimov data against the bank)
 brazil      →  Brazil-band PDFs           (throw pseudo-data, classify each against the bank)
+merge-mesh  →  <tag>_<out>_mesh.bin       (union-merge mesh binaries from separate runs)
+merge-bank  →  <tag>_<out>_bank.bin       (harvest PEs from separate bank binaries onto that mesh)
 ```
 
 A full small-scale run (bump `--throws` and `--n-pe-min` for real studies):
@@ -1018,6 +1020,78 @@ Key knobs: `--p-thresh` (fraction of prepass throws that must refine a cell
 for it to enter the meta-mesh), `--baseline-level` (levels always kept),
 `--cl` (target CLs), `--update-layer` / `--update-only-layer` (target which
 refinement layers get new PEs on an `init-bank` re-run), `--stat-only-throws`.
+
+### Merging meshes and banks: `merge-mesh` and `merge-bank`
+
+The PE bank is by far the most expensive artifact in the pipeline, so PROfit
+can combine meshes and banks produced by *separate* runs — different `-o`
+tags, different machines, different days — into one study. `--merge-input`
+takes explicit filenames or (quoted) glob patterns; the merged artifacts are
+written under the normal `-t`/`-o` naming, and every downstream stage
+(`print-bank`, `asimov`, `brazil`, `init-bank` top-up) consumes them as if
+they had been produced in one run.
+
+```bash
+# Union-merge two meshes (wherever the inputs disagree, the finer tiling wins)
+PROfit -x tutorial.xml -t TUT -o merged --seed 405 -n 8 $AFC \
+    --mode merge-mesh --merge-input TUT_runA_mesh.bin TUT_runB_mesh.bin
+
+# Harvest the PEs from both banks onto the merged mesh
+PROfit -x tutorial.xml -t TUT -o merged --seed 405 -n 8 $AFC \
+    --mode merge-bank --merge-input 'TUT_run[AB]_bank.bin'
+
+# Top up: every cell to 400 PEs (cells already at/above 400 are left alone)
+PROfit -x tutorial.xml -t TUT -o merged --seed 405 -n 8 $AFC \
+    --mode init-bank --n-pe-min 400 --n-pe-max 400
+```
+
+**Where this is useful:**
+
+1. **Grid / cluster PE production.** Build the mesh once, ship it to N jobs,
+   run `init-bank` in each job under its own `-o` tag **with a distinct
+   `--seed`**, copy the banks back, and merge:
+
+   ```bash
+   # one job, i = 0..N-1  (each job has its own copy of the shared mesh
+   # as TUT_grid<i>_mesh.bin — identical copies merge to themselves)
+   PROfit -x tutorial.xml -t TUT -o grid$i --seed $((1000+i)) -n 8 $AFC \
+       --mode init-bank --n-pe-min 100 --n-pe-max 5000
+
+   # back home:
+   PROfit ... -o merged $AFC --mode merge-mesh --merge-input 'TUT_grid*_mesh.bin'
+   PROfit ... -o merged $AFC --mode merge-bank --merge-input 'TUT_grid*_bank.bin'
+   ```
+
+2. **Updating the mesh without losing the bank.** Re-running `build-mesh`
+   with more throws or different `--p-thresh` changes the meta-mesh, and a
+   plain `init-bank` would then discard the old bank as footprint-mismatched.
+   Instead: `merge-mesh` the old and new meshes, `merge-bank` the old bank
+   onto the union, then `init-bank` to generate PEs only where the mesh
+   actually changed. Every cell whose footprint survived keeps its PEs.
+
+3. **Combining independent studies of the same configuration** — e.g. a
+   coarse exploratory bank and a later refined one.
+
+**Rules and gotchas:**
+
+* PEs are Δχ² samples thrown at a cell **center**, so `merge-bank` carries a
+  cell over only when the merged mesh has the *exact same footprint*
+  (same position and size). PEs from cells that changed refinement are at the
+  wrong truth points and are dropped — the log reports carried / dropped /
+  still-empty counts per input.
+* All inputs must share the finest grid resolution and axis bounds
+  (`--prepass-amr-initial`, `--prepass-amr-levels`, `--xlo/xhi/ylo/yhi`);
+  mismatches are refused loudly.
+* Bitwise-identical PEs (same per-PE seed *and* Δχ²) are deduplicated, so
+  merging two banks generated with the same `--seed` silently costs you the
+  overlap — you get a warning, but the wasted CPU already happened. Give
+  every grid job a distinct seed.
+* The binaries carry no XML/fit-config provenance, so the merge **cannot**
+  verify that inputs used the same XML, χ² metric (`-c`), `--preset`, and
+  `--grad-mode`. Mixing those pools different Δχ² distributions — that
+  discipline is on you.
+* The brazil archive (`_brazil.bin`) is *not* merged: throws are cheap
+  relative to banks and are simply re-thrown against the merged bank.
 
 Outputs along the way:
 
