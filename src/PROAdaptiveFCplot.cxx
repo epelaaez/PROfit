@@ -1173,6 +1173,97 @@ static TH2D *build_inclusion_th2d(const PEBank &bank,
     return h;
 }
 
+// Flag the finest-grid bins traversed by the Brazil quantile contours — the
+// SAME curves plot_brazil_band_pdf draws and save_brazil_root stores:
+// marching squares on the 4x-upsampled IDW inclusion surface. Compared to
+// flagging raw per-cell quantile crossings, this (a) inherits the
+// closed-contour filter through the aggregated inclusion fractions, and
+// (b) is naturally noise-suppressed: the IDW average over the 4 nearest
+// decided cells smooths single-cell statistical dips of the near-1 basin
+// plateau back above the 0.975 level, so contour fragments are flagged only
+// where the plotted band actually shows them. Undecidable regions are filled
+// by IDW from decided neighbours, so a contour running into unsampled
+// territory is followed there too — refinement + init-bank top-up is what
+// makes those cells decidable.
+//
+// Each polyline segment is rasterized at sub-bin steps (no gaps at bin
+// corners); `halo` then dilates the flagged set by that many finest bins
+// (Chebyshev) so the mesh brackets the curve on both sides.
+std::vector<uint8_t> flag_bins_on_brazil_contours(
+    const PEBank &bank,
+    const std::vector<std::vector<float>> &inclusion_frac, // [cl][cell]
+    const std::vector<float> &quantiles,
+    bool xlog_axis, bool ylog_axis,
+    int halo)
+{
+    const int W = bank.finest_nx, H = bank.finest_ny;
+    std::vector<uint8_t> flags((size_t)W * (size_t)H, 0);
+    AxisXform A{bank.x_lo, bank.x_hi, bank.y_lo, bank.y_hi, W, H, xlog_axis, ylog_axis};
+
+    // Physical -> finest-grid fractional coordinate (inverse of i_to_x/j_to_y).
+    auto phys_to_fi = [&](float x) -> float {
+        const float t = xlog_axis ? std::log10(std::max(x, 1e-30f)) : x;
+        return (t - bank.x_lo) / (bank.x_hi - bank.x_lo) * (float)W;
+    };
+    auto phys_to_fj = [&](float y) -> float {
+        const float t = ylog_axis ? std::log10(std::max(y, 1e-30f)) : y;
+        return (t - bank.y_lo) / (bank.y_hi - bank.y_lo) * (float)H;
+    };
+    auto flag_at = [&](float fi, float fj) {
+        const int i = std::min(W - 1, std::max(0, (int)std::floor(fi)));
+        const int j = std::min(H - 1, std::max(0, (int)std::floor(fj)));
+        flags[(size_t)i * (size_t)H + (size_t)j] = 1;
+    };
+
+    for (size_t k = 0; k < inclusion_frac.size(); ++k) {
+        TH2D *h = build_inclusion_th2d(bank, inclusion_frac[k], A,
+                                       Form("cleanup_incl_cl%zu", k), /*upsample=*/ 4);
+        for (float q : quantiles) {
+            auto segs = extract_contour_graphs(h, (double)q);
+            for (TGraph *g : segs) {
+                float prev_fi = 0.0f, prev_fj = 0.0f;
+                for (int p = 0; p < g->GetN(); ++p) {
+                    const float fi = phys_to_fi((float)g->GetPointX(p));
+                    const float fj = phys_to_fj((float)g->GetPointY(p));
+                    if (p == 0) {
+                        flag_at(fi, fj);
+                    } else {
+                        const float d = std::max(std::fabs(fi - prev_fi),
+                                                 std::fabs(fj - prev_fj));
+                        const int nstep = std::max(1, (int)std::ceil(d * 2.0f));
+                        for (int s = 1; s <= nstep; ++s) {
+                            const float t = (float)s / (float)nstep;
+                            flag_at(prev_fi + t * (fi - prev_fi),
+                                    prev_fj + t * (fj - prev_fj));
+                        }
+                    }
+                    prev_fi = fi; prev_fj = fj;
+                }
+                delete g;
+            }
+        }
+        delete h;
+    }
+
+    if (halo > 0) {
+        std::vector<uint8_t> dilated = flags;
+        for (int i = 0; i < W; ++i) {
+            for (int j = 0; j < H; ++j) {
+                if (!flags[(size_t)i * (size_t)H + (size_t)j]) continue;
+                for (int di = -halo; di <= halo; ++di) {
+                    for (int dj = -halo; dj <= halo; ++dj) {
+                        const int ni = i + di, nj = j + dj;
+                        if (ni < 0 || nj < 0 || ni >= W || nj >= H) continue;
+                        dilated[(size_t)ni * (size_t)H + (size_t)nj] = 1;
+                    }
+                }
+            }
+        }
+        flags.swap(dilated);
+    }
+    return flags;
+}
+
 // Multi-page PDF, one page per requested CL. Each page draws the median
 // (P=0.5), ±1σ (P=0.16, 0.84), and ±2σ (P=0.025, 0.975) contours of the
 // per-cell inclusion-fraction field — the classic Brazil-band visualisation.

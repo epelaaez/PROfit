@@ -220,6 +220,16 @@ void save_asimov_root(
     const std::string &filename,
     bool xlog_axis, bool ylog_axis);
 
+// Flag finest-grid bins ([i * H + j]) traversed by the Brazil quantile
+// contours — the exact curves the band PDF draws (marching squares on the
+// 4x-upsampled IDW inclusion surface). halo dilates by that many bins.
+std::vector<uint8_t> flag_bins_on_brazil_contours(
+    const PEBank &bank,
+    const std::vector<std::vector<float>> &inclusion_frac, // [cl][cell]
+    const std::vector<float> &quantiles,
+    bool xlog_axis, bool ylog_axis,
+    int halo);
+
 void plot_brazil_band_pdf(
     const PEBank &bank,
     const std::vector<std::vector<float>> &inclusion_frac, // [cl_idx][cell_idx]

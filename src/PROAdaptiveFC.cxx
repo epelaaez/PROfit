@@ -790,11 +790,12 @@ AdaptiveFCResult run_adaptive_fc(
     // around the Asimov contour, not the throw spread). Reads THIS tag's
     // <tag>_bank.bin + <tag>_brazil.bin — no new fits or throws — recomputes
     // the per-cell inclusion fractions (same classification + closed-contour
-    // filter as --mode brazil), finds every finest-bin pair straddling a
-    // requested quantile level (default 0.025 / 0.975), and writes
-    // <tag>_cleanup_mesh.bin: finest cells over the crossings, coarsest
-    // tiling elsewhere. Same finest grid + bounds as the bank, so it
-    // union-merges with the mesh that made the band:
+    // filter as --mode brazil), traces the PLOTTED quantile contours
+    // (--cleanup-quantiles, default 0.025 / 0.975: the ±2σ band edges) on the
+    // same smoothed surface the band PDF uses, and writes
+    // <tag>_cleanup_mesh.bin: finest cells along the curves (± --cleanup-halo
+    // bins), coarsest tiling elsewhere. Same finest grid + bounds as the
+    // bank, so it union-merges with the mesh that made the band:
     //
     //   ... -o orig --mode brazil-cleanup
     //   ... -o v2   --mode merge-mesh --merge-input orig_mesh.bin orig_cleanup_mesh.bin
@@ -832,91 +833,20 @@ AdaptiveFCResult run_adaptive_fc(
         BrazilAggregation agg =
             aggregate_brazil_throws(bank, arc, acfg.cl_targets, min_pes, nthreads);
 
-        // Finest-bin cell lookup, then flag every bin adjacent to a quantile
-        // crossing. A pair (bin, right/up neighbour) straddles level q when
-        // (f0 - q)(fn - q) <= 0 with both bins decided; both bins are flagged.
-        // A decided bin whose neighbour is UNdecidable is flagged if its own
-        // value sits inside [min(q), max(q)] — the contour may continue into
-        // the unsampled region, and refining there is exactly what lets the
-        // init-bank top-up make it decidable.
-        //
-        // Noise guard: the deep-basin plateau sits within binomial noise of
-        // f = 1 (σ = √(q(1−q)/n_kept); at q=0.975 and ~200 kept throws one
-        // throw moves f by ~0.5%), so the 0.975 level set wiggles through the
-        // basin from finite-throw statistics alone. A crossing therefore only
-        // counts when the jump |Δf| across the pair clears a per-(CL, q)
-        // threshold — real (coarse) band edges jump by 0.1+, noise crossings
-        // by ~0.01-0.03. Sub-threshold crossings are already resolved at the
-        // statistical precision of the throws: they call for more throws, not
-        // more mesh. The undecidable-neighbour guard gets the same margin so
-        // a noise dip to f=0.97 next to an unsampled cell doesn't flag.
+        // Flag the finest-grid bins traversed by the PLOTTED band-edge
+        // contours: flag_bins_on_brazil_contours runs the same 4x-upsampled
+        // IDW surface + marching squares as plot_brazil_band_pdf, so the mesh
+        // refines exactly the curves the band PDF shows. The IDW smoothing
+        // also suppresses single-cell statistical dips of the near-1 basin
+        // plateau (which a raw per-cell crossing test flags as spurious
+        // wiggles), and carries the contour through undecidable regions —
+        // where refinement + top-up is what makes them decidable.
         const int W = bank.finest_nx, H = bank.finest_ny;
-        std::vector<int> cid_at((size_t)W * (size_t)H, -1);
-        for (int c = 0; c < bank.n_cells; ++c) {
-            for (int ii = bank.cell_i_bl[(size_t)c];
-                 ii < bank.cell_i_bl[(size_t)c] + bank.cell_step[(size_t)c] && ii < W; ++ii)
-                for (int jj = bank.cell_j_bl[(size_t)c];
-                     jj < bank.cell_j_bl[(size_t)c] + bank.cell_step[(size_t)c] && jj < H; ++jj)
-                    cid_at[(size_t)ii * (size_t)H + (size_t)jj] = c;
-        }
-        float q_min = acfg.cleanup_quantiles.front(), q_max = q_min;
-        for (float q : acfg.cleanup_quantiles) {
-            q_min = std::min(q_min, q);
-            q_max = std::max(q_max, q);
-        }
-        auto jump_thresh = [&](float q, int n_kept) -> float {
-            if (acfg.cleanup_min_jump >= 0.0f) return acfg.cleanup_min_jump;
-            const float n = (float)std::max(1, n_kept);
-            return std::max(0.02f, 3.0f * std::sqrt(q * (1.0f - q) / n));
-        };
-        std::vector<uint8_t> flags((size_t)W * (size_t)H, 0);
-        for (size_t k = 0; k < acfg.cl_targets.size(); ++k) {
-            const auto &f = agg.inclusion_frac[k];
-            const int n_kept = agg.n_kept_per_cl[k];
-            std::vector<float> q_jump(acfg.cleanup_quantiles.size());
-            for (size_t iq = 0; iq < acfg.cleanup_quantiles.size(); ++iq) {
-                q_jump[iq] = jump_thresh(acfg.cleanup_quantiles[iq], n_kept);
-                log<LOG_INFO>(L"%1% || brazil-cleanup CL=%2% q=%3%: min |df| for a crossing = %4% (n_kept=%5%).")
-                    % __func__ % acfg.cl_targets[k] % acfg.cleanup_quantiles[iq]
-                    % q_jump[iq] % n_kept;
-            }
-            // Undecidable-neighbour guard margins: the decided value must sit
-            // inside the band by more than the noise threshold at each edge.
-            const float in_lo = q_min + jump_thresh(q_min, n_kept);
-            const float in_hi = q_max - jump_thresh(q_max, n_kept);
-            auto fval = [&](int i, int j) -> float {
-                const int cid = cid_at[(size_t)i * (size_t)H + (size_t)j];
-                return cid >= 0 ? f[(size_t)cid] : kUndecidedSentinel;
-            };
-            for (int i = 0; i < W; ++i) {
-                for (int j = 0; j < H; ++j) {
-                    const float f0 = fval(i, j);
-                    const size_t b0 = (size_t)i * (size_t)H + (size_t)j;
-                    const int di[2] = {1, 0}, dj[2] = {0, 1};
-                    for (int d = 0; d < 2; ++d) {
-                        const int ni = i + di[d], nj = j + dj[d];
-                        if (ni >= W || nj >= H) continue;
-                        const float fn = fval(ni, nj);
-                        const size_t bn = (size_t)ni * (size_t)H + (size_t)nj;
-                        if (f0 >= 0.0f && fn >= 0.0f) {
-                            for (size_t iq = 0; iq < acfg.cleanup_quantiles.size(); ++iq) {
-                                const float q = acfg.cleanup_quantiles[iq];
-                                if ((f0 - q) * (fn - q) <= 0.0f
-                                    && std::fabs(f0 - fn) >= q_jump[iq]) {
-                                    flags[b0] = 1;
-                                    flags[bn] = 1;
-                                    break;
-                                }
-                            }
-                        } else if (f0 >= 0.0f && fn < 0.0f) {
-                            if (f0 >= in_lo && f0 <= in_hi) flags[b0] = 1;
-                        } else if (f0 < 0.0f && fn >= 0.0f) {
-                            if (fn >= in_lo && fn <= in_hi) flags[bn] = 1;
-                        }
-                    }
-                }
-            }
-        }
+        const bool xlog_axis = (xaxis_idx < model->is_log10.size()) ? model->is_log10[xaxis_idx] : acfg.logx;
+        const bool ylog_axis = (yaxis_idx < model->is_log10.size()) ? model->is_log10[yaxis_idx] : acfg.logy;
+        std::vector<uint8_t> flags = flag_bins_on_brazil_contours(
+            bank, agg.inclusion_frac, acfg.cleanup_quantiles,
+            xlog_axis, ylog_axis, acfg.cleanup_halo);
         const int n_flagged = (int)std::count(flags.begin(), flags.end(), (uint8_t)1);
         if (n_flagged == 0) {
             log<LOG_WARNING>(L"%1% || brazil-cleanup: no quantile crossings found "

@@ -1102,11 +1102,14 @@ Brazil ±2σ band edges — the P(included) = 0.025 and 0.975 contours of the
 throw ensemble — spread beyond it, often into coarse baseline cells where
 the band looks blocky. `brazil-cleanup` closes that loop: it reads the
 finished bank + brazil archive (**no fits, no throws — it runs in seconds**),
-recomputes the per-cell inclusion fractions, finds every finest-grid crossing
-of the requested quantile levels (`--cleanup-quantiles`, default
-`0.025 0.975`), and writes `<tag>_<out>_cleanup_mesh.bin`: finest cells over
-the crossings, coarsest tiling elsewhere. It shares the finest grid with the
-original mesh by construction, so it union-merges with it:
+recomputes the per-cell inclusion fractions (closed-contour throws removed,
+same as `brazil`), traces the **plotted** quantile contours
+(`--cleanup-quantiles`, default `0.025 0.975` — extracted from the same
+smoothed surface as the band PDF, so the refined region is exactly the
+curves you see), and writes `<tag>_<out>_cleanup_mesh.bin`: finest cells
+along the contours ± `--cleanup-halo` bins (default 1), coarsest tiling
+elsewhere. It shares the finest grid with the original mesh by construction,
+so it union-merges with it:
 
 ```bash
 # 1. band-edge refinement mesh from the finished brazil run (tag "afc")

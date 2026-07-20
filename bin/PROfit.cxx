@@ -347,7 +347,7 @@ int main(int argc, char* argv[])
     float afc_roi_band = 8.0f;
     std::vector<std::string> afc_merge_inputs;
     std::vector<float> afc_cleanup_quantiles = {0.025f, 0.975f};
-    float afc_cleanup_min_jump = -1.0f;
+    int afc_cleanup_halo = 1;
 
 
     //Global Arguments for all PROfit enables subcommands.
@@ -518,11 +518,9 @@ int main(int argc, char* argv[])
         "brazil-cleanup: inclusion-fraction quantile levels whose contour "
         "crossings get finest refinement (default 0.025 0.975 = the Brazil "
         "+-2sigma band edges).")->expected(-1);
-    afc_command->add_option("--cleanup-min-jump", afc_cleanup_min_jump,
-        "brazil-cleanup: minimum |df| across a bin pair for a quantile "
-        "crossing to be refined; suppresses statistical-noise crossings of "
-        "the near-1 basin plateau. Negative (default) = auto per CL: "
-        "max(0.02, 3*sqrt(q(1-q)/n_kept)).")->default_val(-1.0f);
+    afc_command->add_option("--cleanup-halo", afc_cleanup_halo,
+        "brazil-cleanup: dilate the flagged contour path by this many finest "
+        "bins so the mesh brackets the curve on both sides.")->default_val(1);
     afc_command->add_option("--throws", afc_n_throws,
         "Number of Wilks pre-pass throws (each produces one AMR mesh).")->default_val(200);
     afc_command->add_option("--prepass-amr-initial", afc_prepass_initial,
@@ -2794,7 +2792,7 @@ int main(int argc, char* argv[])
         acfg.n_brazil_throws = afc_n_brazil_throws;
         acfg.roi_band = afc_roi_band;
         acfg.cleanup_quantiles = afc_cleanup_quantiles;
-        acfg.cleanup_min_jump  = afc_cleanup_min_jump;
+        acfg.cleanup_halo      = afc_cleanup_halo;
 
         // Expand --merge-input entries: each may be a literal filename or a
         // glob pattern (quoted through the shell, e.g. 'run*_mesh.bin').

@@ -114,16 +114,13 @@ namespace PROfit {
         std::vector<std::string> merge_inputs;
 
         // ---- brazil-cleanup ----
-        // Inclusion-fraction quantile levels whose contour crossings get
-        // finest refinement. Default = the Brazil ±2σ band edges.
+        // Inclusion-fraction quantile levels whose plotted contours (traced
+        // on the same IDW-smoothed surface as the band PDF) get finest
+        // refinement. Default = the Brazil ±2σ band edges.
         std::vector<float> cleanup_quantiles = {0.025f, 0.975f};
-        // Minimum |Δf| across a bin pair for a quantile crossing to count.
-        // The near-1 basin plateau grazes the 0.975 level with binomial noise
-        // (σ = √(q(1−q)/n_kept)), producing spurious wiggles far from the
-        // band; sub-threshold crossings are already resolved at the
-        // statistical precision of the throws and need more throws, not more
-        // mesh. Negative (default) = auto: max(0.02, 3σ) per CL and level.
-        float cleanup_min_jump = -1.0f;
+        // Dilate the flagged contour path by this many finest bins so the
+        // mesh brackets the curve on both sides.
+        int cleanup_halo = 1;
     };
 
     /**
