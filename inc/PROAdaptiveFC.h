@@ -50,6 +50,7 @@ namespace PROfit {
         Classify,  ///< (not yet implemented) Classify real data against the bank.
         MergeMesh, ///< Union-merge ≥2 mesh binaries (--merge-input) into <tag>_mesh.bin.
         MergeBank, ///< Harvest PEs from ≥1 bank binaries (--merge-input) onto <tag>_mesh.bin, save <tag>_bank.bin.
+        BrazilCleanup, ///< From <tag>_bank.bin + <tag>_brazil.bin, build <tag>_cleanup_mesh.bin densified at the Brazil ±2σ contours. No fits.
     };
 
     /**
@@ -110,6 +111,11 @@ namespace PROfit {
         // CLI layer). merge-mesh: ≥2 *_mesh.bin; merge-bank: ≥1 *_bank.bin
         // harvested onto this tag's already-merged <output_tag>_mesh.bin.
         std::vector<std::string> merge_inputs;
+
+        // ---- brazil-cleanup ----
+        // Inclusion-fraction quantile levels whose contour crossings get
+        // finest refinement. Default = the Brazil ±2σ band edges.
+        std::vector<float> cleanup_quantiles = {0.025f, 0.975f};
     };
 
     /**

@@ -78,6 +78,163 @@ static size_t resolve_axis_index(const std::string &name,
 }
 
 // ====================================================================
+//  Section 5b — Brazil throw aggregation (shared by brazil / brazil-cleanup)
+// ====================================================================
+
+namespace {
+    /// Everything derived from (bank, archive) by re-classification:
+    /// per-throw verdicts, the closed-contour filter decisions, and the
+    /// per-cell inclusion fractions over kept throws.
+    struct BrazilAggregation {
+        std::vector<std::vector<std::vector<uint8_t>>> per_throw_verdicts; ///< [t][cl][cell]
+        std::vector<std::vector<uint8_t>> throw_kept;                      ///< [cl][t]
+        std::vector<std::vector<float>>   inclusion_frac;                  ///< [cl][cell]
+        std::vector<int> n_kept_per_cl;
+        std::vector<int> n_dropped_per_cl;
+    };
+    constexpr float kUndecidedSentinel = -1.0f;
+}
+
+// Re-classify every archived throw against the bank, apply the
+// closed-contour filter, and aggregate per-cell inclusion fractions over
+// kept throws. Pure function of (bank, archive, cl_targets, min_pes) — no
+// RNG, no fits — used by --mode brazil (band outputs) and
+// --mode brazil-cleanup (contour-targeted mesh refinement).
+//
+// Details preserved from the original in-line brazil implementation:
+//  * `included` and `decidable` are tracked separately per throw so the
+//    aggregation can distinguish "throw said outside" from "bank too sparse
+//    to say" — treating undecidable as "outside" paints a phantom band ring
+//    at the AMR refined↔baseline boundary.
+//  * crit_dchi2/decidable depend only on the bank, so they are computed ONCE
+//    (one sort per cell, compute_bank_crits) and each throw reduces to a
+//    comparison; throws are classified in parallel (no RNG, disjoint writes
+//    — bitwise deterministic for any thread count).
+//  * Closed-contour filter: the band represents the spread of *exclusion
+//    boundaries*; a throw whose allowed region is a closed island (the
+//    bottom-left no-oscillation corner itself excluded) answers a different
+//    question and is dropped for that CL. Decidability of the corner cell
+//    depends only on its PE count, so the filter is fully active or — bank
+//    too sparse there — fully inactive with a warning.
+static BrazilAggregation aggregate_brazil_throws(
+    const PEBank &bank,
+    const BrazilArchive &arc,
+    const std::vector<float> &cl_targets,
+    int min_pes,
+    int nthreads)
+{
+    const int n_total = (int)arc.per_throw_dchi2.size();
+    const int n_cells = bank.n_cells;
+    const int n_cl    = (int)cl_targets.size();
+
+    BrazilAggregation agg;
+    agg.per_throw_verdicts.assign(
+        (size_t)n_total,
+        std::vector<std::vector<uint8_t>>(
+            (size_t)n_cl, std::vector<uint8_t>((size_t)n_cells, 0)));
+    std::vector<std::vector<std::vector<uint8_t>>> per_throw_decidable(
+        (size_t)n_total,
+        std::vector<std::vector<uint8_t>>(
+            (size_t)n_cl, std::vector<uint8_t>((size_t)n_cells, 0)));
+    {
+        const auto bank_crits = compute_bank_crits(bank, cl_targets, min_pes);
+        std::atomic<int> next_throw{0};
+        auto classify_worker = [&]() {
+            while (true) {
+                const int t = next_throw.fetch_add(1);
+                if (t >= n_total) break;
+                const auto &dchi2 = arc.per_throw_dchi2[(size_t)t];
+                for (int k = 0; k < n_cl; ++k) {
+                    for (int c = 0; c < n_cells; ++c) {
+                        const auto &v = bank_crits[(size_t)k][(size_t)c];
+                        per_throw_decidable[(size_t)t][(size_t)k][(size_t)c] = v.decidable ? 1 : 0;
+                        agg.per_throw_verdicts[(size_t)t][(size_t)k][(size_t)c] =
+                            (v.decidable && dchi2[(size_t)c] <= v.crit_dchi2) ? 1 : 0;
+                    }
+                }
+            }
+        };
+        const int n_workers = std::max(1, std::min(nthreads, n_total));
+        std::vector<std::thread> pool;
+        pool.reserve((size_t)n_workers);
+        for (int i = 0; i < n_workers; ++i) pool.emplace_back(classify_worker);
+        for (auto &th : pool) th.join();
+    }
+
+    // Closed-contour filter (see block comment above).
+    int corner_cell = -1;
+    for (int c = 0; c < n_cells; ++c) {
+        if (bank.cell_i_bl[(size_t)c] == 0 && bank.cell_j_bl[(size_t)c] == 0) {
+            corner_cell = c;
+            break;
+        }
+    }
+    agg.throw_kept.assign((size_t)n_cl, std::vector<uint8_t>((size_t)n_total, 1));
+    agg.n_kept_per_cl.assign((size_t)n_cl, n_total);
+    agg.n_dropped_per_cl.assign((size_t)n_cl, 0);
+    if (corner_cell < 0) {
+        log<LOG_WARNING>(L"%1% || brazil: no meta-cell anchored at grid corner (0,0); closed-contour filter inactive.")
+            % __func__;
+    } else if (n_total > 0 && n_cl > 0
+               && !per_throw_decidable[0][0][(size_t)corner_cell]) {
+        log<LOG_WARNING>(L"%1% || brazil: corner cell %2% is undecidable (< %3% PEs in bank); closed-contour filter inactive — top up the bank to enable it.")
+            % __func__ % corner_cell % min_pes;
+    } else {
+        for (int k = 0; k < n_cl; ++k) {
+            for (int t = 0; t < n_total; ++t) {
+                if (!agg.per_throw_verdicts[(size_t)t][(size_t)k][(size_t)corner_cell]) {
+                    agg.throw_kept[(size_t)k][(size_t)t] = 0;
+                    ++agg.n_dropped_per_cl[(size_t)k];
+                }
+            }
+            agg.n_kept_per_cl[(size_t)k] = n_total - agg.n_dropped_per_cl[(size_t)k];
+            log<LOG_INFO>(L"%1% || brazil closed-contour filter CL=%2%: kept %3% / %4% throws (%5% dropped — corner excluded, closed allowed contour).")
+                % __func__ % cl_targets[(size_t)k]
+                % agg.n_kept_per_cl[(size_t)k] % n_total % agg.n_dropped_per_cl[(size_t)k];
+            if (agg.n_kept_per_cl[(size_t)k] == 0) {
+                log<LOG_WARNING>(L"%1% || brazil: ALL %2% throws dropped at CL=%3% — the band for this CL will be empty.")
+                    % __func__ % n_total % cl_targets[(size_t)k];
+            }
+        }
+    }
+
+    // Aggregate inclusion fractions across kept throws only. Sentinel:
+    // inclusion_frac < 0 marks a cell where no kept throw was ever decidable;
+    // build_inclusion_th2d skips such cells from the IDW interpolation.
+    agg.inclusion_frac.assign(
+        (size_t)n_cl, std::vector<float>((size_t)n_cells, kUndecidedSentinel));
+    int total_undecidable_cells = 0;
+    for (int k = 0; k < n_cl; ++k) {
+        int undecidable_this_cl = 0;
+        for (int c = 0; c < n_cells; ++c) {
+            int n_in = 0, n_decided = 0;
+            for (int t = 0; t < n_total; ++t) {
+                if (!agg.throw_kept[(size_t)k][(size_t)t]) continue;
+                if (per_throw_decidable[(size_t)t][(size_t)k][(size_t)c]) {
+                    ++n_decided;
+                    if (agg.per_throw_verdicts[(size_t)t][(size_t)k][(size_t)c]) ++n_in;
+                }
+            }
+            if (n_decided > 0) {
+                agg.inclusion_frac[(size_t)k][(size_t)c] = (float)n_in / (float)n_decided;
+            } else {
+                agg.inclusion_frac[(size_t)k][(size_t)c] = kUndecidedSentinel;
+                ++undecidable_this_cl;
+            }
+        }
+        log<LOG_INFO>(L"%1% || brazil aggregation CL=%2%: %3% / %4% cells undecidable (bank too sparse).")
+            % __func__ % cl_targets[(size_t)k] % undecidable_this_cl % n_cells;
+        total_undecidable_cells += undecidable_this_cl;
+    }
+    if (total_undecidable_cells > 0) {
+        log<LOG_INFO>(L"%1% || brazil: %2% undecidable (cell, CL) entries skipped from IDW interpolation; "
+                      L"deep-basin / sparse-bank regions are filled by neighbouring decided cells.")
+            % __func__ % total_undecidable_cells;
+    }
+    return agg;
+}
+
+// ====================================================================
 //  Section 6 — run_adaptive_fc (top-level dispatcher)
 // ====================================================================
 
@@ -546,135 +703,12 @@ AdaptiveFCResult run_adaptive_fc(
         // (3) Persist the merged archive.
         save_brazil_archive(arc, brazil_bin);
 
-        // (4) Re-classify ALL throws (existing + new) against the current bank.
-        //     Verdicts are derived afresh — archive stored only observables.
-        //     Track BOTH `included` and `decidable` per throw so the aggregation
-        //     can distinguish "throw said outside" from "bank too sparse to say":
-        //     treating undecidable as "outside" creates a phantom Brazil-band
-        //     ring at the AMR refined↔baseline boundary (deep-basin cells get
-        //     painted as excluded when they're really just unsampled).
-        //     crit_dchi2/decidable depend only on the bank, so they are
-        //     computed ONCE (one sort per cell, compute_bank_crits) and each
-        //     throw's classification reduces to a comparison. Throws are then
-        //     classified in parallel: no RNG, disjoint writes per throw —
-        //     bitwise deterministic for any thread count.
-        std::vector<std::vector<std::vector<uint8_t>>> per_throw_verdicts(
-            (size_t)n_total,
-            std::vector<std::vector<uint8_t>>(
-                (size_t)n_cl, std::vector<uint8_t>((size_t)n_cells, 0)));
-        std::vector<std::vector<std::vector<uint8_t>>> per_throw_decidable(
-            (size_t)n_total,
-            std::vector<std::vector<uint8_t>>(
-                (size_t)n_cl, std::vector<uint8_t>((size_t)n_cells, 0)));
-        {
-            const auto bank_crits = compute_bank_crits(bank, acfg.cl_targets, min_pes);
-            std::atomic<int> next_throw{0};
-            auto classify_worker = [&]() {
-                while (true) {
-                    const int t = next_throw.fetch_add(1);
-                    if (t >= n_total) break;
-                    const auto &dchi2 = arc.per_throw_dchi2[(size_t)t];
-                    for (int k = 0; k < n_cl; ++k) {
-                        for (int c = 0; c < n_cells; ++c) {
-                            const auto &v = bank_crits[(size_t)k][(size_t)c];
-                            per_throw_decidable[(size_t)t][(size_t)k][(size_t)c] = v.decidable ? 1 : 0;
-                            per_throw_verdicts [(size_t)t][(size_t)k][(size_t)c] =
-                                (v.decidable && dchi2[(size_t)c] <= v.crit_dchi2) ? 1 : 0;
-                        }
-                    }
-                }
-            };
-            const int n_workers = std::max(1, std::min(nthreads, n_total));
-            std::vector<std::thread> pool;
-            pool.reserve((size_t)n_workers);
-            for (int i = 0; i < n_workers; ++i) pool.emplace_back(classify_worker);
-            for (auto &th : pool) th.join();
-        }
-
-        // (4b) Closed-contour filter. The Brazil band represents the spread of
-        //     *exclusion boundaries* across throws; a throw whose allowed
-        //     region is a closed island (the contour closes around the truth
-        //     instead of excluding upward from it) answers a different
-        //     question and would bias the band. Proxy test: the bottom-left
-        //     corner of the grid (smallest x, smallest y — the no-oscillation
-        //     limit). Corner allowed → exclusion-type throw, kept; corner
-        //     excluded → closed contour, dropped for that CL. Decidability is
-        //     a property of the corner cell's PE count alone (same for every
-        //     throw and CL), so the filter is either fully active or — if the
-        //     bank is too sparse there — fully inactive, with a warning.
-        int corner_cell = -1;
-        for (int c = 0; c < n_cells; ++c) {
-            if (bank.cell_i_bl[(size_t)c] == 0 && bank.cell_j_bl[(size_t)c] == 0) {
-                corner_cell = c;
-                break;
-            }
-        }
-        std::vector<std::vector<uint8_t>> throw_kept(
-            (size_t)n_cl, std::vector<uint8_t>((size_t)n_total, 1));
-        std::vector<int> n_kept_per_cl((size_t)n_cl, n_total);
-        std::vector<int> n_dropped_per_cl((size_t)n_cl, 0);
-        if (corner_cell < 0) {
-            log<LOG_WARNING>(L"%1% || brazil: no meta-cell anchored at grid corner (0,0); closed-contour filter inactive.")
-                % __func__;
-        } else if (n_total > 0 && n_cl > 0
-                   && !per_throw_decidable[0][0][(size_t)corner_cell]) {
-            log<LOG_WARNING>(L"%1% || brazil: corner cell %2% is undecidable (< %3% PEs in bank); closed-contour filter inactive — top up the bank to enable it.")
-                % __func__ % corner_cell % min_pes;
-        } else {
-            for (int k = 0; k < n_cl; ++k) {
-                for (int t = 0; t < n_total; ++t) {
-                    if (!per_throw_verdicts[(size_t)t][(size_t)k][(size_t)corner_cell]) {
-                        throw_kept[(size_t)k][(size_t)t] = 0;
-                        ++n_dropped_per_cl[(size_t)k];
-                    }
-                }
-                n_kept_per_cl[(size_t)k] = n_total - n_dropped_per_cl[(size_t)k];
-                log<LOG_INFO>(L"%1% || brazil closed-contour filter CL=%2%: kept %3% / %4% throws (%5% dropped — corner excluded, closed allowed contour).")
-                    % __func__ % acfg.cl_targets[(size_t)k]
-                    % n_kept_per_cl[(size_t)k] % n_total % n_dropped_per_cl[(size_t)k];
-                if (n_kept_per_cl[(size_t)k] == 0) {
-                    log<LOG_WARNING>(L"%1% || brazil: ALL %2% throws dropped at CL=%3% — the band for this CL will be empty.")
-                        % __func__ % n_total % acfg.cl_targets[(size_t)k];
-                }
-            }
-        }
-
-        // (5) Aggregate inclusion fractions across kept throws only.
-        //     Sentinel: inclusion_frac < 0 marks a cell where no kept throw
-        //     was ever decidable. build_inclusion_th2d skips such cells from
-        //     the IDW interpolation, so the surface is filled by neighbouring
-        //     decided cells — no phantom contour ringing the AMR boundary.
-        constexpr float kUndecidedSentinel = -1.0f;
-        std::vector<std::vector<float>> inclusion_frac(
-            (size_t)n_cl, std::vector<float>((size_t)n_cells, kUndecidedSentinel));
-        int total_undecidable_cells = 0;
-        for (int k = 0; k < n_cl; ++k) {
-            int undecidable_this_cl = 0;
-            for (int c = 0; c < n_cells; ++c) {
-                int n_in = 0, n_decided = 0;
-                for (int t = 0; t < n_total; ++t) {
-                    if (!throw_kept[(size_t)k][(size_t)t]) continue;
-                    if (per_throw_decidable[(size_t)t][(size_t)k][(size_t)c]) {
-                        ++n_decided;
-                        if (per_throw_verdicts[(size_t)t][(size_t)k][(size_t)c]) ++n_in;
-                    }
-                }
-                if (n_decided > 0) {
-                    inclusion_frac[(size_t)k][(size_t)c] = (float)n_in / (float)n_decided;
-                } else {
-                    inclusion_frac[(size_t)k][(size_t)c] = kUndecidedSentinel;
-                    ++undecidable_this_cl;
-                }
-            }
-            log<LOG_INFO>(L"%1% || brazil aggregation CL=%2%: %3% / %4% cells undecidable (bank too sparse).")
-                % __func__ % acfg.cl_targets[(size_t)k] % undecidable_this_cl % n_cells;
-            total_undecidable_cells += undecidable_this_cl;
-        }
-        if (total_undecidable_cells > 0) {
-            log<LOG_INFO>(L"%1% || brazil: %2% undecidable (cell, CL) entries skipped from IDW interpolation; "
-                          L"deep-basin / sparse-bank regions are filled by neighbouring decided cells.")
-                % __func__ % total_undecidable_cells;
-        }
+        // (4)+(5) Re-classify ALL throws (existing + new) against the current
+        //     bank, apply the closed-contour filter, and aggregate per-cell
+        //     inclusion fractions — shared with --mode brazil-cleanup, see
+        //     aggregate_brazil_throws above for the details.
+        BrazilAggregation agg =
+            aggregate_brazil_throws(bank, arc, acfg.cl_targets, min_pes, nthreads);
 
         // Outputs.
         const std::string brazil_pdf  = acfg.output_tag + "_brazil_band.pdf";
@@ -692,15 +726,15 @@ AdaptiveFCResult run_adaptive_fc(
             ? std::pow(10.0f, fakeDataParams((int)yaxis_idx))
             : fakeDataParams((int)yaxis_idx);
 
-        plot_brazil_band_pdf(bank, inclusion_frac, acfg.cl_targets, brazil_pdf, bank_in,
+        plot_brazil_band_pdf(bank, agg.inclusion_frac, acfg.cl_targets, brazil_pdf, bank_in,
                               xlabel, ylabel, acfg.logx, acfg.logy,
                               xlog_axis, ylog_axis,
                               /*draw_truth_marker=*/ true,
                               truth_x_phys, truth_y_phys,
-                              n_kept_per_cl, n_dropped_per_cl);
+                              agg.n_kept_per_cl, agg.n_dropped_per_cl);
 
-        save_brazil_root(bank, per_throw_verdicts, arc.per_throw_dchi2,
-                          arc.per_throw_global_chi2, inclusion_frac, throw_kept,
+        save_brazil_root(bank, agg.per_throw_verdicts, arc.per_throw_dchi2,
+                          arc.per_throw_global_chi2, agg.inclusion_frac, agg.throw_kept,
                           acfg.cl_targets, brazil_root, xlog_axis, ylog_axis);
 
         // Populate result.
@@ -714,6 +748,138 @@ AdaptiveFCResult run_adaptive_fc(
         log<LOG_INFO>(L"%1% || brazil done: %2% new + %3% existing = %4% total throws across %5% cells; outputs %6%, %7%, %8%.")
             % __func__ % n_new % n_existing % n_total % n_cells
             % brazil_bin.c_str() % brazil_pdf.c_str() % brazil_root.c_str();
+        return res;
+    }
+
+    // ---- Mode: brazil-cleanup ----------------------------------------------
+    // Post-brazil mesh refinement targeting the Brazil ±2σ band edges, which
+    // often fall in coarse baseline cells (the Wilks prepass only refined
+    // around the Asimov contour, not the throw spread). Reads THIS tag's
+    // <tag>_bank.bin + <tag>_brazil.bin — no new fits or throws — recomputes
+    // the per-cell inclusion fractions (same classification + closed-contour
+    // filter as --mode brazil), finds every finest-bin pair straddling a
+    // requested quantile level (default 0.025 / 0.975), and writes
+    // <tag>_cleanup_mesh.bin: finest cells over the crossings, coarsest
+    // tiling elsewhere. Same finest grid + bounds as the bank, so it
+    // union-merges with the mesh that made the band:
+    //
+    //   ... -o orig --mode brazil-cleanup
+    //   ... -o v2   --mode merge-mesh --merge-input orig_mesh.bin orig_cleanup_mesh.bin
+    //   ... -o v2   --mode merge-bank --merge-input orig_bank.bin
+    //   ... -o v2   --mode init-bank  ...   (top up the new fine cells)
+    //   ... -o v2   --mode brazil     ...   (re-throw; archives are per-mesh)
+    if (acfg.mode == AdaptiveFCMode::BrazilCleanup) {
+        const std::string bank_in    = acfg.output_tag + "_bank.bin";
+        const std::string brazil_bin = acfg.output_tag + "_brazil.bin";
+        PEBank bank;
+        if (!load_bank(bank, bank_in)) {
+            log<LOG_ERROR>(L"%1% || brazil-cleanup: failed to load %2%.") % __func__ % bank_in.c_str();
+            return res;
+        }
+        BrazilArchive arc;
+        if (!load_brazil_archive(arc, brazil_bin)
+            || arc.n_cells != bank.n_cells
+            || arc.finest_nx != bank.finest_nx
+            || arc.finest_ny != bank.finest_ny) {
+            log<LOG_ERROR>(L"%1% || brazil-cleanup: %2% missing or mismatched with the bank. "
+                           L"Run --mode brazil (same -o) first.") % __func__ % brazil_bin.c_str();
+            return res;
+        }
+        const int n_total = (int)arc.per_throw_dchi2.size();
+        const int min_pes = std::max(10, acfg.n_pe_min);
+        if (acfg.cleanup_quantiles.empty()) {
+            log<LOG_ERROR>(L"%1% || brazil-cleanup: empty --cleanup-quantiles.") % __func__;
+            return res;
+        }
+        log<LOG_INFO>(L"%1% || brazil-cleanup: bank=%2% (%3% cells), archive=%4% (%5% throws), "
+                      L"%6% CLs, %7% quantile levels, min_pes=%8%.")
+            % __func__ % bank_in.c_str() % bank.n_cells % brazil_bin.c_str() % n_total
+            % (int)acfg.cl_targets.size() % (int)acfg.cleanup_quantiles.size() % min_pes;
+
+        BrazilAggregation agg =
+            aggregate_brazil_throws(bank, arc, acfg.cl_targets, min_pes, nthreads);
+
+        // Finest-bin cell lookup, then flag every bin adjacent to a quantile
+        // crossing. A pair (bin, right/up neighbour) straddles level q when
+        // (f0 - q)(fn - q) <= 0 with both bins decided; both bins are flagged.
+        // A decided bin whose neighbour is UNdecidable is flagged if its own
+        // value sits inside [min(q), max(q)] — the contour may continue into
+        // the unsampled region, and refining there is exactly what lets the
+        // init-bank top-up make it decidable.
+        const int W = bank.finest_nx, H = bank.finest_ny;
+        std::vector<int> cid_at((size_t)W * (size_t)H, -1);
+        for (int c = 0; c < bank.n_cells; ++c) {
+            for (int ii = bank.cell_i_bl[(size_t)c];
+                 ii < bank.cell_i_bl[(size_t)c] + bank.cell_step[(size_t)c] && ii < W; ++ii)
+                for (int jj = bank.cell_j_bl[(size_t)c];
+                     jj < bank.cell_j_bl[(size_t)c] + bank.cell_step[(size_t)c] && jj < H; ++jj)
+                    cid_at[(size_t)ii * (size_t)H + (size_t)jj] = c;
+        }
+        float q_min = acfg.cleanup_quantiles.front(), q_max = q_min;
+        for (float q : acfg.cleanup_quantiles) {
+            q_min = std::min(q_min, q);
+            q_max = std::max(q_max, q);
+        }
+        std::vector<uint8_t> flags((size_t)W * (size_t)H, 0);
+        for (size_t k = 0; k < acfg.cl_targets.size(); ++k) {
+            const auto &f = agg.inclusion_frac[k];
+            auto fval = [&](int i, int j) -> float {
+                const int cid = cid_at[(size_t)i * (size_t)H + (size_t)j];
+                return cid >= 0 ? f[(size_t)cid] : kUndecidedSentinel;
+            };
+            for (int i = 0; i < W; ++i) {
+                for (int j = 0; j < H; ++j) {
+                    const float f0 = fval(i, j);
+                    const size_t b0 = (size_t)i * (size_t)H + (size_t)j;
+                    const int di[2] = {1, 0}, dj[2] = {0, 1};
+                    for (int d = 0; d < 2; ++d) {
+                        const int ni = i + di[d], nj = j + dj[d];
+                        if (ni >= W || nj >= H) continue;
+                        const float fn = fval(ni, nj);
+                        const size_t bn = (size_t)ni * (size_t)H + (size_t)nj;
+                        if (f0 >= 0.0f && fn >= 0.0f) {
+                            for (float q : acfg.cleanup_quantiles) {
+                                if ((f0 - q) * (fn - q) <= 0.0f) {
+                                    flags[b0] = 1;
+                                    flags[bn] = 1;
+                                    break;
+                                }
+                            }
+                        } else if (f0 >= 0.0f && fn < 0.0f) {
+                            if (f0 >= q_min && f0 <= q_max) flags[b0] = 1;
+                        } else if (f0 < 0.0f && fn >= 0.0f) {
+                            if (fn >= q_min && fn <= q_max) flags[bn] = 1;
+                        }
+                    }
+                }
+            }
+        }
+        const int n_flagged = (int)std::count(flags.begin(), flags.end(), (uint8_t)1);
+        if (n_flagged == 0) {
+            log<LOG_WARNING>(L"%1% || brazil-cleanup: no quantile crossings found "
+                             L"(band edges undecidable everywhere, or outside the grid); no mesh written.")
+                % __func__;
+            return res;
+        }
+        log<LOG_INFO>(L"%1% || brazil-cleanup: %2% / %3% finest bins flagged around the quantile contours.")
+            % __func__ % n_flagged % (W * H);
+
+        MetaMesh cleanup = build_mesh_from_flags(
+            W, H, bank.max_levels,
+            bank.x_lo, bank.x_hi, bank.y_lo, bank.y_hi,
+            flags, acfg.baseline_level);
+        const std::string mesh_out = acfg.output_tag + "_cleanup_mesh.bin";
+        if (save_mesh(cleanup, mesh_out)) {
+            log<LOG_INFO>(L"%1% || brazil-cleanup: wrote %2% (%3% cells). Next: "
+                          L"--mode merge-mesh -o <new> --merge-input %4%_mesh.bin %2%; "
+                          L"--mode merge-bank -o <new> --merge-input %5%; "
+                          L"--mode init-bank -o <new>; --mode brazil -o <new>.")
+                % __func__ % mesh_out.c_str() % (int)cleanup.cells.size()
+                % acfg.output_tag.c_str() % bank_in.c_str();
+        }
+        res.n_meta_cells     = (int)cleanup.cells.size();
+        res.n_baseline_cells = cleanup.n_baseline_cells;
+        res.n_refined_cells  = cleanup.n_refined_cells;
         return res;
     }
 

@@ -346,6 +346,7 @@ int main(int argc, char* argv[])
     int   afc_n_brazil_throws = 100;
     float afc_roi_band = 8.0f;
     std::vector<std::string> afc_merge_inputs;
+    std::vector<float> afc_cleanup_quantiles = {0.025f, 0.975f};
 
 
     //Global Arguments for all PROfit enables subcommands.
@@ -510,6 +511,10 @@ int main(int argc, char* argv[])
         "Input artifact filenames for merge-mesh / merge-bank (repeatable; "
         "glob patterns like 'run*_mesh.bin' are expanded). Output goes to the "
         "normal <output_tag>-prefixed artifacts.")->expected(-1);
+    afc_command->add_option("--cleanup-quantiles", afc_cleanup_quantiles,
+        "brazil-cleanup: inclusion-fraction quantile levels whose contour "
+        "crossings get finest refinement (default 0.025 0.975 = the Brazil "
+        "+-2sigma band edges).")->expected(-1);
     afc_command->add_option("--throws", afc_n_throws,
         "Number of Wilks pre-pass throws (each produces one AMR mesh).")->default_val(200);
     afc_command->add_option("--prepass-amr-initial", afc_prepass_initial,
@@ -2743,6 +2748,7 @@ int main(int argc, char* argv[])
         else if (afc_mode_str == "classify")   acfg.mode = PROfit::AdaptiveFCMode::Classify;
         else if (afc_mode_str == "merge-mesh") acfg.mode = PROfit::AdaptiveFCMode::MergeMesh;
         else if (afc_mode_str == "merge-bank") acfg.mode = PROfit::AdaptiveFCMode::MergeBank;
+        else if (afc_mode_str == "brazil-cleanup") acfg.mode = PROfit::AdaptiveFCMode::BrazilCleanup;
         else {
             log<LOG_WARNING>(L"%1% || fc-adaptive: unknown --mode '%2%', defaulting to build-mesh.")
                 % __func__ % afc_mode_str.c_str();
@@ -2778,6 +2784,7 @@ int main(int argc, char* argv[])
         acfg.only_layer = afc_only_layer;
         acfg.n_brazil_throws = afc_n_brazil_throws;
         acfg.roi_band = afc_roi_band;
+        acfg.cleanup_quantiles = afc_cleanup_quantiles;
 
         // Expand --merge-input entries: each may be a literal filename or a
         // glob pattern (quoted through the shell, e.g. 'run*_mesh.bin').

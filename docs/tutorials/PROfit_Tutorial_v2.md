@@ -351,7 +351,7 @@ Subcommands:
   profile      Make a 1D profiled chi2 for each physics and nuisence parameter.
   plot         Make plots of CV, or injected point with error bars and covariance.
   fc           Run Feldman-Cousins for this injected signal
-  fc-adaptive  Adaptive Feldman-Cousins. Sub-modes: build-mesh, init-bank, print-bank, asimov, brazil, merge-mesh, merge-bank.
+  fc-adaptive  Adaptive Feldman-Cousins. Sub-modes: build-mesh, init-bank, print-bank, asimov, brazil, brazil-cleanup, merge-mesh, merge-bank.
   global       Just do a single global fit.
   mcmc         Get bayesian posteriors using MCMC
   scale-test   Run timing benchmarks for FillSpectra / metric / fit hot paths.
@@ -996,6 +996,7 @@ asimov      →  FC contour + verdict PDFs  (classify the Asimov data against th
 brazil      →  Brazil-band PDFs           (throw pseudo-data, classify each against the bank)
 merge-mesh  →  <tag>_<out>_mesh.bin       (union-merge mesh binaries from separate runs)
 merge-bank  →  <tag>_<out>_bank.bin       (harvest PEs from separate bank binaries onto that mesh)
+brazil-cleanup → <tag>_<out>_cleanup_mesh.bin  (mesh densified at the Brazil ±2σ contours; no fits)
 ```
 
 A full small-scale run (bump `--throws` and `--n-pe-min` for real studies):
@@ -1092,6 +1093,41 @@ PROfit -x tutorial.xml -t TUT -o merged --seed 405 -n 8 $AFC \
   discipline is on you.
 * The brazil archive (`_brazil.bin`) is *not* merged: throws are cheap
   relative to banks and are simply re-thrown against the merged bank.
+
+### Sharpening the band edges: `brazil-cleanup`
+
+The Wilks prepass refines the mesh around the *Asimov* contour, but the
+Brazil ±2σ band edges — the P(included) = 0.025 and 0.975 contours of the
+throw ensemble — spread beyond it, often into coarse baseline cells where
+the band looks blocky. `brazil-cleanup` closes that loop: it reads the
+finished bank + brazil archive (**no fits, no throws — it runs in seconds**),
+recomputes the per-cell inclusion fractions, finds every finest-grid crossing
+of the requested quantile levels (`--cleanup-quantiles`, default
+`0.025 0.975`), and writes `<tag>_<out>_cleanup_mesh.bin`: finest cells over
+the crossings, coarsest tiling elsewhere. It shares the finest grid with the
+original mesh by construction, so it union-merges with it:
+
+```bash
+# 1. band-edge refinement mesh from the finished brazil run (tag "afc")
+PROfit -x tutorial.xml -t TUT -o afc --seed 405 -n 8 $AFC --mode brazil-cleanup
+
+# 2. union with the original mesh, harvest the original bank, top up, re-throw
+PROfit -x tutorial.xml -t TUT -o afc2 --seed 405 -n 8 $AFC \
+    --mode merge-mesh --merge-input TUT_afc_mesh.bin TUT_afc_cleanup_mesh.bin
+PROfit -x tutorial.xml -t TUT -o afc2 --seed 405 -n 8 $AFC \
+    --mode merge-bank --merge-input TUT_afc_bank.bin
+PROfit -x tutorial.xml -t TUT -o afc2 --seed 406 -n 8 $AFC \
+    --mode init-bank --n-pe-min 25 --n-pe-max 400
+PROfit -x tutorial.xml -t TUT -o afc2 --seed 405 -n 8 $AFC \
+    --mode brazil --n-brazil-throws 50
+```
+
+Every PE from the original bank survives wherever the cell footprint is
+unchanged (everywhere except the newly refined band-edge cells), so the
+top-up only pays for the new fine cells. Iterate if the edges are still
+coarse. A decided cell sitting inside the band whose neighbour is
+*undecidable* is also refined — that is exactly where the contour runs off
+into unsampled territory, and the top-up is what makes it decidable.
 
 Outputs along the way:
 

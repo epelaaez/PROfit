@@ -54,6 +54,14 @@ MetaMesh build_meta_mesh(const std::vector<PROmesh::AMRResult> &throws,
 MetaMesh merge_meta_meshes(const std::vector<MetaMesh> &inputs,
                            int baseline_level);
 
+// Meta-mesh from a finest-grid flag map ([i * H + j]): finest cells over
+// flagged bins, coarsest tiling elsewhere. Union-merges with any sibling
+// mesh of the same finest grid + bounds (brazil-cleanup).
+MetaMesh build_mesh_from_flags(int finest_nx, int finest_ny, int max_levels,
+                               float x_lo, float x_hi, float y_lo, float y_hi,
+                               const std::vector<uint8_t> &flags,
+                               int baseline_level);
+
 void compute_cell_centers(const MetaMesh &mm,
                           bool xlog, bool ylog,
                           std::vector<float> &cx_out,
