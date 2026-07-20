@@ -839,6 +839,17 @@ AdaptiveFCResult run_adaptive_fc(
         // value sits inside [min(q), max(q)] — the contour may continue into
         // the unsampled region, and refining there is exactly what lets the
         // init-bank top-up make it decidable.
+        //
+        // Noise guard: the deep-basin plateau sits within binomial noise of
+        // f = 1 (σ = √(q(1−q)/n_kept); at q=0.975 and ~200 kept throws one
+        // throw moves f by ~0.5%), so the 0.975 level set wiggles through the
+        // basin from finite-throw statistics alone. A crossing therefore only
+        // counts when the jump |Δf| across the pair clears a per-(CL, q)
+        // threshold — real (coarse) band edges jump by 0.1+, noise crossings
+        // by ~0.01-0.03. Sub-threshold crossings are already resolved at the
+        // statistical precision of the throws: they call for more throws, not
+        // more mesh. The undecidable-neighbour guard gets the same margin so
+        // a noise dip to f=0.97 next to an unsampled cell doesn't flag.
         const int W = bank.finest_nx, H = bank.finest_ny;
         std::vector<int> cid_at((size_t)W * (size_t)H, -1);
         for (int c = 0; c < bank.n_cells; ++c) {
@@ -853,9 +864,26 @@ AdaptiveFCResult run_adaptive_fc(
             q_min = std::min(q_min, q);
             q_max = std::max(q_max, q);
         }
+        auto jump_thresh = [&](float q, int n_kept) -> float {
+            if (acfg.cleanup_min_jump >= 0.0f) return acfg.cleanup_min_jump;
+            const float n = (float)std::max(1, n_kept);
+            return std::max(0.02f, 3.0f * std::sqrt(q * (1.0f - q) / n));
+        };
         std::vector<uint8_t> flags((size_t)W * (size_t)H, 0);
         for (size_t k = 0; k < acfg.cl_targets.size(); ++k) {
             const auto &f = agg.inclusion_frac[k];
+            const int n_kept = agg.n_kept_per_cl[k];
+            std::vector<float> q_jump(acfg.cleanup_quantiles.size());
+            for (size_t iq = 0; iq < acfg.cleanup_quantiles.size(); ++iq) {
+                q_jump[iq] = jump_thresh(acfg.cleanup_quantiles[iq], n_kept);
+                log<LOG_INFO>(L"%1% || brazil-cleanup CL=%2% q=%3%: min |df| for a crossing = %4% (n_kept=%5%).")
+                    % __func__ % acfg.cl_targets[k] % acfg.cleanup_quantiles[iq]
+                    % q_jump[iq] % n_kept;
+            }
+            // Undecidable-neighbour guard margins: the decided value must sit
+            // inside the band by more than the noise threshold at each edge.
+            const float in_lo = q_min + jump_thresh(q_min, n_kept);
+            const float in_hi = q_max - jump_thresh(q_max, n_kept);
             auto fval = [&](int i, int j) -> float {
                 const int cid = cid_at[(size_t)i * (size_t)H + (size_t)j];
                 return cid >= 0 ? f[(size_t)cid] : kUndecidedSentinel;
@@ -871,17 +899,19 @@ AdaptiveFCResult run_adaptive_fc(
                         const float fn = fval(ni, nj);
                         const size_t bn = (size_t)ni * (size_t)H + (size_t)nj;
                         if (f0 >= 0.0f && fn >= 0.0f) {
-                            for (float q : acfg.cleanup_quantiles) {
-                                if ((f0 - q) * (fn - q) <= 0.0f) {
+                            for (size_t iq = 0; iq < acfg.cleanup_quantiles.size(); ++iq) {
+                                const float q = acfg.cleanup_quantiles[iq];
+                                if ((f0 - q) * (fn - q) <= 0.0f
+                                    && std::fabs(f0 - fn) >= q_jump[iq]) {
                                     flags[b0] = 1;
                                     flags[bn] = 1;
                                     break;
                                 }
                             }
                         } else if (f0 >= 0.0f && fn < 0.0f) {
-                            if (f0 >= q_min && f0 <= q_max) flags[b0] = 1;
+                            if (f0 >= in_lo && f0 <= in_hi) flags[b0] = 1;
                         } else if (f0 < 0.0f && fn >= 0.0f) {
-                            if (fn >= q_min && fn <= q_max) flags[bn] = 1;
+                            if (fn >= in_lo && fn <= in_hi) flags[bn] = 1;
                         }
                     }
                 }
