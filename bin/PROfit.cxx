@@ -505,7 +505,9 @@ int main(int argc, char* argv[])
         "print-bank: load <tag>_bank.bin and write summary PDFs. "
         "asimov: load <tag>_bank.bin and write FC contour + verdict PDFs. "
         "merge-mesh: union-merge >=2 --merge-input mesh binaries into <tag>_mesh.bin. "
-        "merge-bank: harvest PEs from >=1 --merge-input bank binaries onto <tag>_mesh.bin.")
+        "merge-bank: harvest PEs from >=1 --merge-input bank binaries onto <tag>_mesh.bin. "
+        "brazil-cleanup: mesh densified at the Brazil +-2sigma contours -> <tag>_cleanup_mesh.bin. "
+        "print-mesh: plot <tag>_mesh.bin (or --merge-input mesh files) as PDFs.")
         ->default_str("build-mesh");
     afc_command->add_option("--merge-input", afc_merge_inputs,
         "Input artifact filenames for merge-mesh / merge-bank (repeatable; "
@@ -2749,6 +2751,7 @@ int main(int argc, char* argv[])
         else if (afc_mode_str == "merge-mesh") acfg.mode = PROfit::AdaptiveFCMode::MergeMesh;
         else if (afc_mode_str == "merge-bank") acfg.mode = PROfit::AdaptiveFCMode::MergeBank;
         else if (afc_mode_str == "brazil-cleanup") acfg.mode = PROfit::AdaptiveFCMode::BrazilCleanup;
+        else if (afc_mode_str == "print-mesh") acfg.mode = PROfit::AdaptiveFCMode::PrintMesh;
         else {
             log<LOG_WARNING>(L"%1% || fc-adaptive: unknown --mode '%2%', defaulting to build-mesh.")
                 % __func__ % afc_mode_str.c_str();

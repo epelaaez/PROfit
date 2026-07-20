@@ -457,6 +457,39 @@ AdaptiveFCResult run_adaptive_fc(
         return res;
     }
 
+    // ---- Mode: print-mesh ---------------------------------------------------
+    // Plot mesh binaries as PDFs. No fitting. With --merge-input, plots each
+    // given file (e.g. a _cleanup_mesh.bin or a merged mesh); otherwise plots
+    // this tag's <tag>_mesh.bin. PDF name = input filename with .bin → .pdf.
+    if (acfg.mode == AdaptiveFCMode::PrintMesh) {
+        std::vector<std::string> mesh_files = acfg.merge_inputs;
+        if (mesh_files.empty()) mesh_files.push_back(acfg.output_tag + "_mesh.bin");
+        int n_plotted = 0;
+        for (const auto &path : mesh_files) {
+            MetaMesh mm;
+            if (!load_mesh(mm, path)) {
+                log<LOG_ERROR>(L"%1% || print-mesh: failed to load %2%.") % __func__ % path.c_str();
+                continue;
+            }
+            std::string pdf = path;
+            if (pdf.size() > 4 && pdf.compare(pdf.size() - 4, 4, ".bin") == 0)
+                pdf.resize(pdf.size() - 4);
+            pdf += ".pdf";
+            // n_throws <= 0: a loaded mesh carries no reliable throw/p_thresh
+            // provenance (and derived merge/cleanup meshes have none at all).
+            plot_metamesh_pdf(mm, *model, pdf, /*n_throws=*/0, acfg.p_thresh,
+                              acfg.baseline_level, acfg.logx, acfg.logy,
+                              xaxis_idx, yaxis_idx);
+            res.n_meta_cells     = (int)mm.cells.size();
+            res.n_baseline_cells = mm.n_baseline_cells;
+            res.n_refined_cells  = mm.n_refined_cells;
+            ++n_plotted;
+        }
+        log<LOG_INFO>(L"%1% || print-mesh: plotted %2% / %3% mesh file(s).")
+            % __func__ % n_plotted % (int)mesh_files.size();
+        return res;
+    }
+
     // ---- Mode: print-bank ---------------------------------------------------
     // Loads an existing bank artifact and writes a summary PDF. No fitting.
     if (acfg.mode == AdaptiveFCMode::PrintBank) {

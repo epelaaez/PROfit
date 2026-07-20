@@ -51,6 +51,7 @@ namespace PROfit {
         MergeMesh, ///< Union-merge ≥2 mesh binaries (--merge-input) into <tag>_mesh.bin.
         MergeBank, ///< Harvest PEs from ≥1 bank binaries (--merge-input) onto <tag>_mesh.bin, save <tag>_bank.bin.
         BrazilCleanup, ///< From <tag>_bank.bin + <tag>_brazil.bin, build <tag>_cleanup_mesh.bin densified at the Brazil ±2σ contours. No fits.
+        PrintMesh, ///< Plot <tag>_mesh.bin (or any mesh binaries given via --merge-input) as PDF(s). No fitting.
     };
 
     /**

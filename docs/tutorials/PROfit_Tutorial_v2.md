@@ -351,7 +351,7 @@ Subcommands:
   profile      Make a 1D profiled chi2 for each physics and nuisence parameter.
   plot         Make plots of CV, or injected point with error bars and covariance.
   fc           Run Feldman-Cousins for this injected signal
-  fc-adaptive  Adaptive Feldman-Cousins. Sub-modes: build-mesh, init-bank, print-bank, asimov, brazil, brazil-cleanup, merge-mesh, merge-bank.
+  fc-adaptive  Adaptive Feldman-Cousins. Sub-modes: build-mesh, init-bank, print-bank, print-mesh, asimov, brazil, brazil-cleanup, merge-mesh, merge-bank.
   global       Just do a single global fit.
   mcmc         Get bayesian posteriors using MCMC
   scale-test   Run timing benchmarks for FillSpectra / metric / fit hot paths.
@@ -992,6 +992,7 @@ build-mesh  →  <tag>_<out>_mesh.bin      (Wilks prepass: N throws, each an AMR
 init-bank   →  <tag>_<out>_bank.bin      (pseudo-experiment bank: PEs per meta-mesh cell,
                                           doubling with refinement level; re-running ADDS PEs)
 print-bank  →  summary PDFs               (bank occupancy diagnostics)
+print-mesh  →  mesh PDFs                  (<tag>_mesh.bin, or any mesh files via --merge-input)
 asimov      →  FC contour + verdict PDFs  (classify the Asimov data against the bank)
 brazil      →  Brazil-band PDFs           (throw pseudo-data, classify each against the bank)
 merge-mesh  →  <tag>_<out>_mesh.bin       (union-merge mesh binaries from separate runs)
@@ -1125,7 +1126,10 @@ PROfit -x tutorial.xml -t TUT -o afc2 --seed 405 -n 8 $AFC \
 Every PE from the original bank survives wherever the cell footprint is
 unchanged (everywhere except the newly refined band-edge cells), so the
 top-up only pays for the new fine cells. Iterate if the edges are still
-coarse. A decided cell sitting inside the band whose neighbour is
+coarse. To eyeball any mesh along the way (the cleanup mesh, the merged
+mesh, ...): `--mode print-mesh --merge-input TUT_afc_cleanup_mesh.bin`
+renders each given file as `<same name>.pdf`; with no `--merge-input` it
+plots the current tag's `_mesh.bin`. A decided cell sitting inside the band whose neighbour is
 *undecidable* is also refined — that is exactly where the contour runs off
 into unsampled territory, and the top-up is what makes it decidable.
 

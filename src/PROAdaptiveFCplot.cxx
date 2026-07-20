@@ -90,7 +90,11 @@ static void plot_amr_throws_multipage_pdf(
 // refined this cell at its assigned level), so cells where the throws
 // strongly agreed appear saturated and cells that barely cleared p_thresh
 // appear translucent — at a glance you see *where* the throws gathered.
-static void plot_metamesh_pdf(const MetaMesh &mm,
+//
+// n_throws <= 0 means "no throw tallies available" (a mesh loaded from disk
+// via --mode print-mesh, or a derived merge/cleanup mesh whose counters are
+// zero): alpha modulation and the throw/p_thresh info lines are skipped.
+void plot_metamesh_pdf(const MetaMesh &mm,
                               const PROmodel &model,
                               const std::string &filename,
                               int n_throws,
@@ -166,10 +170,14 @@ static void plot_metamesh_pdf(const MetaMesh &mm,
         const int palette_idx = std::min(mc->level, 5);
         int refine_count_at_level = (mc->level < (int)mc->per_level_refine_count.size())
             ? mc->per_level_refine_count[mc->level] : 0;
-        const float agreement = std::min(1.0f, (float)refine_count_at_level / (float)std::max(1, n_throws));
+        const float agreement = n_throws > 0
+            ? std::min(1.0f, (float)refine_count_at_level / (float)n_throws)
+            : 1.0f; // no tallies: flat saturation
 
         TBox *box = new TBox(xlo, ylo, xhi, yhi);
-        if (mc->level < baseline_level) {
+        // n_throws <= 0 (loaded/derived mesh): baseline_level is not known,
+        // so colour every cell by level instead of graying "baseline" cells.
+        if (n_throws > 0 && mc->level < baseline_level) {
             box->SetFillColorAlpha(kGray + 1, 0.15f);
         } else {
             const float alpha = std::min(1.0f, std::max(0.35f, agreement));
@@ -189,11 +197,15 @@ static void plot_metamesh_pdf(const MetaMesh &mm,
     info->SetTextAlign(12);
     info->AddText("Meta-mesh summary");
     info->AddText("");
-    info->AddText(Form("Throws merged: %d", n_throws));
-    info->AddText(Form("p_{thresh}: %.3f", p_thresh));
-    info->AddText(Form("  threshold count: #geq %d / %d throws",
-                        std::max(1, (int)std::ceil(p_thresh * (float)n_throws)), n_throws));
-    info->AddText(Form("Baseline level: %d", baseline_level));
+    if (n_throws > 0) {
+        info->AddText(Form("Throws merged: %d", n_throws));
+        info->AddText(Form("p_{thresh}: %.3f", p_thresh));
+        info->AddText(Form("  threshold count: #geq %d / %d throws",
+                            std::max(1, (int)std::ceil(p_thresh * (float)n_throws)), n_throws));
+    } else {
+        info->AddText("(loaded from file: throw tallies not shown)");
+    }
+    if (n_throws > 0) info->AddText(Form("Baseline level: %d", baseline_level));
     info->AddText(Form("Levels present: 0..%d", max_lvl));
     info->AddText(Form("Total cells: %d", (int)mm.cells.size()));
     info->AddText(Form("  refined : %d", mm.n_refined_cells));

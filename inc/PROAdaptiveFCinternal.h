@@ -160,6 +160,18 @@ void write_slice1_diagnostics(
     size_t xaxis_idx, size_t yaxis_idx,
     AdaptiveFCResult &result_out);
 
+// Meta-mesh visualisation (level-coloured cells + info panel). Pass
+// n_throws <= 0 for meshes loaded from disk / derived meshes (merge,
+// brazil-cleanup): throw-tally alpha modulation and info lines are skipped.
+void plot_metamesh_pdf(const MetaMesh &mm,
+                       const PROmodel &model,
+                       const std::string &filename,
+                       int n_throws,
+                       float p_thresh,
+                       int baseline_level,
+                       bool logx, bool logy,
+                       size_t xaxis_idx, size_t yaxis_idx);
+
 void plot_pebank_summary_pdf(const PEBank &bank,
                              const std::string &filename,
                              const std::string &bank_path,
