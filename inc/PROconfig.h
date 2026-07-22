@@ -531,12 +531,11 @@ namespace PROfit{
             const Binning& GetChannelVariableBins(size_t channel_index, size_t other_index) const;
 
             /* Function: build the X-axis title for a channel as "label [unit]",
-             * omitting either part if empty. For 2D variables, the legacy
-             * combined "xtitle;ytitle" string in m_channel_variable_units is
-             * returned as-is.
-             */
+             * omitting either part if empty. For 2D variables, the combined
+             */ "xtitle;ytitle" is split and the first part is returned.
             std::string GetChannelXAxisTitle(size_t channel_index) const;
             std::string GetChannelXAxisTitle(size_t channel_index, size_t other_index) const;
+            std::string GetChannelAxisTitle(size_t channel_index, size_t other_index, size_t dim) const;
 
             /**
              * @brief Install a runtime fit-region mask over the collapsed bins of one variable.
