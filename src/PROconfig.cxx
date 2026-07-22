@@ -1284,6 +1284,9 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
                 m_mcgen_variation_type.push_back(variation_type);
                 m_mcgen_variation_type_map[wt] = variation_type;
+                // mcstat's covariance is registered in PROsyst under the systematic's name; remember
+                // that name here so the covariance key matches the tag/plotname maps (both keyed by wt).
+                if(variation_type && std::string(variation_type) == "mcstat") m_mcstat_systname = wt;
 
                 // DetVar variations are handled separately (not weight branches in MC files),
                 // so don't add them to the allowlist that PROcess_CAFAna uses.

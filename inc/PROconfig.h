@@ -426,6 +426,7 @@ namespace PROfit{
 
             //specific bits for covairiancegeneration
             bool m_use_mcstats = false;
+            std::string m_mcstat_systname = "mcstat";  ///< XML name of the mcstat systematic; the key its covariance is registered under (defaults to legacy "mcstat")
             std::vector<std::string> m_mcgen_weightmaps_formulas;
             std::vector<bool> m_mcgen_weightmaps_uses;
             std::vector<std::string> m_mcgen_weightmaps_patterns;

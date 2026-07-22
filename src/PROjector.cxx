@@ -113,7 +113,7 @@ namespace PROfit {
         // cross-detector correlation for a pre-fit to constrain.
         std::vector<std::string> promote_names;
         for(const std::string &name : systs.covar_names) {
-            if(name == "mcstat") continue;
+            if(name == config.m_mcstat_systname) continue;
             if(std::find(keep_covariance.begin(), keep_covariance.end(), name) != keep_covariance.end()) {
                 log<LOG_INFO>(L"%1% || PROjector keeping systematic %2% as unconstrained covariance.") % __func__ % name.c_str();
                 continue;

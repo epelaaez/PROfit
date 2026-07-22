@@ -182,7 +182,9 @@ namespace PROfit {
             Eigen::MatrixXf fractional_mcstat_cov =  prop.variable_mc_stat_err[other_index].array().square().inverse().matrix().asDiagonal();
             toFiniteMatrix(fractional_mcstat_cov);
             Eigen::MatrixXf mcstat_corr = GenerateCorrMatrix(fractional_mcstat_cov);
-            syst_map["mcstat"] = {covmat.size(), SystType::Covariance};
+            // Register under the systematic's XML name (like every other covariance at
+            // syst_map[syst.systname] above) so downstream tag/plotname lookups match its key.
+            syst_map[config.m_mcstat_systname] = {covmat.size(), SystType::Covariance};
             covmat.push_back(fractional_mcstat_cov);
             corrmat.push_back(mcstat_corr);
             ++n_covar;
