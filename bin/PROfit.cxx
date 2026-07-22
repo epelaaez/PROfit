@@ -171,6 +171,7 @@ bool LOGGING_TO_FILE = false;
 
 void mcmc_worker(std::vector<std::unique_ptr<Metropolis<log_phys_target, adaptive_proposal>>> &mets, Eigen::VectorXf initial, PROmetric *metric, uint32_t seed, size_t nchains, size_t burnin, size_t steps);
 //void mcmc_worker(std::vector<std::unique_ptr<Metropolis<simple_target, adaptive_proposal>>> &mets, Eigen::VectorXf initial, PROmetric *metric, uint32_t seed, size_t nchains, size_t burnin, size_t steps);
+void nuts_worker(std::vector<std::vector<Eigen::VectorXf>> &chains, Eigen::VectorXf initial, PROmetric *metric, uint32_t seed, size_t nchains, size_t burnin, size_t steps);
 
 struct GlobalFitResult {
     PROfitter fitter;
@@ -3023,22 +3024,31 @@ int main(int argc, char* argv[])
         std::vector<Eigen::VectorXf> samples_eigen; 
         for(size_t i = 0; i < samples.size(); ++i) {
             samples_eigen.push_back(Eigen::VectorXf::Map(samples[i].data(), samples[i].size()));
-            samples_eigen.back()(0) = std::pow(10, samples_eigen.back()(0));
-            samples_eigen.back()(1) = std::pow(10, samples_eigen.back()(1));
+            //samples_eigen.back()(0) = std::pow(10, samples_eigen.back()(0));
+            //samples_eigen.back()(1) = std::pow(10, samples_eigen.back()(1));
         }
         size_t mcmc_threads = mcmc_chains >= nthread ? nthread : mcmc_chains;
         std::vector<std::vector<std::unique_ptr<Metropolis<log_phys_target, adaptive_proposal>>>> mets;
+        std::vector<std::vector<std::vector<Eigen::VectorXf>>> chains;
         //std::vector<std::vector<std::unique_ptr<Metropolis<simple_target, adaptive_proposal>>>> mets;
         mets.reserve(mcmc_threads);
         std::vector<std::thread> threads;
         size_t chains_per_thread = mcmc_chains / mcmc_threads;
         size_t addone = mcmc_threads - mcmc_chains%mcmc_threads;
         for(size_t i = 0; i < mcmc_threads; ++i) {
-            mets.emplace_back();
-            threads.emplace_back(
-                    [&, i](){
-                        mcmc_worker(mets[i], samples_eigen[i], metric->Clone(), myseed.getThreadSeeds()->at(i), chains_per_thread + (i >= addone), fitConfig.MCMCburn, fitConfig.MCMCiter);
-                    });
+            if(true) {
+                chains.emplace_back();
+                threads.emplace_back(
+                        [&, i](){
+                            nuts_worker(chains[i], samples_eigen[i], metric->Clone(), myseed.getThreadSeeds()->at(i), chains_per_thread + (i >= addone), fitConfig.MCMCburn, fitConfig.MCMCiter);
+                        });
+            } else {
+                mets.emplace_back();
+                threads.emplace_back(
+                        [&, i](){
+                            mcmc_worker(mets[i], samples_eigen[i], metric->Clone(), myseed.getThreadSeeds()->at(i), chains_per_thread + (i >= addone), fitConfig.MCMCburn, fitConfig.MCMCiter);
+                        });
+            }
         }
         for(auto&& t : threads) {
             t.join();
@@ -3055,39 +3065,78 @@ int main(int argc, char* argv[])
         //oned.push_back(TH1D("one2", ";#Deltam^{2}_{41} [eV^{2}];Posterior PDF", 200, -2, 2));
         TFile fout((final_output_tag+"_PROMCMC_chains.root").c_str(), "RECREATE");
         size_t chain_counter = 0;
-        for(const auto &tmets : mets) {
-            for(const auto &met : tmets) {
-                chain_counter++;
-                std::string name = "chain"+std::to_string(chain_counter);
-                TTree tree(name.c_str(), name.c_str());
-                Eigen::VectorXf v = Eigen::VectorXf::Zero(nparams);
-                std::vector<std::string> param_names;
-                for(size_t i = 0; i < metric->GetModel().nparams; ++i) {
-                    tree.Branch(metric->GetModel().param_names[i].c_str(), &v(i));
-                    param_names.push_back(metric->GetModel().pretty_param_names[i]);
-                }
-                for(size_t i = metric->GetModel().nparams; i < nparams; ++i) {
-                    const std::string &sname = metric->GetSysts().spline_names[i-metric->GetModel().nparams];
-                    std::string::size_type l = sname.find(':');
-                    // TODO: This only handles names with a single colon in them. I don't think we ever have more than that, it's really just meant for the 'flat' and 'norm' systs.
-                    if(l != std::string::npos) {
-                        std::string bname = sname;
-                        bname[l] = '_';
-                        tree.Branch(bname.c_str(), &v(i));
-                    } else {
-                        tree.Branch(sname.c_str(), &v(i));
+        if(true) {
+            for(const auto &tchain : chains) {
+                for(const auto &chain : tchain) {
+                    chain_counter++;
+                    std::string name = "chain"+std::to_string(chain_counter);
+                    TTree tree(name.c_str(), name.c_str());
+                    Eigen::VectorXf v = Eigen::VectorXf::Zero(nparams);
+                    std::vector<std::string> param_names;
+                    for(size_t i = 0; i < metric->GetModel().nparams; ++i) {
+                        tree.Branch(metric->GetModel().param_names[i].c_str(), &v(i));
+                        param_names.push_back(metric->GetModel().pretty_param_names[i]);
                     }
-                    param_names.push_back(config.m_mcgen_variation_plotname_map.at(metric->GetSysts().spline_names[i-N_phys_params]));
+                    for(size_t i = metric->GetModel().nparams; i < nparams; ++i) {
+                        const std::string &sname = metric->GetSysts().spline_names[i-metric->GetModel().nparams];
+                        std::string::size_type l = sname.find(':');
+                        // TODO: This only handles names with a single colon in them. I don't think we ever have more than that, it's really just meant for the 'flat' and 'norm' systs.
+                        if(l != std::string::npos) {
+                            std::string bname = sname;
+                            bname[l] = '_';
+                            tree.Branch(bname.c_str(), &v(i));
+                        } else {
+                            tree.Branch(sname.c_str(), &v(i));
+                        }
+                        param_names.push_back(config.m_mcgen_variation_plotname_map.at(metric->GetSysts().spline_names[i-N_phys_params]));
+                    }
+                    for(const auto &p : chain) {
+                    //    twod[0].Fill(p(1), p(0));
+                    //    oned[0].Fill(p(1));
+                    //    oned[1].Fill(p(0));
+                        v = p;
+                        tree.Fill();
+                    }
+                    tree.Write();
+                    //met->plot_autocorrelation((final_output_tag+"_PROMCMC_autocorrelation_chain"+std::to_string(chain_counter)+".pdf").c_str(), param_names);
                 }
-                for(const auto &p : met->chain) {
-                //    twod[0].Fill(p(1), p(0));
-                //    oned[0].Fill(p(1));
-                //    oned[1].Fill(p(0));
-                    v = p;
-                    tree.Fill();
+            }
+
+        } else {
+            for(const auto &tmets : mets) {
+                for(const auto &met : tmets) {
+                    chain_counter++;
+                    std::string name = "chain"+std::to_string(chain_counter);
+                    TTree tree(name.c_str(), name.c_str());
+                    Eigen::VectorXf v = Eigen::VectorXf::Zero(nparams);
+                    std::vector<std::string> param_names;
+                    for(size_t i = 0; i < metric->GetModel().nparams; ++i) {
+                        tree.Branch(metric->GetModel().param_names[i].c_str(), &v(i));
+                        param_names.push_back(metric->GetModel().pretty_param_names[i]);
+                    }
+                    for(size_t i = metric->GetModel().nparams; i < nparams; ++i) {
+                        const std::string &sname = metric->GetSysts().spline_names[i-metric->GetModel().nparams];
+                        std::string::size_type l = sname.find(':');
+                        // TODO: This only handles names with a single colon in them. I don't think we ever have more than that, it's really just meant for the 'flat' and 'norm' systs.
+                        if(l != std::string::npos) {
+                            std::string bname = sname;
+                            bname[l] = '_';
+                            tree.Branch(bname.c_str(), &v(i));
+                        } else {
+                            tree.Branch(sname.c_str(), &v(i));
+                        }
+                        param_names.push_back(config.m_mcgen_variation_plotname_map.at(metric->GetSysts().spline_names[i-N_phys_params]));
+                    }
+                    for(const auto &p : met->chain) {
+                    //    twod[0].Fill(p(1), p(0));
+                    //    oned[0].Fill(p(1));
+                    //    oned[1].Fill(p(0));
+                        v = p;
+                        tree.Fill();
+                    }
+                    tree.Write();
+                    met->plot_autocorrelation((final_output_tag+"_PROMCMC_autocorrelation_chain"+std::to_string(chain_counter)+".pdf").c_str(), param_names, {});
                 }
-                tree.Write();
-                met->plot_autocorrelation((final_output_tag+"_PROMCMC_autocorrelation_chain"+std::to_string(chain_counter)+".pdf").c_str(), param_names, {});
             }
         }
         //TCanvas c;
@@ -3467,6 +3516,18 @@ int main(int argc, char* argv[])
     return 0;
 }
 
+
+void nuts_worker(std::vector<std::vector<Eigen::VectorXf>> &chains, Eigen::VectorXf initial, PROmetric *metric, uint32_t seed, size_t nchains, size_t burnin, size_t steps) {
+    std::uniform_int_distribution<uint32_t> dseed(0, std::numeric_limits<uint32_t>::max());
+    std::mt19937 rng(seed);
+    for(size_t i = 0; i < nchains; ++i) {
+        NUTS nuts;
+        nuts.M = 10'000;
+        nuts.Madapt = 1'000;
+        nuts(initial, *metric, dseed(rng));
+        chains.emplace_back(std::move(nuts.chain));
+    }
+}
 
 void mcmc_worker(std::vector<std::unique_ptr<Metropolis<log_phys_target, adaptive_proposal>>> &mets, Eigen::VectorXf initial, PROmetric *metric, uint32_t seed, size_t nchains, size_t burnin, size_t steps) {
 //void mcmc_worker(std::vector<std::unique_ptr<Metropolis<simple_target, adaptive_proposal>>> &mets, Eigen::VectorXf initial, PROmetric *metric, uint32_t seed, size_t nchains, size_t burnin, size_t steps) {
