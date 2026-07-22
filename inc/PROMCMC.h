@@ -45,7 +45,8 @@ namespace PROfit {
                 bool step() {
                     Eigen::VectorXf p = proposal(current);
                     float acceptance;
-                    acceptance = proposal.within_bound(p) ? std::min(1.0f, target(p)/target(current) * proposal.P(current, p)/proposal.P(p, current)) : 0;
+                    // Targets return log-density (e.g. -0.5*chi^2); subtract before exp to avoid float32 underflow when chi^2 is large.
+                    acceptance = proposal.within_bound(p) ? std::min(1.0f, std::exp(target(p) - target(current)) * proposal.P(current, p)/proposal.P(p, current)) : 0;
                     float u = uniform(rng);
 
                     if(u <= acceptance) {
@@ -82,7 +83,7 @@ namespace PROfit {
                     }
                 }
 
-                void plot_autocorrelation(const std::string &filename, const std::vector<std::string> &param_names, size_t max_lag = 1000) const {
+                void plot_autocorrelation(const std::string &filename, const std::vector<std::string> &param_names, std::optional<std::map<std::string, TObject*>*> drawn_objs, size_t max_lag = 1000) const {
                     if(chain.size() == 0) {
                         log<LOG_ERROR>(L"%1% || Error: cannot calculate autocorrelation without a saved chain."
                                        L" Did you forget to run the Metropolis object, or tell the Metropolis"
@@ -148,6 +149,9 @@ namespace PROfit {
                         hs.back().second->Draw("l");
                         zero.Draw("l same");
                         c.Print(filename.c_str());
+                        if(drawn_objs) {
+                            (*drawn_objs)->insert({param_names[i]+"_autocorr", hs.back().second->Clone()});
+                        }
                     }
                     c.Clear();
                     gStyle->SetPalette(kCool);
@@ -192,9 +196,11 @@ namespace PROfit {
     struct simple_target {
         PROmetric &metric;
 
+        // Returns log-target (-0.5*chi^2). Metropolis::step does exp(target(p) - target(current))
+        // so the exp argument stays in safe float32 range even when chi^2 is large.
         float operator()(Eigen::VectorXf &value) {
             Eigen::VectorXf empty = value;
-            return std::exp(-0.5f*metric(value, empty, false));
+            return -0.5f*metric(value, empty, false);
         }
     };
 
@@ -203,7 +209,7 @@ namespace PROfit {
 
         float operator()(Eigen::VectorXf &value) {
             Eigen::VectorXf nuisance = value.segment(metric.GetModel().nparams, metric.GetSysts().GetNSplines());
-            return std::exp(-0.5f*metric.Pull(nuisance));
+            return -0.5f*metric.Pull(nuisance);
         }
     };
 

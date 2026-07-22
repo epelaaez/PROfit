@@ -15,8 +15,18 @@ option(MPI_ENABLE "MPI_ENABLE" OFF)
 message("MPI_ENABLE IS SET TO ${MPI_ENABLE}")
 
 
-set(CMAKE_CXX_FLAGS "-O3 -Wall -Wextra")
-#set(CMAKE_CXX_FLAGS "-g -DNDEBUG -fno-omit-frame-pointer -O3 -Wall -Wextra")
+# Append (don't overwrite) so user/toolchain-provided flags survive.
+# -DNDEBUG disables assert() and Eigen's per-access bounds assertions in the
+# hot fit loops — measurable on FillSpectra/Metric-heavy workloads.
+# -ffast-math is deliberately NOT used: the code relies on IEEE NaN/Inf
+# semantics (isnan/isinf guards, toFiniteMatrix).
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -DNDEBUG -Wall -Wextra")
+#set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -DNDEBUG -fno-omit-frame-pointer -O3 -Wall -Wextra")
+
+option(PROFIT_MARCH_NATIVE "Build with -march=native (faster, non-portable binaries)" OFF)
+if(PROFIT_MARCH_NATIVE)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=native")
+endif()
 
 #Allow for nice support folders in IDEs like VScode
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)

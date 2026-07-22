@@ -51,7 +51,7 @@ TH1D PROdata::toTH1D(const PROconfig &inconfig, int global_channel_index, int ot
     int nbins_dim = inconfig.m_channel_variable_bins[local_channel_index][other_index].NBinsAlong(dim);
     std::vector<float> bin_edges =  inconfig.m_channel_variable_bins[local_channel_index][other_index].Edges();
     std::string hist_name = inconfig.m_channel_names[local_channel_index] + " Data";
-    std::string xaxis_title =  inconfig.m_channel_variable_units[local_channel_index][other_index];
+    std::string xaxis_title =  inconfig.GetChannelXAxisTitle(local_channel_index, other_index);
 
 
     //fill 1D hist
@@ -82,7 +82,7 @@ void PROdata::toROOT(const PROconfig& inconfig, const std::string& output_name){
 
 bool PROdata::SameDim(const PROdata& a, const PROdata& b){
     if(a.nbins != b.nbins){
-        log<LOG_ERROR>(L"%1% || Two spectra have different bins: %2 vs. %3") % __func__ % a.nbins % b.nbins;
+        log<LOG_ERROR>(L"%1% || Two spectra have different bins: %2% vs. %3%") % __func__ % a.nbins % b.nbins;
         return false;
     }
     return true;
@@ -161,21 +161,21 @@ PROdata PROdata::operator/(const PROdata& b) const{
 }
 
 PROdata& PROdata::operator/=(const PROdata& b) {
-    //check if dimension 
+    //check if dimension
     if(!PROdata::SameDim(*this, b)){
         log<LOG_ERROR>(L"Terminating.");
         exit(EXIT_FAILURE);
     }
 
-
-
-    this->spec =  this->eigenvector_division(this->spec, b.spec);
-    //calculate relative error, and sqrt of quadratic sum of relative error
+    //calculate relative errors BEFORE overwriting spec with the ratio
+    //(dividing this->error by the ratio instead of the original spectrum gave
+    //wrong uncertainties; the const operator/ was already correct).
     Eigen::VectorXf this_relative_error = this->eigenvector_division(this->error, this->spec), b_relative_error = this->eigenvector_division(b.error, b.spec);
     Eigen::VectorXf ratio_relative_error = this->eigenvector_sqrt_quadrature_sum(this_relative_error, b_relative_error);
 
+    this->spec =  this->eigenvector_division(this->spec, b.spec);
     this->error  = this->eigenvector_multiplication(this->spec, ratio_relative_error);
-    return *this; 
+    return *this;
 }
 
 PROdata PROdata::operator*(float scale) const{
@@ -258,7 +258,7 @@ void PROdata::plotSpectrum(const PROconfig& inconfig, const std::string& output_
                 }
 
                 hists.back()->SetTitle((inconfig.m_mode_names[im]  +" "+ inconfig.m_detector_names[id]+" "+ inconfig.m_channel_names[ic]).c_str());
-                hists.back()->GetXaxis()->SetTitle(inconfig.m_channel_units[ic].c_str());
+                hists.back()->GetXaxis()->SetTitle(inconfig.GetChannelXAxisTitle(ic).c_str());
                 hists.back()->GetYaxis()->SetTitle("Events");
                 hists.back()->Draw("hist");
                 ++global_channel_index;

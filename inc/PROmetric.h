@@ -74,9 +74,9 @@ namespace PROfit {
              * preserved across all modes — LBFGSB depends on it.
              */
             enum GradientMode {
-                GradientCentralFull,    ///< Default: central FD on full chi². Most accurate, slowest.
+                GradientCentralFull,    ///< Central FD on full chi². Most accurate, slowest (rebuilds covariance + Cholesky per FD step).
                 GradientOneSidedFull,   ///< One-sided forward FD on full chi². ~2× faster, O(h) vs O(h²).
-                GradientCentralLin,     ///< Central FD on δ only, M frozen at base (Gauss-Newton). 5–10× faster.
+                GradientCentralLin,     ///< Default: central FD on δ only, M frozen at base (Gauss-Newton). 5–10× faster; exact at the minimum.
                 GradientOneSidedLin,    ///< One-sided FD on δ only, M frozen at base. 10–20× faster.
             };
 
@@ -173,6 +173,14 @@ namespace PROfit {
                 return ub;
             }
 
+            /** @brief True if a fit-region (active-bin) mask was snapshotted from the config. */
+            bool hasActiveBinMask() const { return !active_bins.empty(); }
+
+            /** @brief True if collapsed bin @p i (fitting variable) is in the fit region. Always true without a mask. */
+            bool binActive(Eigen::Index i) const {
+                return active_bins.empty() || (i >= 0 && (size_t)i < active_bins.size() && active_bins[(size_t)i] != 0);
+            }
+
             /** @brief Return the total number of times operator() has been called since last reset. */
             size_t getCallCount() const { return call_count; }
             /** @brief Reset the call counter to zero. */
@@ -241,7 +249,31 @@ namespace PROfit {
 
         protected:
             mutable std::atomic<size_t> call_count{0}; ///< Thread-safe counter of operator() invocations.
-            GradientMode gradient_mode = GradientCentralFull; ///< Default mirrors current behaviour.
+            GradientMode gradient_mode = GradientCentralLin; ///< Default: Gauss-Newton linearised gradient (M frozen at base). Use --grad-mode central-full for the legacy full-FD behaviour.
+
+            /** @brief Snapshot of PROconfig's fit-region mask for the fitting variable
+             *  (collapsed space); empty = no mask, all bins active. Taken at construction
+             *  in every concrete metric — Clone() re-runs the constructor with the same
+             *  config, and FC/AFC workers construct fresh metrics from the same config,
+             *  so the mask propagates everywhere without per-call-site plumbing.
+             *  NOTE: like lb/ub/is_fixed, this does NOT survive a raw copy-construction
+             *  (PROmetric's copy ctor is a no-op); always use Clone(). */
+            std::vector<char> active_bins;
+
+            /** @brief Fill active_bins from the config's mask for its primary fitting variable.
+             *  Call from every concrete metric constructor. */
+            void snapshotActiveBins(const PROconfig &c) {
+                active_bins.clear();
+                if(!c.HasActiveBins(c.i_prime)) return;
+                const size_t n = c.m_num_variable_bins_total_collapsed[c.i_prime];
+                active_bins.resize(n);
+                size_t n_active = 0;
+                for(size_t i = 0; i < n; ++i) {
+                    active_bins[i] = c.IsBinActive(c.i_prime, i) ? 1 : 0;
+                    n_active += active_bins[i];
+                }
+                log<LOG_INFO>(L"%1% || Metric fit region: %2% of %3% collapsed bins active.") % __func__ % n_active % n;
+            }
 
     };
 

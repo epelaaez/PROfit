@@ -134,11 +134,11 @@ namespace PROfit{
       bool GetReweight() const {return hist_reweight;}
 
        int GetModelRule() const{
-	return model_rule;
+        return model_rule;
       };
 
       int GetIncludeSystematics() const{
-	return include_systematics;
+        return include_systematics;
       };
 
 
@@ -237,13 +237,6 @@ namespace PROfit{
     class PROconfig {
         private:
 
-            //indicator of whether each channel/detector/subchannel is used
-            std::vector<bool> m_mode_bool;
-            std::vector<bool> m_detector_bool;
-            std::vector<bool> m_channel_bool;
-            std::vector<std::vector<bool>>  m_subchannel_bool;
-
-
             //map from subchannel name/index to global index and channel index
             std::unordered_map<std::string, size_t> m_map_fullname_subchannel_index;
             std::vector<size_t> m_vec_subchannel_index; //vector of global subchannel index, in increasing order
@@ -255,7 +248,8 @@ namespace PROfit{
             /* Function: construct a matrix T, which will be used to collapse matrix and vectors */
             void construct_variable_collapsing_matrices();
 
-            /* Function: remove any mode/detector/channel/subchannels in the configuration xml that are not used from consideration
+            /* Function: finalize mode/detector/channel/subchannel counts and build the list of
+             * subchannel fullnames. (The old `use="false"` disable mechanism has been removed.)
             */
             void remove_unused_channel();
 
@@ -359,10 +353,12 @@ namespace PROfit{
             std::vector<std::string> m_detector_names; 		
             std::vector<std::string> m_detector_plotnames; 		
 
-            std::vector<std::string> m_channel_names; 		
-            std::vector<std::string> m_channel_plotnames; 		
-            std::vector<std::string> m_channel_units; 		
+            std::vector<std::string> m_channel_names;
+            std::vector<std::string> m_channel_plotnames;
+            std::vector<std::string> m_channel_xaxis_labels;
+            std::vector<std::string> m_channel_units;
 
+            std::vector<std::vector<std::string>> m_channel_variable_xaxis_labels;
             std::vector<std::vector<std::string>> m_channel_variable_units;
             std::vector<std::vector<int>> m_channel_variable_dims;
 
@@ -380,6 +376,16 @@ namespace PROfit{
 
             std::vector<std::vector<std::pair<float,float>>> m_variable_bin_to_edges;
 
+            /** @brief Runtime-only fit region in COLLAPSED bin space, one mask per variable.
+             *  @details Empty outer/inner vector = no mask = every bin active. Set via
+             *  SetActiveBins() BEFORE any PROmetric is constructed: metrics snapshot the
+             *  mask in their constructors, so later changes are not seen by existing
+             *  metrics (by design — the mask is read-only during fitting and may be read
+             *  concurrently by FC/MCMC worker threads). Deliberately NOT hashed and NOT
+             *  serialized: it is per-run analysis state (PROjector, future bin-off
+             *  studies), not part of the analysis definition. */
+            std::vector<std::vector<char>> m_variable_active_bins_collapsed;
+
             std::vector<Eigen::MatrixXf> variable_collapsing_matrices;
             // Sparse companions to variable_collapsing_matrices (one nonzero per row).
             // Used by CollapseMatrix in the chi^2 inner loop; built once in construct_variable_collapsing_matrices.
@@ -393,6 +399,7 @@ namespace PROfit{
             int m_num_variation_type_covariance = 0;
             int m_num_variation_type_covariance_to_spline = 0;
             int m_num_variation_type_external_covariance = 0;
+            int m_num_variation_type_external_covariance_to_spline = 0;
             int m_num_variation_type_spline = 0;
             int m_num_variation_type_spline_to_covariance = 0;
             int m_num_variation_type_flat = 0;
@@ -444,7 +451,9 @@ namespace PROfit{
             std::map<std::string, std::vector<int>> m_mcgen_variation_include_only_weights; //map of systematics with include_only_weights (1-based indices of which weights to include in spline universes)
             std::map<std::string, std::pair<float,float>> m_mcgen_variation_restrict; //map of systematics with restrict="lo, hi" (clamp knob value during evaluation and fitting)
             std::map<std::string, float> m_mcgen_variation_scale; //map of systematics with scale factor to apply to weights (e.g., 0.001 for weights stored as x1000)
+            std::map<std::string, float> m_mcgen_variation_inflate; //map of systematics with inflate factor: spline shifts are scaled about 1 (ratio -> 1 + inflate*(ratio-1)) before interpolation; covariance matrices are scaled by inflate^2
             std::map<std::string, int> m_mcgen_variation_num_decomp_knobs; //map of covariance_to_spline systematics to the number of eigenpairs to keep (-1 or missing = keep all)
+            std::map<std::string, bool> m_mcgen_variation_include_resid_cov; //map of covariance_to_spline systematics to whether the un-kept eigenpairs are retained as a residual covariance (missing = true)
       
             //FIX skepic
             std::vector<std::string> systematic_name;
@@ -456,6 +465,11 @@ namespace PROfit{
             std::vector<int> m_model_parameter_index;
             std::vector<std::string> m_model_parameter_names;
             std::map<std::string,int> m_model_parameter_map;
+            /// Optional per-model-parameter min/max bounds, read from the <parameter> tag's
+            /// "min"/"max" attributes. Used by normalization-style models (e.g. template_fit)
+            /// where each <parameter> names a subchannel and min/max are its scale bounds.
+            std::vector<float> m_model_parameter_min;
+            std::vector<float> m_model_parameter_max;
 
             bool m_bool_rate_only;
             //----- PUBLIC FUNCTIONS ------
@@ -515,6 +529,44 @@ namespace PROfit{
 
             /* Function: given channel index, return list of bin edges for this channel */
             const Binning& GetChannelVariableBins(size_t channel_index, size_t other_index) const;
+
+            /* Function: build the X-axis title for a channel as "label [unit]",
+             * omitting either part if empty. For 2D variables, the legacy
+             * combined "xtitle;ytitle" string in m_channel_variable_units is
+             * returned as-is.
+             */
+            std::string GetChannelXAxisTitle(size_t channel_index) const;
+            std::string GetChannelXAxisTitle(size_t channel_index, size_t other_index) const;
+
+            /**
+             * @brief Install a runtime fit-region mask over the collapsed bins of one variable.
+             * @details Fatal error if the mask size does not match the variable's collapsed bin
+             * count or if every bin is inactive. Must be called before metric construction to
+             * take effect (metrics snapshot the mask in their constructors).
+             * @param var_index  Variable (binning) index.
+             * @param mask       One entry per collapsed bin; nonzero = active (included in fits).
+             */
+            void SetActiveBins(size_t var_index, const std::vector<char> &mask);
+
+            /** @brief Remove all runtime fit-region masks (every bin active again). */
+            void ClearActiveBins();
+
+            /** @brief True if a fit-region mask has been installed for this variable. */
+            bool HasActiveBins(size_t var_index) const;
+
+            /** @brief True if the collapsed bin is in the fit region (always true when no mask is set). */
+            bool IsBinActive(size_t var_index, size_t collapsed_bin) const;
+
+            /** @brief Number of active collapsed bins for this variable (= total bins when no mask is set). Use for dof counting. */
+            size_t NActiveBins(size_t var_index) const;
+
+            /* Function: return the unit string for a channel's variable
+             * (e.g. "MeV"), preferring the per-variable <bins unit="..."> entry
+             * and falling back to the channel-level <channel unit="..."> entry.
+             * Returns "" if neither is set, or for 2D variables (whose units
+             * field stores the legacy combined "xtitle;ytitle" string).
+             */
+            std::string GetChannelUnit(size_t channel_index, size_t other_index) const;
 
             /* Function: Hex to int*/
             int HexToROOTColor(const std::string& hexColor) const;

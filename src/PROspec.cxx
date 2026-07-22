@@ -33,6 +33,10 @@ PROspec PROspec::PoissonVariation(const PROspec &s, uint32_t seed) {
         }
     }
 
+    // A thrown spectrum is unit-weight counts: its stat error is sqrt(N), not
+    // the N that Fill's sum-of-weights-squared gives for a single N-weight fill.
+    newSpec.error = newSpec.spec.array().sqrt();
+
     return newSpec;
 }
 
@@ -78,7 +82,7 @@ TH1D PROspec::toTH1D_Collapsed(const PROconfig &inconfig, int channel_index, siz
     int nbins_dim = inconfig.m_channel_variable_bins[channel_index][var_index].NBinsAlong(dim);
     std::vector<float> bin_edges = inconfig.m_channel_variable_bins[channel_index][var_index].Edges(dim);
     std::string hist_name = inconfig.m_channel_names[channel_index];
-    std::string xaxis_title = inconfig.m_channel_units[channel_index];
+    std::string xaxis_title = inconfig.GetChannelXAxisTitle(channel_index);
 
     Eigen::VectorXf coll_spec = CollapseMatrix(inconfig,spec)(Eigen::seqN(global_bin_start, nbins_tot));
     //Eigen::VectorXf coll_error = CollapseMatrix(inconfig,error);
@@ -105,10 +109,11 @@ TH1D PROspec::toTH1DSlices(PROconfig const & inconfig, int subchannel_index, int
     int nbins_dim = inconfig.m_channel_variable_bins[channel_index][other_index].NBinsAlong(dim);
     std::vector<float> bin_edges = inconfig.m_channel_variable_bins[channel_index][other_index].Edges(dim);
     std::string hist_name = inconfig.m_fullnames[subchannel_index];
-    std::string xaxis_title =  inconfig.m_channel_variable_units[channel_index][other_index];
+    std::string xaxis_title =  inconfig.GetChannelXAxisTitle(channel_index, other_index);
 
     //fill 1D hist
-    TH1D hSpec((hist_name+std::to_string(other_index)+std::to_string(dim)+std::to_string(subchannel_index)).c_str(),hist_name.c_str(), nbins_dim, &bin_edges[0]); 
+    TH1D hSpec((hist_name+std::to_string(other_index)+std::to_string(dim)+std::to_string(subchannel_index)).c_str(),hist_name.c_str(), nbins_dim, &bin_edges[0]);
+    hSpec.SetDirectory(nullptr);  // detach from gDirectory; multiple calls reuse names and would otherwise warn.
     hSpec.GetXaxis()->SetTitle(xaxis_title.c_str());
 
     if(inconfig.m_channel_variable_dims[channel_index][other_index] == 2){
@@ -133,7 +138,7 @@ TH1D PROspec::toTH1D(PROconfig const & inconfig, int subchannel_index, int other
     int nbins_dim = inconfig.m_channel_variable_bins[channel_index][other_index].NBinsAlong(dim);
     std::vector<float> bin_edges = inconfig.m_channel_variable_bins[channel_index][other_index].Edges(dim);
     std::string hist_name = inconfig.m_fullnames[subchannel_index];
-    std::string xaxis_title =  inconfig.m_channel_variable_units[channel_index][other_index];
+    std::string xaxis_title =  inconfig.GetChannelXAxisTitle(channel_index, other_index);
 
 
     // project along input dimension
@@ -141,7 +146,8 @@ TH1D PROspec::toTH1D(PROconfig const & inconfig, int subchannel_index, int other
     Eigen::VectorXf error_proj = inconfig.m_channel_variable_bins[channel_index][other_index].ProjectSpectraErrors(error(Eigen::seqN(global_bin_start, nbins_tot)), dim);
 
     //fill 1D hist
-    TH1D hSpec((hist_name+std::to_string(other_index)+std::to_string(dim)+std::to_string(subchannel_index)).c_str(),hist_name.c_str(), nbins_dim, &bin_edges[0]); 
+    TH1D hSpec((hist_name+std::to_string(other_index)+std::to_string(dim)+std::to_string(subchannel_index)).c_str(),hist_name.c_str(), nbins_dim, &bin_edges[0]);
+    hSpec.SetDirectory(nullptr);  // detach from gDirectory; multiple calls reuse names and would otherwise warn.
     hSpec.GetXaxis()->SetTitle(xaxis_title.c_str());
 
     for(int i = 1; i <= nbins_dim; ++i){
@@ -159,7 +165,7 @@ TH2D PROspec::toTH2D(PROconfig const & inconfig, int subchannel_index, int other
     //set up hist specs
     std::vector<float> bin_edges = inconfig.m_channel_variable_bins[channel_index][other_index].Edges(dim);
     std::string hist_name = inconfig.m_fullnames[subchannel_index];
-    std::string xaxis_title =  inconfig.m_channel_variable_units[channel_index][other_index];
+    std::string xaxis_title =  inconfig.GetChannelXAxisTitle(channel_index, other_index);
 
     // 2D binning info
     size_t channel_nbins_x = inconfig.m_channel_variable_bins[channel_index][other_index].NBinsAlong(0);
@@ -171,6 +177,7 @@ TH2D PROspec::toTH2D(PROconfig const & inconfig, int subchannel_index, int other
     Eigen::VectorXf spec_2d = spec(Eigen::seqN(global_bin_start, nbins_tot));
 
     TH2D hSpec(hist_name.c_str(),hist_name.c_str(), channel_nbins_x, edges_x.data(), channel_nbins_y, edges_y.data());
+    hSpec.SetDirectory(nullptr);  // detach from gDirectory; multiple calls reuse names and would otherwise warn.
     hSpec.GetXaxis()->SetTitle(xaxis_title.c_str());
 
     for(int xbin = 0; xbin < (int)channel_nbins_x; xbin++){
@@ -212,7 +219,7 @@ void PROspec::toROOT(const PROconfig& inconfig, const std::string& output_name){
 
 bool PROspec::SameDim(const PROspec& a, const PROspec& b){
     if(a.nbins != b.nbins){
-        log<LOG_ERROR>(L"%1% || Two spectra have different bins: %2 vs. %3") % __func__ % a.nbins % b.nbins;
+        log<LOG_ERROR>(L"%1% || Two spectra have different bins: %2% vs. %3%") % __func__ % a.nbins % b.nbins;
         return false;
     }
     return true;
@@ -434,7 +441,7 @@ void PROspec::plotSpectrum(const PROconfig& inconfig, const std::string& output_
 
                 if(collapsed) {
                     hists.back()->SetTitle((inconfig.m_mode_names[im]  +" "+ inconfig.m_detector_names[id]+" "+ inconfig.m_channel_names[ic]).c_str());
-                    hists.back()->GetXaxis()->SetTitle(inconfig.m_channel_units[ic].c_str());
+                    hists.back()->GetXaxis()->SetTitle(inconfig.GetChannelXAxisTitle(ic).c_str());
                     hists.back()->GetYaxis()->SetTitle("Events");
                     hists.back()->Draw("hist");
                 } else {
@@ -444,8 +451,15 @@ void PROspec::plotSpectrum(const PROconfig& inconfig, const std::string& output_
                     legs.back()->Draw();
 
                     stacks.back()->SetTitle((inconfig.m_mode_names[im]  +" "+ inconfig.m_detector_names[id]+" "+ inconfig.m_channel_names[ic]).c_str());
-                    stacks.back()->GetXaxis()->SetTitle(inconfig.m_channel_units[ic].c_str());
-                    stacks.back()->GetYaxis()->SetTitle("Events/GeV");
+                    stacks.back()->GetXaxis()->SetTitle(inconfig.GetChannelXAxisTitle(ic).c_str());
+                    std::string chan_unit = inconfig.GetChannelUnit(ic, inconfig.i_prime);
+                    std::string ytitle;
+                    if(chan_unit.empty()) {
+                        ytitle = "Events/unit";
+                    } else {
+                        ytitle = "Events/" + chan_unit;
+                    }
+                    stacks.back()->GetYaxis()->SetTitle(ytitle.c_str());
                 }
 
                 ++global_channel_index;

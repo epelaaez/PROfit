@@ -168,7 +168,29 @@ namespace PROfit {
                 }
             }
 
-            void finish_all() {
+            /// @brief Force a single bar to 100% (current = total).  Safe to call from any thread.
+            ///        Used to land bars cleanly at completion regardless of how many increments were issued.
+            void complete_bar(int bar_index) {
+                if (bar_index >= 0 && bar_index < num_bars) {
+                    bars[bar_index].finish();
+                    needs_refresh = true;
+                }
+            }
+
+            /// @brief Force every bar to 100%.  Called by finish_all() so the display ends cleanly.
+            void complete_all() {
+                for (auto& b : bars) b.finish();
+                needs_refresh = true;
+            }
+
+            /// @brief Stop the refresh thread.  By default rounds all bars up to 100% first so the
+            ///        terminal ends in a tidy state.  Pass round_up = false to preserve the
+            ///        partial-progress display verbatim.
+            void finish_all(bool round_up = true) {
+                if (round_up) {
+                    complete_all();
+                    refresh_display();   // make sure the 100% state is actually drawn before we stop
+                }
                 should_stop = true;
                 if (refresh_thread.joinable()) {
                     refresh_thread.join();
