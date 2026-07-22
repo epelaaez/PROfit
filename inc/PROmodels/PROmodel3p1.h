@@ -11,7 +11,8 @@
  *   - PRO3p1_3A          — variant 3A: (dmsq, sin^2 2theta_ee, sin^2 theta_24).
  *   - PRO3p1_3B          — variant 3B: (dmsq, sin^2 2theta_mumu, sB).
  *   - PRO3p1_3C          — variant 3C: (dmsq, sin^2 2theta_mue, xi).
- *   - PRO3p1_decay_invis — 3+1 with invisible decay: (dmsq, |U_e4|^2, |U_mu4|^2, g^2).
+ * The decay variants live in their own files: inc/PROmodels/PROmodel3p1decayinvis.h
+ * (invisible decay) and inc/PROmodels/PROmodel3p1decayvis.h (visible decay).
  */
 #ifndef PROMODEL3P1_H
 #define PROMODEL3P1_H
@@ -201,36 +202,6 @@ public:
     float Pmumu(float dmsq, float sinsq2thmue, float xi, float le) const;
 
     float Pee(float dmsq, float sinsq2thmue, float xi, float le) const;
-
-    Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<std::vector<float>> &var_arrs) const override;
-};
-
-/**
- * @brief 3+1 sterile-neutrino model with invisible decay of the heavy mass eigenstate.
- * @details Extends the standard 3+1 picture by allowing the fourth mass eigenstate to decay into
- * invisible (non-interacting) particles with coupling strength g^2.  The oscillation probability
- * is modified by an exponential damping factor exp(-g^2 * Delta / (8 pi)) where
- * Delta = 1.267 * dmsq * L/E.  See arxiv:2204.00612 (IceCube) and PRD 110, 075002 for derivation.
- * Parameters: dmsq [log10], |U_e4|^2 [log10], |U_mu4|^2 [log10], g^2 [linear, >= 0].
- * A combined unitarity + positivity constraint is enforced via model_constraint.
- */
-class PRO3p1_decay_invis : public PROmodel {
-public:
-    /**
-     * @brief Construct the PRO3p1_decay_invis model.
-     * @param prop          MC event store; used to build H_combined.
-     * @param parameter_map Map from physics variable name (e.g., "L/E") to variable index in PROpeller.
-     *                      Must contain the key "L/E".
-     */
-    PRO3p1_decay_invis(const PROpeller &prop, const std::map<std::string,int> &parameter_map);
-
-    int UnitarityConstraint(const Eigen::VectorXf &v);
-
-    float Pmue(float dmsq, float Ue4sq, float Um4sq, float g2, float le) const;
-
-    float Pmumu(float dmsq, float Ue4sq, float Um4sq, float g2, float le) const;
-
-    float Pee(float dmsq, float Ue4sq, float Um4sq, float g2, float le) const;
 
     Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<std::vector<float>> &var_arrs) const override;
 };

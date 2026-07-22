@@ -13,7 +13,8 @@
  * (exception: NullModel, used directly by bin/PROfit.cxx):
  *   - inc/PROmodels/PROmodelSimple.h — NullModel, PROtemplate (non-oscillation).
  *   - inc/PROmodels/PROmodel2flav.h  — PROnumudis, PROnumudisTEST, PROnueapp, PROnuedis.
- *   - inc/PROmodels/PROmodel3p1.h    — PRO3p1 and variants (_angles, _3A, _3B, _3C, _decay_invis).
+ *   - inc/PROmodels/PROmodel3p1.h    — PRO3p1 and variants (_angles, _3A, _3B, _3C).
+ *   - inc/PROmodels/PROmodel3p1decayinvis.h — PRO3p1_decay_invis (3+1 with invisible decay).
  *   - inc/PROmodels/PROmodel3p1decayvis.h — PRO3p1_decay_vis_model1/2 (3+1 with visible decay).
  *   - inc/PROmodels/PROmodel3p2.h    — PRO3p2.
  *   - inc/PROmodels/PROmodelLBL.h    — PROLBL (NuFastLBL three-flavour matter oscillations).

@@ -7,6 +7,7 @@
 #include "PROmodels/PROmodelSimple.h"
 #include "PROmodels/PROmodel2flav.h"
 #include "PROmodels/PROmodel3p1.h"
+#include "PROmodels/PROmodel3p1decayinvis.h"
 #include "PROmodels/PROmodel3p1decayvis.h"
 #include "PROmodels/PROmodel3p2.h"
 #include "PROmodels/PROmodelLBL.h"
