@@ -532,7 +532,8 @@ namespace PROfit{
 
             /* Function: build the X-axis title for a channel as "label [unit]",
              * omitting either part if empty. For 2D variables, the combined
-             */ "xtitle;ytitle" is split and the first part is returned.
+             * "xtitle;ytitle" is split and the first part is returned.
+            */
             std::string GetChannelXAxisTitle(size_t channel_index) const;
             std::string GetChannelXAxisTitle(size_t channel_index, size_t other_index) const;
             std::string GetChannelAxisTitle(size_t channel_index, size_t other_index, size_t dim) const;
