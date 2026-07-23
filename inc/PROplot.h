@@ -162,6 +162,21 @@ namespace PROfit{
     void set_matrix_palette();
 
     /**
+     * @brief Plot the spectrum of the ratio between each pair of detectors, one page per channel.
+     * @param c                Canvas printing into an already-open multipage PDF.
+     * @param config           Analysis configuration.
+     * @param cv_coll          Collapsed CV prediction.
+     * @param bf_coll          Optional collapsed best-fit prediction.
+     * @param data_coll        Optional collapsed data spectrum.
+     * @param errband          Optional pre-fit error band, whose covariance propagates the inter-detector correlation.
+     * @param posterrband      Optional post-fit error band, used with bf_coll.
+     * @param channel_offsets  Collapsed bin start of each mode/detector/channel, in loop order.
+     * @param filename         Output PDF filename.
+     * @param other_index      Variable index (default 0).
+     */
+    void plot_detector_ratio_spectra(TCanvas &c, const PROconfig &config, const Eigen::VectorXf &cv_coll, const std::optional<Eigen::VectorXf> &bf_coll, const std::optional<Eigen::VectorXf> &data_coll, const std::optional<PROerrorbar> &errband, const std::optional<PROerrorbar> &posterrband, const std::vector<size_t> &channel_offsets, const std::string &filename, int other_index = 0);
+
+    /**
      * @brief Produce a multi-panel detector ratio comparison plot.
      * @param config       Analysis configuration.
      * @param data_hists   Data histograms, one per channel.

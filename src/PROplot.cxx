@@ -968,6 +968,152 @@ namespace PROfit{
         log<LOG_DEBUG>(L"%1% || Finishing Plotting 1D Histogram %2%") % __func__ % hist_titles.c_str();
     }
 
+    // Ratio of the same channel between two detectors, drawn as a spectrum.
+    // Uses the error-band covariance rather than TH1::Divide so the correlation
+    // between detectors is propagated. For 2D channels the y-axis is summed,
+    // matching the projection used for the 1D pages.
+    void plot_detector_ratio_spectra(TCanvas &c,
+                                     const PROconfig &config,
+                                     const Eigen::VectorXf &cv_coll,
+                                     const std::optional<Eigen::VectorXf> &bf_coll,
+                                     const std::optional<Eigen::VectorXf> &data_coll,
+                                     const std::optional<PROerrorbar> &errband,
+                                     const std::optional<PROerrorbar> &posterrband,
+                                     const std::vector<size_t> &channel_offsets,
+                                     const std::string &filename,
+                                     int other_index)
+    {
+        if(config.m_num_detectors < 2) return;
+
+        // Deliberately empty: --plot-bounds ymax etc. refer to event counts, not ratios.
+        PlotBounds ratio_bounds;
+
+        auto sum_vec = [](const Eigen::VectorXf &v, size_t off, size_t bx, size_t ny) {
+            float s = 0.0f;
+            for(size_t by = 0; by < ny; ++by) s += v(off + bx*ny + by);
+            return s;
+        };
+        auto sum_block = [](const Eigen::MatrixXf &m, size_t offr, size_t offc, size_t bx, size_t ny) {
+            float s = 0.0f;
+            for(size_t i = 0; i < ny; ++i)
+                for(size_t j = 0; j < ny; ++j)
+                    s += m(offr + bx*ny + i, offc + bx*ny + j);
+            return s;
+        };
+
+        for(size_t mode = 0; mode < config.m_num_modes; ++mode) {
+        for(size_t det1 = 0; det1 < config.m_num_detectors; ++det1) {
+        for(size_t det2 = det1 + 1; det2 < config.m_num_detectors; ++det2) {
+        for(size_t ch = 0; ch < config.m_num_channels; ++ch) {
+
+            const size_t gidx1 = (mode*config.m_num_detectors + det1)*config.m_num_channels + ch;
+            const size_t gidx2 = (mode*config.m_num_detectors + det2)*config.m_num_channels + ch;
+            if(gidx1 >= channel_offsets.size() || gidx2 >= channel_offsets.size()) continue;
+            const size_t off1 = channel_offsets[gidx1];
+            const size_t off2 = channel_offsets[gidx2];
+
+            const size_t nx = config.m_channel_variable_bins[ch][other_index].NBinsAlong(0);
+            const size_t ny = config.m_channel_variable_dims[ch][other_index] == 2
+                            ? config.m_channel_variable_bins[ch][other_index].NBinsAlong(1) : 1;
+            std::vector<float> edges = config.m_channel_variable_bins[ch][other_index].Edges(0);
+
+            const std::string ratname = config.m_detector_plotnames[det1] + " / " + config.m_detector_plotnames[det2];
+            const std::string xtitle   = config.GetChannelXAxisTitle(ch, other_index);
+            const std::string title    = config.m_mode_plotnames[mode] + " " + config.m_channel_plotnames[ch]
+                                       + ";" + xtitle + ";" + ratname;
+            const std::string sfx = "_ratspec_" + std::to_string(mode) + "_" + std::to_string(det1)
+                                  + "_" + std::to_string(det2) + "_" + std::to_string(ch);
+
+            std::unique_ptr<TH1D> cv_rat = std::make_unique<TH1D>(("cvrat"+sfx).c_str(), title.c_str(), nx, edges.data());
+            cv_rat->SetDirectory(nullptr);
+            cv_rat->SetLineWidth(2);
+
+            std::unique_ptr<TH1D> bf_rat, data_rat;
+            if(bf_coll) {
+                bf_rat = std::make_unique<TH1D>(("bfrat"+sfx).c_str(), title.c_str(), nx, edges.data());
+                bf_rat->SetDirectory(nullptr);
+            }
+            if(data_coll) {
+                data_rat = std::make_unique<TH1D>(("datrat"+sfx).c_str(), title.c_str(), nx, edges.data());
+                data_rat->SetDirectory(nullptr);
+                data_rat->SetLineColor(kBlack);
+                data_rat->SetLineWidth(2);
+                data_rat->SetMarkerStyle(kFullCircle);
+                data_rat->SetMarkerColor(kBlack);
+                data_rat->SetMarkerSize(1);
+            }
+
+            std::vector<float> rel_err(nx, 0.0f), post_rel_err(nx, 0.0f);
+
+            for(size_t bx = 0; bx < nx; ++bx) {
+                const float a = sum_vec(cv_coll, off1, bx, ny);
+                const float b = sum_vec(cv_coll, off2, bx, ny);
+                const float r = (b != 0.0f) ? a/b : 0.0f;
+                cv_rat->SetBinContent(bx+1, r);
+
+                if(errband && a != 0.0f && b != 0.0f) {
+                    const Eigen::MatrixXf &C = errband->covariance;
+                    const float caa = sum_block(C, off1, off1, bx, ny);
+                    const float cbb = sum_block(C, off2, off2, bx, ny);
+                    const float cab = sum_block(C, off1, off2, bx, ny);
+                    // clamp: the cancellation can go slightly negative in float
+                    const float relvar = std::max(0.0f, caa/(a*a) + cbb/(b*b) - 2.0f*cab/(a*b));
+                    rel_err[bx] = std::sqrt(relvar);
+                    cv_rat->SetBinError(bx+1, r*rel_err[bx]);
+                }
+
+                if(bf_coll) {
+                    const float ba = sum_vec(*bf_coll, off1, bx, ny);
+                    const float bb = sum_vec(*bf_coll, off2, bx, ny);
+                    const float br = (bb != 0.0f) ? ba/bb : 0.0f;
+                    bf_rat->SetBinContent(bx+1, br);
+                    if(posterrband && ba != 0.0f && bb != 0.0f) {
+                        const Eigen::MatrixXf &C = posterrband->covariance;
+                        const float caa = sum_block(C, off1, off1, bx, ny);
+                        const float cbb = sum_block(C, off2, off2, bx, ny);
+                        const float cab = sum_block(C, off1, off2, bx, ny);
+                        const float relvar = std::max(0.0f, caa/(ba*ba) + cbb/(bb*bb) - 2.0f*cab/(ba*bb));
+                        post_rel_err[bx] = std::sqrt(relvar);
+                        bf_rat->SetBinError(bx+1, br*post_rel_err[bx]);
+                    }
+                }
+
+                if(data_coll) {
+                    const float da = sum_vec(*data_coll, off1, bx, ny);
+                    const float db = sum_vec(*data_coll, off2, bx, ny);
+                    const float dr = (db != 0.0f) ? da/db : 0.0f;
+                    data_rat->SetBinContent(bx+1, dr);
+                    // data detectors are statistically independent
+                    const float dvar = (da > 0.0f && db > 0.0f) ? (1.0f/da + 1.0f/db) : 0.0f;
+                    data_rat->SetBinError(bx+1, dr*std::sqrt(dvar));
+                }
+            }
+
+            std::unique_ptr<TGraphAsymmErrors> band, post_band;
+            if(errband) {
+                band = std::make_unique<TGraphAsymmErrors>(cv_rat.get());
+                for(size_t bx = 0; bx < nx; ++bx) {
+                    const float e = cv_rat->GetBinContent(bx+1)*rel_err[bx];
+                    band->SetPointEYhigh(bx, e);
+                    band->SetPointEYlow(bx, e);
+                }
+            }
+            if(bf_coll && posterrband) {
+                post_band = std::make_unique<TGraphAsymmErrors>(bf_rat.get());
+                for(size_t bx = 0; bx < nx; ++bx) {
+                    const float e = bf_rat->GetBinContent(bx+1)*post_rel_err[bx];
+                    post_band->SetPointEYhigh(bx, e);
+                    post_band->SetPointEYlow(bx, e);
+                }
+            }
+
+            std::string dat_str = "Data";
+            plot_hist1ds(&c, cv_rat.get(), band.get(), nullptr, nullptr,
+                         bf_rat.get(), post_band.get(), data_rat.get(), &dat_str,
+                         PlotOptions{}, title, "", filename, ratio_bounds, nullptr);
+        }}}}
+    }
+    
     void plot_channels(const std::string &filename, const PROconfig &config, std::optional<PROspec> cv, std::optional<PROspec> best_fit, std::optional<PROdata> data, std::optional<PROerrorbar> errband, std::optional<PROerrorbar> posterrband, std::vector<TPaveText> &texts, PlotBounds &bounds, PlotOptions opt, int other_index, bool ratio_bool) {
 
         log<LOG_DEBUG>(L"%1% || Starting plot_channels") % __func__;
@@ -983,6 +1129,7 @@ namespace PROfit{
         std::vector<TH1D> data_hists;
         std::vector<TH1D> cv_hists;
         std::vector<TH1D> bf_hists;
+        std::vector<size_t> channel_offsets;   // collapsed bin start of each mode/det/channel
 
         size_t global_subchannel_index = 0;
         size_t global_subchannel_index_2d = 0;
@@ -1004,6 +1151,7 @@ namespace PROfit{
                 for(size_t channel = 0; channel < config.m_num_channels; ++channel) {
 
                     log<LOG_DEBUG>(L"%1% || channel %2%") % __func__ % channel;
+                    channel_offsets.push_back(tot_offset);
 
                     std::string xtitle = config.GetChannelXAxisTitle(channel, other_index);
                     std::string ratio_titles = ";"+xtitle+";"+rat_y_title;
@@ -1296,6 +1444,16 @@ namespace PROfit{
                 }
             }
         }
+        
+        if(config.m_num_detectors > 1 && cv) {
+            Eigen::VectorXf cv_coll = CollapseMatrix(config, cv->Spec(), other_index);
+            std::optional<Eigen::VectorXf> bf_coll, data_coll;
+            if(best_fit) bf_coll = CollapseMatrix(config, best_fit->Spec(), other_index);
+            if(data)     data_coll = data->Spec();
+            plot_detector_ratio_spectra(c, config, cv_coll, bf_coll, data_coll,
+                                        errband, posterrband, channel_offsets, filename, other_index);
+        }
+
         c.Print((filename+"]").c_str());
 
         log<LOG_DEBUG>(L"%1% || ratio_bool: %2%") % __func__ % ratio_bool;
