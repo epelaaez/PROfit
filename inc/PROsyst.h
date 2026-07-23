@@ -189,6 +189,9 @@ namespace PROfit {
              */
             void CreateFlatMatrix(const PROconfig& config, const SystStruct& syst);
 
+            /* Function: Build a fully correlated fractional covariance over the selected bins. */
+            void CreateNormMatrix(const PROconfig& config, const SystStruct& syst);
+
             /* Function: Given a SystStruct, load an external fractinal covariance matrix, and calculate correlation matrix, and add matrices to covmat_map and corrtmat_map
              */
             void LoadExternalCovarianceMatrix(const PROconfig& config, const SystStruct& syst);
