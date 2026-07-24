@@ -95,13 +95,13 @@ namespace PROfit {
         size_t MCMCiter = 20'000;  ///< Number of MCMC iterations (after burn-in) for posterior sampling.
         size_t MCMCburn = 25'000;  ///< Number of MCMC burn-in iterations discarded before sampling.
 
-        size_t harmonic_min_num_seeds = 2;               ///< Minimum number of seed points from the harmonic frequency search.
-        size_t harmonic_max_num_seeds = 4;               ///< Maximum number of seed points from the harmonic frequency search.
-        size_t harmonic_num_test_points = 125;           ///< Number of test points in physics-parameter frequency space.
-        size_t harmonic_raw_max_tests = 60;              ///< Maximum iterations to find significant minima in the harmonic scan.
+        size_t harmonic_min_num_seeds = 3;               ///< Minimum number of seed points from the harmonic frequency search.
+        size_t harmonic_max_num_seeds = 5;               ///< Maximum number of seed points from the harmonic frequency search.
+        size_t harmonic_num_test_points = 150;           ///< Number of test points in physics-parameter frequency space 125.
+        size_t harmonic_raw_max_tests = 65;              ///< Maximum iterations to find significant minima in the harmonic scan 65
         float harmonic_prominence_threshold = 0.5;       ///< Peak prominence threshold for peak selection in the harmonic scan.
         float harmonic_prominence_threshold_shift = 0.2; ///< Shift applied to the prominence threshold between harmonic search rounds.
-        float harmonic_min_spacing_log = 0.025;          ///< Minimum log-space separation between selected harmonic seed peaks.
+        float harmonic_min_spacing_log = 0.0225;         ///< Minimum log-space separation between selected harmonic seed peaks 0.0225
         float harmonic_prominence_threshold_minimum = 1e-5; ///< Absolute minimum prominence threshold (floor).
         float harmonic_seed_norm_tolerance = 1e-4;       ///< Tolerance for seed-point norm convergence in the harmonic search.
         float harmonic_seed_chi_tolerence = 1e-6;        ///< Tolerance for chi-squared convergence in the harmonic seed search.

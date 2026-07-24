@@ -761,7 +761,7 @@ int main(int argc, char* argv[])
                 const std::string& varName = config.m_detvar_files[idv].name;
 
                 if(config.m_mcgen_variation_type_map.count(varName) == 0) {
-                    log<LOG_INFO>(L"%1% || Skipping DetVar '%2%' — no matching entry in <systematics> section.") % __func__ % varName.c_str();
+                    log<LOG_INFO>(L"%1% || Skipping DetVar '%2%' -- no matching entry in <systematics> section.") % __func__ % varName.c_str();
                     continue;
                 }
                 std::map<int, size_t> syst_files;
@@ -3385,6 +3385,7 @@ GlobalFitResult do_a_fit(const PROconfig &config, const PROpeller &prop, const P
     Eigen::VectorXf best_fit = res.fitter.best_fit;
     if((opt & GlobalFitOptions::FreqSeedPts) != GlobalFitOptions::Default) res.fitter.calcFreqSeedPoints(*metric);
 
+    long best_harmonic_idx = -1;
     for(size_t i=0; i< res.fitter.freq_seed_points.size(); i++){
         float chi_freq = res.fitter.freq_seed_values.at(i);
         if( chi_freq < best_chi2){
@@ -3392,9 +3393,19 @@ GlobalFitResult do_a_fit(const PROconfig &config, const PROpeller &prop, const P
             log<LOG_INFO>(L"%1% || -- at params:  %2% ") % __func__ % res.fitter.freq_seed_points.at(i);
             best_chi2 = chi_freq;
             best_fit = res.fitter.freq_seed_points.at(i);
+            best_harmonic_idx = (long)i;
         }
     }
-    res.chi2 = best_chi2;   
+    if(best_harmonic_idx >= 0){
+        // Everything downstream (global_fit_result, draw_fit_result,
+        // PROfile::Plot) reads res.fitter.best_fit; keep it in sync with
+        // res.chi2 so the reported best-fit point is the one this chi2
+        // belongs to.
+        res.fitter.best_fit = best_fit;
+        log<LOG_WARNING>(L"%1% || A harmonic seed (#%2%) beat the first-pass global fit; adopting it as the global best fit with chi^2 %3%.") % __func__ % best_harmonic_idx % best_chi2;
+        log<LOG_WARNING>(L"%1% || -- best harmonic seed params: %2%") % __func__ % best_fit;
+    }
+    res.chi2 = best_chi2;
     if(progress_bar) progress.finish_all();
 
     if (res.fitter.exception_string_map.empty()) {
