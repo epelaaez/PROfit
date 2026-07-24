@@ -193,6 +193,12 @@ namespace PROfit {
              */
             void LoadExternalCovarianceMatrix(const PROconfig& config, const SystStruct& syst);
 
+            /* Function: Open syst.external_filename and read the named TMatrixD into an Eigen fractional
+             * covariance matrix (sized to syst.binning), zeroing non-finite entries and warning if it is
+             * not positive semi-definite. Shared by the "external_covariance" and
+             * "external_covariance_to_spline" modes. */
+            Eigen::MatrixXf LoadExternalFractionalCovariance(const PROconfig& config, const SystStruct& syst);
+
             /* Function: given a syst struct with cv and variation spectra, build fractional covariance matrix for the systematics, as well as correlation matrix 
              * Return: {fractional covariance matrix, correlation covariance matrix}
              */
@@ -229,6 +235,12 @@ namespace PROfit {
              * largest eigenvalue. If syst.num_decomp_knobs > 0, only the top N eigenpairs are kept. */
             void FillSplinesFromCovariance(const SystStruct& syst);
 
+            /* Function: Eigendecompose an already-built fractional covariance matrix and synthesize one
+             * linear spline per retained eigenpair (the shared core of FillSplinesFromCovariance). Used
+             * by both "covariance_to_spline" (matrix from MC universes) and "external_covariance_to_spline"
+             * (matrix loaded from an external TMatrixD). */
+            void FillSplinesFromCovarianceMatrix(Eigen::MatrixXf frac_cov, const SystStruct& syst);
+
             /* Function: Get weight for bin for a given shift using spline */
             float GetSplineShift(int syst_num, float shift, int bin) const;
             float GetSplineShift(std::string name, float shift, int bin) const;
@@ -241,6 +253,18 @@ namespace PROfit {
             PROspec GetSplineShiftedSpectrum(const PROconfig& config, const PROpeller& prop, std::vector<float> shifts) const;
 
             Eigen::MatrixXf DecomposeFractionalCovariance(const PROconfig &config, const Eigen::VectorXf &cv_vec) const;
+
+            /** @brief Full-bin (uncollapsed) analogue of DecomposeFractionalCovariance.
+             *
+             *  Returns a sampler matrix A (nbins_full x nbins_full, zero-padded columns)
+             *  with A*A^T ~= diag(cv_vec) * fractional_covariance * diag(cv_vec), i.e. the
+             *  absolute covariance in full (subchannel) bin space, NOT collapsed. Throwing
+             *  A*z with z ~ N(0,1)^nbins and collapsing afterwards is distributed
+             *  identically to the collapsed-space throw from DecomposeFractionalCovariance;
+             *  the full-space version exists so a throw can be split into subchannel
+             *  pieces (e.g. per-throw background subtraction in plotting) before collapse.
+             *  Cached like the collapsed variant. */
+            Eigen::MatrixXf DecomposeFractionalCovarianceFull(const PROconfig &config, const Eigen::VectorXf &cv_vec) const;
 
             void PrintSplines();
 
@@ -257,6 +281,8 @@ namespace PROfit {
             std::vector<int> spline_binnings;        ///< Binning-scheme index for each spline.
             Eigen::VectorXf spline_priors;           ///< Prior width (sigma) for each spline nuisance parameter.
             Eigen::VectorXf spline_centers;          ///< Prior centre for each spline nuisance parameter.
+            bool has_external_prior_cov = false;     ///< If true, metrics use external_prior_cov as a fully correlated Gaussian prior (PROjector).
+            Eigen::MatrixXf external_prior_cov;      ///< Absolute prior covariance over the spline nuisance parameters (used with spline_centers).
             std::map<std::string, Cov2SplineDebugInfo> cov2spline_debug_info; ///< Debug info per "covariance_to_spline" systematic, keyed by parent systname.
         private:
             std::map<std::string, std::pair<size_t, SystType>> syst_map; ///< Map from systematic name to (index, type).
@@ -269,6 +295,8 @@ namespace PROfit {
             static bool shape_only;                  ///< If true, variations are normalised to CV integral (shape-only mode).
             mutable Eigen::VectorXf last_decomp_spec; ///< Cached CV spectrum from last DecomposeFractionalCovariance call.
             mutable Eigen::MatrixXf last_decomp_mat;  ///< Cached Cholesky factor from last DecomposeFractionalCovariance call.
+            mutable Eigen::VectorXf last_decomp_full_spec; ///< Cached CV spectrum from last DecomposeFractionalCovarianceFull call.
+            mutable Eigen::MatrixXf last_decomp_full_mat;  ///< Cached sampler from last DecomposeFractionalCovarianceFull call.
     };
 
 };

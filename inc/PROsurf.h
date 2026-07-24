@@ -20,8 +20,13 @@
 #include "PROmetric.h"
 #include "PROgress.h"
 #include "PROversion.h"
+#include "PROmesh.h"
+#include "PRObe.h"
 
 #include <Eigen/Eigen>
+
+#include <atomic>
+#include <mutex>
 
 #include "TGraphAsymmErrors.h"
 #include "TMarker.h"
@@ -41,9 +46,24 @@ namespace PROfit {
     };
 
     /**
+     * @brief One unit of profile-scan work for the dynamic dispatcher.
+     * @details A "task" is "scan parameter `param_idx` over the sub-range
+     * [sub_lb, sub_ub]". Most parameters produce a single task spanning the full
+     * range. Physics parameters can be split into multiple chunked tasks via
+     * --probe-chunks so that several threads can work on the same physics
+     * parameter in parallel; chunked task results are merged by param_idx.
+     */
+    struct ScanTask {
+        int   param_idx;   ///< Index in the full (model + splines) parameter vector.
+        float sub_lb;      ///< Lower edge of this task's scan range for the scanned parameter.
+        float sub_ub;      ///< Upper edge of this task's scan range for the scanned parameter.
+    };
+
+    /**
      * @brief Output record for a 1D profile likelihood scan.
      */
     struct profOut{
+        int param_idx = -1; ///< Index of the scanned parameter in the full (model + splines) vector. Set by the worker; used by the dispatcher to merge results.
         std::vector<float> knob_vals; ///< Parameter values at each scan point.
         std::vector<float> knob_chis; ///< Profile chi-squared at each scan point.
         std::vector<Eigen::VectorXf> knob_bfs; ///< Best-fit parameter vectors at each scan point.
@@ -90,14 +110,27 @@ namespace PROfit {
             std::vector<float> values1_up;   ///< Upper 1-sigma boundary values.
             std::vector<float> values1_down; ///< Lower 1-sigma boundary values.
 
-            float newglob;                  ///< Updated global minimum chi-squared found during the scan.
-            Eigen::VectorXf newglob_param;  ///< Full parameter vector at the updated global minimum.
+            float newglob = 0;              ///< Informational only: lower chi-squared found during the scan, if any (never read by consumers; logged in the constructor's merge loop).
+            Eigen::VectorXf newglob_param;  ///< Full parameter vector at that lower minimum (informational only).
 
-            PROfile(const PROconfig &config, const PROsyst &systs, const PROmodel &model, PROmetric &metric, PROseed &proseed, const PROfitterConfig &fitconfig, std::string filename, float minchi = 0, bool with_osc = false, int nThreads = 1, const std::vector<Eigen::VectorXf> &seed_points = {}, const Eigen::VectorXf& true_params = Eigen::VectorXf() ) ;
+            /** @brief Shared warm-start bank for the profile scans: for each scanned
+             *  parameter, every completed (scanned value, best-fit vector) pair from ALL
+             *  threads, tasks, and chunks. Each new scan-point fit is seeded from the
+             *  entry of the SAME parameter closest in scanned value -- robust to the
+             *  center-out walk order, to --probe-chunks splitting one parameter across
+             *  threads, and to dynamic task dispatch. Guarded by seed_bank_mutex
+             *  (contention is negligible: bank ops are microseconds vs ~0.1-1 s fits).
+             *  Note: a spline's full scan is a single task, so spline seeding is
+             *  deterministic regardless of thread count; chunked physics parameters may
+             *  see completion-order-dependent (but still valid) seeds. */
+            std::vector<std::vector<ScanPoint>> seed_bank;
+            std::mutex seed_bank_mutex;     ///< Guards seed_bank.
+
+            PROfile(const PROconfig &config, const PROsyst &systs, const PROmodel &model, PROmetric &metric, PROseed &proseed, const PROfitterConfig &fitconfig, std::string filename, float minchi = 0, bool with_osc = false, int nThreads = 1, const std::vector<Eigen::VectorXf> &seed_points = {}, const Eigen::VectorXf& true_params = Eigen::VectorXf(), bool use_probe = false, int n_physics_chunks = 1 ) ;
 
             void Plot(const PROconfig &config, const PROsyst &systs, const PROmodel &model, PROmetric &metric, PROseed &proseed, std::string filename, bool with_osc = false, const Eigen::VectorXf& init_seed = Eigen::VectorXf(), const Eigen::VectorXf& true_params = Eigen::VectorXf(), const Eigen::MatrixXf& spline_covariance = Eigen::MatrixXf{}, const Eigen::VectorXf& param_err_lo = Eigen::VectorXf{}, const Eigen::VectorXf& param_err_hi = Eigen::VectorXf{}, bool mask_osc = false) ;
 
-            std::vector<profOut> PROfilePointHelper(const PROsyst *systs, const PROfitterConfig &fitconfig, int offset, int stride, float minchi, bool with_osc, MultiPROgressBar& progressbar, const std::vector<Eigen::VectorXf> &seed_points = {}, uint32_t seed=0);
+            std::vector<profOut> PROfilePointHelper(const PROsyst *systs, const PROfitterConfig &fitconfig, std::atomic<int> *task_counter, const std::vector<ScanTask> *tasks, float minchi, bool with_osc, MultiPROgressBar& progressbar, const std::vector<Eigen::VectorXf> &seed_points = {}, uint32_t seed=0, bool use_probe = false, std::atomic<int>* tasks_remaining = nullptr, int bar_index_offset = 0, std::atomic<uint64_t>* max_thread_wall_us = nullptr);
     };
 
     /**
@@ -142,10 +175,45 @@ namespace PROfit {
 
             PROsurf(PROmetric &metric, size_t x_idx, size_t y_idx, size_t nbinsx, LogLin llx, float x_lo, float x_hi, size_t nbinsy, LogLin lly, float y_lo, float y_hi);
 
-            std::vector<surfOut> PointHelper(const PROfitterConfig &fitconfig, std::vector<surfOut> multi_physics_params, int start, int end, uint32_t seed, const Eigen::VectorXf &seed_pt);
+            std::vector<surfOut> PointHelper(const PROfitterConfig &fitconfig, std::vector<surfOut> multi_physics_params, std::atomic<int> *point_counter, uint32_t seed, const Eigen::VectorXf &seed_pt, MultiPROgressBar* progressbar = nullptr);
 
             void FillSurfaceStat(const PROconfig &config, const PROfitterConfig &fitconfig, std::string filename, const Eigen::VectorXf &cv_params, uint32_t seed);
             void FillSurface(const PROfitterConfig &fitconfig, std::string filename, PROseed & proseed, float min_chi, const Eigen::VectorXf &seed_pt, int nthreads = 1);
+
+            /**
+             * @brief Adaptive-mesh-refinement surface scan.
+             * @details Replaces the fixed 60×60-style grid scan with `PROmesh::run_amr`. Each
+             * AMR grid point is evaluated by a per-thread `PROfitter::Fit` call (via a
+             * thread-local metric clone) using the AMR-supplied warm-start seeds; the
+             * per-point fit body is the shared `PROmesh::pinned_scan_eval`
+             * (inc/PROmeshEval.h), also used by the adaptive-FC Wilks prepass. After AMR
+             * converges, the sparse evaluated map is written to a text file (one
+             * (xphys, yphys, χ²) row per evaluated point), polyline contours are returned for
+             * each level in `opts.contour_levels`, and the optional bilinear-reconstructed
+             * dense matrix is copied into `surface(nbinsx, nbinsy)` for plot-compat.
+             */
+            PROmesh::AMRResult FillSurfaceAMR(
+                const PROfitterConfig &fitconfig,
+                std::string filename,
+                PROseed &proseed,
+                int nthreads,
+                const std::vector<Eigen::VectorXf> &caller_seeds = {},
+                const PROmesh::AMROptions &opts = {});
+
+            /**
+             * @brief Render the AMR mesh as a "boxes shrinking around the contour" plot.
+             * @details Thin wrapper: delegates to the shared
+             * `PROmesh::draw_amr_mesh_on_canvas` (inc/PROmeshPlot.h) — level-coloured
+             * translucent boxes with opaque outlines (a fill+outline TBox pair per leaf),
+             * contour polylines, and an info box with total and per-level fit counts —
+             * then prints to `<filename>_amr_mesh.pdf`.
+             */
+            void PlotAMRMesh(const PROmesh::AMRResult &amr,
+                             const PROmodel &model,
+                             std::string filename,
+                             bool logx, bool logy,
+                             size_t xaxis_idx, size_t yaxis_idx);
+
             std::vector<surfOut> FillCurve(const PROfitterConfig &fitconfig, PROseed &proseed, float min_chi, const Eigen::VectorXf &seed_pt, int nThreads, std::vector<float> &A, std::vector<float> &B, size_t n_points);
             void PlotCurve(const PROconfig &config, const PROmodel &model, const PROsyst &syst, const std::vector<surfOut> & cpoints, std::string final_output_tag, bool logx, bool logy,size_t xaxis_idx,size_t yaxis_idx,std::vector<float> &A, std::vector<float> &B, size_t n_points);
 

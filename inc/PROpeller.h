@@ -106,6 +106,25 @@ namespace PROfit{
 
 
             /**
+             * @brief w^T-style weighted sum over the logical histogram H(rowvar, colvar):
+             * returns per-colvar-bin totals with @p w weighting the rowvar bins.
+             * @details Avoids operator()(rowvar, colvar) for the lower triangle: binding an
+             * Eigen::Ref<const MatrixXf> to the transposed view there forces a full-matrix
+             * copy on every access; here the transpose is folded into the GEMV instead.
+             */
+            Eigen::VectorXf WeightedColSum(size_t rowvar, size_t colvar, const Eigen::VectorXf &w) const {
+                if (rowvar <= colvar) return data[compute_index(rowvar, colvar)].transpose() * w;
+                return data[compute_index(colvar, rowvar)] * w;
+            }
+
+            /// Column sums of the logical histogram H(rowvar, colvar) (per-colvar-bin totals),
+            /// transpose-free like WeightedColSum.
+            Eigen::VectorXf UnweightedColSum(size_t rowvar, size_t colvar) const {
+                if (rowvar <= colvar) return data[compute_index(rowvar, colvar)].colwise().sum().transpose();
+                return data[compute_index(colvar, rowvar)].rowwise().sum();
+            }
+
+            /**
              * @brief Mutable access to the matrix for variable pair (i, j) for filling.
              * @param i  Row variable index; must satisfy i ≤ j.
              * @param j  Column variable index.
@@ -189,7 +208,8 @@ namespace PROfit{
             std::vector<std::vector<int>> variable_bin_indices;
             /// Per-event values for each analysis variable; outer = variable, inner = event.
             std::vector<std::vector<float>> variable_values;
-            /// Per-variable MC statistical error vectors (sqrt of summed-weight-squared per bin).
+            /// Per-variable MC-stat effective-count vectors: sqrt(N_eff) = Sum(w)/sqrt(Sum(w^2))
+            /// per bin, so 1/this^2 is the exact fractional MC-stat variance for weighted events.
             std::vector<Eigen::VectorXf> variable_mc_stat_err;
             /// Per-variable bin centre value vectors.
             std::vector<Eigen::VectorXf> variable_midbin;

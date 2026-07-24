@@ -4,22 +4,45 @@
 #include "PROswarm.h"
 #include <Eigen/Eigen>
 
+#include <algorithm>
+#include <chrono>
+#include <limits>
 #include <random>
 
 using namespace PROfit;
 
+namespace PROfit {
+    // Definitions of the global scan-timing machinery declared in PROfitter.h.
+    // Function-local statics so the order of construction across translation
+    // units doesn't bite.
+    ScanTimingStats& GetScanTimingStats() {
+        static ScanTimingStats s;
+        return s;
+    }
+    bool& GetScanTimingEnabled() {
+        static bool b = false;
+        return b;
+    }
+}
+
 std::vector<std::vector<float>> PROfit::latin_hypercube_sampling(size_t num_samples, size_t dimensions, std::uniform_real_distribution<float>&dis, std::mt19937 &gen) {
+    // Stratified LHS on the unit cube: dimension-wise, one sample per stratum
+    // [i/n, (i+1)/n), independently shuffled. The jitter draw is normalised
+    // onto [0,1) from whatever uniform range the caller's distribution has, so
+    // strata never overlap and the output always spans [0,1).
     std::vector<std::vector<float>> samples(num_samples, std::vector<float>(dimensions));
 
+    const float dis_lo = dis.min(), dis_span = dis.max() - dis.min();
     for (size_t d = 0; d < dimensions; ++d) {
 
         std::vector<float> perm(num_samples);
         for (size_t i = 0; i < num_samples; ++i) {
-            perm[i] = (i + dis(gen)) / num_samples;  
+            const float u01 = dis_span > 0 ? (dis(gen) - dis_lo) / dis_span : 0.5f;
+            perm[i] = (i + u01) / num_samples;
         }
-        std::shuffle(perm.begin(), perm.end(), gen);  
+        std::shuffle(perm.begin(), perm.end(), gen);
         for (size_t i = 0; i < num_samples; ++i) {
-            samples[i][d] = perm[i]; 
+            samples[i][d] = perm[i];
         }
     }
 
@@ -27,16 +50,18 @@ std::vector<std::vector<float>> PROfit::latin_hypercube_sampling(size_t num_samp
 }
 
 void PROfit::recenter_latin_samples(std::vector<std::vector<float>> &samples, const Eigen::VectorXf &ub, const Eigen::VectorXf &lb) {
+    // Map unit-cube LHS samples onto the full fit box [lb, ub] in every
+    // dimension. An infinite bound falls back to a 4-unit window against the
+    // finite side, or [-2, 2] if both sides are unbounded.
     for(std::vector<float> &pt: samples) {
         for(size_t i = 0; i < pt.size(); ++i) {
-            if(ub(i) != 3 || lb(i) != -3) {
-                float width = std::isinf(ub(i)) || std::isinf(lb(i)) ? 4 : ub(i) - lb(i);
-                float center = std::isinf(ub(i)) ? lb(i) + width/2.0 :
-                    std::isinf(lb(i)) ? ub(i) - width/2.0 :
-                    (ub(i) + lb(i)) / 2.0;
-                float randpt = pt[i] / 4.0;
-                pt[i] = center + randpt * width;
-            }
+            const bool lo_inf = std::isinf(lb(i)), hi_inf = std::isinf(ub(i));
+            float lo, width;
+            if(!lo_inf && !hi_inf) { lo = lb(i);     width = ub(i) - lb(i); }
+            else if(!lo_inf)       { lo = lb(i);     width = 4; }
+            else if(!hi_inf)       { lo = ub(i) - 4; width = 4; }
+            else                   { lo = -2;        width = 4; }
+            pt[i] = lo + pt[i] * width;
         }
     }
 }
@@ -127,31 +152,21 @@ float PROfitter::Fit(PROmetric &metric, const Eigen::VectorXf &seed_pt ) {
 
 float PROfitter::Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed_points ) {
 
-    // Apply the configured gradient strategy to the metric for the duration of
-    // this fit. The metric stores the mode itself (PROmetric::gradient_mode)
-    // so any subsequent operator() call inside the LBFGS solver will use it.
     metric.setGradientMode(fitconfig.gradient_mode);
+
+    const bool tim_on = PROfit::GetScanTimingEnabled();
+    auto fit_t0 = tim_on ? std::chrono::steady_clock::now()
+                         : std::chrono::steady_clock::time_point{};
 
     std::mt19937 rng;
     rng.seed(seed);
     std::normal_distribution<float> d;
-    std::uniform_real_distribution<float> d_uni(-2.0, 2.0);
+    std::uniform_real_distribution<float> d_uni(0.0, 1.0);
 
-    //n_latin_points is how many initial latin cube points
+    //n_latin_points is how many initial latin cube points, sampled on the unit
+    //cube and then mapped onto the full [lb, ub] fit box.
     std::vector<std::vector<float>> latin_samples = latin_hypercube_sampling(fitconfig.n_latin_points, ub.size(), d_uni,rng);
-    //Rescale the latin hypercube now at -2 to 2, scale to real bounds.
-    for(std::vector<float> &pt: latin_samples) {
-        for(size_t i = 0; i < pt.size(); ++i) {
-            if(ub(i) != 3 || lb(i) != -3) {
-                float width = std::isinf(ub(i)) || std::isinf(lb(i)) ? 4 : ub(i) - lb(i);
-                float center = std::isinf(ub(i)) ? lb(i) + width/2.0 :
-                    std::isinf(lb(i)) ? ub(i) - width/2.0 :
-                    (ub(i) + lb(i)) / 2.0;
-                float randpt = pt[i] / 4.0;
-                pt[i] = center + randpt * width;
-            }
-        }
-    }
+    recenter_latin_samples(latin_samples, ub, lb);
     if(seed_points.size()>0 && seed_points.front().size()>0){
         log<LOG_INFO>(L"%1% || Seed point passed in. Being included.") % __func__  ;
         for(auto & pt: seed_points){
@@ -168,6 +183,8 @@ float PROfitter::Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed
     chi2s_multistart.reserve(fitconfig.n_latin_points);
 
     log<LOG_INFO>(L"%1% || Starting MultiGlobal runs (i.e latin hypercube runs, pure chi^2 no grad) : %2%") % __func__ % fitconfig.n_latin_points ;
+    auto latin_t0 = tim_on ? std::chrono::steady_clock::now()
+                           : std::chrono::steady_clock::time_point{};
     for(int s = 0; s < fitconfig.n_latin_points; s++){
         Eigen::VectorXf x = Eigen::Map<Eigen::VectorXf>(latin_samples[s].data(), latin_samples[s].size());
         Eigen::VectorXf grad = Eigen::VectorXf::Constant(x.size(), 0);
@@ -175,6 +192,11 @@ float PROfitter::Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed
         chi2s_multistart.push_back(fx);
         if(run_progress){progress->increment_bar(0);}
 
+    }
+    if (tim_on) {
+        const auto dt = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - latin_t0).count();
+        PROfit::GetScanTimingStats().latin_us.fetch_add((uint64_t)dt, std::memory_order_relaxed);
     }
     //Sort so we can take the best N_localfits for further zoning with a PSO
     //std::vector<int> best_multistart = sorted_indices(chi2s_multistart);    
@@ -185,30 +207,47 @@ float PROfitter::Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed
     std::string swarm_string = "";
     std::vector<std::vector<float>> swarm_start_points;
     int niter=0;
-    float fx;
+    float fx = std::numeric_limits<float>::infinity();
     if(fitconfig.n_swarm_particles < 1){
         fitconfig.n_swarm_particles = 1;
     }
 
-    for(int s = 0; s < fitconfig.n_swarm_particles; s++){
+    const size_t n_swarm_avail = std::min((size_t)fitconfig.n_swarm_particles, best_multistart.size());
+    for(size_t s = 0; s < n_swarm_avail; s++){
         swarm_string += " " + std::to_string(chi2s_multistart[best_multistart[s]]);
         swarm_start_points.push_back(latin_samples[best_multistart[s]]);
     }
     log<LOG_INFO>(L"%1% || Will swarm with %2% swarm points chis of %3% ") % __func__ % fitconfig.n_swarm_particles % swarm_string.c_str();
 
+    auto pso_t0 = tim_on ? std::chrono::steady_clock::now()
+                         : std::chrono::steady_clock::time_point{};
     PROswarm PSO(metric, rng, swarm_start_points, lb, ub , fitconfig.n_swarm_iterations);
     if(run_progress){
         PSO.runSwarm(metric,rng,fitconfig, progress);
     }else{
         PSO.runSwarm(metric,rng,fitconfig);
     }
+    if (tim_on) {
+        const auto dt = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - pso_t0).count();
+        PROfit::GetScanTimingStats().pso_us.fetch_add((uint64_t)dt, std::memory_order_relaxed);
+    }
 
+    auto lbfgs_t0 = tim_on ? std::chrono::steady_clock::now()
+                           : std::chrono::steady_clock::time_point{};
 
-    Eigen::VectorXf x;  
+    Eigen::VectorXf x;
 
     float chimin = 9999999;
     std::vector<float> chi2s_localfits;
     niter=0;
+
+    // Per-Fit tally of local-refinement failures. Individual throws are
+    // routine (near-optimal starts break the More-Thuente line search, see the
+    // seed-candidate note below) so per-attempt detail goes to LOG_DEBUG and a
+    // single LOG_WARNING summary is emitted at the end of the fit.
+    std::map<std::string, size_t> fit_exception_counts;
+    size_t n_fail_pso = 0, n_fail_seed = 0, n_fail_latin = 0, n_latin_starts = 0;
 
     bool success = false;
     best_fit = PSO.getGlobalBestPosition();
@@ -217,6 +256,12 @@ float PROfitter::Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed
 
     log<LOG_INFO>(L"%1% || Starting local fit of best swarm point. ") % __func__ ;
 
+    // NOTE on exception handling in the local-fit blocks below: the solver is
+    // called directly inside the attempt loop's try. A throwing attempt leaves
+    // fx/x in an unspecified state, so failed attempts record the exception,
+    // retry, and never feed fx/x into the best-fit bookkeeping. (Previously an
+    // inner catch swallowed every exception: retries could never happen and an
+    // uninitialized fx could be recorded as the best chi².)
     for (size_t attempt = 1; attempt <= fitconfig.n_max_local_retries; ++attempt) {
         if(run_progress)progress->increment_bar(2);
 
@@ -224,13 +269,7 @@ float PROfitter::Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed
             x = PSO.getGlobalBestPosition();
             log<LOG_INFO>(L"%1% || Starting local minimization attempt %2%/%3%") % __func__ % attempt % fitconfig.n_max_local_retries;
 
-            try{
-                niter = solver.minimize(metric, x, fx, lb, ub);
-            } catch(const std::exception &e) {
-                std::string msg = e.what();
-                exception_string_map[msg]++;
-            }
-
+            niter = solver.minimize(metric, x, fx, lb, ub);
 
             chi2s_localfits.push_back(fx);
 
@@ -248,23 +287,18 @@ float PROfitter::Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed
             success = true;
             break;
 
-        } catch (const std::runtime_error &except) {
-            log<LOG_WARNING>(L"%1% || Minimization attempt %2%/%3% failed: %4%") % __func__ % attempt % fitconfig.n_max_local_retries % except.what();
+        } catch (const std::exception &except) {
+            exception_string_map[std::string(except.what())]++;
+            fit_exception_counts[std::string(except.what())]++;
+            log<LOG_DEBUG>(L"%1% || Minimization attempt %2%/%3% failed: %4%") % __func__ % attempt % fitconfig.n_max_local_retries % except.what();
         }
     }
 
     if (!success) {
-        log<LOG_WARNING>(L"%1% || All minimization attempts failed, checking how good we got, otherwise falling back to PSO best") % __func__;
-
-        log<LOG_WARNING>(L"%1% || PSO chi %2%  and local: %3% ") % __func__ % PSO.getGlobalBestScore() % fx;
-        if (fx < chimin) {
-             best_fit = x;
-             chimin = fx;
-        }
-        if(PSO.getGlobalBestScore()< chimin){
-            best_fit = PSO.getGlobalBestPosition();
-            chimin = PSO.getGlobalBestScore();
-        }
+        // best_fit/chimin already hold the PSO best (set above); nothing valid
+        // came out of the local attempts.
+        ++n_fail_pso;
+        log<LOG_DEBUG>(L"%1% || All minimization attempts failed, falling back to PSO best with chi %2%") % __func__ % chimin;
     }
 
 
@@ -276,56 +310,67 @@ float PROfitter::Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed
 
         if(run_progress)progress->increment_bar(2);
         for(size_t s = 0; s < seed_points.size();s++){
+            // Candidate guarantee: the (bound-clamped) seed is itself a valid
+            // point whose chi2 costs one evaluation. Record it BEFORE the LBFGS
+            // refinement: a seed that is already at/near a minimum routinely
+            // makes the More-Thuente line search throw ("step became smaller
+            // than the minimum value allowed" — float-level chi2 changes cannot
+            // satisfy the Wolfe conditions), and previously that discarded the
+            // known-good seed entirely, leaving the much cruder LHS/PSO value
+            // as the result. This is what produced spiky PROfile curves: scan
+            // points whose every seed refinement threw sat several chi2 units
+            // above their neighbours. With the seed recorded first, refinement
+            // failure degrades to "keep the seed's own chi2".
+            {
+                Eigen::VectorXf x0 = seed_points.at(s).cwiseMax(lb).cwiseMin(ub);
+                Eigen::VectorXf g0 = Eigen::VectorXf::Zero(x0.size());
+                const float f0 = metric(x0, g0, false);
+                if (std::isfinite(f0) && f0 < chimin) {
+                    best_fit = x0;
+                    chimin = f0;
+                }
+            }
+            bool seed_success = false;
             for (size_t attempt = 1; attempt <= fitconfig.n_max_local_retries; ++attempt) {
                 try {
-
                     x = seed_points.at(s);
-                log<LOG_INFO>(L"%1% || Starting local minimization attempt %2%/%3%") % __func__ % attempt % fitconfig.n_max_local_retries;
-            try{
-                niter = solver.minimize(metric, x, fx, lb, ub);
-            } catch(const std::exception &e) {
-                std::string msg = e.what();
-                exception_string_map[msg]++;
-            }
+                    log<LOG_INFO>(L"%1% || Starting local minimization attempt %2%/%3%") % __func__ % attempt % fitconfig.n_max_local_retries;
 
+                    niter = solver.minimize(metric, x, fx, lb, ub);
 
+                    chi2s_localfits.push_back(fx);
 
+                    if (fx < chimin) {
+                        best_fit = x;
+                        chimin = fx;
+                    }
 
-                chi2s_localfits.push_back(fx);
+                    log<LOG_INFO>(L"%1% || Minimization successful, chi %2% after %3% iterations") % __func__ % fx % niter;
 
-                if (fx < chimin) {
-                    best_fit = x;
-                    chimin = fx;
+                    std::string spec_string = "";
+                    for (auto &f : x) spec_string += " " + std::to_string(f);
+                    log<LOG_DEBUG>(L"%1% || Best Point after minimization: %2%") % __func__ % spec_string.c_str();
+
+                    seed_success = true;
+                    break;
+
+                } catch (const std::exception &except) {
+                    exception_string_map[std::string(except.what())]++;
+                    fit_exception_counts[std::string(except.what())]++;
+                    log<LOG_DEBUG>(L"%1% || Minimization attempt %2%/%3% failed: %4%") % __func__ % attempt % fitconfig.n_max_local_retries % except.what();
                 }
-
-                log<LOG_INFO>(L"%1% || Minimization successful, chi %2% after %3% iterations") % __func__ % fx % niter;
-
-                std::string spec_string = "";
-                for (auto &f : x) spec_string += " " + std::to_string(f);
-                log<LOG_DEBUG>(L"%1% || Best Point after minimization: %2%") % __func__ % spec_string.c_str();
-
-                success = true;
-                break;
-
-            } catch (const std::runtime_error &except) {
-                log<LOG_WARNING>(L"%1% || Minimization attempt %2%/%3% failed: %4%") % __func__ % attempt % fitconfig.n_max_local_retries % except.what();
-            }
-        }
-
-        if (!success) {
-            log<LOG_WARNING>(L"%1% || All minimization attempts failed, falling back to PSO best") % __func__;
-            if (fx < chimin) {
-                    best_fit = x;
-                    chimin = fx;
             }
 
-
+            if (!seed_success) {
+                ++n_fail_seed;
+                log<LOG_DEBUG>(L"%1% || Seed-point refinement failed; keeping best-so-far (chi %2%, includes the seed's own chi2 as a candidate)") % __func__ % chimin;
+            }
         }
-    }
     }
 
 
-    for(int i=0; i< fitconfig.n_localfit-1-fudge; i++){
+    for(int i=0; i< fitconfig.n_localfit-1-fudge && (size_t)(i+1) < best_multistart.size(); i++){
+        ++n_latin_starts;
         success = false;
 
         //After the best best fit, do you want to do more of the latin ones?
@@ -337,13 +382,9 @@ float PROfitter::Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed
         for (size_t attempt = 1; attempt <= fitconfig.n_max_local_retries; ++attempt) {
             try {
                 log<LOG_INFO>(L"%1% || Starting local minimization attempt %2%/%3%") % __func__ % attempt % fitconfig.n_max_local_retries;
-                
-                try{
+
                 niter = solver.minimize(metric, x, fx, lb, ub);
-            } catch(const std::exception &e) {
-                std::string msg = e.what();
-                exception_string_map[msg]++;
-            }
+
                 chi2s_localfits.push_back(fx);
 
                 if (fx < chimin) {
@@ -360,34 +401,51 @@ float PROfitter::Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed
                 success = true;
                 break;
 
-            } catch (const std::runtime_error &except) {
-                log<LOG_WARNING>(L"%1% || Minimization attempt %2%/%3% failed: %4%") % __func__ % attempt % fitconfig.n_max_local_retries % except.what();
+            } catch (const std::exception &except) {
+                exception_string_map[std::string(except.what())]++;
+                fit_exception_counts[std::string(except.what())]++;
+                log<LOG_DEBUG>(L"%1% || Minimization attempt %2%/%3% failed: %4%") % __func__ % attempt % fitconfig.n_max_local_retries % except.what();
             }
         }
 
         if (!success) {
-            log<LOG_WARNING>(L"%1% || All minimization attempts failed. Hopefully the PSO worked above.") % __func__;
-              if (fx < chimin) {
-                    best_fit = x;
-                    chimin = fx;
-                }
-
-
+            ++n_fail_latin;
+            log<LOG_DEBUG>(L"%1% || All minimization attempts failed for this start point, keeping current best (chi %2%).") % __func__ % chimin;
         }
     }
 
-    if (fx < chimin) {
-        best_fit = x;
-        chimin = fx;
+    const size_t n_fail_total = n_fail_pso + n_fail_seed + n_fail_latin;
+    if (n_fail_total > 0) {
+        std::string exc_breakdown;
+        for (const auto &[msg, count] : fit_exception_counts)
+            exc_breakdown += " " + std::to_string(count) + "x \"" + msg + "\";";
+        log<LOG_WARNING>(L"%1% || Fit summary: refinement threw on %2%/%3% start points (PSO-best %4%/1, seeds %5%/%6%, latin %7%/%8%) — benign, pre-refinement candidate chi2s retained. Exceptions:%9%")
+            % __func__ % n_fail_total % (1 + fudge + n_latin_starts)
+            % n_fail_pso % n_fail_seed % fudge % n_fail_latin % n_latin_starts
+            % exc_breakdown.c_str();
     }
 
     log<LOG_INFO>(L"%1% || FINAL has a chi %2%") % __func__ %  chimin;
     std::string spec_string = "";
-    for(auto &f : best_fit) spec_string+=" "+std::to_string(f); 
+    for(auto &f : best_fit) spec_string+=" "+std::to_string(f);
     log<LOG_INFO>(L"%1% || FINAL is  : %2% ") % __func__ % spec_string.c_str();
+
+    if (tim_on) {
+        const auto now = std::chrono::steady_clock::now();
+        const auto dt_lbfgs = std::chrono::duration_cast<std::chrono::microseconds>(
+            now - lbfgs_t0).count();
+        const auto dt_total = std::chrono::duration_cast<std::chrono::microseconds>(
+            now - fit_t0).count();
+        auto& s = PROfit::GetScanTimingStats();
+        s.lbfgs_us.fetch_add((uint64_t)dt_lbfgs, std::memory_order_relaxed);
+        s.total_fit_us.fetch_add((uint64_t)dt_total, std::memory_order_relaxed);
+        s.n_fits.fetch_add(1, std::memory_order_relaxed);
+    }
 
     return chimin;
 }
+
+
 int PROfitter::calcFreqSeedPoints(PROmetric &metric) {
     freq_seed_points.clear();
     freq_seed_values.clear();
@@ -448,7 +506,8 @@ int PROfitter::calcFreqSeedPoints(PROmetric &metric) {
         }
         metric.setBounds(temp_lb,temp_ub);
 
-        float fx = -9;
+        // +inf so a throwing fit can never masquerade as a scan minimum.
+        float fx = std::numeric_limits<float>::infinity();
 
         if(fitconfig.harmonic_scan_fit){
             try{
@@ -494,12 +553,12 @@ int PROfitter::calcFreqSeedPoints(PROmetric &metric) {
         ub(osc_par)=minima.at(p).first;
         metric.setBounds(lb,ub);
 
-        //Best fit, with minima points
+        //Best fit, with minima points. Non-osc parameters stay at the global
+        //best fit (minima.at(p).second is the scan chi², not a parameter).
         Eigen::VectorXf test_minima = best_fit;
         test_minima(osc_par) = minima.at(p).first;
-        test_minima(1) = minima.at(p).second;
 
-        float fx;
+        float fx = std::numeric_limits<float>::infinity();
         LBFGSpp::LBFGSBSolver<float> solver(fitconfig.param);
         try{
             solver.minimize(metric, test_minima, fx, lb, ub);

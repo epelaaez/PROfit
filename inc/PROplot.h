@@ -190,8 +190,11 @@ namespace PROfit{
      * @param opt          Bitmask of PlotOptions flags.
      * @param var_index    Variable index (default 0).
      * @param ratio_bool   If true, add a ratio panel.
+     * @param skip_stack_subchannels  Optional global subchannel indices to omit from the
+     *        CV stack and legend (used by --bkg-subtract; their contents are expected to
+     *        already be zero in `cv`).
      */
-    void plot_channels(const std::string &filename, const PROconfig &config, std::optional<PROspec> cv, std::optional<PROspec> best_fit, std::optional<PROdata> data, std::optional<PROerrorbar> errband, std::optional<PROerrorbar> posterrband, std::vector<TPaveText> &texts, PlotBounds &bounds, PlotOptions opt = PlotOptions::Default, int var_index = 0, bool ratio_bool = false);
+    std::map<std::string, TObject *> plot_channels(const std::string &filename, const PROconfig &config, std::optional<PROspec> cv, std::optional<PROspec> best_fit, std::optional<PROdata> data, std::optional<PROerrorbar> errband, std::optional<PROerrorbar> posterrband, std::vector<TPaveText> &texts, PlotBounds &bounds, PlotOptions opt = PlotOptions::Default, int var_index = 0, bool ratio_bool = false, const std::vector<size_t> *skip_stack_subchannels = nullptr);
 
     /**
      * @brief Return global subchannel indices whose `m_fullnames[i]` contains `pattern` as a substring.
@@ -207,12 +210,26 @@ namespace PROfit{
                                                     const std::string &pattern);
 
     /**
+     * @brief Build a full-bin 0/1 indicator vector for the bins owned by
+     * `matched_subchannel_indices`.
+     * @details The returned vector has size config.m_num_variable_bins_total[var_index],
+     * with 1 in every bin belonging to a matched subchannel and 0 elsewhere. Variable
+     * index controls bin-start lookup via config.GetGlobalVariableBinStart.
+     * @param config                       Analysis configuration.
+     * @param matched_subchannel_indices   Global subchannel indices to mark.
+     * @param var_index                    Variable index for bin-range lookup.
+     * @return Full-bin 0/1 indicator vector.
+     */
+    Eigen::VectorXf build_subchannel_bin_mask(const PROconfig &config,
+                                              const std::vector<size_t> &matched_subchannel_indices,
+                                              int var_index);
+
+    /**
      * @brief Build a full-bin vector that copies `spec`'s values only in the bins
      * owned by `matched_subchannel_indices`, zero elsewhere.
-     * @details Used by the --bkg-subtract plot path to mask out only the bkg
-     * subchannel bins on the full-bin PROspec. The returned vector has size
-     * config.m_num_variable_bins_total[var_index]. Variable index controls
-     * bin-start lookup via config.GetGlobalVariableBinStart.
+     * @details Thin wrapper over build_subchannel_bin_mask: returns
+     * mask.cwiseProduct(spec.Spec()). Used by the --bkg-subtract plot path to mask
+     * out only the bkg subchannel bins on the full-bin PROspec.
      * @param config                       Analysis configuration.
      * @param spec                         Source full-bin spectrum.
      * @param matched_subchannel_indices   Global subchannel indices to retain.
@@ -274,6 +291,46 @@ namespace PROfit{
      * @return PROerrorbar with asymmetric per-bin uncertainties.
      */
     PROerrorbar getErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const PROspec &cv_spec, const Eigen::VectorXf &cvparams,bool scale=false, int other_index=0);
+
+    /**
+     * @brief Result of getErrorBandBkgSubtracted: a signal-only error band plus the
+     * background pieces needed to correct the data points.
+     * @details `band` follows getErrorBand's conventions (error_up/down/point bin-width
+     * scaled if requested; covariance unscaled). The three bkg vectors are deliberately
+     * UNSCALED counts because they feed PROdata, which is width/area scaled later inside
+     * plot_channels.
+     */
+    struct PROsubtractedErrorBand {
+        PROerrorbar band;                         ///< Signal-only band; error_point = (CV - bkg_CV), bin-width scaled if scale.
+        Eigen::VectorXf bkg_cv_collapsed;         ///< Collapsed bkg CV, unscaled counts.
+        Eigen::VectorXf bkg_sigma_collapsed;      ///< Per-bin sqrt(Var) of the bkg systematic throws, unscaled.
+        Eigen::VectorXf bkg_mcstat_var_collapsed; ///< Collapsed sum of squared MC-stat errors in bkg bins, unscaled.
+        PROsubtractedErrorBand(size_t n) : band(n), bkg_cv_collapsed(Eigen::VectorXf::Zero(n)),
+            bkg_sigma_collapsed(Eigen::VectorXf::Zero(n)), bkg_mcstat_var_collapsed(Eigen::VectorXf::Zero(n)) {}
+    };
+
+    /**
+     * @brief Background-subtracted pre-fit error band, publication convention.
+     * @details Each of the 2500 systematic throws is split into signal and background
+     * pieces (FillSystRandomThrowSplit) and the throw's OWN background is subtracted, so
+     * background systematic variations cancel out of the band: the band shows
+     * signal-only systematics around the subtracted CV. The background's per-bin
+     * systematic sigma (from the same throws) and MC-stat variance are returned so the
+     * caller can inflate the data errors to sqrt(N + sigma_bkg_syst^2 + sigma_bkg_MCstat^2).
+     * Note: the signal-background systematic correlation is retained in the band (via the
+     * per-throw cancellation) but discarded in the data error — inherent to this convention.
+     * @param config          Analysis configuration.
+     * @param prop            MC event store.
+     * @param syst            Systematic object.
+     * @param model           Physics model.
+     * @param cv_spec         CV predicted spectrum (full binning, UNsubtracted).
+     * @param cvparams        CV physics parameter vector.
+     * @param bkg_subchannels Global subchannel indices to subtract (from find_subchannels_by_pattern).
+     * @param scale           If true, divide band errors by bin width.
+     * @param other_index     Variable index.
+     * @return PROsubtractedErrorBand (see struct docs).
+     */
+    PROsubtractedErrorBand getErrorBandBkgSubtracted(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const PROspec &cv_spec, const Eigen::VectorXf &cvparams, const std::vector<size_t> &bkg_subchannels, bool scale=false, int other_index=0);
 
     /**
      * @brief Produce a bar chart showing fractional prior uncertainty per systematic.

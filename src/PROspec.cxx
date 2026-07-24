@@ -33,6 +33,10 @@ PROspec PROspec::PoissonVariation(const PROspec &s, uint32_t seed) {
         }
     }
 
+    // A thrown spectrum is unit-weight counts: its stat error is sqrt(N), not
+    // the N that Fill's sum-of-weights-squared gives for a single N-weight fill.
+    newSpec.error = newSpec.spec.array().sqrt();
+
     return newSpec;
 }
 
@@ -215,7 +219,7 @@ void PROspec::toROOT(const PROconfig& inconfig, const std::string& output_name){
 
 bool PROspec::SameDim(const PROspec& a, const PROspec& b){
     if(a.nbins != b.nbins){
-        log<LOG_ERROR>(L"%1% || Two spectra have different bins: %2 vs. %3") % __func__ % a.nbins % b.nbins;
+        log<LOG_ERROR>(L"%1% || Two spectra have different bins: %2% vs. %3%") % __func__ % a.nbins % b.nbins;
         return false;
     }
     return true;

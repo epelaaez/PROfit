@@ -19,9 +19,9 @@
 #include "PROmetric.h"
 #include "PROcess.h"
 #include "PROtocall.h"
-#include "PROchi.h"
-#include "PROCNP.h"
-#include "PROpoisson.h"
+#include "PROmetrics/PROchi.h"
+#include "PROmetrics/PROCNP.h"
+#include "PROmetrics/PROpoisson.h"
 
 #include <Eigen/Eigen>
 
