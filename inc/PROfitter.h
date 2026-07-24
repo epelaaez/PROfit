@@ -107,8 +107,8 @@ namespace PROfit {
         float harmonic_prominence_threshold_minimum = 1e-5; ///< DEPRECATED: unused since the persistence-based minima finder (kept for option-file compatibility).
         float harmonic_seed_norm_tolerance = 1e-4;       ///< Tolerance for seed-point norm convergence in the harmonic search.
         float harmonic_seed_chi_tolerence = 1e-6;        ///< Tolerance for chi-squared convergence in the harmonic seed search.
-        int harmonic_scan_mode = 0;                      ///< 0: single chi2 eval per scan point (slice at BF). 1: fit non-frequency physics, splines pinned at BF. 2: full profile, ALL params free except the pinned frequency.
-        size_t harmonic_phys_ladder = 8;                 ///< Trial values per non-frequency physics parameter evaluated at every scan point (min taken). Makes the scan amplitude-aware: a basin whose depth only appears away from the BF amplitude is invisible to the plain BF slice. 0/1 disables.
+        int harmonic_scan_mode = 1;                      ///< 0: single chi2 eval per scan point (slice at BF). 1: fit non-frequency physics, splines pinned at BF. 2: full profile, ALL params free except the pinned frequency.
+        size_t harmonic_phys_ladder = 4;                 ///< Trial values per non-frequency physics parameter evaluated at every scan point (min taken). Makes the scan amplitude-aware: a basin whose depth only appears away from the BF amplitude is invisible to the plain BF slice. 0/1 disables.
         float harmonic_dense_lo = 0.0f;                  ///< Lower edge of the densely sampled log10(dm2) window (clamped into the model range at runtime).
         float harmonic_dense_hi = 1.5f;                  ///< Upper edge of the densely sampled log10(dm2) window (clamped into the model range at runtime).
         size_t harmonic_refine_rounds = 1;               ///< Adaptive refinement rounds: insert scan midpoints where adjacent chi2 values jump by more than harmonic_refine_dchi.
