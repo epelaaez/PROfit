@@ -177,7 +177,7 @@ static BrazilAggregation aggregate_brazil_throws(
             % __func__;
     } else if (n_total > 0 && n_cl > 0
                && !per_throw_decidable[0][0][(size_t)corner_cell]) {
-        log<LOG_WARNING>(L"%1% || brazil: corner cell %2% is undecidable (< %3% PEs in bank); closed-contour filter inactive — top up the bank to enable it.")
+        log<LOG_WARNING>(L"%1% || brazil: corner cell %2% is undecidable (< %3% PEs in bank); closed-contour filter inactive -- top up the bank to enable it.")
             % __func__ % corner_cell % min_pes;
     } else {
         for (int k = 0; k < n_cl; ++k) {
@@ -188,11 +188,11 @@ static BrazilAggregation aggregate_brazil_throws(
                 }
             }
             agg.n_kept_per_cl[(size_t)k] = n_total - agg.n_dropped_per_cl[(size_t)k];
-            log<LOG_INFO>(L"%1% || brazil closed-contour filter CL=%2%: kept %3% / %4% throws (%5% dropped — corner excluded, closed allowed contour).")
+            log<LOG_INFO>(L"%1% || brazil closed-contour filter CL=%2%: kept %3% / %4% throws (%5% dropped -- corner excluded, closed allowed contour).")
                 % __func__ % cl_targets[(size_t)k]
                 % agg.n_kept_per_cl[(size_t)k] % n_total % agg.n_dropped_per_cl[(size_t)k];
             if (agg.n_kept_per_cl[(size_t)k] == 0) {
-                log<LOG_WARNING>(L"%1% || brazil: ALL %2% throws dropped at CL=%3% — the band for this CL will be empty.")
+                log<LOG_WARNING>(L"%1% || brazil: ALL %2% throws dropped at CL=%3% -- the band for this CL will be empty.")
                     % __func__ % n_total % cl_targets[(size_t)k];
             }
         }
@@ -432,7 +432,7 @@ AdaptiveFCResult run_adaptive_fc(
                 % __func__ % path.c_str() % matched_cells % dropped_cells
                 % (long long)carried % (long long)dups % (long long)dropped_pes;
             if (dups > 0) {
-                log<LOG_WARNING>(L"%1% || merge-bank: %2% bitwise-identical PEs dropped from %3% — "
+                log<LOG_WARNING>(L"%1% || merge-bank: %2% bitwise-identical PEs dropped from %3% -- "
                                  L"input banks share RNG seeds. Generate grid banks with distinct --seed values.")
                     % __func__ % (long long)dups % path.c_str();
             }
@@ -444,7 +444,7 @@ AdaptiveFCResult run_adaptive_fc(
         const std::string bank_out = acfg.output_tag + "_bank.bin";
         if (save_bank(bank, bank_out)) {
             res.bank_path = bank_out;
-            log<LOG_INFO>(L"%1% || merge-bank: wrote %2% — %3% cells, %4% PEs carried "
+            log<LOG_INFO>(L"%1% || merge-bank: wrote %2% -- %3% cells, %4% PEs carried "
                           L"(%5% duplicates + %6% unmatched dropped), %7% cells still empty. "
                           L"Next: --mode init-bank -o %8% to top up to criterion.")
                 % __func__ % bank_out.c_str() % bank.n_cells % (long long)total_carried
