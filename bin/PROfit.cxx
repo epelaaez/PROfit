@@ -3631,6 +3631,8 @@ void draw_harmonic_scan_pdf(const GlobalFitResult &fitres, const PROfitterConfig
     info.AddText(buf);
     snprintf(buf, sizeof buf, "persistence: rel %.3g, floor %.3g, cap %.3g", fit_config.harmonic_persistence_rel, fit_config.harmonic_persistence_floor, fit_config.harmonic_prominence_threshold);
     info.AddText(buf);
+    snprintf(buf, sizeof buf, "phys ladder: %zu pts/dim", fit_config.harmonic_phys_ladder);
+    info.AddText(buf);
     snprintf(buf, sizeof buf, "min spacing: %.3g, seeds: %zu-%zu", fit_config.harmonic_min_spacing_log, fit_config.harmonic_min_num_seeds, fit_config.harmonic_max_num_seeds);
     info.AddText(buf);
     snprintf(buf, sizeof buf, "refit window: %.3g", fit_config.harmonic_refit_window);

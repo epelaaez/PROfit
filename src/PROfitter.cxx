@@ -550,29 +550,66 @@ int PROfitter::calcFreqSeedPoints(PROmetric &metric) {
 
     Eigen::VectorXf grad = Eigen::VectorXf::Constant(best_fit.size(), 0);
 
+    // Trial ladder for each non-frequency physics parameter (typically the
+    // oscillation amplitude). The plain BF slice is blind to basins whose
+    // depth only appears at a different amplitude: with the BF amplitude
+    // near zero, chi2 barely depends on the frequency even when a
+    // (freq, amplitude) pair several chi2 units deeper exists. Taking the
+    // minimum over a coarse per-dimension ladder at every scan point
+    // recovers that depth with pure evals and hands every refit a start
+    // inside the right basin.
+    std::vector<std::pair<size_t, std::vector<float>>> phys_ladders;
+    if(fitconfig.harmonic_phys_ladder > 1) {
+        for(size_t j = 0; j < nphys; ++j) {
+            if(j == osc_par) continue;
+            const float jlo = std::isfinite(metric.GetModel().lb(j)) ? metric.GetModel().lb(j) : -3.0f;
+            const float jhi = std::isfinite(metric.GetModel().ub(j)) ? metric.GetModel().ub(j) : 3.0f;
+            if(!(jhi > jlo)) continue;
+            std::vector<float> vals;
+            for(size_t t = 0; t < fitconfig.harmonic_phys_ladder; ++t)
+                vals.push_back(jlo + (jhi - jlo) * (float)t / (float)(fitconfig.harmonic_phys_ladder - 1));
+            phys_ladders.emplace_back(j, std::move(vals));
+        }
+    }
+
+    // Best slice at frequency k: the BF slice plus single-dimension ladder
+    // variations of each non-frequency physics parameter.
+    auto slice_candidate = [&](float k) -> std::pair<float, Eigen::VectorXf> {
+        Eigen::VectorXf x0 = best_fit;
+        x0(osc_par) = k;
+        float best = metric(x0, grad, false);
+        if(!std::isfinite(best)) best = std::numeric_limits<float>::infinity();
+        Eigen::VectorXf bx = x0;
+        for(const auto &[j, vals] : phys_ladders) {
+            for(float v : vals) {
+                Eigen::VectorXf x = x0;
+                x(j) = v;
+                const float fx = metric(x, grad, false);
+                if(std::isfinite(fx) && fx < best) { best = fx; bx = x; }
+            }
+        }
+        return {best, bx};
+    };
+
     // Evaluate/fit a single scan point. Fit modes record the warm start's own
     // chi2 first, so a solver throw degrades to that value instead of leaving
     // a hole (a +inf hole fabricates sign changes for the minima finder).
     auto scan_point = [&](float k, const Eigen::VectorXf &warm) -> std::pair<float, Eigen::VectorXf> {
         if(scan_mode == 0) {
-            Eigen::VectorXf x = best_fit;
-            x(osc_par) = k;
-            float fx = metric(x, grad, false);
-            return {fx, x};
+            return slice_candidate(k);
         }
         fit_lb(osc_par) = k;
         fit_ub(osc_par) = k;
         metric.setBounds(fit_lb, fit_ub);
         Eigen::VectorXf g0 = Eigen::VectorXf::Zero(best_fit.size());
 
-        // BF-slice candidate: the global BF with only the frequency swapped.
-        // This floors every point at the mode-0 slice value: a stalled or
-        // throwing continuation fit can then never record worse than the
-        // plain slice. Without it a stretch of solver throws leaves the
-        // curve evaluated on a distant neighbour's physics.
-        Eigen::VectorXf x_slice = best_fit.cwiseMax(fit_lb).cwiseMin(fit_ub);
+        // Slice candidate (BF + ladder): floors every point, so a stalled or
+        // throwing continuation fit can never record worse than the slice.
+        // Without it a stretch of solver throws leaves the curve evaluated
+        // on a distant neighbour's physics.
+        auto [f_slice, x_slice_raw] = slice_candidate(k);
+        Eigen::VectorXf x_slice = x_slice_raw.cwiseMax(fit_lb).cwiseMin(fit_ub);
         x_slice(osc_par) = k;
-        const float f_slice = metric(x_slice, g0, false);
         float best = std::isfinite(f_slice) ? f_slice : std::numeric_limits<float>::infinity();
         Eigen::VectorXf bx = x_slice;
 
@@ -717,13 +754,14 @@ int PROfitter::calcFreqSeedPoints(PROmetric &metric) {
 
         const float mpos = minima.at(p).first;
 
-        // Start from the scan's own converged point at this frequency when
-        // the scan fitted (modes 1/2); the BF slice otherwise. The scan chi2
-        // is the guaranteed candidate: a refit throw degrades to it instead
-        // of discarding the minimum (LBFGS mutates its start in place, so
-        // each stage gets a fresh copy).
+        // Start from the scan's own best point at this frequency (the fitted
+        // point in modes 1/2; the ladder-best slice in mode 0 -- crucially
+        // NOT the BF slice, whose amplitude can sit in the wrong basin). The
+        // scan chi2 is the guaranteed candidate: a refit throw degrades to
+        // it instead of discarding the minimum (LBFGS mutates its start in
+        // place, so each stage gets a fresh copy).
         Eigen::VectorXf start = best_fit;
-        if(scan_mode > 0) {
+        {
             auto it = std::lower_bound(chipos.begin(), chipos.end(), mpos);
             if(it != chipos.end() && std::fabs(*it - mpos) < 1e-6f) {
                 const size_t src = scan_idx[it - chipos.begin()];

@@ -108,6 +108,7 @@ namespace PROfit {
         float harmonic_seed_norm_tolerance = 1e-4;       ///< Tolerance for seed-point norm convergence in the harmonic search.
         float harmonic_seed_chi_tolerence = 1e-6;        ///< Tolerance for chi-squared convergence in the harmonic seed search.
         int harmonic_scan_mode = 0;                      ///< 0: single chi2 eval per scan point (slice at BF). 1: fit non-frequency physics, splines pinned at BF. 2: full profile, ALL params free except the pinned frequency.
+        size_t harmonic_phys_ladder = 8;                 ///< Trial values per non-frequency physics parameter evaluated at every scan point (min taken). Makes the scan amplitude-aware: a basin whose depth only appears away from the BF amplitude is invisible to the plain BF slice. 0/1 disables.
         float harmonic_dense_lo = 0.0f;                  ///< Lower edge of the densely sampled log10(dm2) window (clamped into the model range at runtime).
         float harmonic_dense_hi = 1.5f;                  ///< Upper edge of the densely sampled log10(dm2) window (clamped into the model range at runtime).
         size_t harmonic_refine_rounds = 1;               ///< Adaptive refinement rounds: insert scan midpoints where adjacent chi2 values jump by more than harmonic_refine_dchi.
@@ -371,6 +372,8 @@ namespace PROfit {
                     harmonic_refine_dchi = value;
                 } else if(param_name == "harmonic_refit_window") {
                     harmonic_refit_window = value;
+                } else if(param_name == "harmonic_phys_ladder") {
+                    harmonic_phys_ladder = value;
                 } else {
                     log<LOG_WARNING>(L"%1% || Unrecognized parameter %2%. Will ignore.") 
                         % __func__ % param_name.c_str();
@@ -426,6 +429,7 @@ namespace PROfit {
             log<LOG_INFO>(L"%1% || harmonic_refine_rounds: %2%  ") % __func__ % harmonic_refine_rounds;
             log<LOG_INFO>(L"%1% || harmonic_refine_dchi: %2%  ") % __func__ % harmonic_refine_dchi;
             log<LOG_INFO>(L"%1% || harmonic_refit_window: %2%  ") % __func__ % harmonic_refit_window;
+            log<LOG_INFO>(L"%1% || harmonic_phys_ladder: %2%  ") % __func__ % harmonic_phys_ladder;
             
             log<LOG_INFO>(L"%1% || ------------ LBFGSBParam -------------- ") % __func__ ;
             log<LOG_INFO>(L"%1% || m: %2%   ") % __func__ % param.m ;
@@ -491,6 +495,7 @@ namespace PROfit {
             log<LOG_INFO>(L"  harmonic_refine_rounds               : Adaptive midpoint-refinement rounds over the scan curve");
             log<LOG_INFO>(L"  harmonic_refine_dchi                 : Adjacent-point chi2 jump that triggers a refinement midpoint");
             log<LOG_INFO>(L"  harmonic_refit_window                : Skip refits of scan minima more than this chi2 above the best scan point");
+            log<LOG_INFO>(L"  harmonic_phys_ladder                 : Trial values per non-freq physics param evaluated at each scan point (min taken); 0/1 disables");
             
             log<LOG_INFO>(L"");
             log<LOG_INFO>(L"------ L-BFGS-B Parameters ------");
