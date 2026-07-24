@@ -351,7 +351,7 @@ Subcommands:
   profile      Make a 1D profiled chi2 for each physics and nuisence parameter.
   plot         Make plots of CV, or injected point with error bars and covariance.
   fc           Run Feldman-Cousins for this injected signal
-  fc-adaptive  Adaptive Feldman-Cousins. Sub-modes: build-mesh, init-bank, print-bank, asimov, brazil.
+  fc-adaptive  Adaptive Feldman-Cousins. Sub-modes: build-mesh, init-bank, print-bank, print-mesh, asimov, brazil, brazil-cleanup, merge-mesh, merge-bank.
   global       Just do a single global fit.
   mcmc         Get bayesian posteriors using MCMC
   scale-test   Run timing benchmarks for FillSpectra / metric / fit hot paths.
@@ -992,8 +992,12 @@ build-mesh  →  <tag>_<out>_mesh.bin      (Wilks prepass: N throws, each an AMR
 init-bank   →  <tag>_<out>_bank.bin      (pseudo-experiment bank: PEs per meta-mesh cell,
                                           doubling with refinement level; re-running ADDS PEs)
 print-bank  →  summary PDFs               (bank occupancy diagnostics)
+print-mesh  →  mesh PDFs                  (<tag>_mesh.bin, or any mesh files via --merge-input)
 asimov      →  FC contour + verdict PDFs  (classify the Asimov data against the bank)
 brazil      →  Brazil-band PDFs           (throw pseudo-data, classify each against the bank)
+merge-mesh  →  <tag>_<out>_mesh.bin       (union-merge mesh binaries from separate runs)
+merge-bank  →  <tag>_<out>_bank.bin       (harvest PEs from separate bank binaries onto that mesh)
+brazil-cleanup → <tag>_<out>_cleanup_mesh.bin  (mesh densified at the Brazil ±2σ contours; no fits)
 ```
 
 A full small-scale run (bump `--throws` and `--n-pe-min` for real studies):
@@ -1018,6 +1022,122 @@ Key knobs: `--p-thresh` (fraction of prepass throws that must refine a cell
 for it to enter the meta-mesh), `--baseline-level` (levels always kept),
 `--cl` (target CLs), `--update-layer` / `--update-only-layer` (target which
 refinement layers get new PEs on an `init-bank` re-run), `--stat-only-throws`.
+
+### Merging meshes and banks: `merge-mesh` and `merge-bank`
+
+The PE bank is by far the most expensive artifact in the pipeline, so PROfit
+can combine meshes and banks produced by *separate* runs — different `-o`
+tags, different machines, different days — into one study. `--merge-input`
+takes explicit filenames or (quoted) glob patterns; the merged artifacts are
+written under the normal `-t`/`-o` naming, and every downstream stage
+(`print-bank`, `asimov`, `brazil`, `init-bank` top-up) consumes them as if
+they had been produced in one run.
+
+```bash
+# Union-merge two meshes (wherever the inputs disagree, the finer tiling wins)
+PROfit -x tutorial.xml -t TUT -o merged --seed 405 -n 8 $AFC \
+    --mode merge-mesh --merge-input TUT_runA_mesh.bin TUT_runB_mesh.bin
+
+# Harvest the PEs from both banks onto the merged mesh
+PROfit -x tutorial.xml -t TUT -o merged --seed 405 -n 8 $AFC \
+    --mode merge-bank --merge-input 'TUT_run[AB]_bank.bin'
+
+# Top up: every cell to 400 PEs (cells already at/above 400 are left alone)
+PROfit -x tutorial.xml -t TUT -o merged --seed 405 -n 8 $AFC \
+    --mode init-bank --n-pe-min 400 --n-pe-max 400
+```
+
+**Where this is useful:**
+
+1. **Grid / cluster PE production.** Build the mesh once, ship it to N jobs,
+   run `init-bank` in each job under its own `-o` tag **with a distinct
+   `--seed`**, copy the banks back, and merge:
+
+   ```bash
+   # one job, i = 0..N-1  (each job has its own copy of the shared mesh
+   # as TUT_grid<i>_mesh.bin — identical copies merge to themselves)
+   PROfit -x tutorial.xml -t TUT -o grid$i --seed $((1000+i)) -n 8 $AFC \
+       --mode init-bank --n-pe-min 100 --n-pe-max 5000
+
+   # back home:
+   PROfit ... -o merged $AFC --mode merge-mesh --merge-input 'TUT_grid*_mesh.bin'
+   PROfit ... -o merged $AFC --mode merge-bank --merge-input 'TUT_grid*_bank.bin'
+   ```
+
+2. **Updating the mesh without losing the bank.** Re-running `build-mesh`
+   with more throws or different `--p-thresh` changes the meta-mesh, and a
+   plain `init-bank` would then discard the old bank as footprint-mismatched.
+   Instead: `merge-mesh` the old and new meshes, `merge-bank` the old bank
+   onto the union, then `init-bank` to generate PEs only where the mesh
+   actually changed. Every cell whose footprint survived keeps its PEs.
+
+3. **Combining independent studies of the same configuration** — e.g. a
+   coarse exploratory bank and a later refined one.
+
+**Rules and gotchas:**
+
+* PEs are Δχ² samples thrown at a cell **center**, so `merge-bank` carries a
+  cell over only when the merged mesh has the *exact same footprint*
+  (same position and size). PEs from cells that changed refinement are at the
+  wrong truth points and are dropped — the log reports carried / dropped /
+  still-empty counts per input.
+* All inputs must share the finest grid resolution and axis bounds
+  (`--prepass-amr-initial`, `--prepass-amr-levels`, `--xlo/xhi/ylo/yhi`);
+  mismatches are refused loudly.
+* Bitwise-identical PEs (same per-PE seed *and* Δχ²) are deduplicated, so
+  merging two banks generated with the same `--seed` silently costs you the
+  overlap — you get a warning, but the wasted CPU already happened. Give
+  every grid job a distinct seed.
+* The binaries carry no XML/fit-config provenance, so the merge **cannot**
+  verify that inputs used the same XML, χ² metric (`-c`), `--preset`, and
+  `--grad-mode`. Mixing those pools different Δχ² distributions — that
+  discipline is on you.
+* The brazil archive (`_brazil.bin`) is *not* merged: throws are cheap
+  relative to banks and are simply re-thrown against the merged bank.
+
+### Sharpening the band edges: `brazil-cleanup`
+
+The Wilks prepass refines the mesh around the *Asimov* contour, but the
+Brazil ±2σ band edges — the P(included) = 0.025 and 0.975 contours of the
+throw ensemble — spread beyond it, often into coarse baseline cells where
+the band looks blocky. `brazil-cleanup` closes that loop: it reads the
+bank (grid geometry) and the **saved contour curves in
+`<tag>_<out>_brazil.root`** (**no fits, no throws, nothing recomputed — it
+runs in seconds**), rasterizes the requested quantile curves
+(`--cleanup-quantiles`, default `0.025 0.975`; any of the five saved levels
+0.025/0.16/0.5/0.84/0.975 works) onto the finest grid, and writes
+`<tag>_<out>_cleanup_mesh.bin`: finest cells along the curves ±
+`--cleanup-halo` bins (default 1), coarsest tiling elsewhere. Because the
+curves come from the brazil ROOT artifact itself, the refined region is
+*by construction* the same contours the band PDF drew — run it on the
+`_brazil.root` from the same brazil invocation as the band you are looking
+at. It shares the finest grid with the original mesh by construction,
+so it union-merges with it:
+
+```bash
+# 1. band-edge refinement mesh from the finished brazil run (tag "afc")
+PROfit -x tutorial.xml -t TUT -o afc --seed 405 -n 8 $AFC --mode brazil-cleanup
+
+# 2. union with the original mesh, harvest the original bank, top up, re-throw
+PROfit -x tutorial.xml -t TUT -o afc2 --seed 405 -n 8 $AFC \
+    --mode merge-mesh --merge-input TUT_afc_mesh.bin TUT_afc_cleanup_mesh.bin
+PROfit -x tutorial.xml -t TUT -o afc2 --seed 405 -n 8 $AFC \
+    --mode merge-bank --merge-input TUT_afc_bank.bin
+PROfit -x tutorial.xml -t TUT -o afc2 --seed 406 -n 8 $AFC \
+    --mode init-bank --n-pe-min 25 --n-pe-max 400
+PROfit -x tutorial.xml -t TUT -o afc2 --seed 405 -n 8 $AFC \
+    --mode brazil --n-brazil-throws 50
+```
+
+Every PE from the original bank survives wherever the cell footprint is
+unchanged (everywhere except the newly refined band-edge cells), so the
+top-up only pays for the new fine cells. Iterate if the edges are still
+coarse. To eyeball any mesh along the way (the cleanup mesh, the merged
+mesh, ...): `--mode print-mesh --merge-input TUT_afc_cleanup_mesh.bin`
+renders each given file as `<same name>.pdf`; with no `--merge-input` it
+plots the current tag's `_mesh.bin`. A decided cell sitting inside the band whose neighbour is
+*undecidable* is also refined — that is exactly where the contour runs off
+into unsampled territory, and the top-up is what makes it decidable.
 
 Outputs along the way:
 
