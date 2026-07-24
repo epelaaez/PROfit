@@ -1421,7 +1421,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                     }
                     m_mcgen_variation_inflate[wt] = inflate_val;
                     log<LOG_INFO>(L"%1% || Parsed inflate=%2% for systematic %3%") % __func__ % inflate_val % wt.c_str();
-                    const std::vector<std::string> inflatable_types = {"spline", "spline_to_covariance", "covariance", "external_covariance", "norm", "hist1d", "hist2d"};
+                    const std::vector<std::string> inflatable_types = {"spline", "spline_to_covariance", "covariance", "external_covariance", "norm", "norm_to_covariance", "hist1d", "hist2d"};
                     if(!variation_type || std::find(inflatable_types.begin(), inflatable_types.end(), variation_type) == inflatable_types.end()) {
                         log<LOG_WARNING>(L"%1% || inflate is not supported for systematic %2% (type %3%); it will have no effect.")
                             % __func__ % wt.c_str() % (variation_type ? variation_type : "unspecified");
@@ -1734,9 +1734,10 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
         else if(m_mcgen_variation_type[i] == "flat"){
             m_num_variation_type_flat+=1;
-        }
-        else if(m_mcgen_variation_type[i] == "norm"){
+        } else if(m_mcgen_variation_type[i] == "norm"){
             m_num_variation_type_norm+=1;
+        } else if (m_mcgen_variation_type[i] == "norm_to_covariance") {
+            m_num_variation_type_norm_to_covariance+=1;
         }else if(m_mcgen_variation_type[i] == "spline_to_covariance"){
             m_num_variation_type_spline_to_covariance+=1;
         }else if(m_mcgen_variation_type[i] == "mcstat"){
@@ -1761,6 +1762,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
     log<LOG_INFO>(L"%1% || num_variation_type_external_covariance_to_spline: %2% ") % __func__ % m_num_variation_type_external_covariance_to_spline;
     log<LOG_INFO>(L"%1% || num_variation_type_flat: %2% ") % __func__ % m_num_variation_type_flat;
     log<LOG_INFO>(L"%1% || num_variation_type_norm: %2% ") % __func__ % m_num_variation_type_norm;
+    log<LOG_INFO>(L"%1% || num_variation_type_norm_to_covariance: %2% ") % __func__ % m_num_variation_type_norm_to_covariance;
     log<LOG_INFO>(L"%1% || num_variation_type_spline: %2% ") % __func__ % m_num_variation_type_spline;
     log<LOG_INFO>(L"%1% || num_variation_type_spline_to_covariance: %2% ") % __func__ % m_num_variation_type_spline_to_covariance;
     if(m_use_mcstats){

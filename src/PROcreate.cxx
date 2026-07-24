@@ -425,12 +425,13 @@ namespace PROfit {
             }
         }
 
-        //Do we have any norm spline systeatics?
-        if(inconfig.m_num_variation_type_norm>0){
+        // Do we have any norm systematics?
+        if(inconfig.m_num_variation_type_norm>0 || inconfig.m_num_variation_type_norm_to_covariance>0){
             for(auto& allow_sys : inconfig.m_mcgen_variation_type_map){
                 if(allow_sys.second=="norm"){
-
                     map_systematic_num_universe[allow_sys.first] = 7;
+                }else if(allow_sys.second=="norm_to_covariance"){
+                    map_systematic_num_universe[allow_sys.first] = 0;
                 }
             }
         }
@@ -559,8 +560,8 @@ namespace PROfit {
                     sv.back().knobval = sv.back().knob_index;
                     sv.back().binning = binningindex;
                 }
-                if(sys_mode == "norm") {
-                    log<LOG_INFO>(L"%1% || Systematic variation %2% is a match for a spline norm systematic. Processing a such. ") % __func__ % sys_name.c_str();
+                if(sys_mode == "norm" || sys_mode == "norm_to_covariance") {
+                    log<LOG_INFO>(L"%1% || Systematic variation %2% is a match for a normalization systematic. Processing as such. ") % __func__ % sys_name.c_str();
                     map_systematic_knob_vals[sys_name] = {-3.0f, -2.0f, -1.0f, 0.0f, 1.0f, 2.0f, 3.0f};
                     sv.back().knob_index = map_systematic_knob_vals[sys_name];
                     sv.back().knobval = sv.back().knob_index;
@@ -576,7 +577,8 @@ namespace PROfit {
                     std::string sflat_percent  = sys_name.substr(colonPos + 1);
                     float flat_percent = std::stof(sflat_percent);
 
-                    if(flat_percent >= 0.33333){
+                    // norm_to_covariance should be able to handle >= 0.33
+                    if(sys_mode == "norm" && flat_percent >= 0.33333){
                         log<LOG_ERROR>(L"%1% || Currently norm takes +-3,2,1 sigma. Greater than 33.33% norm error isn't allowed. You entered %2%. Dont.  ") % __func__  %  flat_percent;
                         exit(EXIT_FAILURE);
                     }
