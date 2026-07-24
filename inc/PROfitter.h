@@ -97,7 +97,7 @@ namespace PROfit {
 
         size_t harmonic_min_num_seeds = 3;               ///< Minimum number of seed points from the harmonic frequency search.
         size_t harmonic_max_num_seeds = 5;               ///< Maximum number of seed points from the harmonic frequency search.
-        size_t harmonic_num_test_points = 150;           ///< Number of test points in physics-parameter frequency space 125.
+        size_t harmonic_num_test_points = 125;           ///< Number of test points in physics-parameter frequency space 125.
         size_t harmonic_raw_max_tests = 65;              ///< Maximum iterations to find significant minima in the harmonic scan 65
         float harmonic_prominence_threshold = 0.5;       ///< Absolute cap on the basin-persistence significance threshold (chi2 units).
         float harmonic_persistence_rel = 0.15;           ///< Relative significance: a basin is significant if its persistence exceeds this fraction of the scan curve's full range.

@@ -421,7 +421,7 @@ float PROfitter::Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed
         std::string exc_breakdown;
         for (const auto &[msg, count] : fit_exception_counts)
             exc_breakdown += " " + std::to_string(count) + "x \"" + msg + "\";";
-        log<LOG_WARNING>(L"%1% || Fit summary: refinement threw on %2%/%3% start points (PSO-best %4%/1, seeds %5%/%6%, latin %7%/%8%) -- benign, pre-refinement candidate chi2s retained. Exceptions:%9%")
+        log<LOG_INFO>(L"%1% || Fit summary: refinement threw on %2%/%3% start points (PSO-best %4%/1, seeds %5%/%6%, latin %7%/%8%) -- benign, pre-refinement candidate chi2s retained. Exceptions:%9%")
             % __func__ % n_fail_total % (1 + fudge + n_latin_starts)
             % n_fail_pso % n_fail_seed % fudge % n_fail_latin % n_latin_starts
             % exc_breakdown.c_str();
