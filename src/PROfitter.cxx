@@ -554,27 +554,56 @@ int PROfitter::calcFreqSeedPoints(PROmetric &metric) {
     // chi2 first, so a solver throw degrades to that value instead of leaving
     // a hole (a +inf hole fabricates sign changes for the minima finder).
     auto scan_point = [&](float k, const Eigen::VectorXf &warm) -> std::pair<float, Eigen::VectorXf> {
-        Eigen::VectorXf x = warm;
-        x(osc_par) = k;
         if(scan_mode == 0) {
+            Eigen::VectorXf x = best_fit;
+            x(osc_par) = k;
             float fx = metric(x, grad, false);
             return {fx, x};
         }
         fit_lb(osc_par) = k;
         fit_ub(osc_par) = k;
         metric.setBounds(fit_lb, fit_ub);
-        x = x.cwiseMax(fit_lb).cwiseMin(fit_ub);
-        Eigen::VectorXf g0 = Eigen::VectorXf::Zero(x.size());
-        float best = metric(x, g0, false);
-        if(!std::isfinite(best)) best = std::numeric_limits<float>::infinity();
-        Eigen::VectorXf bx = x;
+        Eigen::VectorXf g0 = Eigen::VectorXf::Zero(best_fit.size());
+
+        // BF-slice candidate: the global BF with only the frequency swapped.
+        // This floors every point at the mode-0 slice value: a stalled or
+        // throwing continuation fit can then never record worse than the
+        // plain slice. Without it a stretch of solver throws leaves the
+        // curve evaluated on a distant neighbour's physics.
+        Eigen::VectorXf x_slice = best_fit.cwiseMax(fit_lb).cwiseMin(fit_ub);
+        x_slice(osc_par) = k;
+        const float f_slice = metric(x_slice, g0, false);
+        float best = std::isfinite(f_slice) ? f_slice : std::numeric_limits<float>::infinity();
+        Eigen::VectorXf bx = x_slice;
+
+        Eigen::VectorXf x_warm = warm.cwiseMax(fit_lb).cwiseMin(fit_ub);
+        x_warm(osc_par) = k;
+        const bool warm_differs = (x_warm - x_slice).squaredNorm() > 0;
+        if(warm_differs) {
+            const float f_warm = metric(x_warm, g0, false);
+            if(std::isfinite(f_warm) && f_warm < best) { best = f_warm; bx = x_warm; }
+        }
+
+        float fit_fx = std::numeric_limits<float>::infinity();
         try {
-            Eigen::VectorXf xf = x;
-            float fx = std::numeric_limits<float>::infinity();
-            solver.minimize(metric, xf, fx, fit_lb, fit_ub);
-            if(std::isfinite(fx) && fx < best) { best = fx; bx = xf; }
+            Eigen::VectorXf xf = x_warm;
+            solver.minimize(metric, xf, fit_fx, fit_lb, fit_ub);
+            if(std::isfinite(fit_fx) && fit_fx < best) { best = fit_fx; bx = xf; }
         } catch (const std::exception &except) {
             exception_string_map[std::string(except.what())]++;
+            fit_fx = std::numeric_limits<float>::infinity();
+        }
+        // Cold-start retry from the slice when the warm-started fit threw or
+        // ended above the slice candidate (continuation left the basin).
+        if(warm_differs && !(fit_fx <= f_slice + 1e-3f)) {
+            try {
+                Eigen::VectorXf xf = x_slice;
+                float fx = std::numeric_limits<float>::infinity();
+                solver.minimize(metric, xf, fx, fit_lb, fit_ub);
+                if(std::isfinite(fx) && fx < best) { best = fx; bx = xf; }
+            } catch (const std::exception &except) {
+                exception_string_map[std::string(except.what())]++;
+            }
         }
         return {best, bx};
     };
@@ -845,148 +874,109 @@ std::vector<std::pair<float, float>> PROfitter::findSignificantMinima(const std:
     if (xs.size() < 3)
         return {};
 
-    // Spacing between two scan positions. The x axis is already log10(dm2),
-    // so the log-spacing option is a plain difference in x; the old
-    // log10-of-log10 double transform made harmonic_min_spacing_log apply in
-    // units nobody configured.
-    auto spacing_of = [use_log_spacing](float a, float b) {
-        (void)use_log_spacing;
-        return std::abs(a - b);
+    const size_t n = ys.size();
+    // Scan positions are already log10(dm2); spacing is a plain x difference.
+    (void)use_log_spacing;
+
+    // ---- 0-dimensional topological persistence over the 1D curve ----
+    // Activate points from lowest y upward, union-finding adjacent active
+    // runs. When two runs merge at a saddle, the run with the shallower
+    // minimum "dies" there: persistence = saddle height - its minimum. Every
+    // basin gets exactly ONE representative minimum (no same-basin
+    // duplicates) and an unambiguous significance, edge basins included --
+    // with no walk cutoffs, threshold relaxation, or spacing decay to tune.
+    std::vector<size_t> order(n);
+    std::iota(order.begin(), order.end(), 0);
+    std::sort(order.begin(), order.end(), [&ys](size_t a, size_t b) {
+        return ys[a] != ys[b] ? ys[a] < ys[b] : a < b;
+    });
+
+    std::vector<int> parent(n, -1);   // -1 = not yet activated
+    std::vector<size_t> comp_min(n);  // root -> index of the component's lowest point
+    auto find_root = [&parent](int a) {
+        while (parent[a] != a) {
+            parent[a] = parent[parent[a]];
+            a = parent[a];
+        }
+        return a;
     };
 
-    // Precompute derivative sign changes
-    std::vector<float> dy(ys.size() - 1);
-    for (size_t i = 0; i < dy.size(); ++i)
-        dy[i] = ys[i + 1] - ys[i];
+    std::vector<std::pair<size_t, float>> basins; // (min index, persistence)
+    for (size_t idx : order) {
+        parent[idx] = (int)idx;
+        comp_min[idx] = idx;
+        for (int nb : {(int)idx - 1, (int)idx + 1}) {
+            if (nb < 0 || nb >= (int)n || parent[nb] == -1) continue;
+            int r1 = find_root((int)idx), r2 = find_root(nb);
+            if (r1 == r2) continue;
+            const int keep = ys[comp_min[r1]] <= ys[comp_min[r2]] ? r1 : r2;
+            const int die = (keep == r1) ? r2 : r1;
+            const float pers = ys[idx] - ys[comp_min[die]];
+            // Zero-persistence deaths are non-minima (or plateau ties), not basins.
+            if (pers > 0) basins.emplace_back(comp_min[die], pers);
+            parent[die] = keep;
+        }
+    }
+    const float y_min = ys[order.front()];
+    const float y_range = ys[order.back()] - y_min;
+    // The surviving component is the global minimum's basin; give it top rank.
+    basins.emplace_back(comp_min[find_root((int)order.front())], std::numeric_limits<float>::infinity());
 
-    // Adaptive threshold loop
-    float prominence_threshold = fitconfig.harmonic_prominence_threshold;
-    float min_spacing = fitconfig.harmonic_min_spacing_log;
-    const float prominence_floor = std::max(fitconfig.harmonic_prominence_threshold_minimum, 0.0f);
+    // Significance threshold: relative to the curve's own dynamic range, so
+    // shallow-but-clear structure on nearly-flat curves (e.g. projected fits
+    // whose slice barely depends on the frequency) is kept; floored against
+    // float noise; capped by the absolute chi2 threshold so strongly
+    // structured curves keep their shallow real harmonics.
+    const float threshold = std::min(fitconfig.harmonic_prominence_threshold,
+            std::max(fitconfig.harmonic_persistence_rel * y_range, fitconfig.harmonic_persistence_floor));
+
+    const float min_spacing = fitconfig.harmonic_min_spacing_log;
+    auto far_from = [&](const std::vector<std::pair<float,float>> &sel, float xv) {
+        for (const auto &m : sel)
+            if (std::abs(m.first - xv) < min_spacing) return false;
+        return true;
+    };
+
+    // Select significant basins, deepest first, respecting min spacing.
+    std::vector<std::pair<size_t, float>> significant, insignificant;
+    for (const auto &b : basins)
+        (b.second >= threshold ? significant : insignificant).push_back(b);
+    std::sort(significant.begin(), significant.end(),
+            [&ys](const auto &a, const auto &b) { return ys[a.first] < ys[b.first]; });
 
     std::vector<std::pair<float, float>> minima;
-    size_t max_iter = fitconfig.harmonic_raw_max_tests;
-    size_t iter = 0;
-
-    // Keep trying with adjusted thresholds until we get the right number
-    while (iter++ < max_iter) {
-        minima.clear();
-
-        std::vector<size_t> candidates;
-        // A curve rising away from an edge makes that edge a basin the
-        // interior sign-change test cannot return (e.g. the high-dm2
-        // fast-oscillation plateau); prominence for edges is one-sided.
-        if (dy.front() > 0) candidates.push_back(0);
-        for (size_t i = 1; i < dy.size(); ++i) {
-            if (dy[i - 1] < 0 && dy[i] > 0)
-                candidates.push_back(i);
-        }
-        if (dy.back() < 0) candidates.push_back(ys.size() - 1);
-
-        // now fiilter found minima by prominence
-        std::vector<std::pair<size_t, float>> prominent_minima;
-
-        for (size_t idx : candidates) {
-            float y0 = ys[idx];
-
-            float left_peak = y0;
-            for (int j = static_cast<int>(idx) - 1; j >= 0; --j) {
-                left_peak = std::max(left_peak, ys[j]);
-                if (ys[j] > y0 + 3 * prominence_threshold)
-                    break;
-            }
-
-            float right_peak = y0;
-            for (size_t j = idx + 1; j < ys.size(); ++j) {
-                right_peak = std::max(right_peak, ys[j]);
-                if (ys[j] > y0 + 3 * prominence_threshold)
-                    break;
-            }
-
-            float prominence;
-            if (idx == 0)                  prominence = right_peak - y0;
-            else if (idx == ys.size() - 1) prominence = left_peak - y0;
-            else                           prominence = std::min(left_peak - y0, right_peak - y0);
-            if (prominence >= prominence_threshold) {
-                prominent_minima.emplace_back(idx, prominence);
-            }
-        }
-
-        // remove minima that are too close together
-        std::sort(prominent_minima.begin(), prominent_minima.end(),[&ys](const auto& a, const auto& b) {
-                return ys[a.first] < ys[b.first];
-        });
-
-        std::vector<bool> keep(prominent_minima.size(), true);
-
-        for (size_t i = 0; i < prominent_minima.size(); ++i) {
-            if (!keep[i]) continue;
-
-            size_t idx_i = prominent_minima[i].first;
-
-            for (size_t j = i + 1; j < prominent_minima.size(); ++j) {
-                if (!keep[j]) continue;
-
-                size_t idx_j = prominent_minima[j].first;
-
-                if (spacing_of(xs[idx_i], xs[idx_j]) < min_spacing) {
-                    keep[j] = false;
-                }
-            }
-        }
-
-        // Collect final minima
-        for (size_t i = 0; i < prominent_minima.size(); ++i) {
-            if (keep[i]) {
-                size_t idx = prominent_minima[i].first;
-                minima.emplace_back(xs[idx], ys[idx]);
-            }
-        }
-
-        // Check if we have enough minima
-        if (minima.size() >= fitconfig.harmonic_min_num_seeds) {
-           break;  // We have enough! If too many, we'll truncate later
-         }
-
-        // Relax toward the floor; below it further relaxation only promotes
-        // float-level noise to "minima", so stop and let the top-up below
-        // fill any remaining shortfall from real scan points.
-        if (prominence_threshold <= prominence_floor)
-            break;
-        prominence_threshold = std::max(prominence_threshold * (1.0f - fitconfig.harmonic_prominence_threshold_shift), prominence_floor);
-        min_spacing *= (1.0f - fitconfig.harmonic_prominence_threshold_shift * 0.5f);
+    for (const auto &[idx, pers] : significant) {
+        if (minima.size() >= fitconfig.harmonic_max_num_seeds) break;
+        if (far_from(minima, xs[idx])) minima.emplace_back(xs[idx], ys[idx]);
     }
+    const size_t n_significant = minima.size();
+    if (significant.size() > n_significant)
+        log<LOG_INFO>(L"%1% || %2% significant basins beyond the max-seed/spacing cuts were dropped.")
+            % __func__ % (significant.size() - n_significant);
 
-    // Top-up: still short of the requested minimum -> take the lowest scan
-    // points subject to the spacing rule instead of mining noise.
+    // Top-up to the requested minimum count from the MOST PERSISTENT
+    // remaining basins (not the lowest raw points, which just shadow the
+    // global minimum's own basin).
     if (minima.size() < fitconfig.harmonic_min_num_seeds) {
-        std::vector<size_t> order(ys.size());
-        std::iota(order.begin(), order.end(), 0);
-        std::sort(order.begin(), order.end(), [&ys](size_t a, size_t b) { return ys[a] < ys[b]; });
-        const size_t n_before = minima.size();
-        for (size_t idx : order) {
+        std::sort(insignificant.begin(), insignificant.end(),
+                [](const auto &a, const auto &b) { return a.second > b.second; });
+        for (const auto &[idx, pers] : insignificant) {
             if (minima.size() >= fitconfig.harmonic_min_num_seeds) break;
-            bool far_enough = true;
-            for (const auto &m : minima) {
-                if (spacing_of(xs[idx], m.first) < min_spacing) { far_enough = false; break; }
-            }
-            if (far_enough) minima.emplace_back(xs[idx], ys[idx]);
+            if (far_from(minima, xs[idx])) minima.emplace_back(xs[idx], ys[idx]);
         }
-        if (minima.size() > n_before)
-            log<LOG_INFO>(L"%1% || Topped up minima from %2% to %3% with lowest scan points (requested minimum %4%).")
-                % __func__ % n_before % minima.size() % fitconfig.harmonic_min_num_seeds;
+        if (minima.size() > n_significant)
+            log<LOG_INFO>(L"%1% || Topped up minima from %2% to %3% with the most persistent sub-threshold basins (requested minimum %4%).")
+                % __func__ % n_significant % minima.size() % fitconfig.harmonic_min_num_seeds;
     }
 
     std::sort(minima.begin(), minima.end(), [](const auto& a, const auto& b) { return a.second < b.second; });
 
-    // Limit to maximum number if we still have too many
-    if (minima.size() > fitconfig.harmonic_max_num_seeds) {
-         const size_t n_found = minima.size();
-         minima.resize(fitconfig.harmonic_max_num_seeds);
-         log<LOG_INFO>(L"%1% || Truncated to %2% best minima from %3% found")      % __func__ % fitconfig.harmonic_max_num_seeds % n_found;
-    }
-    // Log results
-    log<LOG_INFO>(L"%1% || Found %2% significant minima with prominence threshold %3%")  % __func__ % minima.size() % prominence_threshold;
+    log<LOG_INFO>(L"%1% || Persistence minima finder: %2% basins, %3% significant at threshold %4% (cap %5%, rel %6% x range %7%, floor %8%); %9% selected.")
+        % __func__ % basins.size() % n_significant % threshold
+        % fitconfig.harmonic_prominence_threshold % fitconfig.harmonic_persistence_rel
+        % y_range % fitconfig.harmonic_persistence_floor % minima.size();
+    for(const auto &[mx, my] : minima)
+        log<LOG_INFO>(L"%1% ||   minimum at %2%, chi2 %3% (dchi2 %4%)") % __func__ % mx % my % (my - y_min);
 
     return minima;
 }

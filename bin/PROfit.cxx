@@ -3629,7 +3629,7 @@ void draw_harmonic_scan_pdf(const GlobalFitResult &fitres, const PROfitterConfig
     info.AddText(buf);
     snprintf(buf, sizeof buf, "refine: %zu round(s), d#chi^{2} > %.3g", fit_config.harmonic_refine_rounds, fit_config.harmonic_refine_dchi);
     info.AddText(buf);
-    snprintf(buf, sizeof buf, "prominence: %.3g (floor %.3g)", fit_config.harmonic_prominence_threshold, fit_config.harmonic_prominence_threshold_minimum);
+    snprintf(buf, sizeof buf, "persistence: rel %.3g, floor %.3g, cap %.3g", fit_config.harmonic_persistence_rel, fit_config.harmonic_persistence_floor, fit_config.harmonic_prominence_threshold);
     info.AddText(buf);
     snprintf(buf, sizeof buf, "min spacing: %.3g, seeds: %zu-%zu", fit_config.harmonic_min_spacing_log, fit_config.harmonic_min_num_seeds, fit_config.harmonic_max_num_seeds);
     info.AddText(buf);
@@ -3657,7 +3657,13 @@ void draw_harmonic_scan_pdf(const GlobalFitResult &fitres, const PROfitterConfig
     }
     info.Draw();
 
+    // Match the PDF page to the landscape canvas (default paper is portrait,
+    // which top-aligns the canvas and leaves the lower half blank).
+    float paper_w, paper_h;
+    gStyle->GetPaperSize(paper_w, paper_h);
+    gStyle->SetPaperSize(28.0f, 16.0f);
     c.Print(filename.c_str());
+    gStyle->SetPaperSize(paper_w, paper_h);
     log<LOG_INFO>(L"%1% || Wrote harmonic scan summary to %2%") % __func__ % filename.c_str();
 }
 

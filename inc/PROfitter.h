@@ -99,10 +99,12 @@ namespace PROfit {
         size_t harmonic_max_num_seeds = 5;               ///< Maximum number of seed points from the harmonic frequency search.
         size_t harmonic_num_test_points = 150;           ///< Number of test points in physics-parameter frequency space 125.
         size_t harmonic_raw_max_tests = 65;              ///< Maximum iterations to find significant minima in the harmonic scan 65
-        float harmonic_prominence_threshold = 0.5;       ///< Peak prominence threshold for peak selection in the harmonic scan.
-        float harmonic_prominence_threshold_shift = 0.2; ///< Shift applied to the prominence threshold between harmonic search rounds.
+        float harmonic_prominence_threshold = 0.5;       ///< Absolute cap on the basin-persistence significance threshold (chi2 units).
+        float harmonic_persistence_rel = 0.15;           ///< Relative significance: a basin is significant if its persistence exceeds this fraction of the scan curve's full range.
+        float harmonic_persistence_floor = 1e-4;         ///< Noise floor on the persistence threshold (chi2 units); guards against pure float noise on flat curves.
+        float harmonic_prominence_threshold_shift = 0.2; ///< DEPRECATED: unused since the persistence-based minima finder (kept for option-file compatibility).
         float harmonic_min_spacing_log = 0.0225;         ///< Minimum log-space separation between selected harmonic seed peaks 0.0225
-        float harmonic_prominence_threshold_minimum = 1e-5; ///< Absolute minimum prominence threshold (floor of the adaptive relaxation).
+        float harmonic_prominence_threshold_minimum = 1e-5; ///< DEPRECATED: unused since the persistence-based minima finder (kept for option-file compatibility).
         float harmonic_seed_norm_tolerance = 1e-4;       ///< Tolerance for seed-point norm convergence in the harmonic search.
         float harmonic_seed_chi_tolerence = 1e-6;        ///< Tolerance for chi-squared convergence in the harmonic seed search.
         int harmonic_scan_mode = 0;                      ///< 0: single chi2 eval per scan point (slice at BF). 1: fit non-frequency physics, splines pinned at BF. 2: full profile, ALL params free except the pinned frequency.
@@ -335,8 +337,13 @@ namespace PROfit {
                     harmonic_raw_max_tests = value;
                 } else if(param_name == "harmonic_prominence_threshold") {
                     harmonic_prominence_threshold = value;
+                } else if(param_name == "harmonic_persistence_rel") {
+                    harmonic_persistence_rel = value;
+                } else if(param_name == "harmonic_persistence_floor") {
+                    harmonic_persistence_floor = value;
                 } else if(param_name == "harmonic_prominence_threshold_shift") {
                     harmonic_prominence_threshold_shift = value;
+                    log<LOG_WARNING>(L"%1% || harmonic_prominence_threshold_shift is deprecated and unused (persistence-based minima finder).") % __func__;
                 } else if(param_name == "harmonic_min_spacing_log") {
                     harmonic_min_spacing_log = value;
                 } else if(param_name == "harmonic_prominence_threshold_minimum") {
@@ -408,9 +415,9 @@ namespace PROfit {
             log<LOG_INFO>(L"%1% || harmonic_num_test_points: %2%  ") % __func__ % harmonic_num_test_points;
             log<LOG_INFO>(L"%1% || harmonic_raw_max_tests: %2%  ") % __func__ % harmonic_raw_max_tests;
             log<LOG_INFO>(L"%1% || harmonic_prominence_threshold: %2%  ") % __func__ % harmonic_prominence_threshold;
-            log<LOG_INFO>(L"%1% || harmonic_prominence_threshold_shift: %2%  ") % __func__ % harmonic_prominence_threshold_shift;
+            log<LOG_INFO>(L"%1% || harmonic_persistence_rel: %2%  ") % __func__ % harmonic_persistence_rel;
+            log<LOG_INFO>(L"%1% || harmonic_persistence_floor: %2%  ") % __func__ % harmonic_persistence_floor;
             log<LOG_INFO>(L"%1% || harmonic_min_spacing_log: %2%  ") % __func__ % harmonic_min_spacing_log;
-            log<LOG_INFO>(L"%1% || harmonic_prominence_threshold_minimum: %2%  ") % __func__ % harmonic_prominence_threshold_minimum;
             log<LOG_INFO>(L"%1% || harmonic_seed_norm_tolerance: %2%  ") % __func__ % harmonic_seed_norm_tolerance;
             log<LOG_INFO>(L"%1% || harmonic_seed_chi_tolerence: %2%  ") % __func__ % harmonic_seed_chi_tolerence;
             log<LOG_INFO>(L"%1% || harmonic_scan_mode: %2%  ") % __func__ % harmonic_scan_mode;
@@ -472,10 +479,10 @@ namespace PROfit {
             log<LOG_INFO>(L"  harmonic_max_num_seeds               : Maximum number of seed points for harmonic search");
             log<LOG_INFO>(L"  harmonic_num_test_points             : Number of test points in frequency space");
             log<LOG_INFO>(L"  harmonic_raw_max_tests               : Max number of iterations to find significant minima.");
-            log<LOG_INFO>(L"  harmonic_prominence_threshold        : Threshold for peak prominence in harmonic search");
-            log<LOG_INFO>(L"  harmonic_prominence_threshold_shift  : Shift amount for adjusting prominence threshold");
-            log<LOG_INFO>(L"  harmonic_min_spacing_log             : Minimum spacing between peaks in log space");
-            log<LOG_INFO>(L"  harmonic_prominence_threshold_minimum: Absolute minimum for prominence threshold");
+            log<LOG_INFO>(L"  harmonic_prominence_threshold        : Absolute cap on the basin-persistence significance threshold (chi2)");
+            log<LOG_INFO>(L"  harmonic_persistence_rel             : Relative significance: persistence must exceed this fraction of the curve range");
+            log<LOG_INFO>(L"  harmonic_persistence_floor           : Noise floor on the persistence threshold (chi2)");
+            log<LOG_INFO>(L"  harmonic_min_spacing_log             : Minimum spacing between selected seeds in scan space");
             log<LOG_INFO>(L"  harmonic_seed_norm_tolerance         : Tolerance for seed point norm convergence");
             log<LOG_INFO>(L"  harmonic_seed_chi_tolerence          : Tolerance for chi-squared convergence in seed search");
             log<LOG_INFO>(L"  harmonic_scan_mode                   : 0: eval-only slice at BF (default). 1: fit non-freq physics per point. 2: full profile, all params free except pinned freq");
