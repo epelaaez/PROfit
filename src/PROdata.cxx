@@ -51,7 +51,7 @@ TH1D PROdata::toTH1D(const PROconfig &inconfig, int global_channel_index, int ot
     int nbins_dim = inconfig.m_channel_variable_bins[local_channel_index][other_index].NBinsAlong(dim);
     std::vector<float> bin_edges =  inconfig.m_channel_variable_bins[local_channel_index][other_index].Edges();
     std::string hist_name = inconfig.m_channel_names[local_channel_index] + " Data";
-    std::string xaxis_title =  inconfig.GetChannelXAxisTitle(local_channel_index, other_index);
+    std::string xaxis_title = inconfig.GetChannelAxisTitle(local_channel_index, other_index, dim);
 
 
     //fill 1D hist
@@ -297,4 +297,3 @@ Eigen::VectorXf PROdata::Normalize(const PROconfig &inconfig, const PROspec &tar
 
     return spec.array()*output.array();
 }
-

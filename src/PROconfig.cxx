@@ -2043,6 +2043,20 @@ std::string PROconfig::GetChannelXAxisTitle(size_t channel_index, size_t other_i
                            m_channel_variable_units[channel_index][other_index]);
 }
 
+std::string PROconfig::GetChannelAxisTitle(size_t channel_index, size_t other_index, size_t dim) const {
+    const std::string title = GetChannelXAxisTitle(channel_index, other_index);
+    if(channel_index >= m_channel_variable_dims.size() ||
+       other_index >= m_channel_variable_dims[channel_index].size() ||
+       m_channel_variable_dims[channel_index][other_index] != 2) {
+        return dim == 0 ? title : "";
+    }
+
+    const size_t separator = title.find(';');
+    if(dim == 0) return title.substr(0, separator);
+    if(dim == 1 && separator != std::string::npos) return title.substr(separator + 1);
+    return "";
+}
+
 std::string PROconfig::GetChannelUnit(size_t channel_index, size_t other_index) const {
     // 2D variables keep the legacy combined "xtitle;ytitle" string in their
     // units slot, so it isn't a real unit -- skip straight to the channel-level.
