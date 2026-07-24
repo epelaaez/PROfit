@@ -6,7 +6,9 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <limits>
+#include <numeric>
 #include <random>
 
 using namespace PROfit;
@@ -449,6 +451,8 @@ float PROfitter::Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed
 int PROfitter::calcFreqSeedPoints(PROmetric &metric) {
     freq_seed_points.clear();
     freq_seed_values.clear();
+    harmonic_scan_pos.clear();
+    harmonic_scan_chi.clear();
 
     if(best_fit.size()==0){
         log<LOG_WARNING>(L"%1% || WARNING need to run a global fit using this PROfitter before asking to calculate Frequencey Seed Points.  ") %__func__;
@@ -463,130 +467,287 @@ int PROfitter::calcFreqSeedPoints(PROmetric &metric) {
         return 0;
     }
 
-    Eigen::VectorXf lb = Eigen::VectorXf::Constant(nparams, -3.0);
-    Eigen::VectorXf ub = Eigen::VectorXf::Constant(nparams, 3.0);
-
-    std::vector<float> chivalues;
-    std::vector<float> chipos;
-
-    //STEP 1, fix all syst values at best fit, and vary only physics
-    Eigen::VectorXf local_candidate ;
-    Eigen::VectorXf grad = Eigen::VectorXf::Constant(best_fit.size(),0);
+    // The scan repeatedly rebinds the metric's bounds and (for fit modes) its
+    // gradient mode; callers keep using the metric afterwards, so both are
+    // restored before returning.
+    const Eigen::VectorXf saved_lb = metric.lb;
+    const Eigen::VectorXf saved_ub = metric.ub;
+    const PROmetric::GradientMode saved_gmode = metric.getGradientMode();
 
     //TODO hardcoded 1 mass splittin for now
-    size_t osc_par = 0;
-    for(size_t i=0; i<nphys;i++){
-        lb(i)=metric.GetModel().lb(i);
-        ub(i)=metric.GetModel().ub(i);
-    }
+    const size_t osc_par = 0;
+    const int scan_mode = std::min(std::max(fitconfig.harmonic_scan_mode, 0), 2);
 
-    //staggered test points, focus on active refion for efficiency
-    float s1=0.0, s2=1.5;
-    float w2= fabs(s2-s1)/float(fitconfig.harmonic_num_test_points);
-    float w1=w2*10.0; 
-    float w3 =w2*5.0;
+    const float model_lo = std::isfinite(metric.GetModel().lb(osc_par)) ? metric.GetModel().lb(osc_par) : -3.0f;
+    const float model_hi = std::isfinite(metric.GetModel().ub(osc_par)) ? metric.GetModel().ub(osc_par) : 3.0f;
+
+    // Densely sampled window, clamped into the model range so no test point
+    // can land outside the fit bounds.
+    float dense_lo = std::min(std::max(fitconfig.harmonic_dense_lo, model_lo), model_hi);
+    float dense_hi = std::min(std::max(fitconfig.harmonic_dense_hi, model_lo), model_hi);
+    if(dense_hi < dense_lo) std::swap(dense_lo, dense_hi);
+
+    const int n_dense = std::max((int)fitconfig.harmonic_num_test_points, 2);
+    const float w2 = (dense_hi > dense_lo) ? (dense_hi - dense_lo) / (float)n_dense : 0.0f;
+
     std::vector<float> test_p;
-    for (float val = lb(osc_par); val <= s1; val += w1) test_p.push_back(val);
-    for (float val = s1 + w2; val <= s2; val += w2) test_p.push_back(val);
-    for (float val = s2 + w3; val <= ub(osc_par); val += w3) test_p.push_back(val);
-
-    
-
-    for(float &k : test_p){
-        local_candidate = best_fit;
-        local_candidate(osc_par) =k;
-        Eigen::VectorXf temp_lb = local_candidate;
-        Eigen::VectorXf temp_ub = local_candidate;
-
-        //vary ONLY dm manually, and fit other_physics. Nuisence at BF
-        for(size_t i=0; i<nphys;i++){
-            if(i==osc_par) continue;
-            temp_lb(i)=metric.GetModel().lb(i);
-            temp_ub(i)=metric.GetModel().ub(i);
-        }
-        metric.setBounds(temp_lb,temp_ub);
-
-        // +inf so a throwing fit can never masquerade as a scan minimum.
-        float fx = std::numeric_limits<float>::infinity();
-
-        if(fitconfig.harmonic_scan_fit){
-            try{
-                solver.minimize(metric, local_candidate, fx, temp_lb, temp_ub);
-            } catch (const std::exception &except) {
-                std::string msg = except.what();
-                exception_string_map[msg]++;
-            }
-        }else{
-           fx = metric(local_candidate,grad,false);
-        }
-
-        chivalues.push_back(fx);
-        chipos.push_back(k);
-
-        if(run_progress)progress->increment_bar(3);
-       // log<LOG_INFO>(L"%1% || PARG  %2% %3% ") %__func__% k %  fx;
+    // Region 1: coarse log-spaced ladder below the dense window.
+    if(w2 > 0 && dense_lo > model_lo) {
+        const float w1 = 10.0f * w2;
+        const int n1 = (int)std::floor((dense_lo - model_lo) / w1);
+        for(int i = 0; i <= n1; ++i) test_p.push_back(model_lo + (float)i * w1);
     }
+    // Region 2: dense log-spaced window.
+    if(w2 > 0) {
+        for(int i = 0; i <= n_dense; ++i) test_p.push_back(dense_lo + (float)i * w2);
+    } else {
+        test_p.push_back(dense_lo);
+    }
+    // Region 3: above the dense window the chi2 minima are equally spaced in
+    // LINEAR dm2, so a log-spaced ladder aliases where harmonics crowd
+    // hardest. Continue with the linear step the log grid had at dense_hi
+    // (continuous sampling density), capped at 2x the dense budget.
+    if(model_hi > dense_hi && w2 > 0) {
+        const float dm_lo = std::pow(10.0f, dense_hi);
+        const float dm_hi = std::pow(10.0f, model_hi);
+        const float dm_step = dm_lo * std::log(10.0f) * w2;
+        int n3 = (int)std::ceil((dm_hi - dm_lo) / dm_step);
+        n3 = std::min(std::max(n3, 1), 2 * n_dense);
+        for(int i = 1; i <= n3; ++i)
+            test_p.push_back(std::log10(dm_lo + (dm_hi - dm_lo) * (float)i / (float)n3));
+    }
+    for(float &v : test_p) v = std::min(std::max(v, model_lo), model_hi);
+    std::sort(test_p.begin(), test_p.end());
+    test_p.erase(std::unique(test_p.begin(), test_p.end(),
+                [](float a, float b){ return std::fabs(a - b) < 1e-5f; }), test_p.end());
+
+    log<LOG_INFO>(L"%1% || Harmonic scan: mode %2%, %3% test points on [%4%, %5%] (dense window [%6%, %7%]).")
+        % __func__ % scan_mode % test_p.size() % model_lo % model_hi % dense_lo % dense_hi;
+
+    // Scan-fit bounds for modes 1/2: the frequency is pinned per point.
+    // Mode 1 additionally pins every spline at its global-BF value; mode 2
+    // frees them over restrict-else-lo/hi (a true per-point profile).
+    Eigen::VectorXf fit_lb(nparams), fit_ub(nparams);
+    if(scan_mode > 0) {
+        for(size_t i = 0; i < nphys; ++i) {
+            fit_lb(i) = metric.GetModel().lb(i);
+            fit_ub(i) = metric.GetModel().ub(i);
+        }
+        for(size_t i = nphys; i < nparams; ++i) {
+            const size_t si = i - nphys;
+            if(scan_mode == 1) {
+                fit_lb(i) = fit_ub(i) = best_fit(i);
+            } else {
+                fit_lb(i) = metric.GetSysts().spline_has_restrict[si] ? metric.GetSysts().spline_restrict_lo[si] : metric.GetSysts().spline_lo[si];
+                fit_ub(i) = metric.GetSysts().spline_has_restrict[si] ? metric.GetSysts().spline_restrict_hi[si] : metric.GetSysts().spline_hi[si];
+            }
+        }
+        // Scan fits start near-converged (continuation warm starts), where
+        // the linearised Gauss-Newton gradient is exact and several times
+        // cheaper than the full-FD modes.
+        metric.setGradientMode(PROmetric::GradientCentralLin);
+    }
+
+    Eigen::VectorXf grad = Eigen::VectorXf::Constant(best_fit.size(), 0);
+
+    // Evaluate/fit a single scan point. Fit modes record the warm start's own
+    // chi2 first, so a solver throw degrades to that value instead of leaving
+    // a hole (a +inf hole fabricates sign changes for the minima finder).
+    auto scan_point = [&](float k, const Eigen::VectorXf &warm) -> std::pair<float, Eigen::VectorXf> {
+        Eigen::VectorXf x = warm;
+        x(osc_par) = k;
+        if(scan_mode == 0) {
+            float fx = metric(x, grad, false);
+            return {fx, x};
+        }
+        fit_lb(osc_par) = k;
+        fit_ub(osc_par) = k;
+        metric.setBounds(fit_lb, fit_ub);
+        x = x.cwiseMax(fit_lb).cwiseMin(fit_ub);
+        Eigen::VectorXf g0 = Eigen::VectorXf::Zero(x.size());
+        float best = metric(x, g0, false);
+        if(!std::isfinite(best)) best = std::numeric_limits<float>::infinity();
+        Eigen::VectorXf bx = x;
+        try {
+            Eigen::VectorXf xf = x;
+            float fx = std::numeric_limits<float>::infinity();
+            solver.minimize(metric, xf, fx, fit_lb, fit_ub);
+            if(std::isfinite(fx) && fx < best) { best = fx; bx = xf; }
+        } catch (const std::exception &except) {
+            exception_string_map[std::string(except.what())]++;
+        }
+        return {best, bx};
+    };
+
+    //STEP 1: scan the frequency axis. Two center-out half-sweeps from the
+    //global BF so continuation warm starts stay on their own side of the
+    //best-fit basin (mode 0 ignores the warm start beyond the BF slice).
+    const int npts = (int)test_p.size();
+    std::vector<float> chivalues(npts, std::numeric_limits<float>::infinity());
+    std::vector<Eigen::VectorXf> scan_x(npts);
+
+    int center = 0;
+    for(int i = 1; i < npts; ++i)
+        if(std::fabs(test_p[i] - best_fit(osc_par)) < std::fabs(test_p[center] - best_fit(osc_par))) center = i;
+
+    Eigen::VectorXf warm = best_fit;
+    for(int i = center; i < npts; ++i) {
+        auto [fx, x] = scan_point(test_p[i], warm);
+        chivalues[i] = fx;
+        scan_x[i] = x;
+        if(scan_mode > 0 && std::isfinite(fx)) warm = x;
+        if(run_progress) progress->increment_bar(3);
+    }
+    warm = best_fit;
+    for(int i = center - 1; i >= 0; --i) {
+        auto [fx, x] = scan_point(test_p[i], warm);
+        chivalues[i] = fx;
+        scan_x[i] = x;
+        if(scan_mode > 0 && std::isfinite(fx)) warm = x;
+        if(run_progress) progress->increment_bar(3);
+    }
+
+    // Adaptive refinement: a basin narrower than the ladder shows up as a
+    // large jump between neighbours long before it is resolved; insert
+    // midpoints there and re-evaluate.
+    const float min_gap = std::max(w2 * 0.25f, 1e-4f);
+    for(size_t round = 0; round < fitconfig.harmonic_refine_rounds; ++round) {
+        std::vector<float> new_pos;
+        for(size_t i = 0; i + 1 < test_p.size(); ++i) {
+            if(!std::isfinite(chivalues[i]) || !std::isfinite(chivalues[i+1])) continue;
+            if(std::fabs(chivalues[i+1] - chivalues[i]) > fitconfig.harmonic_refine_dchi
+                    && (test_p[i+1] - test_p[i]) > 2.0f * min_gap)
+                new_pos.push_back(0.5f * (test_p[i] + test_p[i+1]));
+            if((int)new_pos.size() >= n_dense) break;
+        }
+        if(new_pos.empty()) break;
+        for(float k : new_pos) {
+            auto it = std::lower_bound(test_p.begin(), test_p.end(), k);
+            const size_t ins = it - test_p.begin();
+            // Warm-start from the nearest already-evaluated neighbour.
+            const size_t nb = (ins > 0 && (ins >= test_p.size()
+                        || std::fabs(test_p[ins-1] - k) < std::fabs(test_p[ins] - k))) ? ins - 1 : ins;
+            const Eigen::VectorXf &w0 = (scan_mode > 0 && scan_x[nb].size()) ? scan_x[nb] : best_fit;
+            auto [fx, x] = scan_point(k, w0);
+            test_p.insert(test_p.begin() + ins, k);
+            chivalues.insert(chivalues.begin() + ins, fx);
+            scan_x.insert(scan_x.begin() + ins, x);
+        }
+        log<LOG_INFO>(L"%1% || Harmonic refinement round %2%: added %3% midpoints (dchi threshold %4%).")
+            % __func__ % (round + 1) % new_pos.size() % fitconfig.harmonic_refine_dchi;
+    }
+
+    // Keep only finite points; store the curve for diagnostics (persisted as
+    // a TGraph by draw_fit_result).
+    std::vector<float> chipos, chivals;
+    std::vector<size_t> scan_idx;
+    for(size_t i = 0; i < test_p.size(); ++i) {
+        if(!std::isfinite(chivalues[i])) continue;
+        chipos.push_back(test_p[i]);
+        chivals.push_back(chivalues[i]);
+        scan_idx.push_back(i);
+    }
+    harmonic_scan_pos = chipos;
+    harmonic_scan_chi = chivals;
+    log<LOG_DEBUG>(L"%1% || Harmonic scan positions: %2%") % __func__ % harmonic_scan_pos;
+    log<LOG_DEBUG>(L"%1% || Harmonic scan chi2s: %2%") % __func__ % harmonic_scan_chi;
 
     //#STEP 2 From the scan above, find local minima in freq
-    std::vector<std::pair<float,float>> minima = findSignificantMinima(chipos, chivalues, true);
+    std::vector<std::pair<float,float>> minima = findSignificantMinima(chipos, chivals, true);
+
+    // Refit window: a scan minimum this far above the best scan point cannot
+    // become a useful seed; skip its two LBFGS refits.
+    if(!chivals.empty()) {
+        const float best_scan_chi = *std::min_element(chivals.begin(), chivals.end());
+        const size_t n_all = minima.size();
+        minima.erase(std::remove_if(minima.begin(), minima.end(),
+                    [&](const std::pair<float,float> &m){ return m.second > best_scan_chi + fitconfig.harmonic_refit_window; }),
+                minima.end());
+        if(minima.size() < n_all)
+            log<LOG_INFO>(L"%1% || Dropped %2% scan minima more than %3% chi2 above the best scan point (%4%).")
+                % __func__ % (n_all - minima.size()) % fitconfig.harmonic_refit_window % best_scan_chi;
+    }
 
 
-    //STEP 3, loop over all mimima and do twofold minimzation. 
+    //STEP 3, loop over all mimima and do twofold minimzation.
     //First with DM minima fixed to get BF of pull terms, then fully free to optimize the mass splitting to high precisin
 
+    Eigen::VectorXf full_lb(nparams), full_ub(nparams);
+    for(size_t i = 0; i < nphys; ++i) {
+        full_lb(i) = metric.GetModel().lb(i);
+        full_ub(i) = metric.GetModel().ub(i);
+    }
+    for(size_t i = nphys; i < nparams; ++i) {
+        size_t si = i - nphys;
+        full_lb(i) = metric.GetSysts().spline_has_restrict[si] ? metric.GetSysts().spline_restrict_lo[si] : metric.GetSysts().spline_lo[si];
+        full_ub(i) = metric.GetSysts().spline_has_restrict[si] ? metric.GetSysts().spline_restrict_hi[si] : metric.GetSysts().spline_hi[si];
+    }
 
     for(size_t p=0;p<minima.size();p++){
         log<LOG_INFO>(L"%1% || ##################  ") %__func__;
 
-        for(size_t i = 0; i < nphys; ++i) {
-            lb(i) = metric.GetModel().lb(i);
-            ub(i) = metric.GetModel().ub(i);
+        const float mpos = minima.at(p).first;
+
+        // Start from the scan's own converged point at this frequency when
+        // the scan fitted (modes 1/2); the BF slice otherwise. The scan chi2
+        // is the guaranteed candidate: a refit throw degrades to it instead
+        // of discarding the minimum (LBFGS mutates its start in place, so
+        // each stage gets a fresh copy).
+        Eigen::VectorXf start = best_fit;
+        if(scan_mode > 0) {
+            auto it = std::lower_bound(chipos.begin(), chipos.end(), mpos);
+            if(it != chipos.end() && std::fabs(*it - mpos) < 1e-6f) {
+                const size_t src = scan_idx[it - chipos.begin()];
+                if(scan_x[src].size()) start = scan_x[src];
+            }
         }
-        for(size_t i = nphys; i < nparams; ++i) {
-            size_t si = i - nphys;
-            lb(i) = metric.GetSysts().spline_has_restrict[si] ? metric.GetSysts().spline_restrict_lo[si] : metric.GetSysts().spline_lo[si];
-            ub(i) = metric.GetSysts().spline_has_restrict[si] ? metric.GetSysts().spline_restrict_hi[si] : metric.GetSysts().spline_hi[si];
+        start(osc_par) = mpos;
+
+        float best_chi = minima.at(p).second;
+        Eigen::VectorXf best_x = start.cwiseMax(full_lb).cwiseMin(full_ub);
+        best_x(osc_par) = mpos;
+
+        // Stage a: frequency pinned, everything else free. Mode 2's scan
+        // already profiled every parameter at exactly this frequency, so it
+        // skips straight to the floating-frequency polish.
+        if(scan_mode != 2) {
+            full_lb(osc_par) = mpos;
+            full_ub(osc_par) = mpos;
+            metric.setBounds(full_lb, full_ub);
+            try{
+                Eigen::VectorXf xf = best_x;
+                float fx = std::numeric_limits<float>::infinity();
+                solver.minimize(metric, xf, fx, full_lb, full_ub);
+                if(std::isfinite(fx) && fx < best_chi) { best_chi = fx; best_x = xf; }
+            } catch (const std::exception &except) {
+                exception_string_map[std::string(except.what())]++;
+            }
+
+            log<LOG_INFO>(L"%1% || Local min num (%2%) with FIXED frequency (%3%) has chi %4% ") %__func__% p % mpos % best_chi;
+            log<LOG_INFO>(L"%1% || -- at bf pt %2%  ") %__func__%  best_x;
         }
 
-        //fix dm at minima
-        lb(osc_par)=minima.at(p).first;
-        ub(osc_par)=minima.at(p).first;
-        metric.setBounds(lb,ub);
+        //free the freq and repeat
+        full_lb(osc_par)=metric.GetModel().lb(osc_par);
+        full_ub(osc_par)=metric.GetModel().ub(osc_par);
+        metric.setBounds(full_lb,full_ub);
 
-        //Best fit, with minima points. Non-osc parameters stay at the global
-        //best fit (minima.at(p).second is the scan chi², not a parameter).
-        Eigen::VectorXf test_minima = best_fit;
-        test_minima(osc_par) = minima.at(p).first;
-
-        float fx = std::numeric_limits<float>::infinity();
-        LBFGSpp::LBFGSBSolver<float> solver(fitconfig.param);
         try{
-            solver.minimize(metric, test_minima, fx, lb, ub);
+            Eigen::VectorXf xf = best_x;
+            float fx = std::numeric_limits<float>::infinity();
+            solver.minimize(metric, xf, fx, full_lb, full_ub);
+            if(std::isfinite(fx) && fx < best_chi) { best_chi = fx; best_x = xf; }
         } catch (const std::exception &except) {
-            std::string msg = except.what();
-            exception_string_map[msg]++;
+            exception_string_map[std::string(except.what())]++;
         }
 
-        log<LOG_INFO>(L"%1% || Local min num (%2%) with FIXED frequency (%3%) has chi %4% ") %__func__% p % minima.at(p).first % fx;
-        log<LOG_INFO>(L"%1% || -- at bf pt %2%  ") %__func__%  test_minima;
+        log<LOG_INFO>(L"%1% || Local min num (%2%) with floating frequency (%3%) has chi %4% (but bf freq was %5%) ") %__func__% p % mpos % best_chi % best_x(osc_par);
+        log<LOG_INFO>(L"%1% || -- at bf pt %2%  ") %__func__%  best_x;
 
-        //free the freq and repeat 
-        lb(osc_par)=metric.GetModel().lb(osc_par);
-        ub(osc_par)=metric.GetModel().ub(osc_par);
-        metric.setBounds(lb,ub);
-
-        try{
-            solver.minimize(metric, test_minima, fx, lb, ub);
-        } catch (const std::exception &except) {
-            std::string msg = except.what();
-            exception_string_map[msg]++;
+        if(std::isfinite(best_chi)) {
+            freq_seed_points.push_back(best_x);
+            freq_seed_values.push_back(best_chi);
         }
-
-        log<LOG_INFO>(L"%1% || Local min num (%2%) with floating frequency (%3%) has chi %4% (but bf freq was %5%) ") %__func__% p % minima.at(p).first % fx % test_minima(osc_par);
-        log<LOG_INFO>(L"%1% || -- at bf pt %2%  ") %__func__%  test_minima;
-
-        freq_seed_points.push_back(test_minima);
-        freq_seed_values.push_back(fx);
         if(run_progress){
             for(int jj=0;jj<std::ceil(100/minima.size())+1; jj++)progress->increment_bar(4);
         }
@@ -613,10 +774,15 @@ int PROfitter::calcFreqSeedPoints(PROmetric &metric) {
             float chip = freq_seed_values.at(p);
             float chiq = freq_seed_values.at(q);
             float normpq = (freq_seed_points.at(p) - freq_seed_points.at(q)).norm();
+            float freq_sep = std::fabs(freq_seed_points.at(p)(osc_par) - freq_seed_points.at(q)(osc_par));
 
-            log<LOG_DEBUG>(L"%1% || NORM freq seed (%2%,%3%) is : %4%, chi_diff: %5%") % __func__ % p % q % normpq % std::abs(chip - chiq);
+            log<LOG_DEBUG>(L"%1% || NORM freq seed (%2%,%3%) is : %4%, chi_diff: %5%, freq_sep: %6%") % __func__ % p % q % normpq % std::abs(chip - chiq) % freq_sep;
 
-            if(normpq < norm_tol && std::abs(chip - chiq) < chi_tol) {
+            // Two refits inside the same frequency basin are one seed: each
+            // survivor costs one LBFGS pass in every downstream scan fit, so
+            // dedup at basin level (freq separation), not just exact match.
+            if((freq_sep < fitconfig.harmonic_min_spacing_log) ||
+               (normpq < norm_tol && std::abs(chip - chiq) < chi_tol)) {
                 if(chip <= chiq) {
                     keep[q] = false;
                     log<LOG_DEBUG>(L"%1% || Removing duplicate %2% (keeping %3%)") % __func__ % q % p;
@@ -655,129 +821,173 @@ int PROfitter::calcFreqSeedPoints(PROmetric &metric) {
 
     log<LOG_INFO>(L"%1% || Reduced from %2% to %3% unique seed points that are kept for future use!")   % __func__ % keep.size() % unique_points.size();
 
+    metric.setBounds(saved_lb, saved_ub);
+    metric.setGradientMode(saved_gmode);
+
     return freq_seed_values.size();
 }
 
 std::vector<std::pair<float, float>> PROfitter::findSignificantMinima(const std::vector<float>& x_values, const std::vector<float>& y_values, bool use_log_spacing){
     if (x_values.size() != y_values.size() || x_values.size() < 3)
         return {};
-    
+
+    // Non-finite scan values fabricate sign changes on both sides and pass
+    // any prominence cut; drop them before differencing.
+    std::vector<float> xs, ys;
+    xs.reserve(x_values.size());
+    ys.reserve(y_values.size());
+    for (size_t i = 0; i < y_values.size(); ++i) {
+        if (std::isfinite(x_values[i]) && std::isfinite(y_values[i])) {
+            xs.push_back(x_values[i]);
+            ys.push_back(y_values[i]);
+        }
+    }
+    if (xs.size() < 3)
+        return {};
+
+    // Spacing between two scan positions. The x axis is already log10(dm2),
+    // so the log-spacing option is a plain difference in x; the old
+    // log10-of-log10 double transform made harmonic_min_spacing_log apply in
+    // units nobody configured.
+    auto spacing_of = [use_log_spacing](float a, float b) {
+        (void)use_log_spacing;
+        return std::abs(a - b);
+    };
+
     // Precompute derivative sign changes
-    std::vector<float> dy(y_values.size() - 1);
+    std::vector<float> dy(ys.size() - 1);
     for (size_t i = 0; i < dy.size(); ++i)
-        dy[i] = y_values[i + 1] - y_values[i];
-    
-    //Keep absolute for now
-    //const float y_range = *std::max_element(y_values.begin(), y_values.end())- *std::min_element(y_values.begin(), y_values.end());
-    //if (y_range == 0) return {};
-    
+        dy[i] = ys[i + 1] - ys[i];
+
     // Adaptive threshold loop
-    float prominence_threshold = fitconfig.harmonic_prominence_threshold;//* y_range;
+    float prominence_threshold = fitconfig.harmonic_prominence_threshold;
     float min_spacing = fitconfig.harmonic_min_spacing_log;
-    
+    const float prominence_floor = std::max(fitconfig.harmonic_prominence_threshold_minimum, 0.0f);
+
     std::vector<std::pair<float, float>> minima;
     size_t max_iter = fitconfig.harmonic_raw_max_tests;
     size_t iter = 0;
-    
+
     // Keep trying with adjusted thresholds until we get the right number
     while (iter++ < max_iter) {
         minima.clear();
-        
+
         std::vector<size_t> candidates;
+        // A curve rising away from an edge makes that edge a basin the
+        // interior sign-change test cannot return (e.g. the high-dm2
+        // fast-oscillation plateau); prominence for edges is one-sided.
+        if (dy.front() > 0) candidates.push_back(0);
         for (size_t i = 1; i < dy.size(); ++i) {
             if (dy[i - 1] < 0 && dy[i] > 0)
                 candidates.push_back(i);
         }
-        
+        if (dy.back() < 0) candidates.push_back(ys.size() - 1);
+
         // now fiilter found minima by prominence
         std::vector<std::pair<size_t, float>> prominent_minima;
-        
+
         for (size_t idx : candidates) {
-            float y0 = y_values[idx];
-            
+            float y0 = ys[idx];
+
             float left_peak = y0;
             for (int j = static_cast<int>(idx) - 1; j >= 0; --j) {
-                left_peak = std::max(left_peak, y_values[j]);
-                if (y_values[j] > y0 + 3 * prominence_threshold)
+                left_peak = std::max(left_peak, ys[j]);
+                if (ys[j] > y0 + 3 * prominence_threshold)
                     break;
             }
-            
+
             float right_peak = y0;
-            for (size_t j = idx + 1; j < y_values.size(); ++j) {
-                right_peak = std::max(right_peak, y_values[j]);
-                if (y_values[j] > y0 + 3 * prominence_threshold)
+            for (size_t j = idx + 1; j < ys.size(); ++j) {
+                right_peak = std::max(right_peak, ys[j]);
+                if (ys[j] > y0 + 3 * prominence_threshold)
                     break;
             }
-            
-            float prominence = std::min(left_peak - y0, right_peak - y0);
+
+            float prominence;
+            if (idx == 0)                  prominence = right_peak - y0;
+            else if (idx == ys.size() - 1) prominence = left_peak - y0;
+            else                           prominence = std::min(left_peak - y0, right_peak - y0);
             if (prominence >= prominence_threshold) {
                 prominent_minima.emplace_back(idx, prominence);
             }
         }
-        
+
         // remove minima that are too close together
-        std::sort(prominent_minima.begin(), prominent_minima.end(),[&y_values](const auto& a, const auto& b) { 
-                return y_values[a.first] < y_values[b.first]; 
+        std::sort(prominent_minima.begin(), prominent_minima.end(),[&ys](const auto& a, const auto& b) {
+                return ys[a.first] < ys[b.first];
         });
-        
+
         std::vector<bool> keep(prominent_minima.size(), true);
-        
+
         for (size_t i = 0; i < prominent_minima.size(); ++i) {
             if (!keep[i]) continue;
-            
+
             size_t idx_i = prominent_minima[i].first;
-            float x_i = x_values[idx_i];
-            
+
             for (size_t j = i + 1; j < prominent_minima.size(); ++j) {
                 if (!keep[j]) continue;
-                
+
                 size_t idx_j = prominent_minima[j].first;
-                float x_j = x_values[idx_j];
-                
-                float spacing;
-                if (use_log_spacing && x_i > 0 && x_j > 0) {
-                    spacing = std::abs(std::log10(x_i) - std::log10(x_j));
-                } else {
-                    spacing = std::abs(x_i - x_j);
-                }
-                
-                if (spacing < min_spacing) {
+
+                if (spacing_of(xs[idx_i], xs[idx_j]) < min_spacing) {
                     keep[j] = false;
                 }
             }
         }
-        
+
         // Collect final minima
         for (size_t i = 0; i < prominent_minima.size(); ++i) {
             if (keep[i]) {
                 size_t idx = prominent_minima[i].first;
-                minima.emplace_back(x_values[idx], y_values[idx]);
+                minima.emplace_back(xs[idx], ys[idx]);
             }
         }
-        
+
         // Check if we have enough minima
         if (minima.size() >= fitconfig.harmonic_min_num_seeds) {
            break;  // We have enough! If too many, we'll truncate later
          }
-         
-        // otheriwwse lets adjust thresholds for next iteration
-        if (minima.size() < fitconfig.harmonic_min_num_seeds) {
-            // Need more minima - relax thresholds
-            prominence_threshold *= (1.0f - fitconfig.harmonic_prominence_threshold_shift);
-            min_spacing *= (1.0f - fitconfig.harmonic_prominence_threshold_shift * 0.5f);
-        };
+
+        // Relax toward the floor; below it further relaxation only promotes
+        // float-level noise to "minima", so stop and let the top-up below
+        // fill any remaining shortfall from real scan points.
+        if (prominence_threshold <= prominence_floor)
+            break;
+        prominence_threshold = std::max(prominence_threshold * (1.0f - fitconfig.harmonic_prominence_threshold_shift), prominence_floor);
+        min_spacing *= (1.0f - fitconfig.harmonic_prominence_threshold_shift * 0.5f);
     }
-    
+
+    // Top-up: still short of the requested minimum -> take the lowest scan
+    // points subject to the spacing rule instead of mining noise.
+    if (minima.size() < fitconfig.harmonic_min_num_seeds) {
+        std::vector<size_t> order(ys.size());
+        std::iota(order.begin(), order.end(), 0);
+        std::sort(order.begin(), order.end(), [&ys](size_t a, size_t b) { return ys[a] < ys[b]; });
+        const size_t n_before = minima.size();
+        for (size_t idx : order) {
+            if (minima.size() >= fitconfig.harmonic_min_num_seeds) break;
+            bool far_enough = true;
+            for (const auto &m : minima) {
+                if (spacing_of(xs[idx], m.first) < min_spacing) { far_enough = false; break; }
+            }
+            if (far_enough) minima.emplace_back(xs[idx], ys[idx]);
+        }
+        if (minima.size() > n_before)
+            log<LOG_INFO>(L"%1% || Topped up minima from %2% to %3% with lowest scan points (requested minimum %4%).")
+                % __func__ % n_before % minima.size() % fitconfig.harmonic_min_num_seeds;
+    }
+
     std::sort(minima.begin(), minima.end(), [](const auto& a, const auto& b) { return a.second < b.second; });
-   
+
     // Limit to maximum number if we still have too many
     if (minima.size() > fitconfig.harmonic_max_num_seeds) {
+         const size_t n_found = minima.size();
          minima.resize(fitconfig.harmonic_max_num_seeds);
-         log<LOG_INFO>(L"%1% || Truncated to %2% best minima from %3% found")      % __func__ % fitconfig.harmonic_max_num_seeds % minima.size();
+         log<LOG_INFO>(L"%1% || Truncated to %2% best minima from %3% found")      % __func__ % fitconfig.harmonic_max_num_seeds % n_found;
     }
     // Log results
     log<LOG_INFO>(L"%1% || Found %2% significant minima with prominence threshold %3%")  % __func__ % minima.size() % prominence_threshold;
-    
+
     return minima;
 }
 

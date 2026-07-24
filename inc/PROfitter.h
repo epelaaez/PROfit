@@ -102,10 +102,15 @@ namespace PROfit {
         float harmonic_prominence_threshold = 0.5;       ///< Peak prominence threshold for peak selection in the harmonic scan.
         float harmonic_prominence_threshold_shift = 0.2; ///< Shift applied to the prominence threshold between harmonic search rounds.
         float harmonic_min_spacing_log = 0.0225;         ///< Minimum log-space separation between selected harmonic seed peaks 0.0225
-        float harmonic_prominence_threshold_minimum = 1e-5; ///< Absolute minimum prominence threshold (floor).
+        float harmonic_prominence_threshold_minimum = 1e-5; ///< Absolute minimum prominence threshold (floor of the adaptive relaxation).
         float harmonic_seed_norm_tolerance = 1e-4;       ///< Tolerance for seed-point norm convergence in the harmonic search.
         float harmonic_seed_chi_tolerence = 1e-6;        ///< Tolerance for chi-squared convergence in the harmonic seed search.
-        bool harmonic_scan_fit = false;                  ///< If true, run a local fit at each harmonic scan point; if false, hold at best fit.
+        int harmonic_scan_mode = 0;                      ///< 0: single chi2 eval per scan point (slice at BF). 1: fit non-frequency physics, splines pinned at BF. 2: full profile, ALL params free except the pinned frequency.
+        float harmonic_dense_lo = 0.0f;                  ///< Lower edge of the densely sampled log10(dm2) window (clamped into the model range at runtime).
+        float harmonic_dense_hi = 1.5f;                  ///< Upper edge of the densely sampled log10(dm2) window (clamped into the model range at runtime).
+        size_t harmonic_refine_rounds = 1;               ///< Adaptive refinement rounds: insert scan midpoints where adjacent chi2 values jump by more than harmonic_refine_dchi.
+        float harmonic_refine_dchi = 3.0f;               ///< Adjacent-point chi2 jump that triggers a refinement midpoint.
+        float harmonic_refit_window = 25.0f;             ///< Skip STEP-3 refits of scan minima more than this many chi2 units above the best scan point.
 
         bool progress_bar = false; ///< If true, display a progress bar during fitting.
 
@@ -341,7 +346,24 @@ namespace PROfit {
                 } else if(param_name == "harmonic_seed_chi_tolerence") {
                     harmonic_seed_chi_tolerence = value;
                 } else if(param_name == "harmonic_scan_fit") {
-                    harmonic_scan_fit = bool(value);
+                    // Deprecated alias: maps onto harmonic_scan_mode 0/1.
+                    harmonic_scan_mode = value ? 1 : 0;
+                } else if(param_name == "harmonic_scan_mode") {
+                    harmonic_scan_mode = int(value);
+                    if(harmonic_scan_mode < 0 || harmonic_scan_mode > 2) {
+                        log<LOG_WARNING>(L"%1% || harmonic_scan_mode must be 0, 1 or 2; got %2%. Clamping.") % __func__ % harmonic_scan_mode;
+                        harmonic_scan_mode = std::min(std::max(harmonic_scan_mode, 0), 2);
+                    }
+                } else if(param_name == "harmonic_dense_lo") {
+                    harmonic_dense_lo = value;
+                } else if(param_name == "harmonic_dense_hi") {
+                    harmonic_dense_hi = value;
+                } else if(param_name == "harmonic_refine_rounds") {
+                    harmonic_refine_rounds = value;
+                } else if(param_name == "harmonic_refine_dchi") {
+                    harmonic_refine_dchi = value;
+                } else if(param_name == "harmonic_refit_window") {
+                    harmonic_refit_window = value;
                 } else {
                     log<LOG_WARNING>(L"%1% || Unrecognized parameter %2%. Will ignore.") 
                         % __func__ % param_name.c_str();
@@ -391,7 +413,12 @@ namespace PROfit {
             log<LOG_INFO>(L"%1% || harmonic_prominence_threshold_minimum: %2%  ") % __func__ % harmonic_prominence_threshold_minimum;
             log<LOG_INFO>(L"%1% || harmonic_seed_norm_tolerance: %2%  ") % __func__ % harmonic_seed_norm_tolerance;
             log<LOG_INFO>(L"%1% || harmonic_seed_chi_tolerence: %2%  ") % __func__ % harmonic_seed_chi_tolerence;
-            log<LOG_INFO>(L"%1% || harmonic_scan_fit: %2%  ") % __func__ % harmonic_scan_fit;
+            log<LOG_INFO>(L"%1% || harmonic_scan_mode: %2%  ") % __func__ % harmonic_scan_mode;
+            log<LOG_INFO>(L"%1% || harmonic_dense_lo: %2%  ") % __func__ % harmonic_dense_lo;
+            log<LOG_INFO>(L"%1% || harmonic_dense_hi: %2%  ") % __func__ % harmonic_dense_hi;
+            log<LOG_INFO>(L"%1% || harmonic_refine_rounds: %2%  ") % __func__ % harmonic_refine_rounds;
+            log<LOG_INFO>(L"%1% || harmonic_refine_dchi: %2%  ") % __func__ % harmonic_refine_dchi;
+            log<LOG_INFO>(L"%1% || harmonic_refit_window: %2%  ") % __func__ % harmonic_refit_window;
             
             log<LOG_INFO>(L"%1% || ------------ LBFGSBParam -------------- ") % __func__ ;
             log<LOG_INFO>(L"%1% || m: %2%   ") % __func__ % param.m ;
@@ -451,7 +478,12 @@ namespace PROfit {
             log<LOG_INFO>(L"  harmonic_prominence_threshold_minimum: Absolute minimum for prominence threshold");
             log<LOG_INFO>(L"  harmonic_seed_norm_tolerance         : Tolerance for seed point norm convergence");
             log<LOG_INFO>(L"  harmonic_seed_chi_tolerence          : Tolerance for chi-squared convergence in seed search");
-            log<LOG_INFO>(L"  harmonic_scan_fit                    : During harmonic scan, fit per point (true) or hold at BF (false/default)");
+            log<LOG_INFO>(L"  harmonic_scan_mode                   : 0: eval-only slice at BF (default). 1: fit non-freq physics per point. 2: full profile, all params free except pinned freq");
+            log<LOG_INFO>(L"  harmonic_scan_fit                    : Deprecated alias for harmonic_scan_mode 0/1");
+            log<LOG_INFO>(L"  harmonic_dense_lo / harmonic_dense_hi: Densely sampled log10(dm2) window (clamped into model bounds)");
+            log<LOG_INFO>(L"  harmonic_refine_rounds               : Adaptive midpoint-refinement rounds over the scan curve");
+            log<LOG_INFO>(L"  harmonic_refine_dchi                 : Adjacent-point chi2 jump that triggers a refinement midpoint");
+            log<LOG_INFO>(L"  harmonic_refit_window                : Skip refits of scan minima more than this chi2 above the best scan point");
             
             log<LOG_INFO>(L"");
             log<LOG_INFO>(L"------ L-BFGS-B Parameters ------");
@@ -498,6 +530,8 @@ namespace PROfit {
 
             std::vector<Eigen::VectorXf> freq_seed_points; ///< Seed points found by the harmonic frequency scan.
             std::vector<float> freq_seed_values;           ///< Chi-squared values at the harmonic seed points.
+            std::vector<float> harmonic_scan_pos;          ///< Diagnostic: frequency positions of the last harmonic scan curve (sorted, finite points only).
+            std::vector<float> harmonic_scan_chi;          ///< Diagnostic: chi-squared values of the last harmonic scan curve, parallel to harmonic_scan_pos.
 
             /**
              * @brief Construct a PROfitter with given bounds and configuration.
