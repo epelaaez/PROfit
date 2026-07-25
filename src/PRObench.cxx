@@ -133,7 +133,7 @@ BenchResult time_fillspectra(const std::string &tag,
     r.total_us    = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
     r.per_call_us = (r.n_calls > 0) ? r.total_us / r.n_calls : 0.0;
 
-    log<LOG_DEBUG>(L"%1% || (sink=%2% — anti-DCE only)") % __func__ % sink;
+    log<LOG_DEBUG>(L"%1% || (sink=%2% -- anti-DCE only)") % __func__ % sink;
     emit_result(r);
     return r;
 }
@@ -174,7 +174,7 @@ BenchResult time_metric(const std::string &tag,
     r.total_us    = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
     r.per_call_us = (r.n_calls > 0) ? r.total_us / r.n_calls : 0.0;
 
-    log<LOG_DEBUG>(L"%1% || (sink=%2% — anti-DCE only)") % __func__ % sink;
+    log<LOG_DEBUG>(L"%1% || (sink=%2% -- anti-DCE only)") % __func__ % sink;
     emit_result(r);
     return r;
 }
@@ -217,7 +217,7 @@ BenchResult time_fit(const std::string &tag,
     r.total_us    = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
     r.per_call_us = (r.n_calls > 0) ? r.total_us / r.n_calls : 0.0;
 
-    log<LOG_DEBUG>(L"%1% || (sink=%2% — anti-DCE only)") % __func__ % sink;
+    log<LOG_DEBUG>(L"%1% || (sink=%2% -- anti-DCE only)") % __func__ % sink;
     emit_result(r, /*seconds=*/true);
     return r;
 }
@@ -295,7 +295,7 @@ BenchResult time_pseudo_universe(const std::string &tag,
     r.total_us    = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
     r.per_call_us = (r.n_calls > 0) ? r.total_us / r.n_calls : 0.0;
 
-    log<LOG_DEBUG>(L"%1% || (sink=%2% — anti-DCE only)") % __func__ % sink;
+    log<LOG_DEBUG>(L"%1% || (sink=%2% -- anti-DCE only)") % __func__ % sink;
     emit_result(r);
     return r;
 }
@@ -367,7 +367,7 @@ BenchResult time_mcmc_step(const std::string &tag,
     r.total_us    = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
     r.per_call_us = (r.n_calls > 0) ? r.total_us / r.n_calls : 0.0;
 
-    log<LOG_DEBUG>(L"%1% || (acceptance=%2%/%3% — anti-DCE info)") % __func__ % naccept % n_steps;
+    log<LOG_DEBUG>(L"%1% || (acceptance=%2%/%3% -- anti-DCE info)") % __func__ % naccept % n_steps;
     emit_result(r);
     return r;
 }
@@ -407,7 +407,7 @@ BenchResult time_collapse(const std::string &tag,
     r.total_us    = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
     r.per_call_us = (r.n_calls > 0) ? r.total_us / r.n_calls : 0.0;
 
-    log<LOG_DEBUG>(L"%1% || (sink=%2% — anti-DCE only)") % __func__ % sink;
+    log<LOG_DEBUG>(L"%1% || (sink=%2% -- anti-DCE only)") % __func__ % sink;
     emit_result(r);
     return r;
 }

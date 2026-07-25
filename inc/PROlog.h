@@ -23,6 +23,7 @@
 #include <iostream>
 #include <iomanip>
 #include <exception>
+#include <locale>
 #include <vector>
 #include <fstream>
 #include <unordered_map>
@@ -59,6 +60,19 @@ namespace log_impl {
     inline void EnableFileLogging(const std::string& filename, log_level_t file_verbosity = static_cast<log_level_t>(-1)) {
         if(LOG_FILE_STREAM.is_open()) {
             LOG_FILE_STREAM.close();
+        }
+        LOG_FILE_STREAM.clear();
+        // The default classic-"C" codecvt cannot convert non-ASCII wchar_t;
+        // one such character sets badbit and every later write is silently
+        // dropped, so the file needs a UTF-8 locale before opening.
+        try {
+            LOG_FILE_STREAM.imbue(std::locale("C.UTF-8"));
+        } catch (const std::exception&) {
+            try {
+                LOG_FILE_STREAM.imbue(std::locale("en_US.UTF-8"));
+            } catch (const std::exception&) {
+                std::wcerr << L"WARNING: No UTF-8 locale available; non-ASCII characters will be dropped from the log file." << std::endl;
+            }
         }
         LOG_FILE_STREAM.open(filename);
         LOGGING_TO_FILE = LOG_FILE_STREAM.is_open();

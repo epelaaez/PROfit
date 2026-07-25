@@ -56,7 +56,8 @@ namespace PROfit{
      * event-by-event; afterwards PROsyst reads it to build splines or covariance matrices.
      *
      * Supported modes (stored in the `mode` field): "multisim", "minmax", "covar", "spline",
-     * "external", "flat", "norm", "hist1d", "hist2d", "spline_to_covariance".
+     * "external", "flat", "norm", "norm_to_covariance", "hist1d", "hist2d",
+     * "spline_to_covariance".
      */
     struct SystStruct {
 

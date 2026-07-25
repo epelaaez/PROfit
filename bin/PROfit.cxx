@@ -46,9 +46,12 @@
 #include <stdexcept>
 #include <string>
 #include <set>
+
+#include <glob.h>
 #include <vector>
 #include <chrono>
 #include "TMath.h"
+#include "TLegend.h"
 
 using namespace PROfit;
 
@@ -209,6 +212,7 @@ GlobalFitOptions operator&=(GlobalFitOptions &lhs, GlobalFitOptions rhs) {
 GlobalFitResult do_a_fit(const PROconfig &config, const PROpeller &prop, const PROdata &data, PROmetric *metric, const Eigen::VectorXf &ub, const Eigen::VectorXf &lb, const PROfitterConfig &fit_config, const Eigen::VectorXf &CVParams, const PROspec &cv, const std::vector<int> &global_fixed, GlobalFitOptions opt);
 
 std::map<std::string, TObject *> draw_fit_result(const PROconfig &config, const PROpeller &prop, const PROmodel &model, const PROsyst &syst, const PROspec &cv, const PROdata &data, const GlobalFitResult &fitres, const std::string &prefix, PlotOptions popt, PlotBounds pbounds);
+void draw_harmonic_scan_pdf(const GlobalFitResult &fitres, const PROfitterConfig &fit_config, const PROmodel &model, const std::string &filename);
 
 // Walks the collapsed reco bins and logs any with prediction < threshold,
 // printing the channel, bin index/edges, prediction, and data count side-by-side.
@@ -343,6 +347,9 @@ int main(int argc, char* argv[])
     int   afc_only_layer   = -1;
     int   afc_n_brazil_throws = 100;
     float afc_roi_band = 8.0f;
+    std::vector<std::string> afc_merge_inputs;
+    std::vector<float> afc_cleanup_quantiles = {0.025f, 0.975f};
+    int afc_cleanup_halo = 1;
 
 
     //Global Arguments for all PROfit enables subcommands.
@@ -495,12 +502,27 @@ int main(int argc, char* argv[])
         "print-bank, asimov. Each mode reads/writes <output_tag>-prefixed artifacts. "
         "Typical workflow: build-mesh -> init-bank -> print-bank / asimov.");
     afc_command->add_option("--mode", afc_mode_str,
-        "Pipeline mode: build-mesh, init-bank, print-bank, asimov. "
+        "Pipeline mode: build-mesh, init-bank, print-bank, asimov, brazil, merge-mesh, merge-bank. "
         "build-mesh: Wilks prepass -> <tag>_mesh.bin + diagnostic PDFs. "
         "init-bank: requires <tag>_mesh.bin, generates <tag>_bank.bin. "
         "print-bank: load <tag>_bank.bin and write summary PDFs. "
-        "asimov: load <tag>_bank.bin and write FC contour + verdict PDFs.")
+        "asimov: load <tag>_bank.bin and write FC contour + verdict PDFs. "
+        "merge-mesh: union-merge >=2 --merge-input mesh binaries into <tag>_mesh.bin. "
+        "merge-bank: harvest PEs from >=1 --merge-input bank binaries onto <tag>_mesh.bin. "
+        "brazil-cleanup: mesh densified at the Brazil +-2sigma contours -> <tag>_cleanup_mesh.bin. "
+        "print-mesh: plot <tag>_mesh.bin (or --merge-input mesh files) as PDFs.")
         ->default_str("build-mesh");
+    afc_command->add_option("--merge-input", afc_merge_inputs,
+        "Input artifact filenames for merge-mesh / merge-bank (repeatable; "
+        "glob patterns like 'run*_mesh.bin' are expanded). Output goes to the "
+        "normal <output_tag>-prefixed artifacts.")->expected(-1);
+    afc_command->add_option("--cleanup-quantiles", afc_cleanup_quantiles,
+        "brazil-cleanup: inclusion-fraction quantile levels whose contour "
+        "crossings get finest refinement (default 0.025 0.975 = the Brazil "
+        "+-2sigma band edges).")->expected(-1);
+    afc_command->add_option("--cleanup-halo", afc_cleanup_halo,
+        "brazil-cleanup: dilate the flagged contour path by this many finest "
+        "bins so the mesh brackets the curve on both sides.")->default_val(1);
     afc_command->add_option("--throws", afc_n_throws,
         "Number of Wilks pre-pass throws (each produces one AMR mesh).")->default_val(200);
     afc_command->add_option("--prepass-amr-initial", afc_prepass_initial,
@@ -741,7 +763,7 @@ int main(int argc, char* argv[])
                 const std::string& varName = config.m_detvar_files[idv].name;
 
                 if(config.m_mcgen_variation_type_map.count(varName) == 0) {
-                    log<LOG_INFO>(L"%1% || Skipping DetVar '%2%' — no matching entry in <systematics> section.") % __func__ % varName.c_str();
+                    log<LOG_INFO>(L"%1% || Skipping DetVar '%2%' -- no matching entry in <systematics> section.") % __func__ % varName.c_str();
                     continue;
                 }
                 std::map<int, size_t> syst_files;
@@ -2732,6 +2754,10 @@ int main(int argc, char* argv[])
         else if (afc_mode_str == "asimov")     acfg.mode = PROfit::AdaptiveFCMode::Asimov;
         else if (afc_mode_str == "brazil")     acfg.mode = PROfit::AdaptiveFCMode::Brazil;
         else if (afc_mode_str == "classify")   acfg.mode = PROfit::AdaptiveFCMode::Classify;
+        else if (afc_mode_str == "merge-mesh") acfg.mode = PROfit::AdaptiveFCMode::MergeMesh;
+        else if (afc_mode_str == "merge-bank") acfg.mode = PROfit::AdaptiveFCMode::MergeBank;
+        else if (afc_mode_str == "brazil-cleanup") acfg.mode = PROfit::AdaptiveFCMode::BrazilCleanup;
+        else if (afc_mode_str == "print-mesh") acfg.mode = PROfit::AdaptiveFCMode::PrintMesh;
         else {
             log<LOG_WARNING>(L"%1% || fc-adaptive: unknown --mode '%2%', defaulting to build-mesh.")
                 % __func__ % afc_mode_str.c_str();
@@ -2767,6 +2793,37 @@ int main(int argc, char* argv[])
         acfg.only_layer = afc_only_layer;
         acfg.n_brazil_throws = afc_n_brazil_throws;
         acfg.roi_band = afc_roi_band;
+        acfg.cleanup_quantiles = afc_cleanup_quantiles;
+        acfg.cleanup_halo      = afc_cleanup_halo;
+
+        // Expand --merge-input entries: each may be a literal filename or a
+        // glob pattern (quoted through the shell, e.g. 'run*_mesh.bin').
+        // Unmatched patterns are kept verbatim so the merge modes report a
+        // clean per-file load error instead of silently shrinking the list.
+        for (const auto &pattern : afc_merge_inputs) {
+            glob_t g;
+            const int rc = glob(pattern.c_str(), GLOB_TILDE, nullptr, &g);
+            if (rc == 0 && g.gl_pathc > 0) {
+                for (size_t p = 0; p < g.gl_pathc; ++p)
+                    acfg.merge_inputs.push_back(g.gl_pathv[p]);
+            } else {
+                acfg.merge_inputs.push_back(pattern);
+            }
+            globfree(&g);
+        }
+        // Dedupe while preserving order (a glob plus an explicit filename can
+        // both match the same artifact).
+        {
+            std::set<std::string> seen_inputs;
+            std::vector<std::string> uniq;
+            for (auto &f : acfg.merge_inputs)
+                if (seen_inputs.insert(f).second) uniq.push_back(f);
+            acfg.merge_inputs = std::move(uniq);
+        }
+        if (!acfg.merge_inputs.empty()) {
+            log<LOG_INFO>(L"%1% || fc-adaptive: %2% merge input(s) after glob expansion.")
+                % __func__ % (int)acfg.merge_inputs.size();
+        }
 
         // Outer "AFC throws" bar is only meaningful for build-mesh (the prepass
         // throws each tick this bar via generate_throws). Other modes (init-bank,
@@ -2834,6 +2891,8 @@ int main(int argc, char* argv[])
         TFile fout((final_output_tag+"_PROglobal.root").c_str(), "RECREATE");
         for(const auto &[n, o] : drawn_objs)
             o->Write(n.c_str());
+
+        draw_harmonic_scan_pdf(fitres, fitConfig, metric->GetModel(), final_output_tag+"_PROglobal_Harmonic_Scan.pdf");
 
         // PROjector pre-fit: the global fit above WAS the pre-fit (masked to the matched
         // channels, physics fixed at CV unless floated); save its nuisance posterior.
@@ -3330,6 +3389,7 @@ GlobalFitResult do_a_fit(const PROconfig &config, const PROpeller &prop, const P
     Eigen::VectorXf best_fit = res.fitter.best_fit;
     if((opt & GlobalFitOptions::FreqSeedPts) != GlobalFitOptions::Default) res.fitter.calcFreqSeedPoints(*metric);
 
+    long best_harmonic_idx = -1;
     for(size_t i=0; i< res.fitter.freq_seed_points.size(); i++){
         float chi_freq = res.fitter.freq_seed_values.at(i);
         if( chi_freq < best_chi2){
@@ -3337,9 +3397,19 @@ GlobalFitResult do_a_fit(const PROconfig &config, const PROpeller &prop, const P
             log<LOG_INFO>(L"%1% || -- at params:  %2% ") % __func__ % res.fitter.freq_seed_points.at(i);
             best_chi2 = chi_freq;
             best_fit = res.fitter.freq_seed_points.at(i);
+            best_harmonic_idx = (long)i;
         }
     }
-    res.chi2 = best_chi2;   
+    if(best_harmonic_idx >= 0){
+        // Everything downstream (global_fit_result, draw_fit_result,
+        // PROfile::Plot) reads res.fitter.best_fit; keep it in sync with
+        // res.chi2 so the reported best-fit point is the one this chi2
+        // belongs to.
+        res.fitter.best_fit = best_fit;
+        log<LOG_WARNING>(L"%1% || A harmonic seed (#%2%) beat the first-pass global fit; adopting it as the global best fit with chi^2 %3%.") % __func__ % best_harmonic_idx % best_chi2;
+        log<LOG_WARNING>(L"%1% || -- best harmonic seed params: %2%") % __func__ % best_fit;
+    }
+    res.chi2 = best_chi2;
     if(progress_bar) progress.finish_all();
 
     if (res.fitter.exception_string_map.empty()) {
@@ -3449,8 +3519,181 @@ GlobalFitResult do_a_fit(const PROconfig &config, const PROpeller &prop, const P
     return res;
 }
 
+// One-page summary of the harmonic seed scan: the Delta chi2(freq) curve, a
+// dotted vertical line per surviving seed, the adopted global BF frequency,
+// and a side panel with the scan configuration and per-seed values.
+void draw_harmonic_scan_pdf(const GlobalFitResult &fitres, const PROfitterConfig &fit_config, const PROmodel &model, const std::string &filename) {
+    const std::vector<float> &pos = fitres.fitter.harmonic_scan_pos;
+    const std::vector<float> &chi = fitres.fitter.harmonic_scan_chi;
+    if(pos.size() < 2) {
+        log<LOG_INFO>(L"%1% || No harmonic scan curve available (scan skipped or empty); not drawing %2%.") % __func__ % filename.c_str();
+        return;
+    }
+
+    // Delta chi2 reference: the lowest chi2 seen anywhere (scan curve, refit
+    // seeds, adopted global BF) so the plotted curve never dips below zero.
+    float ref = *std::min_element(chi.begin(), chi.end());
+    for(float v : fitres.fitter.freq_seed_values) ref = std::min(ref, v);
+    if(std::isfinite(fitres.chi2)) ref = std::min(ref, fitres.chi2);
+
+    std::vector<float> dchi(chi.size());
+    float dmax = 0;
+    for(size_t i = 0; i < chi.size(); ++i) {
+        dchi[i] = chi[i] - ref;
+        dmax = std::max(dmax, dchi[i]);
+    }
+    float seed_dmax = 0;
+    for(float v : fitres.fitter.freq_seed_values) seed_dmax = std::max(seed_dmax, v - ref);
+
+    // Clip the y range to where seeds live; the far tail (often hundreds of
+    // chi2 units up) flattens the structure that matters. The full curve is
+    // saved as the harmonic_scan TGraph in the ROOT output.
+    float ymax = std::min(dmax * 1.05f, std::max(2.0f * seed_dmax + 5.0f, fit_config.harmonic_refit_window * 1.2f));
+    if(!(ymax > 0)) ymax = 1.0f;
+    const bool clipped = ymax < dmax;
+
+    const std::string fname = model.nparams ? model.pretty_param_names[0] : std::string("frequency");
+
+    TCanvas c("harmonic_scan_c", "Harmonic Scan", 1400, 800);
+    TPad plot_pad("hs_plot", "", 0.0, 0.0, 0.70, 1.0);
+    TPad text_pad("hs_text", "", 0.70, 0.0, 1.0, 1.0);
+    plot_pad.Draw();
+    text_pad.Draw();
+
+    plot_pad.cd();
+    plot_pad.SetGridy();
+    plot_pad.SetLeftMargin(0.11);
+    TGraph curve(pos.size(), pos.data(), dchi.data());
+    curve.SetTitle(("Harmonic seed scan;" + fname + " (scan space);#Delta#chi^{2}").c_str());
+    curve.SetLineWidth(2);
+    curve.SetLineColor(kAzure + 2);
+    curve.SetMinimum(0);
+    curve.SetMaximum(ymax);
+    curve.Draw("AL");
+
+    // Dotted vertical line + star marker at each surviving seed.
+    std::vector<std::unique_ptr<TLine>> seed_lines;
+    std::vector<float> seed_x, seed_y;
+    for(size_t i = 0; i < fitres.fitter.freq_seed_points.size(); ++i) {
+        const float x = fitres.fitter.freq_seed_points[i](0);
+        const float y = fitres.fitter.freq_seed_values[i] - ref;
+        seed_x.push_back(x);
+        seed_y.push_back(std::min(y, ymax));
+        auto l = std::make_unique<TLine>(x, 0.0, x, ymax);
+        l->SetLineColor(kRed + 1);
+        l->SetLineStyle(3);
+        l->SetLineWidth(2);
+        l->Draw("same");
+        seed_lines.push_back(std::move(l));
+    }
+    TGraph seeds(seed_x.size(), seed_x.data(), seed_y.data());
+    seeds.SetMarkerStyle(29);
+    seeds.SetMarkerSize(2.0);
+    seeds.SetMarkerColor(kRed + 1);
+    if(!seed_x.empty()) seeds.Draw("P same");
+
+    // The adopted global best-fit frequency.
+    TLine bf_line;
+    const bool have_bf = fitres.fitter.best_fit.size() > 0;
+    if(have_bf) {
+        bf_line.SetLineColor(kGreen + 2);
+        bf_line.SetLineStyle(7);
+        bf_line.SetLineWidth(2);
+        bf_line.DrawLine(fitres.fitter.best_fit(0), 0.0, fitres.fitter.best_fit(0), ymax);
+    }
+
+    TLegend leg(0.55, 0.72, 0.89, 0.89);
+    leg.SetBorderSize(0);
+    leg.SetFillStyle(0);
+    leg.AddEntry(&curve, "Harmonic scan #Delta#chi^{2}", "l");
+    if(!seed_x.empty()) leg.AddEntry(&seeds, "Kept seed points", "p");
+    if(have_bf) leg.AddEntry(&bf_line, "Global best fit", "l");
+    leg.Draw();
+
+    // Side panel: scan configuration and per-seed values.
+    text_pad.cd();
+    TPaveText info(0.02, 0.02, 0.98, 0.98, "NDC");
+    info.SetBorderSize(0);
+    info.SetFillColor(kWhite);
+    info.SetTextAlign(12);
+    info.SetTextFont(42);
+    info.SetTextSize(0.028);
+    char buf[256];
+    info.AddText("#font[62]{Harmonic seed scan summary}");
+    snprintf(buf, sizeof buf, "scan mode: %d (%s)", fit_config.harmonic_scan_mode,
+            fit_config.harmonic_scan_mode == 2 ? "full profile" : fit_config.harmonic_scan_mode == 1 ? "physics fit" : "eval at BF");
+    info.AddText(buf);
+    snprintf(buf, sizeof buf, "points scanned: %zu on [%.3g, %.3g]", pos.size(), pos.front(), pos.back());
+    info.AddText(buf);
+    snprintf(buf, sizeof buf, "dense window: [%.3g, %.3g], %zu pts", fit_config.harmonic_dense_lo, fit_config.harmonic_dense_hi, fit_config.harmonic_num_test_points);
+    info.AddText(buf);
+    snprintf(buf, sizeof buf, "refine: %zu round(s), d#chi^{2} > %.3g", fit_config.harmonic_refine_rounds, fit_config.harmonic_refine_dchi);
+    info.AddText(buf);
+    snprintf(buf, sizeof buf, "persistence: rel %.3g, floor %.3g, cap %.3g", fit_config.harmonic_persistence_rel, fit_config.harmonic_persistence_floor, fit_config.harmonic_prominence_threshold);
+    info.AddText(buf);
+    snprintf(buf, sizeof buf, "phys ladder: %zu pts/dim", fit_config.harmonic_phys_ladder);
+    info.AddText(buf);
+    snprintf(buf, sizeof buf, "min spacing: %.3g, seeds: %zu-%zu", fit_config.harmonic_min_spacing_log, fit_config.harmonic_min_num_seeds, fit_config.harmonic_max_num_seeds);
+    info.AddText(buf);
+    snprintf(buf, sizeof buf, "refit window: %.3g", fit_config.harmonic_refit_window);
+    info.AddText(buf);
+    snprintf(buf, sizeof buf, "global BF #chi^{2}: %.4g", fitres.chi2);
+    info.AddText(buf);
+    if(have_bf) {
+        snprintf(buf, sizeof buf, "global BF freq: %.4g", fitres.fitter.best_fit(0));
+        info.AddText(buf);
+    }
+    if(clipped) {
+        snprintf(buf, sizeof buf, "y clipped at %.3g (curve max %.3g)", ymax, dmax);
+        info.AddText(buf);
+    }
+    info.AddText("#font[62]{Kept seeds (freq, #Delta#chi^{2}):}");
+    const size_t n_list = std::min<size_t>(fitres.fitter.freq_seed_points.size(), 10);
+    for(size_t i = 0; i < n_list; ++i) {
+        snprintf(buf, sizeof buf, "  seed %zu: %.4g, %.4g", i, fitres.fitter.freq_seed_points[i](0), fitres.fitter.freq_seed_values[i] - ref);
+        info.AddText(buf);
+    }
+    if(fitres.fitter.freq_seed_points.size() > n_list) {
+        snprintf(buf, sizeof buf, "  (+%zu more)", fitres.fitter.freq_seed_points.size() - n_list);
+        info.AddText(buf);
+    }
+    info.Draw();
+
+    // Match the PDF page to the landscape canvas (default paper is portrait,
+    // which top-aligns the canvas and leaves the lower half blank).
+    float paper_w, paper_h;
+    gStyle->GetPaperSize(paper_w, paper_h);
+    gStyle->SetPaperSize(28.0f, 16.0f);
+    c.Print(filename.c_str());
+    gStyle->SetPaperSize(paper_w, paper_h);
+    log<LOG_INFO>(L"%1% || Wrote harmonic scan summary to %2%") % __func__ % filename.c_str();
+}
+
 std::map<std::string, TObject *> draw_fit_result(const PROconfig &config, const PROpeller &prop, const PROmodel &model, const PROsyst &syst, const PROspec &cv, const PROdata &data, const GlobalFitResult &fitres, const std::string &prefix, PlotOptions popt, PlotBounds pbounds) {
     std::map<std::string, TObject *> drawn_objs;
+
+    // Harmonic-scan diagnostics: the scan curve chi2(freq) and the refit seed
+    // points, so a missed basin is visible by inspection (overlay a PROfile
+    // physics curve on these -- every profile basin should contain a seed).
+    if(!fitres.fitter.harmonic_scan_pos.empty()) {
+        TGraph *scan_g = new TGraph(fitres.fitter.harmonic_scan_pos.size(),
+                fitres.fitter.harmonic_scan_pos.data(), fitres.fitter.harmonic_scan_chi.data());
+        scan_g->SetName("harmonic_scan");
+        scan_g->SetTitle("Harmonic frequency scan;log_{10}(#Deltam^{2});#chi^{2}");
+        drawn_objs["harmonic_scan"] = scan_g;
+
+        std::vector<float> seed_x, seed_y;
+        for(size_t i = 0; i < fitres.fitter.freq_seed_points.size(); ++i) {
+            seed_x.push_back(fitres.fitter.freq_seed_points[i](0));
+            seed_y.push_back(fitres.fitter.freq_seed_values[i]);
+        }
+        TGraph *seed_g = new TGraph(seed_x.size(), seed_x.data(), seed_y.data());
+        seed_g->SetName("harmonic_seeds");
+        seed_g->SetTitle("Harmonic seed points;log_{10}(#Deltam^{2});#chi^{2}");
+        seed_g->SetMarkerStyle(29);
+        seed_g->SetMarkerSize(1.5);
+        drawn_objs["harmonic_seeds"] = seed_g;
+    }
 
     size_t N_params = model.nparams + syst.GetNSplines();
     size_t N_phys_params = model.nparams;

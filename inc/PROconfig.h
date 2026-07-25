@@ -404,6 +404,7 @@ namespace PROfit{
             int m_num_variation_type_spline_to_covariance = 0;
             int m_num_variation_type_flat = 0;
             int m_num_variation_type_norm = 0;
+            int m_num_variation_type_norm_to_covariance = 0;
             int m_num_variation_type_hist1d = 0;
             int m_num_variation_type_hist2d = 0;
 
@@ -426,6 +427,7 @@ namespace PROfit{
 
             //specific bits for covairiancegeneration
             bool m_use_mcstats = false;
+            std::string m_mcstat_systname = "mcstat";  ///< XML name of the mcstat systematic; the key its covariance is registered under (defaults to legacy "mcstat")
             std::vector<std::string> m_mcgen_weightmaps_formulas;
             std::vector<bool> m_mcgen_weightmaps_uses;
             std::vector<std::string> m_mcgen_weightmaps_patterns;
@@ -531,12 +533,12 @@ namespace PROfit{
             const Binning& GetChannelVariableBins(size_t channel_index, size_t other_index) const;
 
             /* Function: build the X-axis title for a channel as "label [unit]",
-             * omitting either part if empty. For 2D variables, the legacy
-             * combined "xtitle;ytitle" string in m_channel_variable_units is
-             * returned as-is.
-             */
+             * omitting either part if empty. For 2D variables, the combined
+             * "xtitle;ytitle" is split and the first part is returned.
+            */
             std::string GetChannelXAxisTitle(size_t channel_index) const;
             std::string GetChannelXAxisTitle(size_t channel_index, size_t other_index) const;
+            std::string GetChannelAxisTitle(size_t channel_index, size_t other_index, size_t dim) const;
 
             /**
              * @brief Install a runtime fit-region mask over the collapsed bins of one variable.

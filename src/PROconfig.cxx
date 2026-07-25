@@ -1284,6 +1284,9 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
                 m_mcgen_variation_type.push_back(variation_type);
                 m_mcgen_variation_type_map[wt] = variation_type;
+                // mcstat's covariance is registered in PROsyst under the systematic's name; remember
+                // that name here so the covariance key matches the tag/plotname maps (both keyed by wt).
+                if(variation_type && std::string(variation_type) == "mcstat") m_mcstat_systname = wt;
 
                 // DetVar variations are handled separately (not weight branches in MC files),
                 // so don't add them to the allowlist that PROcess_CAFAna uses.
@@ -1421,7 +1424,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                     }
                     m_mcgen_variation_inflate[wt] = inflate_val;
                     log<LOG_INFO>(L"%1% || Parsed inflate=%2% for systematic %3%") % __func__ % inflate_val % wt.c_str();
-                    const std::vector<std::string> inflatable_types = {"spline", "spline_to_covariance", "covariance", "external_covariance", "norm", "hist1d", "hist2d"};
+                    const std::vector<std::string> inflatable_types = {"spline", "spline_to_covariance", "covariance", "external_covariance", "norm", "norm_to_covariance", "hist1d", "hist2d"};
                     if(!variation_type || std::find(inflatable_types.begin(), inflatable_types.end(), variation_type) == inflatable_types.end()) {
                         log<LOG_WARNING>(L"%1% || inflate is not supported for systematic %2% (type %3%); it will have no effect.")
                             % __func__ % wt.c_str() % (variation_type ? variation_type : "unspecified");
@@ -1734,9 +1737,10 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
         else if(m_mcgen_variation_type[i] == "flat"){
             m_num_variation_type_flat+=1;
-        }
-        else if(m_mcgen_variation_type[i] == "norm"){
+        } else if(m_mcgen_variation_type[i] == "norm"){
             m_num_variation_type_norm+=1;
+        } else if (m_mcgen_variation_type[i] == "norm_to_covariance") {
+            m_num_variation_type_norm_to_covariance+=1;
         }else if(m_mcgen_variation_type[i] == "spline_to_covariance"){
             m_num_variation_type_spline_to_covariance+=1;
         }else if(m_mcgen_variation_type[i] == "mcstat"){
@@ -1761,6 +1765,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
     log<LOG_INFO>(L"%1% || num_variation_type_external_covariance_to_spline: %2% ") % __func__ % m_num_variation_type_external_covariance_to_spline;
     log<LOG_INFO>(L"%1% || num_variation_type_flat: %2% ") % __func__ % m_num_variation_type_flat;
     log<LOG_INFO>(L"%1% || num_variation_type_norm: %2% ") % __func__ % m_num_variation_type_norm;
+    log<LOG_INFO>(L"%1% || num_variation_type_norm_to_covariance: %2% ") % __func__ % m_num_variation_type_norm_to_covariance;
     log<LOG_INFO>(L"%1% || num_variation_type_spline: %2% ") % __func__ % m_num_variation_type_spline;
     log<LOG_INFO>(L"%1% || num_variation_type_spline_to_covariance: %2% ") % __func__ % m_num_variation_type_spline_to_covariance;
     if(m_use_mcstats){
@@ -2041,6 +2046,20 @@ std::string PROconfig::GetChannelXAxisTitle(size_t channel_index, size_t other_i
     }
     return FormatLabelUnit(m_channel_variable_xaxis_labels[channel_index][other_index],
                            m_channel_variable_units[channel_index][other_index]);
+}
+
+std::string PROconfig::GetChannelAxisTitle(size_t channel_index, size_t other_index, size_t dim) const {
+    const std::string title = GetChannelXAxisTitle(channel_index, other_index);
+    if(channel_index >= m_channel_variable_dims.size() ||
+       other_index >= m_channel_variable_dims[channel_index].size() ||
+       m_channel_variable_dims[channel_index][other_index] != 2) {
+        return dim == 0 ? title : "";
+    }
+
+    const size_t separator = title.find(';');
+    if(dim == 0) return title.substr(0, separator);
+    if(dim == 1 && separator != std::string::npos) return title.substr(separator + 1);
+    return "";
 }
 
 std::string PROconfig::GetChannelUnit(size_t channel_index, size_t other_index) const {

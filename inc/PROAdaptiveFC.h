@@ -48,6 +48,10 @@ namespace PROfit {
         Asimov,    ///< Load <tag>_bank.bin, classify the asimov dataset, produce contour PDF + ROOT.
         Brazil,    ///< Brazil-band throw loop: classify N pseudo-experiments against the bank.
         Classify,  ///< (not yet implemented) Classify real data against the bank.
+        MergeMesh, ///< Union-merge ≥2 mesh binaries (--merge-input) into <tag>_mesh.bin.
+        MergeBank, ///< Harvest PEs from ≥1 bank binaries (--merge-input) onto <tag>_mesh.bin, save <tag>_bank.bin.
+        BrazilCleanup, ///< From <tag>_bank.bin + <tag>_brazil.bin, build <tag>_cleanup_mesh.bin densified at the Brazil ±2σ contours. No fits.
+        PrintMesh, ///< Plot <tag>_mesh.bin (or any mesh binaries given via --merge-input) as PDF(s). No fitting.
     };
 
     /**
@@ -102,6 +106,21 @@ namespace PROfit {
         float wilson_eps = 0.05f; ///< Unused for bank generation now; reserved for the future classify mode.
         float roi_band = 8.0f;   ///< Reserved for the future classify mode; unused for now.
         int   n_brazil_throws = 100; ///< Number of pseudo-experiment throws for --mode brazil.
+
+        // ---- merge-mesh / merge-bank inputs ----
+        // Concrete artifact filenames (glob patterns already expanded by the
+        // CLI layer). merge-mesh: ≥2 *_mesh.bin; merge-bank: ≥1 *_bank.bin
+        // harvested onto this tag's already-merged <output_tag>_mesh.bin.
+        std::vector<std::string> merge_inputs;
+
+        // ---- brazil-cleanup ----
+        // Inclusion-fraction quantile levels whose plotted contours (traced
+        // on the same IDW-smoothed surface as the band PDF) get finest
+        // refinement. Default = the Brazil ±2σ band edges.
+        std::vector<float> cleanup_quantiles = {0.025f, 0.975f};
+        // Dilate the flagged contour path by this many finest bins so the
+        // mesh brackets the curve on both sides.
+        int cleanup_halo = 1;
     };
 
     /**

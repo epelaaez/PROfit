@@ -125,6 +125,10 @@ namespace PROfit {
                 this->CreateFlatMatrix(config, syst); 
                 covar_names.push_back(syst.systname); 
                 ++n_covar;
+            }else if(syst.mode == "norm_to_covariance"){
+                this->CreateNormMatrix(config, syst);
+                covar_names.push_back(syst.systname);
+                ++n_covar;
             }else if(syst.mode == "external_covariance"){
                 if(other_index == syst.binning){
                     //external covariances are only created for specific binning
@@ -182,7 +186,9 @@ namespace PROfit {
             Eigen::MatrixXf fractional_mcstat_cov =  prop.variable_mc_stat_err[other_index].array().square().inverse().matrix().asDiagonal();
             toFiniteMatrix(fractional_mcstat_cov);
             Eigen::MatrixXf mcstat_corr = GenerateCorrMatrix(fractional_mcstat_cov);
-            syst_map["mcstat"] = {covmat.size(), SystType::Covariance};
+            // Register under the systematic's XML name (like every other covariance at
+            // syst_map[syst.systname] above) so downstream tag/plotname lookups match its key.
+            syst_map[config.m_mcstat_systname] = {covmat.size(), SystType::Covariance};
             covmat.push_back(fractional_mcstat_cov);
             corrmat.push_back(mcstat_corr);
             ++n_covar;
@@ -482,6 +488,28 @@ namespace PROfit {
 
         return;
     }
+
+    void PROsyst::CreateNormMatrix(const PROconfig &config, const SystStruct& syst){
+        std::string sysname = syst.GetSysName();
+        log<LOG_INFO>(L"%1% || Generating a correlated normalization covariance matrix for %2%.") % __func__ % sysname.c_str();
+
+        int nbins = config.m_num_variable_bins_total[other_index];
+        Eigen::MatrixXf fracM = Eigen::MatrixXf::Zero(nbins, nbins);
+        Eigen::MatrixXf corrM = Eigen::MatrixXf::Zero(nbins, nbins);
+        const float covariance = syst.norm_value * syst.norm_value * syst.inflate * syst.inflate;
+
+        for(int row : syst.norm_bins){
+            for(int col : syst.norm_bins){
+                fracM(row, col) = covariance;
+                corrM(row, col) = 1.0;
+            }
+        }
+
+        syst_map[sysname] = {covmat.size(), SystType::Covariance};
+        covmat.push_back(fracM);
+        corrmat.push_back(corrM);
+    }
+
     Eigen::MatrixXf PROsyst::LoadExternalFractionalCovariance(const PROconfig &config, const SystStruct& syst){
         //this is matrix name
         std::string matrixname = syst.GetSysName();
