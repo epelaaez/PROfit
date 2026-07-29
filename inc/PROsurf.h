@@ -126,7 +126,15 @@ namespace PROfit {
             std::vector<std::vector<ScanPoint>> seed_bank;
             std::mutex seed_bank_mutex;     ///< Guards seed_bank.
 
-            PROfile(const PROconfig &config, const PROsyst &systs, const PROmodel &model, PROmetric &metric, PROseed &proseed, const PROfitterConfig &fitconfig, std::string filename, float minchi = 0, bool with_osc = false, int nThreads = 1, const std::vector<Eigen::VectorXf> &seed_points = {}, const Eigen::VectorXf& true_params = Eigen::VectorXf(), bool use_probe = false, int n_physics_chunks = 1 ) ;
+            /** @brief Fixed seeds (see PROfitter FixedSeed) forwarded to every scan-point
+             *  fit, e.g. the background-only seed with physics pinned at the model
+             *  defaults. A seed whose pins conflict with a scan point's bounds (most
+             *  commonly: profiling the very parameter the seed pins, at a different
+             *  value) is skipped inside PROfitter::Fit for that point. Copied from the
+             *  constructor argument before workers dispatch; read-only afterwards. */
+            std::vector<FixedSeed> fixed_seed_points;
+
+            PROfile(const PROconfig &config, const PROsyst &systs, const PROmodel &model, PROmetric &metric, PROseed &proseed, const PROfitterConfig &fitconfig, std::string filename, float minchi = 0, bool with_osc = false, int nThreads = 1, const std::vector<Eigen::VectorXf> &seed_points = {}, const Eigen::VectorXf& true_params = Eigen::VectorXf(), bool use_probe = false, int n_physics_chunks = 1, const std::vector<FixedSeed> &fixed_seeds = {} ) ;
 
             void Plot(const PROconfig &config, const PROsyst &systs, const PROmodel &model, PROmetric &metric, PROseed &proseed, std::string filename, bool with_osc = false, const Eigen::VectorXf& init_seed = Eigen::VectorXf(), const Eigen::VectorXf& true_params = Eigen::VectorXf(), const Eigen::MatrixXf& spline_covariance = Eigen::MatrixXf{}, const Eigen::VectorXf& param_err_lo = Eigen::VectorXf{}, const Eigen::VectorXf& param_err_hi = Eigen::VectorXf{}, bool mask_osc = false) ;
 

@@ -36,8 +36,8 @@ ScanFitContext::Outcome ScanFitContext::fitAt(float value) {
         // NOTE: PROfitter::FitScan (leaner scan-mode pipeline) is deliberately
         // unused while a fit-quality regression in it is investigated; every
         // scan sub-fit runs the full Fit() pipeline.
-        const float chi = seeds.empty() ? fitter.Fit(metric)
-                                        : fitter.Fit(metric, seeds);
+        static const std::vector<FixedSeed> no_fixed_seeds;
+        const float chi = fitter.Fit(metric, seeds, fixed_seeds ? *fixed_seeds : no_fixed_seeds);
         if(!std::isfinite(chi)) {
             log<LOG_WARNING>(L"%1% || Scan fit at param %2% = %3% returned non-finite chi2 (%4%); point skipped.")
                 % __func__ % param_idx % value % chi;

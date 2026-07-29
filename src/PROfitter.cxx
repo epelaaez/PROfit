@@ -152,7 +152,7 @@ float PROfitter::Fit(PROmetric &metric, const Eigen::VectorXf &seed_pt ) {
 
 }
 
-float PROfitter::Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed_points ) {
+float PROfitter::Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed_points, const std::vector<FixedSeed> &fixed_seeds ) {
 
     metric.setGradientMode(fitconfig.gradient_mode);
 
@@ -370,6 +370,96 @@ float PROfitter::Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed
         }
     }
 
+    // Fixed seeds: start points whose flagged parameters are HELD at their seed
+    // values during refinement (zero-width solver bounds for this seed only) —
+    // e.g. the background-only seed with physics pinned at the model defaults,
+    // making a nuisances-only fit of the null hypothesis a guaranteed candidate.
+    // A seed whose pinned value the fit does not allow (a --fix'd parameter, or
+    // a profile/surface scan pinning the same axis at a different value) is
+    // skipped: its constrained minimum would sit outside this fit's space.
+    // Gated by fitconfig.use_bkg_seed (--fit-options / --scan-fit-options).
+    if(!fitconfig.use_bkg_seed && !fixed_seeds.empty()) {
+        log<LOG_INFO>(L"%1% || use_bkg_seed=0: skipping %2% fixed seed(s).") % __func__ % fixed_seeds.size();
+    }
+    for(size_t s = 0; fitconfig.use_bkg_seed && s < fixed_seeds.size(); s++){
+        const FixedSeed &fs = fixed_seeds[s];
+        if(fs.point.size() != lb.size() || (long)fs.fixed.size() != fs.point.size()){
+            log<LOG_WARNING>(L"%1% || Fixed seed %2% is mis-sized (point %3%, flags %4%, fit has %5% params); skipping.")
+                % __func__ % s % fs.point.size() % fs.fixed.size() % lb.size();
+            continue;
+        }
+        bool conflict = false;
+        int npinned = 0;
+        for(long i = 0; i < fs.point.size(); ++i){
+            if(!fs.fixed[i]) continue;
+            ++npinned;
+            if(fs.point(i) < lb(i) || fs.point(i) > ub(i)){
+                log<LOG_INFO>(L"%1% || Fixed seed %2% pins param %3% at %4% but this fit restricts it to [%5%, %6%]; seed skipped.")
+                    % __func__ % s % i % fs.point(i) % lb(i) % ub(i);
+                conflict = true;
+                break;
+            }
+        }
+        if(conflict) continue;
+        ++fudge; // fixed seeds consume local-fit budget like regular seeds
+
+        log<LOG_INFO>(L"%1% || Starting local fit of fixed seed %2% (%3% pinned params).") % __func__ % s % npinned;
+        if(run_progress)progress->increment_bar(2);
+
+        // Candidate guarantee, same as regular seeds: record the seed's own
+        // chi2 before refinement (pinned entries are in-range by the check
+        // above, free entries are clamped, so this is a valid fit-space point).
+        Eigen::VectorXf x0 = fs.point.cwiseMax(lb).cwiseMin(ub);
+        {
+            Eigen::VectorXf g0 = Eigen::VectorXf::Zero(x0.size());
+            const float f0 = metric(x0, g0, false);
+            if (std::isfinite(f0) && f0 < chimin) {
+                best_fit = x0;
+                chimin = f0;
+            }
+        }
+
+        Eigen::VectorXf flb = lb, fub = ub;
+        for(long i = 0; i < fs.point.size(); ++i){
+            if(fs.fixed[i]){ flb(i) = x0(i); fub(i) = x0(i); }
+        }
+
+        bool seed_success = false;
+        for (size_t attempt = 1; attempt <= fitconfig.n_max_local_retries; ++attempt) {
+            try {
+                x = x0;
+                log<LOG_INFO>(L"%1% || Starting fixed-seed local minimization attempt %2%/%3%") % __func__ % attempt % fitconfig.n_max_local_retries;
+
+                niter = solver.minimize(metric, x, fx, flb, fub);
+
+                chi2s_localfits.push_back(fx);
+
+                if (fx < chimin) {
+                    best_fit = x;
+                    chimin = fx;
+                }
+
+                log<LOG_INFO>(L"%1% || Minimization successful, chi %2% after %3% iterations") % __func__ % fx % niter;
+
+                std::string spec_string = "";
+                for (auto &f : x) spec_string += " " + std::to_string(f);
+                log<LOG_DEBUG>(L"%1% || Best Point after minimization: %2%") % __func__ % spec_string.c_str();
+
+                seed_success = true;
+                break;
+
+            } catch (const std::exception &except) {
+                exception_string_map[std::string(except.what())]++;
+                fit_exception_counts[std::string(except.what())]++;
+                log<LOG_DEBUG>(L"%1% || Minimization attempt %2%/%3% failed: %4%") % __func__ % attempt % fitconfig.n_max_local_retries % except.what();
+            }
+        }
+
+        if (!seed_success) {
+            ++n_fail_seed;
+            log<LOG_DEBUG>(L"%1% || Fixed-seed refinement failed; keeping best-so-far (chi %2%, includes the seed's own chi2 as a candidate)") % __func__ % chimin;
+        }
+    }
 
     for(int i=0; i< fitconfig.n_localfit-1-fudge && (size_t)(i+1) < best_multistart.size(); i++){
         ++n_latin_starts;

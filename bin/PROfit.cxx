@@ -211,6 +211,27 @@ GlobalFitOptions operator&=(GlobalFitOptions &lhs, GlobalFitOptions rhs) {
 }
 GlobalFitResult do_a_fit(const PROconfig &config, const PROpeller &prop, const PROdata &data, PROmetric *metric, const Eigen::VectorXf &ub, const Eigen::VectorXf &lb, const PROfitterConfig &fit_config, const Eigen::VectorXf &CVParams, const PROspec &cv, const std::vector<int> &global_fixed, GlobalFitOptions opt);
 
+// Background-only fixed seed: physics pinned at the model defaults (the
+// no-oscillation point for the SBN sterile models), nuisances started from CV.
+// PROfitter refines it with the physics HELD fixed (a nuisances-only fit of the
+// null hypothesis) and records the result as a candidate; a fit that restricts
+// any pinned physics parameter to a different value (--fix, profile scans of
+// that parameter) skips the seed inside PROfitter::Fit. Empty for physics-free
+// models.
+std::vector<FixedSeed> buildBkgOnlyFixedSeeds(const PROmodel &model, const Eigen::VectorXf &CVParams) {
+    std::vector<FixedSeed> out;
+    if(model.nparams == 0) return out;
+    FixedSeed bkg;
+    bkg.point = CVParams;
+    bkg.fixed.assign(CVParams.size(), 0);
+    for(size_t i = 0; i < model.nparams; ++i) {
+        bkg.point((int)i) = model.default_val((int)i);
+        bkg.fixed[i] = 1;
+    }
+    out.push_back(std::move(bkg));
+    return out;
+}
+
 std::map<std::string, TObject *> draw_fit_result(const PROconfig &config, const PROpeller &prop, const PROmodel &model, const PROsyst &syst, const PROspec &cv, const PROdata &data, const GlobalFitResult &fitres, const std::string &prefix, PlotOptions popt, PlotBounds pbounds);
 void draw_harmonic_scan_pdf(const GlobalFitResult &fitres, const PROfitterConfig &fit_config, const PROmodel &model, const std::string &filename);
 
@@ -1444,7 +1465,8 @@ int main(int argc, char* argv[])
         if (profile_timing) PROfit::GetScanTimingEnabled() = true;
         PROfile profile(config, metric->GetSysts(), metric->GetModel(), *metric, myseed, scanFitConfig,
                 final_output_tag+"_PROfile", fitres.chi2, !systs_only, nthread, seeds,
-                fakedataparams, use_probe, n_probe_chunks);
+                fakedataparams, use_probe, n_probe_chunks,
+                buildBkgOnlyFixedSeeds(metric->GetModel(), CVParams));
         if (profile_timing) PROfit::GetScanTimingEnabled() = false;
         log<LOG_INFO>(L"%1% || fakedataparams for Plot (true_params/red stars): %2%") % __func__ % fakedataparams;
         profile.Plot(config, metric->GetSysts(), metric->GetModel(), *metric, myseed,
@@ -3385,7 +3407,11 @@ GlobalFitResult do_a_fit(const PROconfig &config, const PROpeller &prop, const P
         res.fitter.setProgressBar(&progress);
     }
 
-    float best_chi2 = res.fitter.Fit(*metric, CVParams); 
+    // The CV point seeds the full-float fit; the background-only fixed seed
+    // additionally guarantees a nuisances-only fit of the null hypothesis is a
+    // candidate (skipped automatically if it conflicts with --fix'd physics).
+    std::vector<FixedSeed> bkg_fixed_seeds = buildBkgOnlyFixedSeeds(metric->GetModel(), CVParams);
+    float best_chi2 = res.fitter.Fit(*metric, std::vector<Eigen::VectorXf>{CVParams}, bkg_fixed_seeds);
     Eigen::VectorXf best_fit = res.fitter.best_fit;
     if((opt & GlobalFitOptions::FreqSeedPts) != GlobalFitOptions::Default) res.fitter.calcFreqSeedPoints(*metric);
 
