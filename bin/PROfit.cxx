@@ -1879,7 +1879,7 @@ int main(int argc, char* argv[])
                 cv_plot.Spec() -= bkg_full;
             }
             auto objs = plot_channels(final_output_tag+"_PROplot_Variable_"+std::to_string(io)+"_CV.pdf", config, cv_plot, {}, {}, {}, {}, notext, pbounds, opt, io,
-                    false, do_bkg_subtract ? &bkg_subchannels : nullptr);
+                    false, plot_channel_ratios, do_bkg_subtract ? &bkg_subchannels : nullptr);
             cv_objs.push_back(objs);
         }
 
@@ -1888,6 +1888,10 @@ int main(int argc, char* argv[])
         std::string rfilename = final_output_tag+"_ratio_fractional_systematics.pdf";
         if(config.m_num_detectors > 1)
             plotPriorFractionalSystematicRatios(config, variable_cvs[config.i_prime], allcovsyst, rfilename,config.i_prime);
+
+        std::string crfilename = final_output_tag+"_channel_ratio_fractional_systematics.pdf";
+        if(plot_channel_ratios && config.m_num_channels > 1)
+            plotPriorFractionalSystematicChannelRatios(config, variable_cvs[config.i_prime], allcovsyst, crfilename, config.i_prime);
 
         std::vector<std::map<std::string, std::unique_ptr<TH1D>>> other_hists;
         for(size_t io = 0; io < config.m_num_variables; ++io) {
@@ -2460,7 +2464,7 @@ int main(int argc, char* argv[])
             }
             auto objs = plot_channels(final_output_tag+"_PROplot_Variable_"+std::to_string(io)+"_ErrorBand.pdf", config, cv_plot, {}, data_plot,
                     other_err_bands.back(), {}, other_channel_chitexts[io], pbounds, opt | PlotOptions::DataMCRatio, io,
-                    false, do_bkg_subtract ? &bkg_subchannels : nullptr);
+                    false, plot_channel_ratios, do_bkg_subtract ? &bkg_subchannels : nullptr);
             errband_objs.push_back(objs);
         }
 
