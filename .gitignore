@@ -12,3 +12,6 @@ __pycache__
 compile_commands.json
 inc/PROversion.h
 plotting_routines/.ipynb_checkpoints/
+# tutorial: keep the embedded figures, never the (multi-GB) run outputs
+docs/tutorials/tutorial_run/
+!docs/tutorials/figures/*.png

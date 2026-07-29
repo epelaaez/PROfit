@@ -4,8 +4,9 @@ This tutorial walks through the full PROfit v2.X workflow, from the conceptual
 building blocks and XML configuration all the way to Feldman-Cousins and the
 PROjector two-stage fit. Every plot shown here can be regenerated with the
 companion script [`make_tutorial_plots.sh`](make_tutorial_plots.sh) in this
-directory — each plot placeholder below is labelled with the exact output file
-that script produces.
+directory; the embedded images live in [`figures/`](figures/) and are rendered
+from those PDFs by [`make_tutorial_figures.sh`](make_tutorial_figures.sh) —
+each figure caption names the exact output file it came from.
 
 > **Note:** This walk-through was developed and tested on the `project-SBN-dev`
 > branch of PROfit v2.X. If commands here disagree with `PROfit --help` on your
@@ -44,12 +45,6 @@ systematics. The MC files (`fake_sbn_mc_ND.root`, `fake_sbn_mc_FD.root`, ~1 GB
 each) live alongside the XML, or ping Mark Ross-Lonergan on Slack for a
 tarball. **These are toy files for teaching — do not use for physics results.**
 
-The XML ships pointing at a gpvm path, so localize it once before starting:
-
-```bash
-sed "s|/exp/uboone/data/users/markross|/path/to/your/mc/files|g" \
-    working_dir/Neutrino2026/fake_sbn_v2.xml > tutorial.xml
-```
 
 All commands below use `tutorial.xml`, the tag `TUT`, and a fixed seed so your
 numbers should match.
@@ -464,20 +459,21 @@ Outputs (one `Variable_<i>` set per plotted binning of each channel):
 * `TUT_plotcv_ratio_fractional_systematics.pdf` — same as a ratio
 * `TUT_plotcv_PROplot.root` — everything above as ROOT objects
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_plotcv_PROplot_Variable_0_CV.pdf`
-> (stacked CV, reconstructed energy, ND+FD νe and νμ channels)
-> <!-- <img src="UPLOAD_URL_HERE" width="600"/> -->
+<img src="figures/TUT_plotcv_PROplot_Variable_0_CV.png" width="800"/>
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_plotcv_PROplot_Variable_0_ErrorBand.pdf`
-> (CV + total systematic error band; "data" points are the Asimov CV since we injected nothing)
-> <!-- <img src="UPLOAD_URL_HERE" width="600"/> -->
+*`TUT_plotcv_PROplot_Variable_0_CV.pdf` — stacked CV, reconstructed energy, ND+FD νe and νμ channels.*
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_plotcv_PROplot_Covar.pdf` (page with the total collapsed covariance/correlation)
-> <!-- <img src="UPLOAD_URL_HERE" width="600"/> -->
+<img src="figures/TUT_plotcv_PROplot_Variable_0_ErrorBand.png" width="800"/>
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_plotcv_fractional_systematics.pdf`
-> (per-bin fractional uncertainty by systematic tag: flux / xsec / det / QE-MEC / RES / other)
-> <!-- <img src="UPLOAD_URL_HERE" width="600"/> -->
+*`TUT_plotcv_PROplot_Variable_0_ErrorBand.pdf` — CV + total systematic error band; "data" points are the Asimov CV since we injected nothing.*
+
+<img src="figures/TUT_plotcv_PROplot_Covar.png" width="600"/>
+
+*`TUT_plotcv_PROplot_Covar.pdf` (page 1) — the total collapsed correlation matrix.*
+
+<img src="figures/TUT_plotcv_fractional_systematics.png" width="600"/>
+
+*`TUT_plotcv_fractional_systematics.pdf` — per-bin fractional uncertainty by systematic tag: flux / xsec / det / QE-MEC / RES / other.*
 
 ### Injecting a signal
 
@@ -501,12 +497,13 @@ central value**, e.g. to make an oscillated spectrum the null hypothesis.
 They can be combined — inject one point as truth and a different one as the
 CV — to study fitting under a wrong model.
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_plotinj_PROplot_Osc.pdf`
-> <!-- <img src="UPLOAD_URL_HERE" width="600"/> -->
+<img src="figures/TUT_plotinj_PROplot_Osc.png" width="800"/>
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_plotinj_PROplot_Variable_0_ErrorBand.pdf`
-> (error band with injected-signal fake data)
-> <!-- <img src="UPLOAD_URL_HERE" width="600"/> -->
+*`TUT_plotinj_PROplot_Osc.pdf` — oscillated vs unoscillated spectra for the injected point.*
+
+<img src="figures/TUT_plotinj_PROplot_Variable_0_ErrorBand.png" width="800"/>
+
+*`TUT_plotinj_PROplot_Variable_0_ErrorBand.pdf` — error band with injected-signal fake data.*
 
 ### Injecting systematic shifts
 
@@ -517,9 +514,9 @@ PROfit -x tutorial.xml -t TUT -o plotsyst --seed 405 \
     -i dmsq 1 sinsq2thme 0.01 --inject-systs Flux1 1.0 DetSys2 -2.0 plot
 ```
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_plotsyst_PROplot_Variable_0_ErrorBand.pdf`
-> (fake data now includes both the signal and the systematic shifts)
-> <!-- <img src="UPLOAD_URL_HERE" width="600"/> -->
+<img src="figures/TUT_plotsyst_PROplot_Variable_0_ErrorBand.png" width="800"/>
+
+*`TUT_plotsyst_PROplot_Variable_0_ErrorBand.pdf` — fake data now includes both the signal and the systematic shifts.*
 
 ### Looking at the splines themselves
 
@@ -531,8 +528,9 @@ adds `TUT_plotspl_PROplot_Spline.pdf`: per-bin response splines for every
 spline systematic, with the knob points overlaid — the single most useful
 plot for debugging a suspicious multisigma input.
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_plotspl_PROplot_Spline.pdf` (example page)
-> <!-- <img src="UPLOAD_URL_HERE" width="600"/> -->
+<img src="figures/TUT_plotspl_PROplot_Spline.png" width="700"/>
+
+*`TUT_plotspl_PROplot_Spline.pdf` (example page) — per-bin response splines with the knob points overlaid.*
 
 ### Background subtraction
 
@@ -546,9 +544,9 @@ points as √(N + σ²_bkg-syst + σ²_bkg-MCstat).
 PROfit -x tutorial.xml -t TUT -o plotbsub --seed 405 plot --bkg-subtract background
 ```
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_plotbsub_PROplot_Variable_0_ErrorBand.pdf`
-> (background-subtracted spectra; compare with the plotcv version)
-> <!-- <img src="UPLOAD_URL_HERE" width="600"/> -->
+<img src="figures/TUT_plotbsub_PROplot_Variable_0_ErrorBand.png" width="800"/>
+
+*`TUT_plotbsub_PROplot_Variable_0_ErrorBand.pdf` — background-subtracted spectra; compare with the plotcv version.*
 
 Other useful toggles to try yourself: `--area-norm`, `--scale-by-width`,
 `--scale FD 0.5` (half the far-detector POT), `--poisson-throw`. And when
@@ -577,15 +575,17 @@ Outputs:
 * `TUT_glob1_PROglobal_postfit_posteriors.pdf` — post-fit parameter constraints
 * `TUT_glob1_PROglobal.root` — all of the above as ROOT objects
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_glob1_PROglobal_hists.pdf`
-> (pre-fit vs post-fit spectra with ratio panel — your at-a-glance goodness-of-fit)
-> <!-- <img src="UPLOAD_URL_HERE" width="700"/> -->
+<img src="figures/TUT_glob1_PROglobal_hists.png" width="800"/>
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_glob1_PROglobal_postfit_correlation_matrix.pdf`
-> <!-- <img src="UPLOAD_URL_HERE" width="600"/> -->
+*`TUT_glob1_PROglobal_hists.pdf` — pre-fit vs post-fit spectra with ratio panel — your at-a-glance goodness-of-fit.*
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_glob1_PROglobal_postfit_posteriors.pdf`
-> <!-- <img src="UPLOAD_URL_HERE" width="600"/> -->
+<img src="figures/TUT_glob1_PROglobal_postfit_correlation_matrix.png" width="600"/>
+
+*`TUT_glob1_PROglobal_postfit_correlation_matrix.pdf` — post-fit parameter correlations.*
+
+<img src="figures/TUT_glob1_PROglobal_postfit_posteriors.png" width="700"/>
+
+*`TUT_glob1_PROglobal_postfit_posteriors.pdf` (representative pages: CrossSection1, DetSys1, Flux1, FiducialVol_FD) — post-fit parameter constraints, one parameter per page.*
 
 The text output looks like:
 
@@ -733,16 +733,17 @@ Outputs:
 * `TUT_prof1_PROfile.root` — every profile as a TGraph, plus the 1σ summary
 * `TUT_prof1_global_fit.txt` — the global best fit table
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_prof1_PROfile.pdf`
-> (per-parameter profiled Δχ²; top row = physics, rest = nuisances vs their priors)
-> <!-- <img src="UPLOAD_URL_HERE" width="1100"/> -->
+<img src="figures/TUT_prof1_PROfile.png" width="700"/>
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_prof1_PROfile_1sigma.pdf`
-> (±1σ nuisance summary; star = injected, black = best fit)
-> <!-- <img src="UPLOAD_URL_HERE" width="800"/> -->
+*`TUT_prof1_PROfile.pdf` — per-parameter profiled Δχ²; top row = physics, rest = nuisances vs their priors.*
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_prof1_PROfile_hists.pdf`
-> <!-- <img src="UPLOAD_URL_HERE" width="700"/> -->
+<img src="figures/TUT_prof1_PROfile_1sigma.png" width="800"/>
+
+*`TUT_prof1_PROfile_1sigma.pdf` — ±1σ nuisance summary; star = injected, black = best fit.*
+
+<img src="figures/TUT_prof1_PROfile_hists.png" width="800"/>
+
+*`TUT_prof1_PROfile_hists.pdf` — pre-fit vs post-fit spectra.*
 
 How to read `PROfile.pdf`: each nuisance panel shows the profiled Δχ²
 (black) against the dashed-red prior (a 1σ Gaussian pull by construction),
@@ -777,9 +778,9 @@ PROfit -x tutorial.xml -t TUT -o probe1 --seed 405 -n 8 \
     -i dmsq 1 sinsq2thme 0.01 profile --probe
 ```
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_probe1_PROfile.pdf`
-> (PRObe version — compare point placement with the legacy scan above)
-> <!-- <img src="UPLOAD_URL_HERE" width="1100"/> -->
+<img src="figures/TUT_probe1_PROfile.png" width="700"/>
+
+*`TUT_probe1_PROfile.pdf` — PRObe version — compare point placement with the legacy scan above.*
 
 If the two physics-parameter scans are your wall-time bottleneck and you have
 threads to spare, `--probe-chunks 4` splits each physics scan across threads
@@ -850,9 +851,9 @@ tutorial — grid size and thread count are your levers. Outputs:
 * `TUT_surf1_surface.pdf` — a quick-look contour plot
 * `TUT_surf1_global_fit.txt` — the global best fit
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_surf1_surface.pdf`
-> (Asimov sensitivity, 30×30 grid, 90%/95% CL contours)
-> <!-- <img src="UPLOAD_URL_HERE" width="600"/> -->
+<img src="figures/TUT_surf1_surface.png" width="600"/>
+
+*`TUT_surf1_surface.pdf` — Asimov sensitivity Δχ² surface, 30×30 grid.*
 
 We stress: PROfit's job is to give you the *surface data*; ROOT is not the
 place to make pretty contour plots. The `.txt` output loads trivially into
@@ -880,10 +881,9 @@ PROfit -x tutorial.xml -t TUT -o curve1 --seed 405 -n 8 \
     surface $AXES -g 20 --curve-mode -3 -1 -1 1
 ```
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_curve1_PROcurve.pdf`
-> (path across the plane + every nuisance parameter's best-fit value along it,
-> here from (sin²2θμe, Δm²) = (10⁻³, 0.1 eV²) to (10⁻¹, 10 eV²))
-> <!-- <img src="UPLOAD_URL_HERE" width="800"/> -->
+<img src="figures/TUT_curve1_PROcurve.png" width="800"/>
+
+*`TUT_curve1_PROcurve.pdf` — path across the plane + every nuisance parameter's best-fit value along it, here from (sin²2θμe, Δm²) = (10⁻³, 0.1 eV²) to (10⁻¹, 10 eV²).*
 
 ### Adaptive mesh refinement: `--surface-amr`
 
@@ -901,11 +901,18 @@ Effective resolution along the contour is `amr_initial × 2^amr_levels`
 (here 80×80) for roughly the cost of the coarse grid plus a band around the
 contours — typically a **6-8× wall-time win** at equivalent contour quality.
 The scan writes `TUT_surfamr_surface_amr.txt` (same column format, one row
-per evaluated mesh point) alongside the usual `_surf.root` / `_surface.pdf`.
+per evaluated mesh point) alongside the usual `_surf.root` / `_surface.pdf`,
+plus a `TUT_surfamr_amr_mesh.pdf` mesh diagnostic.
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_surfamr_surface.pdf`
-> (AMR surface; note the refined mesh hugging the 1σ/2σ contours)
-> <!-- <img src="UPLOAD_URL_HERE" width="600"/> -->
+<img src="figures/TUT_surfamr_surface.png" width="600"/>
+
+*`TUT_surfamr_surface.pdf` — AMR surface; note the refined mesh hugging the 1σ/2σ contours.*
+
+<img src="figures/TUT_surfamr_amr_mesh.png" width="600"/>
+
+*`TUT_surfamr_amr_mesh.pdf` — the mesh itself: cells refined only along the two
+target Δχ² contours (overlaid curves), with per-level fit counts. Here the
+80×80-equivalent contour resolution cost 1067 fits instead of 6400.*
 
 ### Brazil bands
 
@@ -923,8 +930,9 @@ PROfit -x tutorial.xml -t TUT -o surfbrz --seed 405 -n 16 --log surfbrz.log \
 ```
 
 > 📷 **PLOT PLACEHOLDER** — `TUT_surfbrz_surface.pdf`
-> (median sensitivity with ±1σ/±2σ Brazil bands)
-> <!-- <img src="UPLOAD_URL_HERE" width="600"/> -->
+> (median sensitivity with ±1σ/±2σ Brazil bands — regenerate with
+> `RUN_EXPENSIVE=1 make_tutorial_plots.sh` + `make_tutorial_figures.sh`, then uncomment:)
+> <!-- <img src="figures/TUT_surfbrz_surface.png" width="600"/> -->
 
 ### A note on models: parameterize in the variable you plot
 
@@ -1142,27 +1150,28 @@ into unsampled territory, and the top-up is what makes it decidable.
 Outputs along the way:
 
 > 📷 **PLOT PLACEHOLDER** — `TUT_afc_metamesh.pdf`
-> (the meta-mesh: cell refinement levels, concentrated where throws put the contour)
-> <!-- <img src="UPLOAD_URL_HERE" width="600"/> -->
+> (the meta-mesh: cell refinement levels, concentrated where throws put the contour —
+> regenerate with `make_tutorial_plots.sh` + `make_tutorial_figures.sh`, then uncomment:)
+> <!-- <img src="figures/TUT_afc_metamesh.png" width="600"/> -->
 
 > 📷 **PLOT PLACEHOLDER** — `TUT_afc_throws.pdf`
 > (the Wilks-prepass throw contours that built the mesh)
-> <!-- <img src="UPLOAD_URL_HERE" width="600"/> -->
+> <!-- <img src="figures/TUT_afc_throws.png" width="600"/> -->
 
 > 📷 **PLOT PLACEHOLDER** — `TUT_afc_bank_summary.pdf` (PE bank occupancy per level)
-> <!-- <img src="UPLOAD_URL_HERE" width="600"/> -->
+> <!-- <img src="figures/TUT_afc_bank_summary.png" width="600"/> -->
 
 > 📷 **PLOT PLACEHOLDER** — `TUT_afc_asimov_contour.pdf`
 > (FC-corrected contour vs the Wilks contour)
-> <!-- <img src="UPLOAD_URL_HERE" width="600"/> -->
+> <!-- <img src="figures/TUT_afc_asimov_contour.png" width="600"/> -->
 
 > 📷 **PLOT PLACEHOLDER** — `TUT_afc_asimov_verdict.pdf`
 > (per-cell FC vs Wilks verdict map)
-> <!-- <img src="UPLOAD_URL_HERE" width="600"/> -->
+> <!-- <img src="figures/TUT_afc_asimov_verdict.png" width="600"/> -->
 
 > 📷 **PLOT PLACEHOLDER** — `TUT_afc_brazil_band.pdf`
 > (FC-corrected Brazil band from the bank)
-> <!-- <img src="UPLOAD_URL_HERE" width="600"/> -->
+> <!-- <img src="figures/TUT_afc_brazil_band.png" width="600"/> -->
 
 Determinism note: with `-n 1` and a fixed `--seed` the entire pipeline is
 bit-reproducible; multithreaded runs are statistically equivalent.
@@ -1226,12 +1235,13 @@ mask + zeroed data), and installs (θ̂, Σ) as a fully correlated Gaussian prio
 on the promoted spline parameters.
 
 > 📷 **PLOT PLACEHOLDER** — `TUT_pjprof_PROfile_1sigma.pdf`
-> (projected nuisance constraints — compare against the joint-fit `TUT_prof1_PROfile_1sigma.pdf`)
-> <!-- <img src="UPLOAD_URL_HERE" width="800"/> -->
+> (projected nuisance constraints — compare against the joint-fit `TUT_prof1_PROfile_1sigma.pdf` —
+> regenerate with `make_tutorial_plots.sh` + `make_tutorial_figures.sh`, then uncomment:)
+> <!-- <img src="figures/TUT_pjprof_PROfile_1sigma.png" width="800"/> -->
 
 > 📷 **PLOT PLACEHOLDER** — `TUT_pjsurf_surface.pdf`
 > (projected FD-only sensitivity with the ND constraint as prior, vs the joint surface `TUT_surfamr_surface.pdf`)
-> <!-- <img src="UPLOAD_URL_HERE" width="600"/> -->
+> <!-- <img src="figures/TUT_pjsurf_surface.png" width="600"/> -->
 
 ### Rules and closure checks
 
@@ -1263,6 +1273,21 @@ The script localizes the XML, processes once, and runs every command shown
 above with fixed seeds. Outputs land in `docs/tutorials/tutorial_run/` (set
 `TUTORIAL_OUTDIR` to change). See the script header for the environment
 overrides (`PROFIT_BIN`, `PROFIT_TEST_MCDIR`, `NTHREADS`, `SEED`).
+
+The images embedded in this document are PNG renders of those PDFs (GitHub
+markdown cannot display PDFs inline), produced by:
+
+```bash
+docs/tutorials/make_tutorial_figures.sh   # PDFs → docs/tutorials/figures/*.png
+```
+
+It needs `pdftoppm` (poppler-utils) and `montage` (ImageMagick), picks the
+relevant page of each multi-page PDF (e.g. the collapsed correlation page of
+`_Covar.pdf`), tiles the per-(detector × channel) pages into 2×2 montages,
+and skips any PDF not yet generated — so after running the missing heavy
+steps you can re-run it and just uncomment the corresponding `<img>` tags in
+the remaining placeholders. Commit `figures/`, not `tutorial_run/` (which
+holds ~GB binaries).
 
 ---
 
@@ -1455,6 +1480,4 @@ for sideband/template fits and cross-section-style normalization studies.
 
 ---
 
-*Why is the repository called "Elephant Vanishes"? Old habit — all of Mark's
-git repos are named after the book he was reading when he created them.
-This one was Haruki Murakami's* The Elephant Vanishes.
+*Why is the repository called "Elephant Vanishes"? Old habit — all of my git repos are named after the book I was reading when I created them. This one was Haruki Murakami's* The Elephant Vanishes.

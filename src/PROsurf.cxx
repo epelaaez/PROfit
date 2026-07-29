@@ -371,7 +371,8 @@ std::vector<profOut> PROfile::PROfilePointHelper(const PROsyst *systs, const PRO
             };
         }
         ScanFitContext ctx{*local_metric, tlb, tub, which_spline, fitconfig,
-                           seed + (uint32_t)t_idx * 101u, seed_points, store, on_fit_cb};
+                           seed + (uint32_t)t_idx * 101u, seed_points, store, on_fit_cb,
+                           &fixed_seed_points};
 
         // Fixed parameter (--fix / lb==ub): one fit at the pinned value, same
         // for both scan strategies (PRObe previously returned an EMPTY scan
@@ -1083,7 +1084,10 @@ std::vector<float> findMinAndBounds(TGraph *g, float val, float lo, float hi) {
 }
 
 
-PROfile::PROfile(const PROconfig &config, const PROsyst &systs, const PROmodel &model, PROmetric &metric, PROseed &proseed, const PROfitterConfig &fitconfig, [[maybe_unused]] std::string filename, float minchi, bool with_osc, int nThreads, const std::vector<Eigen::VectorXf> &seed_points, [[maybe_unused]] const Eigen::VectorXf & true_params, bool use_probe, int n_physics_chunks) : metric(metric) {
+PROfile::PROfile(const PROconfig &config, const PROsyst &systs, const PROmodel &model, PROmetric &metric, PROseed &proseed, const PROfitterConfig &fitconfig, [[maybe_unused]] std::string filename, float minchi, bool with_osc, int nThreads, const std::vector<Eigen::VectorXf> &seed_points, [[maybe_unused]] const Eigen::VectorXf & true_params, bool use_probe, int n_physics_chunks, const std::vector<FixedSeed> &fixed_seeds) : metric(metric) {
+    // Copy into the member before any worker thread launches; workers read it
+    // through ScanFitContext::fixed_seeds.
+    fixed_seed_points = fixed_seeds;
     LBFGSpp::LBFGSBSolver<float> solver(fitconfig.param);
     int nparams = systs.GetNSplines() + model.nparams*with_osc;
     std::vector<float> physics_params; 

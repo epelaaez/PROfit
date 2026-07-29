@@ -117,6 +117,13 @@ namespace PROfit {
 
         bool progress_bar = false; ///< If true, display a progress bar during fitting.
 
+        /// If true (default), fixed seeds passed to Fit() are used — currently the
+        /// background-only seed (physics pinned at the model defaults, refined as a
+        /// nuisances-only fit and recorded as a candidate). Set to 0 via
+        /// `--fit-options use_bkg_seed 0` (global fit) or `--scan-fit-options
+        /// use_bkg_seed 0` (profile/surface scan fits) to disable at runtime.
+        bool use_bkg_seed = true;
+
         /// Gradient evaluation strategy applied to the PROmetric used by this fitter.
         /// Default mirrors the historical behaviour (central FD on full chi²); set to
         /// GradientOneSidedFull for ~2× speedup, or to one of the *Lin variants for
@@ -286,7 +293,9 @@ namespace PROfit {
                     }
                 } else if(param_name == "n_max_local_retries") {
                     n_max_local_retries = value;
-                    
+                } else if(param_name == "use_bkg_seed") {
+                    use_bkg_seed = (value != 0);
+
                 // Particle Swarm Optimization parameters
                 } else if(param_name == "n_swarm_particles") {
                     n_swarm_particles = value;
@@ -397,6 +406,7 @@ namespace PROfit {
             log<LOG_INFO>(L"%1% || latin_diversity_factor: %2%  ") % __func__ % latin_diversity_factor;
             log<LOG_INFO>(L"%1% || n_localfit: %2%  ") % __func__ % n_localfit;
             log<LOG_INFO>(L"%1% || n_max_local_retries: %2%  ") % __func__ % n_max_local_retries;
+            log<LOG_INFO>(L"%1% || use_bkg_seed: %2%  ") % __func__ % use_bkg_seed;
             
             log<LOG_INFO>(L"%1% || ------------ Particle Swarm Optimization -------------- ") % __func__ ;
             log<LOG_INFO>(L"%1% || n_swarm_particles: %2%  ") % __func__ % n_swarm_particles;
@@ -460,6 +470,7 @@ namespace PROfit {
             log<LOG_INFO>(L"  latin_diversity_factor               : Diversity of latin points, 0: no distance weighting, 1: select most diverse far away points");
             log<LOG_INFO>(L"  n_localfit                           : Total number of L-BFGS-B fits to do after PSO");
             log<LOG_INFO>(L"  n_max_local_retries                  : Maximum retries if L-BFGS-B throws an exception");
+            log<LOG_INFO>(L"  use_bkg_seed                         : 1 (default) fits the background-only fixed seed (physics pinned at model defaults) as a candidate; 0 disables");
             
             log<LOG_INFO>(L"");
             log<LOG_INFO>(L"------ Particle Swarm Optimization (PSO) Parameters ------");
@@ -521,6 +532,24 @@ namespace PROfit {
     };
 
     /**
+     * @brief A seed point that carries per-parameter pins honored during its refinement.
+     * @details Unlike a plain seed (a start point from which ALL free parameters float),
+     * a FixedSeed holds every flagged parameter at its seed value during the L-BFGS-B
+     * refinement of THIS seed only (via zero-width solver bounds); the rest of the fit
+     * pipeline is untouched. The canonical use is the background-only seed: physics
+     * parameters pinned at the model defaults so the null hypothesis is always fit
+     * (nuisances only) and recorded as a candidate for the global minimum.
+     *
+     * Conflict rule: if any pinned value falls outside the fit's own [lb, ub] for that
+     * parameter — e.g. a --fix'd parameter, or a profile scan pinning the same axis at
+     * a different value — the whole seed is skipped (logged, not an error).
+     */
+    struct FixedSeed {
+        Eigen::VectorXf point;   ///< Full parameter vector (physics + splines) start point.
+        std::vector<int> fixed;  ///< Same length as point; 1 = hold point(i) fixed during this seed's refinement.
+    };
+
+    /**
      * @brief Multi-start global optimiser for PROfit chi-squared minimisation.
      * @details Implements the three-stage pipeline: Latin hypercube sampling,
      * Particle Swarm Optimisation, and L-BFGS-B local refinement.  The Fit() method
@@ -567,9 +596,12 @@ namespace PROfit {
              * @brief Run the optimisation pipeline from a provided list of seed points.
              * @param metric       The PROmetric to minimise.
              * @param seed_points  List of starting parameter vectors; augments or replaces LHS seeding.
+             * @param fixed_seeds  Optional seeds refined with their flagged parameters held fixed
+             *                     (see FixedSeed). A seed whose pinned values conflict with this
+             *                     fitter's [lb, ub] is skipped.
              * @return Minimum chi-squared value found.
              */
-            float Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed_points );
+            float Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed_points, const std::vector<FixedSeed> &fixed_seeds = {});
 
             /**
              * @brief Compute harmonic frequency-domain seed points for the physics parameter space.

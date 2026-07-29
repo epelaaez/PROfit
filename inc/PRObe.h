@@ -134,6 +134,10 @@ namespace PROfit {
         const std::vector<Eigen::VectorXf> &global_seeds; ///< Harmonic/global seeds, passed to every fit.
         ScanPointStore &store;                ///< Shared per-parameter store (see ScanPointStore).
         std::function<void()> on_fit;         ///< Optional per-fit progress callback (may be empty).
+        /// Optional fixed seeds (see PROfitter FixedSeed) passed to every fit; a seed
+        /// whose pins conflict with the scan point's bounds (e.g. profiling the very
+        /// parameter it pins) is skipped inside PROfitter::Fit. Non-owning; may be null.
+        const std::vector<FixedSeed> *fixed_seeds = nullptr;
         int call_count = 0;                   ///< Fits attempted so far (advances the RNG sequence).
 
         struct Outcome {
