@@ -175,7 +175,7 @@ namespace PROfit{
      * @param other_index      Variable index (default 0).
      */
     void plot_detector_ratio_spectra(TCanvas &c, const PROconfig &config, const Eigen::VectorXf &cv_coll, const std::optional<Eigen::VectorXf> &bf_coll, const std::optional<Eigen::VectorXf> &data_coll, const std::optional<PROerrorbar> &errband, const std::optional<PROerrorbar> &posterrband, const std::vector<size_t> &channel_offsets, const std::string &filename, int other_index = 0);
-    void plot_channel_ratio_spectra(TCanvas &c, const PROconfig &config, const Eigen::VectorXf &cv_coll, const std::optional<Eigen::VectorXf> &bf_coll, const std::optional<Eigen::VectorXf> &data_coll, const std::optional<PROerrorbar> &errband, const std::optional<PROerrorbar> &posterrband, const std::vector<size_t> &channel_offsets, const std::string &filename, int other_index = 0);
+    void plot_channel_ratio_spectra(TCanvas &c, const PROconfig &config, const Eigen::VectorXf &cv_coll, const std::optional<Eigen::VectorXf> &bf_coll, const std::optional<Eigen::VectorXf> &data_coll, const std::optional<PROerrorbar> &errband, const std::optional<PROerrorbar> &posterrband, const std::vector<size_t> &channel_offsets, const std::string &filename, int other_index = 0, PlotOptions opt = PlotOptions{});
 
     /**
      * @brief Produce a multi-panel detector ratio comparison plot.

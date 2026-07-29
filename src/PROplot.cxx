@@ -1174,7 +1174,8 @@ namespace PROfit{
                                     const std::optional<PROerrorbar> &posterrband,
                                     const std::vector<size_t> &channel_offsets,
                                     const std::string &filename,
-                                    int other_index)
+                                    int other_index,
+                                    PlotOptions opt)
     {
         if(config.m_num_channels < 2) return;
 
@@ -1332,7 +1333,10 @@ namespace PROfit{
 
             PlotOptions ropt = PlotOptions{};
             std::string ratio_titles = "";
-            if(data_rat && band) {
+            if(data_rat && bf_rat && post_band && bool(opt&PlotOptions::DataPostfitRatio)) {
+                ropt = PlotOptions::DataPostfitRatio;
+                ratio_titles = ";" + xt1 + ";Data/Best-Fit";
+            } else if(data_rat && band) {
                 ropt = PlotOptions::DataMCRatio;
                 ratio_titles = ";" + xt1 + ";Data/MC";
             }
@@ -1725,7 +1729,7 @@ namespace PROfit{
                                             errband, posterrband, channel_offsets, filename, other_index);
             if(plot_channel_ratios && config.m_num_channels > 1)
                 plot_channel_ratio_spectra(c, config, cv_coll, bf_coll, data_coll,
-                                           errband, posterrband, channel_offsets, filename, other_index);
+                                           errband, posterrband, channel_offsets, filename, other_index, opt);
         }
 
         c.Print((filename+"]").c_str());
