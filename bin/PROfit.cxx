@@ -171,7 +171,7 @@ bool LOGGING_TO_FILE = false;
 
 void mcmc_worker(std::vector<std::unique_ptr<Metropolis<log_phys_target, adaptive_proposal>>> &mets, Eigen::VectorXf initial, PROmetric *metric, uint32_t seed, size_t nchains, size_t burnin, size_t steps);
 //void mcmc_worker(std::vector<std::unique_ptr<Metropolis<simple_target, adaptive_proposal>>> &mets, Eigen::VectorXf initial, PROmetric *metric, uint32_t seed, size_t nchains, size_t burnin, size_t steps);
-void nuts_worker(std::vector<std::vector<Eigen::VectorXf>> &chains, Eigen::VectorXf initial, PROmetric *metric, uint32_t seed, size_t nchains, size_t burnin, size_t steps);
+void nuts_worker(std::vector<std::vector<Eigen::VectorXf>> &chains, Eigen::VectorXf initial, PROmetric *metric, uint32_t seed, size_t nchains, size_t burnin, size_t steps, const Eigen::VectorXf &lb, const Eigen::VectorXf &ub);
 
 struct GlobalFitResult {
     PROfitter fitter;
@@ -3040,7 +3040,7 @@ int main(int argc, char* argv[])
                 chains.emplace_back();
                 threads.emplace_back(
                         [&, i](){
-                            nuts_worker(chains[i], samples_eigen[i], metric->Clone(), myseed.getThreadSeeds()->at(i), chains_per_thread + (i >= addone), fitConfig.MCMCburn, fitConfig.MCMCiter);
+                            nuts_worker(chains[i], samples_eigen[i], metric->Clone(), myseed.getThreadSeeds()->at(i), chains_per_thread + (i >= addone), fitConfig.MCMCburn, fitConfig.MCMCiter, global_lb, global_ub);
                         });
             } else {
                 mets.emplace_back();
@@ -3517,13 +3517,14 @@ int main(int argc, char* argv[])
 }
 
 
-void nuts_worker(std::vector<std::vector<Eigen::VectorXf>> &chains, Eigen::VectorXf initial, PROmetric *metric, uint32_t seed, size_t nchains, size_t burnin, size_t steps) {
+void nuts_worker(std::vector<std::vector<Eigen::VectorXf>> &chains, Eigen::VectorXf initial, PROmetric *metric, uint32_t seed, size_t nchains, size_t burnin, size_t steps, const Eigen::VectorXf &lb, const Eigen::VectorXf &ub) {
     std::uniform_int_distribution<uint32_t> dseed(0, std::numeric_limits<uint32_t>::max());
     std::mt19937 rng(seed);
+    metric->setBounds(lb, ub);
     for(size_t i = 0; i < nchains; ++i) {
         NUTS nuts;
-        nuts.M = 10'000;
-        nuts.Madapt = 1'000;
+        nuts.M = 2'500;
+        nuts.Madapt = 500;
         nuts(initial, *metric, dseed(rng));
         chains.emplace_back(std::move(nuts.chain));
     }
