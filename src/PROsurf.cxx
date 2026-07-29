@@ -595,13 +595,6 @@ std::vector<surfOut> PROsurf::PointHelper(const PROfitterConfig &fitconfig, std:
         lb(y_idx) = multi_physics_params[i].grid_val[0];
         ub(y_idx) = multi_physics_params[i].grid_val[0];
 
-        for(size_t j = local_metric->GetModel().nparams; j < nparams+2; ++j) {
-            if(local_metric->GetSysts().spline_has_restrict[j-local_metric->GetModel().nparams]) {
-                lb(j) = local_metric->GetSysts().spline_restrict_lo[j-local_metric->GetModel().nparams];
-                ub(j) = local_metric->GetSysts().spline_restrict_hi[j-local_metric->GetModel().nparams];
-            }
-        }
-
         local_metric->setBounds(lb,ub);
 
         PROfitter fitter(ub, lb, fitconfig, seed+(uint32_t)i);
