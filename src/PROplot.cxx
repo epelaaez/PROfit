@@ -52,21 +52,27 @@ namespace PROfit{
         return matched;
     }
 
-    Eigen::VectorXf build_subchannel_mask_spec(const PROconfig &config,
-                                               const PROspec &spec,
-                                               const std::vector<size_t> &matched_subchannel_indices,
-                                               int var_index) {
-        Eigen::VectorXf mask = Eigen::VectorXf::Zero(spec.Spec().size());
+    Eigen::VectorXf build_subchannel_bin_mask(const PROconfig &config,
+                                              const std::vector<size_t> &matched_subchannel_indices,
+                                              int var_index) {
+        Eigen::VectorXf mask = Eigen::VectorXf::Zero(config.m_num_variable_bins_total[var_index]);
         for (size_t isub : matched_subchannel_indices) {
             const size_t ic    = config.GetLocalChannelIndexFromGlobalSubchannelIndex(isub);
             const size_t start = config.GetGlobalVariableBinStart(isub, var_index);
             const size_t nbins = config.m_channel_variable_bins[ic][var_index].NBins();
             for (size_t b = 0; b < nbins; ++b) {
-                const Eigen::Index idx = static_cast<Eigen::Index>(start + b);
-                mask(idx) = spec.Spec()(idx);
+                mask(static_cast<Eigen::Index>(start + b)) = 1.0f;
             }
         }
         return mask;
+    }
+
+    Eigen::VectorXf build_subchannel_mask_spec(const PROconfig &config,
+                                               const PROspec &spec,
+                                               const std::vector<size_t> &matched_subchannel_indices,
+                                               int var_index) {
+        return build_subchannel_bin_mask(config, matched_subchannel_indices, var_index)
+                   .cwiseProduct(spec.Spec());
     }
 
     std::map<std::string, std::unique_ptr<TH1D>> getCV1DHists(const PROspec &spec, const PROconfig& inconfig, bool scale, int other_index) {
@@ -202,6 +208,7 @@ namespace PROfit{
                 std::vector<std::pair<std::unique_ptr<TGraph>, std::unique_ptr<TGraph>>> bin_graphs;
                 size_t nbins = config.m_num_variable_bins_total.at(systs.spline_binnings[i]);
                 int nsegs = spline.segments_per_bin;
+                constexpr int samples_per_segment = 20;
                 bin_graphs.reserve(nbins);
 
                 for (size_t j = 0; j < nbins; ++j) {
@@ -212,25 +219,17 @@ namespace PROfit{
                     size_t seg_offset = j * nsegs;
 
                     for (int k = 0; k < nsegs; ++k) {
-                        const SplineSegment &seg = spline.segments[seg_offset + k];
-                        float lo = seg.knot;
-                        std::array<float, 4> coeffs = seg.coeffs;
-                        // Determine hi for this segment
-                        float hi;
-                        if (k < nsegs - 1) {
-                            hi = spline.segments[seg_offset + k + 1].knot;
-                        } else {
-                            hi = systs.spline_hi[i];
-                        }
-                        auto fn = [coeffs](float shift) {
-                            return coeffs[0] + coeffs[1] * shift + coeffs[2] * shift * shift + coeffs[3] * shift * shift * shift;
-                        };
-                        fixed_pts->SetPoint(fixed_pts->GetN(), lo, fn(0));
-                        if (k == nsegs - 1)
-                            fixed_pts->SetPoint(fixed_pts->GetN(), hi, fn(hi - lo));
-                        float width = (hi - lo) / 20.0f;
-                        for (int l = 0; l < 20; ++l)
-                            curve->SetPoint(curve->GetN(), lo + l * width, fn(l * width));
+                        float shift = spline.segments[seg_offset + k].knot;
+                        fixed_pts->SetPoint(k, shift, systs.GetSplineShift(i, shift, j));
+                    }
+                    fixed_pts->SetPoint(nsegs, systs.spline_hi[i], systs.GetSplineShift(i, systs.spline_hi[i], j));
+
+                    float lo = systs.spline_has_restrict[i] ? systs.spline_restrict_lo[i] : systs.spline_lo[i];
+                    float hi = systs.spline_has_restrict[i] ? systs.spline_restrict_hi[i] : systs.spline_hi[i];
+                    int samples = samples_per_segment * nsegs;
+                    for (int k = 0; k <= samples; ++k) {
+                        float shift = lo + (hi - lo) * k / samples;
+                        curve->SetPoint(k, shift, systs.GetSplineShift(i, shift, j));
                     }
                     bin_graphs.push_back(std::make_pair(std::move(fixed_pts), std::move(curve)));
                 }
@@ -292,6 +291,53 @@ namespace PROfit{
         }
 	ebar.covariance = cov/nerrorsample;
         return ebar;
+    }
+
+    PROsubtractedErrorBand getErrorBandBkgSubtracted(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const PROspec &cv_spec, const Eigen::VectorXf &cvparams, const std::vector<size_t> &bkg_subchannels, bool scale, int other_index) {
+
+        Eigen::VectorXf mask        = build_subchannel_bin_mask(config, bkg_subchannels, other_index);
+        Eigen::VectorXf bkg_cv_full = cv_spec.Spec().cwiseProduct(mask);
+        Eigen::VectorXf cv_sig      = CollapseMatrix(config, Eigen::VectorXf(cv_spec.Spec() - bkg_cv_full), other_index);
+        Eigen::VectorXf bkg_cv_coll = CollapseMatrix(config, bkg_cv_full, other_index);
+
+        size_t nerrorsample = 2500;
+
+        std::vector<Eigen::VectorXf> sig_specs;
+        std::uniform_int_distribution<uint32_t> dseed(0, std::numeric_limits<uint32_t>::max());
+
+        Eigen::MatrixXf cov = Eigen::MatrixXf::Zero(cv_sig.size(), cv_sig.size());
+        Eigen::VectorXf bkg_var = Eigen::VectorXf::Zero(cv_sig.size());
+        Eigen::VectorXf delta;
+        for(size_t i = 0; i < nerrorsample; ++i){
+            // Subtract each throw's OWN background so bkg systematic variations
+            // cancel: the band that comes out is signal-only.
+            auto [sig, bkg] = FillSystRandomThrowSplit(config, prop, syst, model, cv_spec, cvparams, dseed(PROseed::global_rng), other_index, mask);
+            sig_specs.push_back(sig.Spec());
+            delta = cv_sig - sig.Spec();
+            cov += delta * delta.transpose();
+            bkg_var += (bkg.Spec() - bkg_cv_coll).array().square().matrix();
+        }
+
+        PROsubtractedErrorBand result(cv_sig.size());
+        for(int i = 0; i < cv_sig.size(); ++i) {
+            std::vector<float> binconts(nerrorsample);
+            for(size_t j = 0; j < nerrorsample; ++j) {
+                binconts[j] = sig_specs[j](i);
+            }
+            float scale_factor = scale ? 1.0/config.collapsed_bin_widths.at(other_index)(i) :  1.0;
+            if(std::isnan(scale_factor)) scale_factor = 1;
+            std::sort(binconts.begin(), binconts.end());
+            float ehi = std::abs((binconts[2.5*840] - cv_sig(i))*scale_factor);
+            float elo = std::abs((cv_sig(i) - binconts[2.5*160])*scale_factor);
+            result.band.error_up(i) =  ehi;
+            result.band.error_down(i) =  elo;
+            result.band.error_point(i) = cv_sig(i)*scale_factor;
+        }
+        result.band.covariance = cov/nerrorsample;
+        result.bkg_cv_collapsed = bkg_cv_coll;
+        result.bkg_sigma_collapsed = (bkg_var/nerrorsample).array().sqrt();
+        result.bkg_mcstat_var_collapsed = CollapseMatrix(config, Eigen::VectorXf(cv_spec.Error().array().square().matrix().cwiseProduct(mask)), other_index);
+        return result;
     }
 
     // sort through generic PROspec and combine bins to get projection
@@ -747,7 +793,7 @@ namespace PROfit{
             }
             else{
                 cv_hist->SetMaximum(y_max);
-                cv_hist->SetMinimum(0.01);
+                cv_hist->SetMinimum(0.000001); // to avoid including a zero label, which can overlap the ratio plot
                 cv_hist->Draw("hist");
             }
 
@@ -1114,10 +1160,11 @@ namespace PROfit{
         }}}}
     }
     
-    void plot_channels(const std::string &filename, const PROconfig &config, std::optional<PROspec> cv, std::optional<PROspec> best_fit, std::optional<PROdata> data, std::optional<PROerrorbar> errband, std::optional<PROerrorbar> posterrband, std::vector<TPaveText> &texts, PlotBounds &bounds, PlotOptions opt, int other_index, bool ratio_bool) {
+    std::map<std::string, TObject *> plot_channels(const std::string &filename, const PROconfig &config, std::optional<PROspec> cv, std::optional<PROspec> best_fit, std::optional<PROdata> data, std::optional<PROerrorbar> errband, std::optional<PROerrorbar> posterrband, std::vector<TPaveText> &texts, PlotBounds &bounds, PlotOptions opt, int other_index, bool ratio_bool, const std::vector<size_t> *skip_stack_subchannels) {
 
         log<LOG_DEBUG>(L"%1% || Starting plot_channels") % __func__;
         std::string rat_y_title = bool(opt&PlotOptions::DataMCRatio) ? "Data/MC" : "Data/Best-Fit";
+        std::map<std::string, TObject *> objs;
 
         TCanvas c;
         c.Print((filename+"[").c_str());
@@ -1152,6 +1199,7 @@ namespace PROfit{
 
                     log<LOG_DEBUG>(L"%1% || channel %2%") % __func__ % channel;
                     channel_offsets.push_back(tot_offset);
+                    std::string mdc = config.m_mode_names[mode]+"_"+config.m_detector_names[det]+"_"+config.m_channel_names[channel];
 
                     std::string xtitle = config.GetChannelXAxisTitle(channel, other_index);
                     std::string ratio_titles = ";"+xtitle+";"+rat_y_title;
@@ -1194,8 +1242,12 @@ namespace PROfit{
                     }
 
                     Eigen::VectorXf data_spec_1d = Eigen::VectorXf::Zero(channel_nbins_x);
+                    Eigen::VectorXf data_err_1d = Eigen::VectorXf::Zero(channel_nbins_x);
                     if(data){
                         data_spec_1d = make_1d_spec(data->Spec(), channel_nbins_x, channel_nbins_y, tot_offset, config.m_channel_variable_dims[channel][other_index]);
+                        // Combine per-bin errors in quadrature (summing squared errors is
+                        // what make_1d_spec's bin-sum does for dims==2; passthrough for 1D).
+                        data_err_1d = make_1d_spec(data->Error().array().square(), channel_nbins_x, channel_nbins_y, tot_offset, config.m_channel_variable_dims[channel][other_index]).array().sqrt();
                     }
 
                     PROerrorbar *errband_1d = NULL;
@@ -1235,6 +1287,7 @@ namespace PROfit{
                         p2d.cd();
                         cv_hist->SetTitle(hist_title.c_str());
                         cv_hist->Draw("colz");
+                        objs[mdc+"_cv2d"] = cv_hist->Clone();
                         c.cd();
                         p2d.Draw();
                         c.Print(filename.c_str());
@@ -1254,6 +1307,7 @@ namespace PROfit{
                             TPad pbfd("pbfd", "pbfd", 0, 0, 1, 1);
                             pbfd.cd();
                             bf_hist->Draw("colz");
+                            objs[mdc+"_bestfit2d"] = bf_hist->Clone();
                             c.cd();
                             pbfd.Draw();
                             c.Print(filename.c_str());
@@ -1268,11 +1322,13 @@ namespace PROfit{
                             for(size_t xbin = 0; xbin < channel_nbins_x; xbin++){
                                 for(size_t ybin = 0; ybin < channel_nbins_y; ybin++) {
                                     data_hist->SetBinContent(xbin+1, ybin+1, tmp_data(xbin*channel_nbins_y+ybin+tot_offset));
+                                    data_hist->SetBinError(xbin+1, ybin+1, data->Error()(xbin*channel_nbins_y+ybin+tot_offset));
                                 }
                             }
                             TPad pdata("pdata", "pdata", 0, 0, 1, 1);
                             pdata.cd();
                             data_hist->Draw("colz");
+                            objs[mdc+"_data2d"] = data_hist->Clone();
                             c.cd();
                             pdata.Draw();
                             c.Print(filename.c_str());
@@ -1289,6 +1345,7 @@ namespace PROfit{
                                     post_channel_errband->SetPointEYhigh(xbin, scale*(posterrband->error_up((ybin-1)*channel_nbins_x+xbin+tot_offset)));
                                     post_channel_errband->SetPointEYlow(xbin, scale*(posterrband->error_down((ybin-1)*channel_nbins_x+xbin+tot_offset)));
                                 }
+                                objs[mdc+"_posterrband_slice_ybin"+std::to_string(ybin)] = post_channel_errband->Clone();
                             }
 
                             TGraphAsymmErrors* channel_errband = NULL;
@@ -1298,6 +1355,7 @@ namespace PROfit{
                                     channel_errband->SetPointEYhigh(xbin, scale*(errband->error_up((ybin-1)*channel_nbins_x+xbin+tot_offset)));
                                     channel_errband->SetPointEYlow(xbin, scale*(errband->error_down((ybin-1)*channel_nbins_x+xbin+tot_offset)));
                                 }
+                                objs[mdc+"_preerrband_slice_ybin"+std::to_string(ybin)] = channel_errband->Clone();
                             }
 
                             std::string ybin_str = "Slice "+std::to_string(ybin)+" "+hist_title;
@@ -1305,11 +1363,13 @@ namespace PROfit{
                             TH1D cv_hist_slice = *(cv_hist->ProjectionX("slc", ybin, ybin));
                             cv_hist_slice.SetTitle(ybin_str.c_str());
                             cv_hist_slice.GetYaxis()->SetTitle(ytitle.c_str());
+                            objs[mdc+"_cv_slice_ybin"+std::to_string(ybin)] = cv_hist_slice.Clone();
                             TH1D *bf_hist_slice = NULL;
                             if(best_fit){
                                 bf_hist_slice = bf_hist->ProjectionX("bfslc", ybin, ybin);
                                 bf_hist_slice->SetTitle(ybin_str.c_str());
                                 bf_hist_slice->GetYaxis()->SetTitle(ytitle.c_str());
+                                objs[mdc+"_bestfit_slice_ybin"+std::to_string(ybin)] = bf_hist_slice->Clone();
                             }
                             TH1D* data_hist_slice = NULL;
                             if(data){
@@ -1321,6 +1381,7 @@ namespace PROfit{
                                 data_hist_slice->SetMarkerStyle(kFullCircle);
                                 data_hist_slice->SetMarkerColor(kBlack);
                                 data_hist_slice->SetMarkerSize(1);
+                                objs[mdc+"_data_slice_ybin"+std::to_string(ybin)] = data_hist_slice->Clone();
                             }
 
                             plot_hist1ds(&c, &cv_hist_slice, channel_errband, {}, {}, bf_hist_slice, post_channel_errband, data_hist_slice, &dat_str, {}, ybin_str, ratio_titles, filename, bounds, {});
@@ -1347,7 +1408,13 @@ namespace PROfit{
 
                         for(size_t subchannel = 0; subchannel < config.m_num_subchannels[channel]; ++subchannel){
                             const std::string& subchannel_name  = config.m_fullnames[global_subchannel_index];
-                            if(bool(opt&PlotOptions::CVasStack)) {
+                            // Background-subtracted subchannels are dropped from the
+                            // stack and legend (their contents are already zero); the
+                            // cv_hist sum still includes them so bookkeeping is unchanged.
+                            const bool skip_stack = skip_stack_subchannels &&
+                                std::find(skip_stack_subchannels->begin(), skip_stack_subchannels->end(),
+                                          global_subchannel_index) != skip_stack_subchannels->end();
+                            if(bool(opt&PlotOptions::CVasStack) && !skip_stack) {
                                 cvstack->Add(cv1dhists[subchannel_name].get());
                                 subplots.push_back({subchannel_name, config.m_subchannel_plotnames[channel][subchannel].c_str()});
                             }
@@ -1365,6 +1432,8 @@ namespace PROfit{
                                 }
                             }
                         }
+                        objs[mdc+"_cv1d"] = cv_hist.Clone();
+                        if(cvstack) objs[mdc+"_cvstack"] = cvstack->Clone();
                     }
 
                     TGraphAsymmErrors *channel_errband = NULL;
@@ -1374,12 +1443,18 @@ namespace PROfit{
                         for(size_t bin = 0; bin < channel_nbins_x; ++bin) {
                             float scale = 1.0;
                             if(bool(opt&PlotOptions::AreaNormalized) || bool(opt&PlotOptions::BinWidthScaled)) {
-                                scale = channel_errband->GetPointY(bin) / errband_1d->error_point(bin);
+                                // Guard 0/0 when the (possibly bkg-subtracted) CV is zero
+                                // in a bin; error_point is already bin-width scaled, so
+                                // 1.0 is the exact fallback in the BinWidthScaled case.
+                                float denom = errband_1d->error_point(bin);
+                                scale = (denom != 0 && std::isfinite(denom)) ? channel_errband->GetPointY(bin) / denom : 1.0f;
+                                if(!std::isfinite(scale)) scale = 1.0f;
                             }
 
                             channel_errband->SetPointEYhigh(bin, scale*(errband_1d->error_up(bin)));
                             channel_errband->SetPointEYlow(bin, scale*(errband_1d->error_down(bin)));
                         }
+                        objs[mdc+"_preerrband"] = channel_errband->Clone();
                     }
 
                     TH1D* bf_hist = NULL;
@@ -1392,6 +1467,7 @@ namespace PROfit{
                             bf_hist->Scale(1, "width");
                         if(bool(opt&PlotOptions::AreaNormalized))
                             bf_hist->Scale(1.0/bf_hist->Integral());
+                        objs[mdc+"_bestfit"] = bf_hist->Clone();
                     }
 
                     TH1D* data_hist = NULL;
@@ -1399,6 +1475,11 @@ namespace PROfit{
                         data_hist = new TH1D(("data"+std::to_string(global_channel_index)).c_str(), "", channel_nbins_x, edges.data());
                         for(size_t bin = 0; bin < channel_nbins_x; ++bin) {
                             data_hist->SetBinContent(bin+1, data_spec_1d(bin));
+                            // SetBinError allocates Sumw2, so the Scale calls below
+                            // transform the errors correctly too. Without this ROOT
+                            // falls back to sqrt(|content|), which is wrong for
+                            // bin-width-scaled or background-subtracted data.
+                            data_hist->SetBinError(bin+1, data_err_1d(bin));
                         }
                         data_hist->SetLineColor(kBlack);
                         data_hist->SetLineWidth(2);
@@ -1409,6 +1490,7 @@ namespace PROfit{
                             data_hist->Scale(1, "width");
                         if(bool(opt&PlotOptions::AreaNormalized))
                             data_hist->Scale(1.0/data_hist->Integral());
+                        objs[mdc+"_data"] = data_hist->Clone();
                     }
 
                     TGraphAsymmErrors *post_channel_errband = NULL;
@@ -1417,11 +1499,14 @@ namespace PROfit{
                         for(size_t bin = 0; bin < channel_nbins_x; ++bin) {
                             float scale = 1.0;
                             if(bool(opt&PlotOptions::AreaNormalized) || bool(opt&PlotOptions::BinWidthScaled)) {
-                                scale = post_channel_errband->GetPointY(bin) / (posterrband_1d->error_point(bin));
+                                float denom = posterrband_1d->error_point(bin);
+                                scale = (denom != 0 && std::isfinite(denom)) ? post_channel_errband->GetPointY(bin) / denom : 1.0f;
+                                if(!std::isfinite(scale)) scale = 1.0f;
                             }
                             post_channel_errband->SetPointEYhigh(bin, scale*(posterrband_1d->error_up(bin)));
                             post_channel_errband->SetPointEYlow(bin, scale*(posterrband_1d->error_down(bin)));
                         }
+                        objs[mdc+"_posterrband"] = post_channel_errband->Clone();
                     }
 
                     TText* text = NULL;
@@ -1486,6 +1571,7 @@ namespace PROfit{
 
 
         log<LOG_DEBUG>(L"%1% || Finishing plot_channels") % __func__;
+        return objs;
     }
 
 
@@ -1756,7 +1842,7 @@ namespace PROfit{
                         log<LOG_INFO>(L"%1% || hsum for tag '%2%': nbins=%3%, max=%4%, integral=%5%")
                             % __func__ % tag.c_str() % hsum->GetNbinsX() % hsum->GetMaximum() % hsum->Integral();
 
-                        hsum->SetXTitle(config.m_channel_plotnames[channel].c_str());
+                        hsum->SetXTitle(config.GetChannelAxisTitle(channel, other_index, 0).c_str());
                         hsum->SetYTitle("Fractional Uncertainty");
                         hsum->SetLineColor(kBlack);
                         hsum->SetLineWidth(2);
@@ -1811,7 +1897,7 @@ namespace PROfit{
                         hsum->SetBinContent(i+1, sqrt(hsum->GetBinContent(i+1)));
                     }
                     leg->AddEntry(hsum,"Sum","l");
-                    hsum->SetXTitle(config.m_channel_plotnames[channel].c_str());
+                    hsum->SetXTitle(config.GetChannelAxisTitle(channel, other_index, 0).c_str());
                     hsum->SetTitle(("Summary: "+name).c_str());
                     hsum->SetYTitle("Fractional Uncertainty");
                     hsum->SetLineColor(kBlack);
@@ -2326,7 +2412,13 @@ namespace PROfit{
         for(int i = 0; i < nBins; ++i) {
             std::string label;
             if(with_osc && i < (int)model.nparams) {
-                label = "Log_{10}(" + model.pretty_param_names[i] + ")";
+                const bool is_log_param = (i < (int)model.is_log10.size()) && model.is_log10[i];
+
+                if(is_log_param) {
+                    label = "Log_{10}(" + model.pretty_param_names[i] + ")";
+                } else {
+                    label = model.pretty_param_names[i];
+                }
             } else {
                 auto it = config.m_mcgen_variation_plotname_map.find(names[i]);
                 label = (it != config.m_mcgen_variation_plotname_map.end()) ? it->second : names[i];
@@ -2372,5 +2464,508 @@ namespace PROfit{
         c->Update();
         c->SaveAs((filename+"_1sigmaMCMC.pdf").c_str(), "pdf");
         delete c;
+    }
+
+    namespace {
+        struct ChannelSpan {
+            std::string label;     // subchannel plot/full name
+            size_t start_bin = 0;  // inclusive, in full-bin space
+            size_t nbins   = 0;
+        };
+
+        // Walk all subchannels and return their [start, nbins) span in the full bin space for var_index.
+        std::vector<ChannelSpan> cov2spline_channel_spans(const PROconfig &config, int var_index) {
+            std::vector<ChannelSpan> spans;
+            size_t isub = 0;
+            for(size_t im = 0; im < config.m_num_modes; ++im) {
+                for(size_t id = 0; id < config.m_num_detectors; ++id) {
+                    for(size_t ic = 0; ic < config.m_num_channels; ++ic) {
+                        for(size_t sc = 0; sc < config.m_num_subchannels[ic]; ++sc) {
+                            ChannelSpan s;
+                            s.label    = config.m_fullnames[isub];
+                            s.start_bin = config.GetGlobalVariableBinStart(isub, var_index);
+                            s.nbins   = config.m_channel_variable_bins[ic][var_index].NBins();
+                            spans.push_back(std::move(s));
+                            ++isub;
+                        }
+                    }
+                }
+            }
+            return spans;
+        }
+
+        void draw_channel_dividers_1d(const std::vector<ChannelSpan> &spans, double ymin, double ymax) {
+            for(size_t s = 1; s < spans.size(); ++s) {
+                const double x = static_cast<double>(spans[s].start_bin);
+                auto *ln = new TLine(x, ymin, x, ymax);
+                ln->SetLineColor(kGray + 2);
+                ln->SetLineStyle(2);
+                ln->Draw();
+            }
+        }
+
+        void draw_channel_dividers_2d(const std::vector<ChannelSpan> &spans, double nbins_total) {
+            for(size_t s = 1; s < spans.size(); ++s) {
+                const double x = static_cast<double>(spans[s].start_bin);
+                auto *lnv = new TLine(x, 0, x, nbins_total);
+                lnv->SetLineColor(kGray + 2);
+                lnv->SetLineStyle(2);
+                lnv->Draw();
+                auto *lnh = new TLine(0, x, nbins_total, x);
+                lnh->SetLineColor(kGray + 2);
+                lnh->SetLineStyle(2);
+                lnh->Draw();
+            }
+        }
+
+        void draw_version_stamp() {
+            // Bottom-right of the master canvas so the stamp never sits over a sub-pad's
+            // histogram title on multi-panel pages (top-right NDC lies inside the top-right
+            // sub-pad and overlaps its title there).
+            TText *t = new TText();
+            t->SetNDC();
+            t->SetTextFont(42);
+            t->SetTextSize(0.022f);
+            t->SetTextAlign(31); // bottom-right anchor
+            std::string pv = "PROfit v" + std::string(PROJECT_VERSION_STR);
+            t->DrawText(0.995, 0.005, pv.c_str());
+        }
+
+        std::string cov2spline_display_name(const PROconfig &config, const std::string &systname) {
+            auto it = config.m_mcgen_variation_plotname_map.find(systname);
+            if(it != config.m_mcgen_variation_plotname_map.end() && !it->second.empty()) {
+                return it->second;
+            }
+            return systname;
+        }
+    }
+
+    int plotCov2SplineChecks(const PROconfig &config, const PROspec &cv, const PROsyst &syst, const std::string &filename, int var_index) {
+        if(syst.cov2spline_debug_info.empty()) {
+            return 1;
+        }
+
+        set_matrix_palette();
+
+        TCanvas c("c_cov2spline", "covariance_to_spline checks", 1600, 1100);
+        c.Print((filename + "[").c_str(), "pdf");
+
+        const std::vector<ChannelSpan> spans = cov2spline_channel_spans(config, var_index);
+
+        for(const auto &[systname, dbg]: syst.cov2spline_debug_info) {
+            const std::string display = cov2spline_display_name(config, systname);
+            const int nbins = static_cast<int>(dbg.original_frac_cov.rows());
+            const int K = static_cast<int>(dbg.kept_indices.size());
+            const int n_eig = static_cast<int>(dbg.eigenvalues.size());
+
+            // ---- Reconstructed covariance and residual (rank-K approximation) ----
+            Eigen::MatrixXf recon = Eigen::MatrixXf::Zero(nbins, nbins);
+            for(int k = 0; k < K; ++k) {
+                const int idx = dbg.kept_indices[k];
+                const float lam = dbg.eigenvalues(idx);
+                const Eigen::VectorXf v = dbg.eigenvectors.col(idx);
+                recon.noalias() += lam * (v * v.transpose());
+            }
+            // "difference" = what the rank-K splines alone fail to capture (distinct from the
+            // "residual covariance" feature, which folds the un-kept eigenpairs back in).
+            const Eigen::MatrixXf difference = dbg.original_frac_cov - recon;
+            const float diff_frob = difference.norm();
+            const float orig_frob = dbg.original_frac_cov.norm();
+            const float diff_max_abs = difference.cwiseAbs().maxCoeff();
+
+            // ---- Page 1: summary text ----
+            int n_pos = 0, n_zero = 0, n_neg = 0;
+            const float tol = 10.0f * Eigen::NumTraits<float>::dummy_precision();
+            for(int i = 0; i < n_eig; ++i) {
+                if(dbg.eigenvalues(i) > tol) ++n_pos;
+                else if(dbg.eigenvalues(i) < -tol) ++n_neg;
+                else ++n_zero;
+            }
+            {
+                c.Clear();
+                TPaveText pt(0.05, 0.05, 0.95, 0.95, "NDC");
+                pt.SetFillColor(0);
+                pt.SetBorderSize(0);
+                pt.SetTextAlign(12);
+                pt.SetTextFont(42);
+                pt.SetTextSize(0.030f);
+                TText *title_text = pt.AddText(("covariance_to_spline diagnostics: " + display).c_str());
+                if(title_text) title_text->SetTextSize(0.045f);
+                pt.AddText("");
+                pt.AddText(("systname:  " + systname).c_str());
+                pt.AddText(Form("Bins: %d", nbins));
+                pt.AddText(Form("Eigenvalues: %d total  (positive %d, near-zero %d, negative %d)", n_eig, n_pos, n_zero, n_neg));
+                pt.AddText(Form("Knobs retained: K = %d  of %d positive eigenvalues", K, n_pos));
+                if(K > 0) {
+                    const float lam_max = dbg.eigenvalues(dbg.kept_indices.front());
+                    const float lam_min_kept = dbg.eigenvalues(dbg.kept_indices.back());
+                    pt.AddText(Form("Largest eigenvalue: %.4g    Smallest kept eigenvalue: %.4g", lam_max, lam_min_kept));
+                }
+                pt.AddText(Form("Pre-symmetrization asymmetry (||C - C^T||_F): %.4g", dbg.pre_symm_asymmetry));
+                pt.AddText(Form("Difference ||C_orig - C_recon||_F: %.4g   (relative: %.4g)", diff_frob, orig_frob > 0 ? diff_frob/orig_frob : 0.0f));
+                pt.AddText(Form("Max |difference element|: %.4g", diff_max_abs));
+                pt.AddText("");
+                if(dbg.has_residual) {
+                    const float resid_cov_frob = dbg.residual_cov.norm();
+                    TText *rt = pt.AddText(Form("Residual covariance: ON  -  %d un-kept mode(s) retained as '%s'",
+                                                dbg.n_residual_modes, dbg.residual_cov_name.c_str()));
+                    if(rt) rt->SetTextColor(kGreen + 3);
+                    pt.AddText(Form("   ||C_resid_cov||_F: %.4g   (relative to original: %.4g)",
+                                    resid_cov_frob, orig_frob > 0 ? resid_cov_frob/orig_frob : 0.0f));
+                    pt.AddText("   The K splines plus this covariance reproduce the full systematic;");
+                    pt.AddText("   only negative-eigenvalue numerical noise is discarded.");
+                } else if(K < n_pos) {
+                    TText *rt = pt.AddText(Form("Residual covariance: OFF  -  %d smaller mode(s) DROPPED (include_resid_cov=false)", n_pos - K));
+                    if(rt) rt->SetTextColor(kRed + 1);
+                    pt.AddText("   The rank-K model underestimates the systematic by the difference shown above.");
+                } else {
+                    pt.AddText("Residual covariance: n/a  -  all positive eigenpairs kept as splines.");
+                }
+                pt.Draw();
+                draw_version_stamp();
+                c.Print(filename.c_str(), "pdf");
+            }
+
+            // ---- Page 2: original, rank-K reconstruction, and their difference ----
+            auto fill_th2 = [&](const Eigen::MatrixXf &M, const std::string &name, const std::string &title) {
+                auto h = std::make_unique<TH2D>(name.c_str(), title.c_str(), nbins, 0, nbins, nbins, 0, nbins);
+                h->SetDirectory(nullptr);
+                for(int i = 0; i < nbins; ++i)
+                    for(int j = 0; j < nbins; ++j)
+                        h->SetBinContent(i+1, j+1, M(i,j));
+                const float m = std::max(std::fabs(h->GetMaximum()), std::fabs(h->GetMinimum()));
+                h->SetMaximum(m);
+                h->SetMinimum(-m);
+                return h;
+            };
+            {
+                auto h_orig  = fill_th2(dbg.original_frac_cov, "h_cov_orig_"+systname,  (display+" original frac cov;Bin index;Bin index").c_str());
+                auto h_recon = fill_th2(recon,                  "h_cov_recon_"+systname, (display+Form(" reconstructed (rank %d);Bin index;Bin index", K)).c_str());
+                auto h_diff  = fill_th2(difference,             "h_cov_diff_"+systname,  (display+" difference = orig - recon;Bin index;Bin index").c_str());
+                c.Clear();
+                c.Divide(3, 1);
+                c.cd(1); gPad->SetRightMargin(0.14); gPad->SetTopMargin(0.13); h_orig->Draw("colz");  draw_channel_dividers_2d(spans, nbins);
+                c.cd(2); gPad->SetRightMargin(0.14); gPad->SetTopMargin(0.13); h_recon->Draw("colz"); draw_channel_dividers_2d(spans, nbins);
+                c.cd(3); gPad->SetRightMargin(0.14); gPad->SetTopMargin(0.13); h_diff->Draw("colz");  draw_channel_dividers_2d(spans, nbins);
+                c.cd(0);
+                draw_version_stamp();
+                c.Print(filename.c_str(), "pdf");
+            }
+
+            // ---- Page 2b: closure check when include_resid_cov is on ----
+            // Compare the original against the actual model used in the fit (K splines + residual
+            // covariance). Their difference should be ~0 (only negative-eigenvalue noise remains),
+            // which is the meaningful check now that the un-kept eigenpairs are retained.
+            if(dbg.has_residual) {
+                const Eigen::MatrixXf full_model = recon + dbg.residual_cov;
+                const Eigen::MatrixXf closure = dbg.original_frac_cov - full_model;
+                const float closure_frob = closure.norm();
+                auto h_orig  = fill_th2(dbg.original_frac_cov, "h_cov_orig2_"+systname, (display+" original frac cov;Bin index;Bin index").c_str());
+                auto h_model = fill_th2(full_model,            "h_cov_model_"+systname, (display+Form(" K=%d splines + residual cov;Bin index;Bin index", K)).c_str());
+                auto h_clos  = fill_th2(closure,               "h_cov_clos_"+systname,  (display+Form(" difference (||.||_F=%.2g);Bin index;Bin index", closure_frob)).c_str());
+                c.Clear();
+                c.Divide(3, 1);
+                // Titles read left-to-right as: [original] vs [splines + residual cov] -> [difference ~ 0].
+                c.cd(1); gPad->SetRightMargin(0.14); gPad->SetTopMargin(0.13); h_orig->Draw("colz");  draw_channel_dividers_2d(spans, nbins);
+                c.cd(2); gPad->SetRightMargin(0.14); gPad->SetTopMargin(0.13); h_model->Draw("colz"); draw_channel_dividers_2d(spans, nbins);
+                c.cd(3); gPad->SetRightMargin(0.14); gPad->SetTopMargin(0.13); h_clos->Draw("colz");  draw_channel_dividers_2d(spans, nbins);
+                c.cd(0);
+                draw_version_stamp();
+                c.Print(filename.c_str(), "pdf");
+            }
+
+            // ---- Page 3: sqrt(diag) per bin, original vs reconstructed (+ splines+resid when on) ----
+            {
+                auto h_d_orig  = std::make_unique<TH1D>(("h_diag_orig_"+systname).c_str(), (display+" fractional uncertainty per bin;Bin index;#sqrt{diag}").c_str(), nbins, 0, nbins);
+                auto h_d_recon = std::make_unique<TH1D>(("h_diag_recon_"+systname).c_str(), "", nbins, 0, nbins);
+                auto h_d_sum   = std::make_unique<TH1D>(("h_diag_sum_"+systname).c_str(), "", nbins, 0, nbins);
+                h_d_orig->SetDirectory(nullptr); h_d_recon->SetDirectory(nullptr); h_d_sum->SetDirectory(nullptr);
+                for(int b = 0; b < nbins; ++b) {
+                    h_d_orig ->SetBinContent(b+1, std::sqrt(std::max(0.0f, dbg.original_frac_cov(b,b))));
+                    h_d_recon->SetBinContent(b+1, std::sqrt(std::max(0.0f, recon(b,b))));
+                    if(dbg.has_residual)
+                        h_d_sum->SetBinContent(b+1, std::sqrt(std::max(0.0f, recon(b,b) + dbg.residual_cov(b,b))));
+                }
+                h_d_orig->SetLineColor(kBlack);
+                h_d_orig->SetLineWidth(2);
+                h_d_recon->SetLineColor(kRed);
+                h_d_recon->SetLineWidth(2);
+                h_d_recon->SetLineStyle(2);
+                h_d_sum->SetLineColor(kGreen + 2);
+                h_d_sum->SetLineWidth(2);
+                h_d_sum->SetLineStyle(3);
+                const double ymax = 1.15 * std::max(h_d_orig->GetMaximum(), h_d_recon->GetMaximum());
+                h_d_orig->SetMaximum(ymax);
+                h_d_orig->SetMinimum(0.0);
+                c.Clear();
+                gPad->SetTopMargin(0.13);
+                h_d_orig->Draw("hist");
+                h_d_recon->Draw("hist same");
+                if(dbg.has_residual) h_d_sum->Draw("hist same");
+                draw_channel_dividers_1d(spans, 0.0, ymax);
+                auto *leg = new TLegend(0.62, 0.74, 0.92, 0.9);
+                leg->SetBorderSize(0);
+                leg->SetFillStyle(0);
+                leg->AddEntry(h_d_orig.get(), "Original (multisim)", "l");
+                leg->AddEntry(h_d_recon.get(), Form("K=%d splines only", K), "l");
+                if(dbg.has_residual) leg->AddEntry(h_d_sum.get(), "Splines + residual cov", "l");
+                leg->Draw();
+                draw_version_stamp();
+                c.Print(filename.c_str(), "pdf");
+            }
+
+            // ---- Page 4: scree plot (eigenvalues sorted descending, log y) ----
+            std::vector<double> sorted_eigs(n_eig);
+            for(int i = 0; i < n_eig; ++i) sorted_eigs[i] = dbg.eigenvalues(n_eig - 1 - i);
+            {
+                std::vector<double> xs(n_eig), ys(n_eig);
+                bool any_positive = false;
+                double y_floor = 1e-30;
+                for(int i = 0; i < n_eig; ++i) {
+                    xs[i] = i;
+                    ys[i] = sorted_eigs[i] > 0 ? sorted_eigs[i] : y_floor;
+                    if(sorted_eigs[i] > 0) any_positive = true;
+                }
+                auto *g = new TGraph(n_eig, xs.data(), ys.data());
+                g->SetTitle((display + " eigenvalue scree;eigenvalue index (descending);eigenvalue").c_str());
+                g->SetMarkerStyle(20);
+                g->SetMarkerSize(0.6);
+                g->SetMarkerColor(kBlue + 1);
+                g->SetLineColor(kBlue + 1);
+                c.Clear();
+                gPad->SetTopMargin(0.13);
+                if(any_positive) gPad->SetLogy(1);
+                g->Draw("APL");
+                if(K > 0 && K <= n_eig) {
+                    // Mark the boundary of the kept region (right edge of last kept index).
+                    const double x = K - 0.5;
+                    const double y_top = sorted_eigs[0] * 10;
+                    const double y_bot = y_floor;
+                    auto *ln = new TLine(x, y_bot, x, y_top);
+                    ln->SetLineColor(kRed);
+                    ln->SetLineStyle(2);
+                    ln->SetLineWidth(2);
+                    ln->Draw();
+                }
+                draw_version_stamp();
+                c.Print(filename.c_str(), "pdf");
+                gPad->SetLogy(0);
+            }
+
+            // ---- Page 5: cumulative variance ----
+            {
+                double total = 0.0;
+                for(int i = 0; i < n_eig; ++i) total += std::max(0.0, static_cast<double>(dbg.eigenvalues(i)));
+                std::vector<double> xs(n_eig), ys(n_eig);
+                double running = 0.0;
+                for(int i = 0; i < n_eig; ++i) {
+                    running += std::max(0.0, sorted_eigs[i]);
+                    xs[i] = i + 1;
+                    ys[i] = total > 0 ? running / total : 0.0;
+                }
+                auto *g = new TGraph(n_eig, xs.data(), ys.data());
+                g->SetTitle((display + " cumulative variance captured;Number of modes kept;Fraction of trace").c_str());
+                g->SetMarkerStyle(20);
+                g->SetMarkerSize(0.6);
+                g->SetLineColor(kBlue + 1);
+                g->SetMarkerColor(kBlue + 1);
+                c.Clear();
+                gPad->SetTopMargin(0.13);
+                g->Draw("APL");
+                g->GetHistogram()->SetMinimum(0.0);
+                g->GetHistogram()->SetMaximum(1.05);
+                auto draw_h = [&](double y, int col, const char *label){
+                    auto *ln = new TLine(0, y, n_eig, y);
+                    ln->SetLineColor(col); ln->SetLineStyle(2); ln->Draw();
+                    auto *t = new TLatex(0.92 * n_eig, y + 0.01, label);
+                    t->SetTextSize(0.025f); t->SetTextColor(col); t->Draw();
+                };
+                draw_h(0.90, kGray+2, "90%");
+                draw_h(0.95, kGray+2, "95%");
+                draw_h(0.99, kGray+2, "99%");
+                if(K > 0 && K <= n_eig) {
+                    auto *lnK = new TLine(K, 0, K, 1.05);
+                    lnK->SetLineColor(kRed); lnK->SetLineStyle(2); lnK->SetLineWidth(2);
+                    lnK->Draw();
+                }
+                draw_version_stamp();
+                c.Print(filename.c_str(), "pdf");
+            }
+
+            // ---- Page 6: eigenvector heatmap (kept modes only), entries = sqrt(λ_k) * v_k[b] ----
+            if(K > 0) {
+                auto h_ev = std::make_unique<TH2D>(("h_eigvec_"+systname).c_str(), (display + " eigenvectors (rows = kept knobs);Bin index;Knob k").c_str(), nbins, 0, nbins, K, 0, K);
+                h_ev->SetDirectory(nullptr);
+                for(int k = 0; k < K; ++k) {
+                    const int idx = dbg.kept_indices[k];
+                    const float s = std::sqrt(std::max(0.0f, dbg.eigenvalues(idx)));
+                    const Eigen::VectorXf v = dbg.eigenvectors.col(idx);
+                    for(int b = 0; b < nbins; ++b) {
+                        h_ev->SetBinContent(b+1, k+1, s * v(b));
+                    }
+                }
+                const float m_ev = std::max(std::fabs(h_ev->GetMaximum()), std::fabs(h_ev->GetMinimum()));
+                h_ev->SetMaximum(m_ev);
+                h_ev->SetMinimum(-m_ev);
+                c.Clear();
+                gPad->SetRightMargin(0.13);
+                gPad->SetTopMargin(0.13);
+                h_ev->Draw("colz");
+                // Vertical channel dividers
+                for(size_t s = 1; s < spans.size(); ++s) {
+                    const double x = static_cast<double>(spans[s].start_bin);
+                    auto *ln = new TLine(x, 0, x, K);
+                    ln->SetLineColor(kGray+2); ln->SetLineStyle(2); ln->Draw();
+                }
+                draw_version_stamp();
+                c.Print(filename.c_str(), "pdf");
+            }
+
+            // ---- Per-knob bin response, 4 per page (sqrt(λ_k) * v_k[b]) ----
+            for(int k0 = 0; k0 < K; k0 += 4) {
+                c.Clear();
+                c.Divide(2, 2);
+                for(int kk = 0; kk < 4 && (k0 + kk) < K; ++kk) {
+                    const int k = k0 + kk;
+                    const int idx = dbg.kept_indices[k];
+                    const float s = std::sqrt(std::max(0.0f, dbg.eigenvalues(idx)));
+                    const Eigen::VectorXf v = dbg.eigenvectors.col(idx);
+                    auto h = std::make_unique<TH1D>(Form("h_knob_resp_%s_%d", systname.c_str(), k), Form("%s knob %d   #lambda = %.3g   (+1 #sigma response);Bin index;#sqrt{#lambda} #upoint v_{k}[b]", display.c_str(), k, dbg.eigenvalues(idx)), nbins, 0, nbins);
+                    h->SetDirectory(nullptr);
+                    double yabs = 0;
+                    for(int b = 0; b < nbins; ++b) {
+                        const double y = s * v(b);
+                        h->SetBinContent(b+1, y);
+                        yabs = std::max(yabs, std::fabs(y));
+                    }
+                    h->SetLineColor(kBlue + 1);
+                    h->SetLineWidth(2);
+                    h->SetMaximum(1.2 * (yabs > 0 ? yabs : 1.0));
+                    h->SetMinimum(-1.2 * (yabs > 0 ? yabs : 1.0));
+                    c.cd(kk + 1);
+                    gPad->SetTopMargin(0.13);
+                    h->DrawCopy("hist");
+                    draw_channel_dividers_1d(spans, h->GetMinimum(), h->GetMaximum());
+                    auto *zero = new TLine(0, 0, nbins, 0);
+                    zero->SetLineColor(kBlack); zero->Draw();
+                }
+                c.cd(0);
+                draw_version_stamp();
+                c.Print(filename.c_str(), "pdf");
+            }
+
+            // ---- Per-knob CV ± 1σ band (linear knob: response = 1 ± alpha_b), 4 per page ----
+            const Eigen::VectorXf cv_full = cv.Spec();
+            const bool cv_size_ok = (cv_full.size() == nbins);
+            if(cv_size_ok) {
+                for(int k0 = 0; k0 < K; k0 += 4) {
+                    c.Clear();
+                    c.Divide(2, 2);
+                    for(int kk = 0; kk < 4 && (k0 + kk) < K; ++kk) {
+                        const int k = k0 + kk;
+                        const int idx = dbg.kept_indices[k];
+                        const float s = std::sqrt(std::max(0.0f, dbg.eigenvalues(idx)));
+                        const Eigen::VectorXf v = dbg.eigenvectors.col(idx);
+                        auto h_cv = std::make_unique<TH1D>(Form("h_cv_%s_%d", systname.c_str(), k), Form("%s knob %d   CV #pm 1 #sigma;Bin index;Events", display.c_str(), k), nbins, 0, nbins);
+                        auto h_up = std::make_unique<TH1D>(Form("h_up_%s_%d", systname.c_str(), k), "", nbins, 0, nbins);
+                        auto h_dn = std::make_unique<TH1D>(Form("h_dn_%s_%d", systname.c_str(), k), "", nbins, 0, nbins);
+                        h_cv->SetDirectory(nullptr); h_up->SetDirectory(nullptr); h_dn->SetDirectory(nullptr);
+                        double ymax = 0;
+                        for(int b = 0; b < nbins; ++b) {
+                            const double alpha = s * v(b);
+                            const double y0 = cv_full(b);
+                            h_cv->SetBinContent(b+1, y0);
+                            h_up->SetBinContent(b+1, y0 * (1.0 + alpha));
+                            h_dn->SetBinContent(b+1, y0 * (1.0 - alpha));
+                            ymax = std::max({ymax, std::fabs(y0 * (1.0 + alpha)), std::fabs(y0 * (1.0 - alpha))});
+                        }
+                        h_cv->SetLineColor(kBlack);
+                        h_cv->SetLineWidth(2);
+                        h_up->SetLineColor(kRed + 1);
+                        h_dn->SetLineColor(kAzure + 2);
+                        h_up->SetLineStyle(2);
+                        h_dn->SetLineStyle(2);
+                        h_cv->SetMaximum(1.15 * ymax);
+                        h_cv->SetMinimum(0.0);
+                        c.cd(kk + 1);
+                        gPad->SetTopMargin(0.13);
+                        h_cv->DrawCopy("hist");
+                        h_up->DrawCopy("hist same");
+                        h_dn->DrawCopy("hist same");
+                        draw_channel_dividers_1d(spans, 0.0, 1.15 * ymax);
+                    }
+                    c.cd(0);
+                    draw_version_stamp();
+                    c.Print(filename.c_str(), "pdf");
+                }
+            } else {
+                log<LOG_WARNING>(L"%1% || CV spectrum size %2% != covariance size %3% for systematic %4%; skipping CV-band pages.")
+                    % __func__ % static_cast<int>(cv_full.size()) % nbins % systname.c_str();
+            }
+
+            // ---- Aggregate band: CV ± from original cov vs ± from rank-K sum-of-knobs ----
+            if(cv_size_ok) {
+                auto h_cv  = std::make_unique<TH1D>(("h_aggcv_"+systname).c_str(), (display + " aggregate CV #pm 1 #sigma;Bin index;Events").c_str(), nbins, 0, nbins);
+                auto h_oup = std::make_unique<TH1D>(("h_aggoup_"+systname).c_str(), "", nbins, 0, nbins);
+                auto h_odn = std::make_unique<TH1D>(("h_aggodn_"+systname).c_str(), "", nbins, 0, nbins);
+                auto h_kup = std::make_unique<TH1D>(("h_aggkup_"+systname).c_str(), "", nbins, 0, nbins);
+                auto h_kdn = std::make_unique<TH1D>(("h_aggkdn_"+systname).c_str(), "", nbins, 0, nbins);
+                auto h_sup = std::make_unique<TH1D>(("h_aggsup_"+systname).c_str(), "", nbins, 0, nbins);
+                auto h_sdn = std::make_unique<TH1D>(("h_aggsdn_"+systname).c_str(), "", nbins, 0, nbins);
+                h_cv->SetDirectory(nullptr); h_oup->SetDirectory(nullptr); h_odn->SetDirectory(nullptr);
+                h_kup->SetDirectory(nullptr); h_kdn->SetDirectory(nullptr); h_sup->SetDirectory(nullptr); h_sdn->SetDirectory(nullptr);
+                double ymax = 0;
+                for(int b = 0; b < nbins; ++b) {
+                    const double y0 = cv_full(b);
+                    const double sigma_orig  = std::sqrt(std::max(0.0f, dbg.original_frac_cov(b,b))) * y0;
+                    const double sigma_recon = std::sqrt(std::max(0.0f, recon(b,b))) * y0;
+                    // Combined model = K splines (in quadrature) + residual covariance diagonal.
+                    const double var_comb = recon(b,b) + (dbg.has_residual ? dbg.residual_cov(b,b) : 0.0f);
+                    const double sigma_comb = std::sqrt(std::max(0.0, var_comb)) * y0;
+                    h_cv->SetBinContent(b+1, y0);
+                    h_oup->SetBinContent(b+1, y0 + sigma_orig);
+                    h_odn->SetBinContent(b+1, y0 - sigma_orig);
+                    h_kup->SetBinContent(b+1, y0 + sigma_recon);
+                    h_kdn->SetBinContent(b+1, y0 - sigma_recon);
+                    h_sup->SetBinContent(b+1, y0 + sigma_comb);
+                    h_sdn->SetBinContent(b+1, y0 - sigma_comb);
+                    ymax = std::max({ymax, y0 + sigma_orig, y0 + sigma_recon, y0 + sigma_comb});
+                }
+                h_cv->SetLineColor(kBlack);
+                h_cv->SetLineWidth(2);
+                h_oup->SetLineColor(kBlack); h_odn->SetLineColor(kBlack);
+                h_oup->SetLineStyle(2); h_odn->SetLineStyle(2);
+                h_kup->SetLineColor(kRed + 1); h_kdn->SetLineColor(kRed + 1);
+                h_kup->SetLineStyle(1); h_kdn->SetLineStyle(1);
+                h_sup->SetLineColor(kGreen + 2); h_sdn->SetLineColor(kGreen + 2);
+                h_sup->SetLineStyle(1); h_sdn->SetLineStyle(1);
+                h_sup->SetLineWidth(2); h_sdn->SetLineWidth(2);
+                h_cv->SetMaximum(1.15 * ymax);
+                h_cv->SetMinimum(0.0);
+                c.Clear();
+                gPad->SetTopMargin(0.13);
+                h_cv->Draw("hist");
+                // Draw rank-K band first, then the combined (splines+resid) band, then the
+                // original-multisim dashed lines on top so each stays visible where they overlap.
+                h_kup->Draw("hist same");
+                h_kdn->Draw("hist same");
+                if(dbg.has_residual) { h_sup->Draw("hist same"); h_sdn->Draw("hist same"); }
+                h_oup->Draw("hist same");
+                h_odn->Draw("hist same");
+                draw_channel_dividers_1d(spans, 0.0, 1.15 * ymax);
+                auto *leg = new TLegend(0.6, 0.72, 0.92, 0.9);
+                leg->SetBorderSize(0); leg->SetFillStyle(0);
+                leg->AddEntry(h_cv.get(),  "CV", "l");
+                leg->AddEntry(h_oup.get(), "CV #pm 1#sigma (original multisim)", "l");
+                leg->AddEntry(h_kup.get(), Form("CV #pm 1#sigma (K=%d splines only)", K), "l");
+                if(dbg.has_residual) leg->AddEntry(h_sup.get(), "CV #pm 1#sigma (splines + residual cov)", "l");
+                leg->Draw();
+                draw_version_stamp();
+                c.Print(filename.c_str(), "pdf");
+            }
+        }
+
+        c.Print((filename + "]").c_str(), "pdf");
+        return 0;
     }
 }

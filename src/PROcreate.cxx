@@ -71,10 +71,13 @@ namespace PROfit {
 
     std::string convertToXRootD(std::string fname_orig){
         std::string fname_use = fname_orig;
-        if(fname_orig.find("pnfs")!=std::string::npos ){
-            std::string p = "/pnfs";
-            std::string::size_type i = fname_orig.find(p);
-            fname_orig.erase(i,p.length());
+        // Search for "/pnfs" directly: testing for "pnfs" but erasing at
+        // find("/pnfs") threw std::out_of_range for paths containing "pnfs"
+        // without the leading slash.
+        const std::string p = "/pnfs";
+        std::string::size_type i = fname_orig.find(p);
+        if(i != std::string::npos){
+            fname_orig.erase(i, p.length());
             fname_use = "root://fndca1.fnal.gov:1094/pnfs/fnal.gov/usr"+fname_orig;
         }
         return fname_use;
@@ -422,20 +425,21 @@ namespace PROfit {
             }
         }
 
-        //Do we have any norm spline systeatics?
-        if(inconfig.m_num_variation_type_norm>0){
+        // Do we have any norm systematics?
+        if(inconfig.m_num_variation_type_norm>0 || inconfig.m_num_variation_type_norm_to_covariance>0){
             for(auto& allow_sys : inconfig.m_mcgen_variation_type_map){
                 if(allow_sys.second=="norm"){
-
                     map_systematic_num_universe[allow_sys.first] = 7;
+                }else if(allow_sys.second=="norm_to_covariance"){
+                    map_systematic_num_universe[allow_sys.first] = 0;
                 }
             }
         }
 
         //Do we have any external systeatics?
-        if(inconfig.m_num_variation_type_external_covariance>0){
+        if(inconfig.m_num_variation_type_external_covariance>0 || inconfig.m_num_variation_type_external_covariance_to_spline>0){
             for(auto& allow_sys : inconfig.m_mcgen_variation_type_map){
-                if(allow_sys.second=="external_covariance"){
+                if(allow_sys.second=="external_covariance" || allow_sys.second=="external_covariance_to_spline"){
                     map_systematic_num_universe[allow_sys.first] = -1;
                 }
             }
@@ -483,6 +487,11 @@ namespace PROfit {
                     sv.back().scale = inconfig.m_mcgen_variation_scale.at(sys_name);
                     log<LOG_INFO>(L"%1% || Setting scale=%2% for systematic %3%") % __func__ % sv.back().scale % sys_name.c_str();
                 }
+                // Check if inflate is set for this systematic
+                if(inconfig.m_mcgen_variation_inflate.find(sys_name) != inconfig.m_mcgen_variation_inflate.end()) {
+                    sv.back().inflate = inconfig.m_mcgen_variation_inflate.at(sys_name);
+                    log<LOG_INFO>(L"%1% || Setting inflate=%2% for systematic %3%") % __func__ % sv.back().inflate % sys_name.c_str();
+                }
                 if(sys_mode == "spline" || sys_mode == "spline_to_covariance") {
                     bool override_knobs = inconfig.m_mcgen_variation_knobval_override.find(sys_name) != inconfig.m_mcgen_variation_knobval_override.end();
                     if(!override_knobs && map_systematic_knob_vals.find(sys_name) == map_systematic_knob_vals.end()) {
@@ -518,6 +527,11 @@ namespace PROfit {
                         sv.back().num_decomp_knobs = it_nk->second;
                         log<LOG_INFO>(L"%1% || Setting num_decomp_knobs=%2% for systematic %3%") % __func__ % sv.back().num_decomp_knobs % sys_name.c_str();
                     }
+                    auto it_rc = inconfig.m_mcgen_variation_include_resid_cov.find(sys_name);
+                    if(it_rc != inconfig.m_mcgen_variation_include_resid_cov.end()) {
+                        sv.back().include_resid_cov = it_rc->second;
+                    }
+                    log<LOG_INFO>(L"%1% || Setting include_resid_cov=%2% for systematic %3%") % __func__ % sv.back().include_resid_cov % sys_name.c_str();
                     log<LOG_INFO>(L"%1% || Systematic variation %2% is a match for a covariance_to_spline systematic. Processing as such. ") % __func__ % sys_name.c_str();
                 }
                 if(sys_mode == "flat"){
@@ -529,14 +543,25 @@ namespace PROfit {
                     log<LOG_INFO>(L"%1% || Systematic variation %2% is a match for an externally loaded covariance systematic. Processing a such. ") % __func__ % sys_name.c_str();
                     log<LOG_INFO>(L"%1% || External filename:  %2%, External Matrix :%3% . Use for variable number %4%") % __func__ % sv.back().external_filename.c_str() % sys_name.c_str() % sv.back().binning;
                 }
+                if(sys_mode == "external_covariance_to_spline"){
+                    sv.back().external_filename = inconfig.m_mcgen_variation_external_filename_map.at(sys_name);
+                    sv.back().binning = binningindex;
+                    auto it_nk = inconfig.m_mcgen_variation_num_decomp_knobs.find(sys_name);
+                    if(it_nk != inconfig.m_mcgen_variation_num_decomp_knobs.end()) {
+                        sv.back().num_decomp_knobs = it_nk->second;
+                        log<LOG_INFO>(L"%1% || Setting num_decomp_knobs=%2% for systematic %3%") % __func__ % sv.back().num_decomp_knobs % sys_name.c_str();
+                    }
+                    log<LOG_INFO>(L"%1% || Systematic variation %2% is a match for an externally loaded covariance-to-spline systematic. Processing a such. ") % __func__ % sys_name.c_str();
+                    log<LOG_INFO>(L"%1% || External filename:  %2%, External Matrix :%3% . Use for variable number %4%") % __func__ % sv.back().external_filename.c_str() % sys_name.c_str() % sv.back().binning;
+                }
                 if(sys_mode == "hist1d" || sys_mode == "hist2d") {
                     map_systematic_knob_vals[sys_name] = {1.0f};
                     sv.back().knob_index = map_systematic_knob_vals[sys_name];
                     sv.back().knobval = sv.back().knob_index;
                     sv.back().binning = binningindex;
                 }
-                if(sys_mode == "norm") {
-                    log<LOG_INFO>(L"%1% || Systematic variation %2% is a match for a spline norm systematic. Processing a such. ") % __func__ % sys_name.c_str();
+                if(sys_mode == "norm" || sys_mode == "norm_to_covariance") {
+                    log<LOG_INFO>(L"%1% || Systematic variation %2% is a match for a normalization systematic. Processing as such. ") % __func__ % sys_name.c_str();
                     map_systematic_knob_vals[sys_name] = {-3.0f, -2.0f, -1.0f, 0.0f, 1.0f, 2.0f, 3.0f};
                     sv.back().knob_index = map_systematic_knob_vals[sys_name];
                     sv.back().knobval = sv.back().knob_index;
@@ -552,7 +577,8 @@ namespace PROfit {
                     std::string sflat_percent  = sys_name.substr(colonPos + 1);
                     float flat_percent = std::stof(sflat_percent);
 
-                    if(flat_percent >= 0.33333){
+                    // norm_to_covariance should be able to handle >= 0.33
+                    if(sys_mode == "norm" && flat_percent >= 0.33333){
                         log<LOG_ERROR>(L"%1% || Currently norm takes +-3,2,1 sigma. Greater than 33.33% norm error isn't allowed. You entered %2%. Dont.  ") % __func__  %  flat_percent;
                         exit(EXIT_FAILURE);
                     }
@@ -612,7 +638,7 @@ namespace PROfit {
         for(size_t i = 0; i < syst_vector.size(); ++i){
             auto &sv = syst_vector[i];
             for(auto &s: sv) {
-                if(s.mode=="flat" || s.mode=="external_covariance")
+                if(s.mode=="flat" || s.mode=="external_covariance" || s.mode=="external_covariance_to_spline")
                     continue;
                 //Get these binnings right
                 s.CreateSpecs( (s.mode == "covariance" ) ? inconfig.m_num_variable_bins_total[i] : inconfig.m_num_variable_bins_total[s.binning]);
@@ -842,9 +868,15 @@ namespace PROfit {
 
         //ensure hash is correctly assigned
         inprop.hash=inconfig.hash;
-        //finished, so make sure MCstat is ok
+        // Convert the accumulated per-bin sum of squared weights into the sqrt of the
+        // Kish effective count, sqrt(N_eff) = Sum(w)/sqrt(Sum(w^2)), using the CV Sum(w)
+        // from the pre-binned hist diagonal. PROsyst's square().inverse() then gives the
+        // exact fractional MC-stat variance Sum(w^2)/Sum(w)^2 for arbitrary event weights
+        // (reduces to 1/N when all weights in a bin are equal).
         for(size_t i = 0; i < inconfig.m_num_variables; ++i) {
-            inprop.variable_mc_stat_err[i]=inprop.variable_mc_stat_err[i].array().sqrt();
+            Eigen::ArrayXf sumw  = inprop.variable_hist_storage(i,i).diagonal().array();
+            Eigen::ArrayXf sumw2 = inprop.variable_mc_stat_err[i].array();
+            inprop.variable_mc_stat_err[i] = (sumw2 > 0).select(sumw / sumw2.sqrt(), 0.0f).matrix();
         }
 
 
@@ -1171,7 +1203,7 @@ namespace PROfit {
 
         for(size_t io = 0; io < inconfig.m_num_variables; ++io) {
             if(var_bin_indices[io] >= 0) {
-                inprop.variable_mc_stat_err[io](var_bin_indices[io]) += 1;
+                inprop.variable_mc_stat_err[io](var_bin_indices[io]) += mc_weight * mc_weight;
                 for(size_t jo = io; jo < inconfig.m_num_variables; ++jo) {
 
                     if(var_bin_indices[jo]<0)continue;
@@ -1190,6 +1222,19 @@ namespace PROfit {
 
             float additional_weight = syst_additional_weight.at(i); // extra per-systematic weights, unrelated to the per-event additional_weight set in the xml file
             auto map_iter = eventweight_map.find(var_syst_objs.front()->GetSysName());
+            // The spline/covariance/covariance_to_spline paths below dereference
+            // map_iter; a missing weight name (branch typo, absent friend tree)
+            // must fail loudly here instead of dereferencing the end iterator.
+            const std::string &sys_mode = var_syst_objs.front()->mode;
+            const bool needs_weights = (sys_mode == "spline" || sys_mode == "spline_to_covariance" ||
+                                        sys_mode == "covariance" || sys_mode == "covariance_to_spline");
+            if(needs_weights && map_iter == eventweight_map.end()){
+                log<LOG_ERROR>(L"%1% || ERROR: systematic '%2%' (mode %3%) has no entry in the event weight map. "
+                               L"Check that the variation name matches a weight branch in the input files.")
+                    % __func__ % var_syst_objs.front()->GetSysName().c_str() % sys_mode.c_str();
+                log<LOG_ERROR>(L"Terminating.");
+                exit(EXIT_FAILURE);
+            }
             int spline_bin = (var_syst_objs.front()->mode == "covariance") ? -1: var_bin_indices[var_syst_objs.front()->binning];
 
             if(var_syst_objs.front()->mode == "spline" || var_syst_objs.front()->mode == "spline_to_covariance") {
@@ -1203,7 +1248,15 @@ namespace PROfit {
                         if(var_syst_objs.front()->knobval[u] == var_syst_objs.front()->knob_index[is]) break;
                     
                     float w = static_cast<float>(map_iter->second->at(is));
-                    if(std::isnan(w) || std::isinf(w) || (w > 10)) w = 1;
+                    if(std::isnan(w) || std::isinf(w)) {
+                        log<LOG_WARNING>(L"%1% || Encountered a bad weight (%2%) for syst %3%. Setting to 1 instead.")
+                            % __func__ % w % map_iter->first.c_str();
+                        w = 1;
+                    } else if(w > 30) {
+                        log<LOG_WARNING>(L"%1% || Encountered a very large weight (%2%) for syst %3%. Setting to 1 instead.")
+                            % __func__ % w % map_iter->first.c_str();
+                        w = 1;
+                    }
                     for(auto so: var_syst_objs){
                         if (!so->include_only_weights.empty()) {
                             // Compute weight using only the included weights (avoids divide-by-zero)
@@ -1233,8 +1286,26 @@ namespace PROfit {
                 }
                 for(int iuni = 0; iuni < var_syst_objs.front()->GetNUniverse(); ++iuni){
                     float raw_weight = static_cast<float>(map_iter->second->at(iuni));
+                    // Same non-finite guard the spline path applies at its w:
+                    // one NaN/inf universe weight would silently NaN the whole
+                    // covariance (later zeroed by toFiniteMatrix, hiding the
+                    // bad input). Warn so the input problem is visible.
+                    if(std::isnan(raw_weight) || std::isinf(raw_weight)){
+                        log<LOG_WARNING>(L"%1% || Non-finite universe weight %2% for covariance systematic '%3%' universe %4%; using 1.")
+                            % __func__ % raw_weight % var_syst_objs.front()->GetSysName().c_str() % iuni;
+                        raw_weight = 1;
+                    }
                     float scaled_weight = raw_weight * var_syst_objs.front()->scale; // apply scale factor (default 1.0)
                     float sys_wei = run_syst ? additional_weight * scaled_weight :  1.0;
+                    if(std::isnan(sys_wei) || std::isinf(sys_wei)) {
+                        log<LOG_WARNING>(L"%1% || Encountered a bad weight (%2%) for syst %3%. Setting to 1 instead.")
+                            % __func__ % sys_wei % map_iter->first.c_str();
+                        sys_wei = 1;
+                    } else if(sys_wei > 30) {
+                        log<LOG_WARNING>(L"%1% || Encountered a very large weight (%2%) for syst %3%. Setting to 1 instead.")
+                            % __func__ % sys_wei % map_iter->first.c_str();
+                        sys_wei = 1;
+                    }
                     for(size_t io = 0; io < inconfig.m_num_variables; ++io) {
                         if(var_bin_indices[io] >= 0){
                             var_syst_objs[io]->FillUniverse(iuni, var_bin_indices[io], mc_weight * sys_wei);
@@ -1247,8 +1318,22 @@ namespace PROfit {
                     so->FillCV(spline_bin, mc_weight);
                 for(int iuni = 0; iuni < var_syst_objs.front()->GetNUniverse(); ++iuni){
                     float raw_weight = static_cast<float>(map_iter->second->at(iuni));
+                    if(std::isnan(raw_weight) || std::isinf(raw_weight)){
+                        log<LOG_WARNING>(L"%1% || Non-finite universe weight %2% for covariance_to_spline systematic '%3%' universe %4%; using 1.")
+                            % __func__ % raw_weight % var_syst_objs.front()->GetSysName().c_str() % iuni;
+                        raw_weight = 1;
+                    }
                     float scaled_weight = raw_weight * var_syst_objs.front()->scale;
                     float sys_wei = run_syst ? additional_weight * scaled_weight : 1.0;
+                    if(std::isnan(sys_wei) || std::isinf(sys_wei)) {
+                        log<LOG_WARNING>(L"%1% || Encountered a bad weight (%2%) for syst %3%. Setting to 1 instead.")
+                            % __func__ % sys_wei % map_iter->first.c_str();
+                        sys_wei = 1;
+                    } else if(sys_wei > 30) {
+                        log<LOG_WARNING>(L"%1% || Encountered a very large weight (%2%) for syst %3%. Setting to 1 instead.")
+                            % __func__ % sys_wei % map_iter->first.c_str();
+                        sys_wei = 1;
+                    }
                     for(auto so: var_syst_objs){
                         so->FillUniverse(iuni, spline_bin, mc_weight * sys_wei);
                     }
@@ -1275,8 +1360,11 @@ namespace PROfit {
                 if(spline_bin < 0) continue;
                 int var_num = inconfig.m_mcgen_variation_histaxisvars_map.at(var_syst_objs.front()->systname)[0];
                 float val = vars[var_num].first();
-                int bin = inconfig.m_mcgen_variation_hist1d_map.at(var_syst_objs.front()->systname)->FindBin(val);
-                float wgt = inconfig.m_mcgen_variation_hist1d_map.at(var_syst_objs.front()->systname)->GetBinContent(bin);
+                TH1 *h = inconfig.m_mcgen_variation_hist1d_map.at(var_syst_objs.front()->systname);
+                int bin = h->FindBin(val);
+                float wgt = h->GetBinContent(bin);
+                if(std::isnan(val) || std::isinf(val)) wgt = 1;
+                if(val < h->GetXaxis()->GetXmin() || val > h->GetXaxis()->GetXmax()) wgt = 1;
 
                 // Only filling 1 sigma, so just combine CV and Universe filling
                 for(auto so: var_syst_objs) {
@@ -1290,8 +1378,12 @@ namespace PROfit {
                 int yvar_num = inconfig.m_mcgen_variation_histaxisvars_map.at(var_syst_objs.front()->systname)[1];
                 float xval = vars[xvar_num].first();
                 float yval = vars[yvar_num].first();
-                int bin = inconfig.m_mcgen_variation_hist2d_map.at(var_syst_objs.front()->systname)->FindBin(xval, yval);
-                float wgt = inconfig.m_mcgen_variation_hist2d_map.at(var_syst_objs.front()->systname)->GetBinContent(bin);
+                TH2 *h = inconfig.m_mcgen_variation_hist2d_map.at(var_syst_objs.front()->systname);
+                int bin = h->FindBin(xval, yval);
+                float wgt = h->GetBinContent(bin);
+                if(std::isnan(xval) || std::isnan(yval) || std::isinf(xval) || std::isinf(yval)) wgt = 1;
+                if(xval < h->GetXaxis()->GetXmin() || xval > h->GetXaxis()->GetXmax()
+                    || yval < h->GetYaxis()->GetXmin() || yval > h->GetYaxis()->GetXmax()) wgt = 1;
 
                 // Only filling 1 sigma, so just combine CV and Universe filling
                 for(auto so: var_syst_objs) {

@@ -56,7 +56,8 @@ namespace PROfit{
      * event-by-event; afterwards PROsyst reads it to build splines or covariance matrices.
      *
      * Supported modes (stored in the `mode` field): "multisim", "minmax", "covar", "spline",
-     * "external", "flat", "norm", "hist1d", "hist2d", "spline_to_covariance".
+     * "external", "flat", "norm", "norm_to_covariance", "hist1d", "hist2d",
+     * "spline_to_covariance".
      */
     struct SystStruct {
 
@@ -79,11 +80,13 @@ namespace PROfit{
         std::vector<std::shared_ptr<PROspec>> p_multi_spec; ///< Shared pointers to per-universe variation spectra.
 
         std::vector<int> norm_bins; ///< Bin indices used for shape-normalisation (empty = normalise all bins).
-        float norm_value;           ///< Normalisation target integral (used in shape-only mode).
+        float norm_value = 0.0f;    ///< Normalisation target integral (used in shape-only mode; only set for "norm" systematics).
         bool force_0_cv = false;    ///< If true, normalise spline shifts by the shift at knob=0.
         std::vector<int> include_only_weights; ///< 1-based indices of weight universes to include; empty = all.
         float scale = 1.0f;         ///< Scale factor applied to all weights (e.g. 0.001 for weights stored as x1000).
+        float inflate = 1.0f;       ///< Uncertainty inflation factor: spline ratios are scaled about 1 (ratio -> 1 + inflate*(ratio-1)) before interpolation; covariance matrices are scaled by inflate^2.
         int num_decomp_knobs = -1;  ///< For "covariance_to_spline": number of top eigenpairs to keep as spline knobs (-1 = keep all).
+        bool include_resid_cov = true; ///< For "covariance_to_spline": if true, retain the un-kept (smaller) eigenpairs as a "<systname>_resid_cov" covariance matrix instead of dropping them.
         bool has_restrict = false;  ///< If true, clamp the knob value to [restrict_lo, restrict_hi] during evaluation and fitting.
         float restrict_lo = 0.0f;   ///< Lower clamp bound (used only when has_restrict is true).
         float restrict_hi = 0.0f;   ///< Upper clamp bound (used only when has_restrict is true).
@@ -116,6 +119,12 @@ namespace PROfit{
             }
             if (version >= 2) {
                 ar & num_decomp_knobs;
+            }
+            if (version >= 3) {
+                ar & include_resid_cov;
+            }
+            if (version >= 4) {
+                ar & inflate;
             }
         }
 
@@ -321,6 +330,6 @@ namespace PROfit{
 
 };
 
-BOOST_CLASS_VERSION(PROfit::SystStruct, 2)
+BOOST_CLASS_VERSION(PROfit::SystStruct, 4)
 
 #endif

@@ -62,7 +62,7 @@ private:
     Eigen::VectorXf eigenvector_multiplication(const Eigen::VectorXf& a, const Eigen::VectorXf& b) const;
 
 public:
-    uint32_t hash; ///< MurmurHash3 of the PROconfig used to create this data; checked during serialisation.
+    uint32_t hash = 0; ///< MurmurHash3 of the PROconfig used to create this data; checked during serialisation. Zero-initialized so copies made before save() never carry (or serialize) indeterminate bytes.
 
     /** @brief Boost serialisation support — serialises nbins, spec, error, and hash. */
     template<class Archive>
@@ -99,7 +99,10 @@ public:
     /* Function: create PROspec of given size */
     PROdata(size_t num_bins);
 
-    TH1D toTH1D(const PROconfig& inconfig, int channel_index, int other_index = -1, int dim = 0) const;
+    // other_index defaults to 0 (the first variable), matching PROspec::toTH1D.
+    // The old default of -1 indexed m_channel_variable_bins[...][-1] — UB for
+    // every caller that used the default (toROOT, plotSpectrum).
+    TH1D toTH1D(const PROconfig& inconfig, int channel_index, int other_index = 0, int dim = 0) const;
 
     void toROOT(const PROconfig& inconfig, const std::string& output_name);
 

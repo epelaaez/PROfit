@@ -83,7 +83,7 @@ namespace PROfit {
                     }
                 }
 
-                void plot_autocorrelation(const std::string &filename, const std::vector<std::string> &param_names, size_t max_lag = 1000) const {
+                void plot_autocorrelation(const std::string &filename, const std::vector<std::string> &param_names, std::optional<std::map<std::string, TObject*>*> drawn_objs, size_t max_lag = 1000) const {
                     if(chain.size() == 0) {
                         log<LOG_ERROR>(L"%1% || Error: cannot calculate autocorrelation without a saved chain."
                                        L" Did you forget to run the Metropolis object, or tell the Metropolis"
@@ -149,6 +149,9 @@ namespace PROfit {
                         hs.back().second->Draw("l");
                         zero.Draw("l same");
                         c.Print(filename.c_str());
+                        if(drawn_objs) {
+                            (*drawn_objs)->insert({param_names[i]+"_autocorr", hs.back().second->Clone()});
+                        }
                     }
                     c.Clear();
                     gStyle->SetPalette(kCool);
