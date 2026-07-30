@@ -114,6 +114,12 @@ namespace PROfit{
         for(size_t im = 0; im < inconfig.m_num_modes; im++){
             for(size_t id = 0; id < inconfig.m_num_detectors; id++){
                 for(size_t ic = 0; ic < inconfig.m_num_channels; ic++){
+                    // toTH2D reads Edges(1)/NBinsAlong(1), which is out-of-bounds for
+                    // channels whose binning for this variable is 1D.
+                    if(inconfig.m_channel_variable_dims[ic][other_index] != 2) {
+                        global_subchannel_index += inconfig.m_num_subchannels[ic];
+                        continue;
+                    }
                     for(size_t sc = 0; sc < inconfig.m_num_subchannels[ic]; sc++){
                         const std::string& subchannel_name  = inconfig.m_fullnames[global_subchannel_index];
                         std::unique_ptr<TH2D> htmp = std::make_unique<TH2D>(spec.toTH2D(inconfig, global_subchannel_index, other_index));
@@ -1032,7 +1038,6 @@ namespace PROfit{
         std::vector<TH1D> bf_hists;
 
         size_t global_subchannel_index = 0;
-        size_t global_subchannel_index_2d = 0;
         size_t global_channel_index = 0;
         int tot_offset = 0;
 
@@ -1137,10 +1142,11 @@ namespace PROfit{
 
                         // this needs to be a sum over all subchannels
                         TH2D* cv_hist = new TH2D(hist_title.c_str(),hist_title.c_str(), channel_nbins_x, edges_x.data(), channel_nbins_y, edges_y.data());
+                        // global_subchannel_index still points at this channel's first
+                        // subchannel here; it is only advanced in the stack loop below.
                         for(size_t subchannel = 0; subchannel < config.m_num_subchannels[channel]; ++subchannel){
-                            const std::string& subchannel_name  = config.m_fullnames[global_subchannel_index_2d];
+                            const std::string& subchannel_name  = config.m_fullnames[global_subchannel_index + subchannel];
                             cv_hist->Add(cv2dhists[subchannel_name].get());
-                            ++global_subchannel_index_2d;
                         }
 
                         TPad p2d("p2d", "p2d", 0, 0, 1, 1);
@@ -1321,7 +1327,9 @@ namespace PROfit{
                             if(bool(opt&PlotOptions::CVasStack))
                                 cvstack_y = new THStack(("y"+std::to_string(global_channel_index)).c_str(), "");
 
-                            const size_t first_subchannel = global_subchannel_index_2d-config.m_num_subchannels[channel];
+                            // global_subchannel_index still points at this channel's first
+                            // subchannel; it is only advanced in the 1D stack loop below.
+                            const size_t first_subchannel = global_subchannel_index;
                             for(size_t subchannel = 0; subchannel < config.m_num_subchannels[channel]; ++subchannel) {
                                 const size_t global_index = first_subchannel+subchannel;
                                 const std::string &subchannel_name = config.m_fullnames[global_index];

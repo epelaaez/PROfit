@@ -162,6 +162,12 @@ TH2D PROspec::toTH2D(PROconfig const & inconfig, int subchannel_index, int other
     int global_bin_start = inconfig.GetGlobalVariableBinStart(subchannel_index, other_index);
     int channel_index = inconfig.GetLocalChannelIndexFromGlobalSubchannelIndex(subchannel_index);
 
+    if(inconfig.m_channel_variable_bins[channel_index][other_index].NDim() < 2) {
+        log<LOG_ERROR>(L"%1% || toTH2D called for channel %2%, variable %3%, whose binning is 1D") % __func__ % channel_index % other_index;
+        log<LOG_ERROR>(L"Terminating.");
+        exit(EXIT_FAILURE);
+    }
+
     //set up hist specs
     std::vector<float> bin_edges = inconfig.m_channel_variable_bins[channel_index][other_index].Edges(dim);
     std::string hist_name = inconfig.m_fullnames[subchannel_index];
