@@ -194,9 +194,10 @@ namespace PROfit {
                 n_swarm_iterations = 300;
                 n_localfit=15;
 
-                harmonic_min_num_seeds = 3;//4
-                harmonic_max_num_seeds = 8;
-                harmonic_num_test_points = 200;
+                harmonic_min_num_seeds = 10;//4
+                harmonic_max_num_seeds = 20;
+                harmonic_num_test_points = 250;
+                harmonic_scan_mode = 2;
             }
 
             else if(fit_preset == "sensitivity"){
