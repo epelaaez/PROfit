@@ -114,6 +114,12 @@ namespace PROfit{
         for(size_t im = 0; im < inconfig.m_num_modes; im++){
             for(size_t id = 0; id < inconfig.m_num_detectors; id++){
                 for(size_t ic = 0; ic < inconfig.m_num_channels; ic++){
+                    // toTH2D reads Edges(1)/NBinsAlong(1), which is out-of-bounds for
+                    // channels whose binning for this variable is 1D.
+                    if(inconfig.m_channel_variable_dims[ic][other_index] != 2) {
+                        global_subchannel_index += inconfig.m_num_subchannels[ic];
+                        continue;
+                    }
                     for(size_t sc = 0; sc < inconfig.m_num_subchannels[ic]; sc++){
                         const std::string& subchannel_name  = inconfig.m_fullnames[global_subchannel_index];
                         std::unique_ptr<TH2D> htmp = std::make_unique<TH2D>(spec.toTH2D(inconfig, global_subchannel_index, other_index));
@@ -1032,7 +1038,6 @@ namespace PROfit{
         std::vector<TH1D> bf_hists;
 
         size_t global_subchannel_index = 0;
-        size_t global_subchannel_index_2d = 0;
         size_t global_channel_index = 0;
         int tot_offset = 0;
 
@@ -1129,10 +1134,11 @@ namespace PROfit{
                         // this needs to be a sum over all subchannels
                         //
                         TH2D* cv_hist = new TH2D(hist_title.c_str(),hist_title.c_str(), channel_nbins_x, edges_x.data(), channel_nbins_y, edges_y.data());
+                        // global_subchannel_index still points at this channel's first
+                        // subchannel here; it is only advanced in the stack loop below.
                         for(size_t subchannel = 0; subchannel < config.m_num_subchannels[channel]; ++subchannel){
-                            const std::string& subchannel_name  = config.m_fullnames[global_subchannel_index_2d];
+                            const std::string& subchannel_name  = config.m_fullnames[global_subchannel_index + subchannel];
                             cv_hist->Add(cv2dhists[subchannel_name].get());
-                            ++global_subchannel_index_2d;
                         }
 
                         TPad p2d("p2d", "p2d", 0, 0, 1, 1);
@@ -1194,8 +1200,8 @@ namespace PROfit{
                             if(posterrband) {
                                 post_channel_errband = new TGraphAsymmErrors(bf_hist->ProjectionX("slc", ybin, ybin));
                                 for(size_t xbin = 0; xbin < channel_nbins_x; ++xbin) {
-                                    post_channel_errband->SetPointEYhigh(xbin, scale*(posterrband->error_up((ybin-1)*channel_nbins_x+xbin+tot_offset)));
-                                    post_channel_errband->SetPointEYlow(xbin, scale*(posterrband->error_down((ybin-1)*channel_nbins_x+xbin+tot_offset)));
+                                    post_channel_errband->SetPointEYhigh(xbin, scale*(posterrband->error_up(xbin*channel_nbins_y+(ybin-1)+tot_offset)));
+                                    post_channel_errband->SetPointEYlow(xbin, scale*(posterrband->error_down(xbin*channel_nbins_y+(ybin-1)+tot_offset)));
                                 }
                                 objs[mdc+"_posterrband_slice_ybin"+std::to_string(ybin)] = post_channel_errband->Clone();
                             }
@@ -1204,8 +1210,8 @@ namespace PROfit{
                             if(errband) {
                                 channel_errband = new TGraphAsymmErrors(cv_hist->ProjectionX("slc", ybin, ybin));
                                 for(size_t xbin = 0; xbin < channel_nbins_x; ++xbin) {
-                                    channel_errband->SetPointEYhigh(xbin, scale*(errband->error_up((ybin-1)*channel_nbins_x+xbin+tot_offset)));
-                                    channel_errband->SetPointEYlow(xbin, scale*(errband->error_down((ybin-1)*channel_nbins_x+xbin+tot_offset)));
+                                    channel_errband->SetPointEYhigh(xbin, scale*(errband->error_up(xbin*channel_nbins_y+(ybin-1)+tot_offset)));
+                                    channel_errband->SetPointEYlow(xbin, scale*(errband->error_down(xbin*channel_nbins_y+(ybin-1)+tot_offset)));
                                 }
                                 objs[mdc+"_preerrband_slice_ybin"+std::to_string(ybin)] = channel_errband->Clone();
                             }
