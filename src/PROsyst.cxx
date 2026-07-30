@@ -1170,6 +1170,13 @@ namespace PROfit {
     }
 
     Eigen::MatrixXf PROsyst::DecomposeFractionalCovariance(const PROconfig &config, const Eigen::VectorXf &cv_vec) const {
+        // Spline-only (no covariance systs): fractional_covariance is the
+        // ctor's all-zero placeholder, whose SVD has no singular value above
+        // tolerance. A zero factor is the correct no-op throw shift.
+        if(n_covar == 0) {
+            size_t nbins = config.m_num_variable_bins_total_collapsed[other_index < 0 ? (int)config.i_prime : other_index];
+            return Eigen::MatrixXf::Zero(nbins, nbins);
+        }
         // The mutable last_decomp_* cache is written from this const method;
         // metric clones and throw helpers share PROsyst objects across
         // threads, so guard the cache. Function-local mutex keeps PROsyst
@@ -1249,6 +1256,9 @@ namespace PROfit {
 
     Eigen::MatrixXf PROsyst::DecomposeFractionalCovarianceFull(const PROconfig &config, const Eigen::VectorXf &cv_vec) const {
         (void)config;
+        // Spline-only: same zero-factor short-circuit as the collapsed version above.
+        if(n_covar == 0)
+            return Eigen::MatrixXf::Zero(cv_vec.size(), cv_vec.size());
         // Same cache/mutex pattern as DecomposeFractionalCovariance above.
         static std::mutex decomp_full_cache_mutex;
         {
