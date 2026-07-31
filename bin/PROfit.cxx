@@ -1468,6 +1468,22 @@ int main(int argc, char* argv[])
                 fakedataparams, use_probe, n_probe_chunks,
                 buildBkgOnlyFixedSeeds(metric->GetModel(), CVParams));
         if (profile_timing) PROfit::GetScanTimingEnabled() = false;
+        // The scan can find a lower global minimum than do_a_fit (trapped in a
+        // local minimum); PROfile has already re-baselined its curves against
+        // it. Mirror the harmonic-seed adoption in do_a_fit: everything
+        // downstream (Plot's best-fit markers, global_fit_result, the
+        // global_fit_result histogram written below) reads fitres, so update
+        // it to the minimum the curves are actually baselined on. The spectra
+        // PDFs from draw_fit_result above were drawn at the pre-scan fit.
+        if(profile.newglob_param.size() > 0) {
+            log<LOG_WARNING>(L"%1% || PROfile found a lower global minimum (chi^2 %2% vs global fit's %3%); adopting it as the global best fit for plots and recorded results.")
+                % __func__ % profile.newglob % fitres.chi2;
+            log<LOG_WARNING>(L"%1% || -- new best-fit params: %2%") % __func__ % profile.newglob_param;
+            fitres.chi2 = profile.newglob;
+            fitres.fitter.best_fit = profile.newglob_param;
+            global_fit_chi2 = profile.newglob;
+            global_fit_result = profile.newglob_param;
+        }
         log<LOG_INFO>(L"%1% || fakedataparams for Plot (true_params/red stars): %2%") % __func__ % fakedataparams;
         profile.Plot(config, metric->GetSysts(), metric->GetModel(), *metric, myseed,
                 final_output_tag+"_PROfile", !systs_only, fitres.fitter.best_fit,
