@@ -110,8 +110,24 @@ namespace PROfit {
             std::vector<float> values1_up;   ///< Upper 1-sigma boundary values.
             std::vector<float> values1_down; ///< Lower 1-sigma boundary values.
 
-            float newglob = 0;              ///< Informational only: lower chi-squared found during the scan, if any (never read by consumers; logged in the constructor's merge loop).
-            Eigen::VectorXf newglob_param;  ///< Full parameter vector at that lower minimum (informational only).
+            /** @brief If the scan found a lower global minimum than the caller's
+             *  `minchi` (the global fit was trapped in a local minimum): the new
+             *  minimum chi-squared. 0 when the global fit stood. All profile
+             *  curves, bands, and the points file are already re-baselined
+             *  against it, so plots never dip below Δχ²=0. Callers (the profile
+             *  subcommand) should adopt it as the global best fit for markers /
+             *  recorded results — see the profile block in bin/PROfit.cxx. */
+            float newglob = 0;
+            Eigen::VectorXf newglob_param;  ///< Full parameter vector at that lower minimum (empty when the global fit stood).
+
+            /** @brief Live cross-thread, cross-parameter tracker of the lowest
+             *  chi² seen by any scan fit (see ScanGlobalMin). Initialised with
+             *  (minchi, seed_points.front()) before workers dispatch; once a
+             *  scan fit beats it, every subsequent fit of EVERY parameter is
+             *  additionally seeded from the improved point, so the other
+             *  parameters' curves find the deeper basin too instead of being
+             *  re-baselined against a minimum they never sampled. */
+            ScanGlobalMin global_min_tracker;
 
             /** @brief Shared warm-start bank for the profile scans: for each scanned
              *  parameter, every completed (scanned value, best-fit vector) pair from ALL
