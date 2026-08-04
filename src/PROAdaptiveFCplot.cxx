@@ -177,18 +177,27 @@ void plot_metamesh_pdf(const MetaMesh &mm,
             ? std::min(1.0f, (float)refine_count_at_level / (float)n_throws)
             : 1.0f; // no tallies: flat saturation
 
-        TBox *box = new TBox(xlo, ylo, xhi, yhi);
+        // Two-TBox rendering as in PROmesh::draw_amr_mesh_on_canvas: a single
+        // TBox with SetFillColorAlpha drops its border in this ROOT build, so
+        // draw the fill ("F") and a hollow gray outline ("L") separately.
+        TBox *fill = new TBox(xlo, ylo, xhi, yhi);
         // n_throws <= 0 (loaded/derived mesh): baseline_level is not known,
         // so colour every cell by level instead of graying "baseline" cells.
         if (n_throws > 0 && mc->level < baseline_level) {
-            box->SetFillColorAlpha(kGray + 1, 0.15f);
+            fill->SetFillColorAlpha(kGray + 1, 0.15f);
         } else {
             const float alpha = std::min(1.0f, std::max(0.35f, agreement));
-            box->SetFillColorAlpha(level_palette[palette_idx], alpha);
+            fill->SetFillColorAlpha(level_palette[palette_idx], alpha);
         }
-        box->SetLineColor(kBlack);
-        box->SetLineWidth(1);
-        box->Draw();
+        fill->SetLineWidth(0);
+        fill->Draw("F");
+
+        TBox *border = new TBox(xlo, ylo, xhi, yhi);
+        border->SetFillStyle(0);
+        border->SetLineColor(kGray + 1);
+        border->SetLineWidth(1);
+        border->SetLineStyle(1);
+        border->Draw("L");
     }
 
     // ---- Right pad: info only, no axes. --------------------------------------
