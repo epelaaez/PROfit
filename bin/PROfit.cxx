@@ -3384,8 +3384,8 @@ int main(int argc, char* argv[])
     delete metric;
     auto stop_time = std::chrono::high_resolution_clock::now();
     
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop_time - start_time);
-    log<LOG_INFO>(L"%1% || Total run time: %2%") % __func__ % duration.count();
+    auto duration = std::chrono::duration_cast<std::chrono::seconds>(stop_time - start_time);
+    log<LOG_INFO>(L"%1% || Total run time: %2% seconds") % __func__ % duration.count();
 
     return 0;
 }
