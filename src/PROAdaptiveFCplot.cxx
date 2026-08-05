@@ -1376,10 +1376,17 @@ void plot_brazil_band_pdf(
         frame->GetYaxis()->SetTitleSize(0.045);
         frame->Draw();
 
-        // High-res IDW surface so marching-squares contours are smooth.
-        // 4× upsampling → 256×256 from a 64×64 finest grid (sub-second cost).
+        // High-res IDW surface so marching-squares contours are smooth and the
+        // band fills (drawn at this bin resolution) don't visibly stair-step
+        // against them. The upsample factor targets a fixed ~512 bins per
+        // axis rather than a fixed multiplier: a coarse 64×64 finest grid
+        // gets 8×, while an already-fine mesh draws at native resolution.
+        // This bounds the IDW cost (O(W·H·n_cells)) and the number of RLE
+        // fill boxes no matter how deep the adaptive mesh is refined.
+        const int target_res = 512;
+        const int upsample = std::max(1, target_res / std::max({1, bank.finest_nx, bank.finest_ny}));
         TH2D *h_incl = build_inclusion_th2d(bank, inclusion_frac[k], A,
-                                            Form("incl_cl%zu", k), /*upsample=*/ 4);
+                                            Form("incl_cl%zu", k), upsample);
 
         // Extract each contour level as TGraphs once and reuse for both the
         // filled band and the outline overlay. extract_contour_graphs mutates
@@ -1391,27 +1398,16 @@ void plot_brazil_band_pdf(
         auto segs_q84  = extract_contour_graphs(h_incl, 0.84);
         auto segs_q975 = extract_contour_graphs(h_incl, 0.975);
 
-        // (1) Brazil-band fills via cell-based, per-row run-length-encoded
-        //   TBoxes.
-        //
-        //   Earlier attempts used h_incl (the IDW-smoothed surface) for the
-        //   per-bin color decision. That gave smooth visual transitions but
-        //   bled the ±2σ yellow into the deep basin: IDW averages a bin's
-        //   value from its 4 nearest decided cells, so a bin sitting between
-        //   a decided "deep-basin" cell (v≈1) and a decided "boundary" cell
-        //   (v≈0.5) gets an interpolated value in the 0.84–0.975 band, even
-        //   though no actual cell *believes* it sits in the inner-2σ rim.
-        //   With large baseline cells in sparse-bank regions, the IDW
-        //   smoothing zone covers a huge swath of the plot.
-        //
-        //   Fix: for the *fills*, each bin inherits the value of the
-        //   meta-cell that physically contains it — no IDW. Cell-edges in
-        //   the fills are then hidden by the smooth IDW-based contour
-        //   outlines drawn in step (2). Result: bands appear *only* where
-        //   some actual cell has its own inclusion fraction in the band
-        //   range. Undecidable cells (sentinel v<0) are skipped entirely
-        //   and stay white, which is the correct "unknown" presentation
-        //   instead of being smeared into a band colour.
+        // (1) Brazil-band fills via per-row run-length-encoded TBoxes over
+        //   the SAME IDW-smoothed surface (h_incl) the contour outlines in
+        //   step (2) are extracted from, so the fill edges coincide with
+        //   the outlines exactly. An earlier version coloured each bin from
+        //   the meta-cell that contains it (no IDW) to avoid smearing bands
+        //   into regions where no decided cell sits in the band range — but
+        //   with coarse meta-cells that painted large blocks that visibly
+        //   disagreed with the smooth contours. Where the fills and curves
+        //   conflict, the curves are the published statement, so the fills
+        //   follow them.
         //
         //   Five-region classification of P(included):
         //       v < 0.025 or v > 0.975          → outside bands (no fill)
@@ -1419,29 +1415,6 @@ void plot_brazil_band_pdf(
         //       0.16 ≤ v ≤ 0.84                 → ±1σ (green)
         const int W_up = h_incl->GetNbinsX();
         const int H_up = h_incl->GetNbinsY();
-        // upsample factor relative to bank.finest_nx (must match the call
-        // to build_inclusion_th2d above).
-        const int up = std::max(1, W_up / std::max(1, bank.finest_nx));
-
-        // Precompute a [W_up × H_up] lookup mapping each upsampled bin to
-        // the index of the meta-cell that contains it. -1 = no cell covers
-        // this bin (shouldn't happen if the meta-mesh tiles the parameter
-        // space, but we guard for safety).
-        std::vector<int> cell_id_at((size_t)W_up * (size_t)H_up, -1);
-        for (int c = 0; c < bank.n_cells; ++c) {
-            const int i0  = bank.cell_i_bl[(size_t)c] * up;
-            const int j0  = bank.cell_j_bl[(size_t)c] * up;
-            const int len = bank.cell_step[(size_t)c] * up;
-            const int i_end = std::min(W_up, i0 + len);
-            const int j_end = std::min(H_up, j0 + len);
-            const int i_beg = std::max(0, i0);
-            const int j_beg = std::max(0, j0);
-            for (int ii = i_beg; ii < i_end; ++ii) {
-                for (int jj = j_beg; jj < j_end; ++jj) {
-                    cell_id_at[(size_t)ii * (size_t)H_up + (size_t)jj] = c;
-                }
-            }
-        }
 
         auto color_for_v = [&](float v) -> int {
             if (v < 0.0f) return -1; // undecidable cell: leave white
@@ -1451,17 +1424,28 @@ void plot_brazil_band_pdf(
             return -1; // outside bands
         };
 
-        // RLE per row over cell-based v lookups.
-        for (int j = 0; j < H_up; ++j) {
-            const float ylo = (float)h_incl->GetYaxis()->GetBinLowEdge(j + 1);
-            const float yhi = (float)h_incl->GetYaxis()->GetBinUpEdge(j + 1);
+        // RLE over the smoothed field, in coarse rows. Box HEIGHT is floored
+        // at 1/100 of the y-axis span — the band colouring never needs finer
+        // vertical granularity — while the run boundaries inside each row
+        // keep the field's full horizontal resolution (the RLE merge makes
+        // wide boxes free; the per-row box count is just the number of
+        // colour transitions). Each coarse row is classified along its
+        // centre scanline. Total element count is therefore bounded at
+        // ~100 rows × a few runs per page, independent of the render
+        // resolution and of how finely the adaptive mesh is refined.
+        const int n_fill_rows = std::min(H_up, 100);
+        for (int r = 0; r < n_fill_rows; ++r) {
+            const int j0 = (int)((long)r       * H_up / n_fill_rows); // first fine row in group
+            const int j1 = (int)((long)(r + 1) * H_up / n_fill_rows); // one past last
+            const int jc = (j0 + j1 - 1) / 2;                         // centre scanline
+            const float ylo = (float)h_incl->GetYaxis()->GetBinLowEdge(j0 + 1);
+            const float yhi = (float)h_incl->GetYaxis()->GetBinUpEdge(j1);
             int run_color = -1;  // -1 means "no active fillable run"
             int run_start = 0;
             for (int i = 0; i <= W_up; ++i) {
                 int color = -2; // sentinel: forces emit at i == W_up
                 if (i < W_up) {
-                    const int cid = cell_id_at[(size_t)i * (size_t)H_up + (size_t)j];
-                    color = (cid >= 0) ? color_for_v(inclusion_frac[k][(size_t)cid]) : -1;
+                    color = color_for_v((float)h_incl->GetBinContent(i + 1, jc + 1));
                 }
                 if (color != run_color) {
                     if (run_color >= 0) {
