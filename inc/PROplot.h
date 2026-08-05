@@ -293,6 +293,24 @@ namespace PROfit{
     PROerrorbar getErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const PROspec &cv_spec, const Eigen::VectorXf &cvparams,bool scale=false, int other_index=0);
 
     /**
+     * @brief Compute an error band analytically from the covariance-type systematics alone.
+     * @details Exact replacement for getMCMCErrorBand when the sampling chain has zero
+     * free parameters (no spline nuisances, or all of them --fix'd): the chain never
+     * moves, so its band reduces to Gaussian throws of the collapsed scaled covariance
+     * around a single spectrum, whose 16/84 quantiles are exactly ±sqrt(diag).  Symmetric
+     * by construction; `covariance` is the collapsed scaled covariance itself.
+     * @param config    Analysis configuration.
+     * @param prop      MC event store.
+     * @param syst      Systematic object (only covariance-type systs contribute).
+     * @param model     Physics model.
+     * @param params    Parameter vector at which to evaluate the spectrum (e.g. best fit).
+     * @param scale     If true, divide errors by bin width.
+     * @param var_index Variable index.
+     * @return PROerrorbar with symmetric per-bin uncertainties and the bin covariance.
+     */
+    PROerrorbar getCovarianceOnlyErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const Eigen::VectorXf &params, bool scale=false, int var_index=0);
+
+    /**
      * @brief Result of getErrorBandBkgSubtracted: a signal-only error band plus the
      * background pieces needed to correct the data points.
      * @details `band` follows getErrorBand's conventions (error_up/down/point bin-width
