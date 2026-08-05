@@ -3524,38 +3524,62 @@ GlobalFitResult do_a_fit(const PROconfig &config, const PROpeller &prop, const P
     bool preerr = (opt & GlobalFitOptions::PrefitErrorBand) != GlobalFitOptions::Default;
     bool mcmcpre = (opt & GlobalFitOptions::MCMCPrefitErrorBand) != GlobalFitOptions::Default;
     bool binwidth_scale = (opt & GlobalFitOptions::BinWidthScaled) != GlobalFitOptions::Default;
-    if(preerr || mcmcpre) {
-        // Fix physics parameters
-        std::vector<int> fixed_pars;
-        for(size_t i = 0; i < N_phys_params; ++i) fixed_pars.push_back(i);
-        for(size_t i = N_phys_params; i< global_fixed.size();i++){
-            if(global_fixed.at(i)==1)fixed_pars.push_back(i);
+
+    // The error-band chains fix all physics params plus any --fix'd splines; if
+    // that leaves zero free parameters the chain never moves and its band is
+    // exactly Gaussian throws of the covariance around the best-fit spectrum —
+    // computed analytically instead (getCovarianceOnlyErrorBand), skipping
+    // MCMCburn+MCMCiter identical spectrum evaluations.
+    std::vector<int> errband_fixed_pars;
+    for(size_t i = 0; i < N_phys_params; ++i) errband_fixed_pars.push_back(i);
+    for(size_t i = N_phys_params; i< global_fixed.size();i++){
+        if(global_fixed.at(i)==1)errband_fixed_pars.push_back(i);
+    }
+    const bool errband_chain_degenerate = errband_fixed_pars.size() >= N_params;
+    // Delta-function stand-ins for the chain's parameter-posterior outputs.
+    const auto degenerate_mcmc_params = [&](std::vector<TH1D> &posts, Eigen::MatrixXf &covar, Eigen::VectorXf &lo, Eigen::VectorXf &hi) {
+        for(size_t i = 0; i < N_nuisance; ++i) {
+            posts.emplace_back("", (";"+config.m_mcgen_variation_plotname_map.at(metric->GetSysts().spline_names[i])).c_str(), 60, -3, 3);
+            posts.back().Fill(best_fit(N_phys_params + i));
         }
+        covar = Eigen::MatrixXf::Zero(N_nuisance, N_nuisance);
+        lo = Eigen::VectorXf::Zero(N_nuisance);
+        hi = Eigen::VectorXf::Zero(N_nuisance);
+    };
 
+    if(preerr || mcmcpre) {
         log<LOG_INFO>(L"%1% || Starting global getErrorBand() ") % __func__;
-        Metropolis mh_pre(prior_only_target{*metric}, adaptive_proposal(*metric, dseed(PROseed::global_rng), fixed_pars), best_fit, dseed(PROseed::global_rng));
-
-        std::optional<PROgressBar> errband_pre_pbar;
-        if(progress_bar && mcmcpre) errband_pre_pbar.emplace(int(fit_config.MCMCburn + fit_config.MCMCiter), 30, "MCMC prefit");
-        res.err_band =
-            mcmcpre
-            ? getMCMCErrorBand(mh_pre, fit_config.MCMCburn, fit_config.MCMCiter, config, prop, *metric, best_fit, res.priors, res.prior_covariance, res.prior_param_lo, res.prior_param_hi, binwidth_scale, config.i_prime, errband_pre_pbar ? &*errband_pre_pbar : nullptr)
-            : getErrorBand(config, prop, metric->GetSysts(), metric->GetModel(), cv ,CVParams, binwidth_scale, config.i_prime);
+        if(mcmcpre && errband_chain_degenerate) {
+            log<LOG_INFO>(L"%1% || No free nuisance parameters; computing the pre-fit error band analytically from the covariance instead of MCMC.") % __func__;
+            res.err_band = getCovarianceOnlyErrorBand(config, prop, metric->GetSysts(), metric->GetModel(), best_fit, binwidth_scale, config.i_prime);
+            degenerate_mcmc_params(res.priors, res.prior_covariance, res.prior_param_lo, res.prior_param_hi);
+        } else if(mcmcpre) {
+            Metropolis mh_pre(prior_only_target{*metric}, adaptive_proposal(*metric, dseed(PROseed::global_rng), errband_fixed_pars), best_fit, dseed(PROseed::global_rng));
+            std::optional<PROgressBar> errband_pre_pbar;
+            if(progress_bar) errband_pre_pbar.emplace(int(fit_config.MCMCburn + fit_config.MCMCiter), 30, "MCMC prefit");
+            res.err_band = getMCMCErrorBand(mh_pre, fit_config.MCMCburn, fit_config.MCMCiter, config, prop, *metric, best_fit, res.priors, res.prior_covariance, res.prior_param_lo, res.prior_param_hi, binwidth_scale, config.i_prime, errband_pre_pbar ? &*errband_pre_pbar : nullptr);
+        } else {
+            // Keep the global RNG stream where existing seeded runs expect it:
+            // this branch used to construct an unused prefit Metropolis chain,
+            // consuming two seed draws before getErrorBand's own throws.
+            dseed(PROseed::global_rng);
+            dseed(PROseed::global_rng);
+            res.err_band = getErrorBand(config, prop, metric->GetSysts(), metric->GetModel(), cv ,CVParams, binwidth_scale, config.i_prime);
+        }
     }
 
     if((opt & GlobalFitOptions::PostFitErrorBand) != GlobalFitOptions::Default) {
-        // Fix physics parameters
-        std::vector<int> fixed_pars;
-        for(size_t i = 0; i < N_phys_params; ++i) fixed_pars.push_back(i);
-        for(size_t i = N_phys_params; i< global_fixed.size();i++){
-            if(global_fixed.at(i)==1)fixed_pars.push_back(i);
-        }
-
-        Metropolis mh_post(simple_target{*metric}, adaptive_proposal(*metric, dseed(PROseed::global_rng), fixed_pars), best_fit, dseed(PROseed::global_rng));
         log<LOG_INFO>(L"%1% || Starting global getPostFitErrorBand() ") % __func__;
-        std::optional<PROgressBar> errband_post_pbar;
-        if(progress_bar) errband_post_pbar.emplace(int(fit_config.MCMCburn + fit_config.MCMCiter), 30, "MCMC postfit band");
-        res.post_err_band = getMCMCErrorBand(mh_post, fit_config.MCMCburn, fit_config.MCMCiter, config, prop, *metric, best_fit, res.posteriors, res.spline_covariance, res.post_param_lo, res.post_param_hi, binwidth_scale,config.i_prime, errband_post_pbar ? &*errband_post_pbar : nullptr);
+        if(errband_chain_degenerate) {
+            log<LOG_INFO>(L"%1% || No free nuisance parameters; computing the post-fit error band analytically from the covariance instead of MCMC.") % __func__;
+            res.post_err_band = getCovarianceOnlyErrorBand(config, prop, metric->GetSysts(), metric->GetModel(), best_fit, binwidth_scale, config.i_prime);
+            degenerate_mcmc_params(res.posteriors, res.spline_covariance, res.post_param_lo, res.post_param_hi);
+        } else {
+            Metropolis mh_post(simple_target{*metric}, adaptive_proposal(*metric, dseed(PROseed::global_rng), errband_fixed_pars), best_fit, dseed(PROseed::global_rng));
+            std::optional<PROgressBar> errband_post_pbar;
+            if(progress_bar) errband_post_pbar.emplace(int(fit_config.MCMCburn + fit_config.MCMCiter), 30, "MCMC postfit band");
+            res.post_err_band = getMCMCErrorBand(mh_post, fit_config.MCMCburn, fit_config.MCMCiter, config, prop, *metric, best_fit, res.posteriors, res.spline_covariance, res.post_param_lo, res.post_param_hi, binwidth_scale,config.i_prime, errband_post_pbar ? &*errband_post_pbar : nullptr);
+        }
     }
     
     return res;

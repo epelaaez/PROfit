@@ -299,6 +299,31 @@ namespace PROfit{
         return ebar;
     }
 
+    PROerrorbar getCovarianceOnlyErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const Eigen::VectorXf &params, bool scale, int var_index) {
+        Eigen::VectorXf cv = FillSpectra(config, prop, syst, model, params, true, var_index).Spec();
+        Eigen::VectorXf cv_coll = CollapseMatrix(config, cv, var_index);
+
+        Eigen::MatrixXf cov;
+        if(syst.GetNCovar() > 0) {
+            Eigen::MatrixXf L = syst.DecomposeFractionalCovariance(config, cv);
+            cov = L * L.transpose();
+        } else {
+            cov = Eigen::MatrixXf::Zero(cv_coll.size(), cv_coll.size());
+        }
+
+        PROerrorbar ebar(cv_coll.size());
+        for(int i = 0; i < cv_coll.size(); ++i) {
+            float scale_factor = scale ? 1.0/config.collapsed_bin_widths.at(var_index)(i) : 1.0;
+            if(std::isnan(scale_factor)) scale_factor = 1;
+            float err = std::sqrt(std::max(cov(i,i), 0.0f)) * scale_factor;
+            ebar.error_up(i) = err;
+            ebar.error_down(i) = err;
+            ebar.error_point(i) = cv_coll(i)*scale_factor;
+        }
+        ebar.covariance = cov;
+        return ebar;
+    }
+
     PROsubtractedErrorBand getErrorBandBkgSubtracted(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const PROspec &cv_spec, const Eigen::VectorXf &cvparams, const std::vector<size_t> &bkg_subchannels, bool scale, int other_index) {
 
         Eigen::VectorXf mask        = build_subchannel_bin_mask(config, bkg_subchannels, other_index);

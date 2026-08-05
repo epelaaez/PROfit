@@ -559,6 +559,15 @@ namespace PROfit {
                     sv.back().knob_index = map_systematic_knob_vals[sys_name];
                     sv.back().knobval = sv.back().knob_index;
                     sv.back().binning = binningindex;
+                    // restrict= widens the single linear parameter beyond its default
+                    // [0,1] knob range (the linear segments extrapolate; use with
+                    // mirror="false" for a symmetric response about the CV).
+                    if(inconfig.m_mcgen_variation_restrict.find(sys_name) != inconfig.m_mcgen_variation_restrict.end()) {
+                        sv.back().has_restrict = true;
+                        sv.back().restrict_lo = inconfig.m_mcgen_variation_restrict.at(sys_name).first;
+                        sv.back().restrict_hi = inconfig.m_mcgen_variation_restrict.at(sys_name).second;
+                        log<LOG_INFO>(L"%1% || Setting restrict=[%2%, %3%] for systematic %4%") % __func__ % sv.back().restrict_lo % sv.back().restrict_hi % sys_name.c_str();
+                    }
                 }
                 if(sys_mode == "norm" || sys_mode == "norm_to_covariance") {
                     log<LOG_INFO>(L"%1% || Systematic variation %2% is a match for a normalization systematic. Processing as such. ") % __func__ % sys_name.c_str();
@@ -1152,6 +1161,14 @@ namespace PROfit {
                 delete chains[fid];
                 chains[fid] = nullptr;
             }
+        }
+
+        // "Data" from these files is often weighted MC (POT-scaled fake data):
+        // its statistical error is Poisson sqrt(N) of the bin content, not the
+        // sqrt(sum w^2) accumulated by Fill. Identical for unit-weight data.
+        for(auto &d : data) {
+            Eigen::VectorXf poisson_err = d.Spec().array().max(0.0f).sqrt();
+            d = PROdata(d.Spec(), poisson_err);
         }
 
         return data;
