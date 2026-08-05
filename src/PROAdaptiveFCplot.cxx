@@ -1331,7 +1331,8 @@ void plot_brazil_band_pdf(
     float truth_x_phys,
     float truth_y_phys,
     const std::vector<int> &n_throws_kept,
-    const std::vector<int> &n_throws_dropped)
+    const std::vector<int> &n_throws_dropped,
+    bool america_style)
 {
     if (bank.n_cells <= 0 || cl_targets.empty()) {
         log<LOG_WARNING>(L"%1% || plot_brazil_band_pdf: empty input, skipping.") % __func__;
@@ -1354,6 +1355,9 @@ void plot_brazil_band_pdf(
     // separately as TGraphs.
     const int brazil_yellow = TColor::GetColor(244, 229, 160);  // ±2σ band fill
     const int brazil_green  = TColor::GetColor(152, 215, 152);  // ±1σ band fill
+    // america_style: US-flag palette (Old Glory blue/red) for the fun mode.
+    const int glory_blue    = TColor::GetColor(60, 59, 110);    // ±1σ fill, starred
+    const int glory_red     = TColor::GetColor(178, 34, 52);    // ±2σ stripe fill
 
     for (size_t k = 0; k < cl_targets.size(); ++k) {
         c.Clear();
@@ -1418,13 +1422,28 @@ void plot_brazil_band_pdf(
         //       0.16 ≤ v ≤ 0.84                 → ±1σ (green)
         const int W_up = h_incl->GetNbinsX();
         const int H_up = h_incl->GetNbinsY();
+        const int n_fill_cols = 512;
+        const int n_fill_rows = 100;
 
-        auto color_for_v = [&](float v) -> int {
-            if (v < 0.0f) return -1; // undecidable cell: leave white
-            if      (v >= 0.025f && v < 0.16f)   return brazil_yellow;
-            else if (v >= 0.16f  && v <= 0.84f)  return brazil_green;
-            else if (v > 0.84f   && v <= 0.975f) return brazil_yellow;
-            return -1; // outside bands
+        // 0 = outside bands / undecidable (white), 1 = ±1σ, 2 = ±2σ.
+        auto class_for_v = [&](float v) -> int {
+            if (v < 0.0f) return 0; // undecidable cell: leave white
+            if      (v >= 0.025f && v < 0.16f)   return 2;
+            else if (v >= 0.16f  && v <= 0.84f)  return 1;
+            else if (v > 0.84f   && v <= 0.975f) return 2;
+            return 0; // outside bands
+        };
+        // Band class -> fill colour, per fill row. Default: flat green/yellow.
+        // america_style: Old Glory blue ±1σ; ±2σ becomes 13 horizontal
+        // stripes across the axis span, red at the top like the flag.
+        auto box_color = [&](int cls, int r) -> int {
+            if (cls == 1) return america_style ? glory_blue : brazil_green;
+            if (cls == 2) {
+                if (!america_style) return brazil_yellow;
+                const int stripe = ((n_fill_rows - 1 - r) * 21) / n_fill_rows; // odd count: red at top and bottom
+                return (stripe % 2 == 0) ? glory_red : kWhite;
+            }
+            return -1;
         };
 
         // RLE fills over a FIXED fine sampling lattice (512 columns × 100
@@ -1438,8 +1457,6 @@ void plot_brazil_band_pdf(
         // number of colour transitions. Element count and sampling cost are
         // therefore bounded regardless of the render resolution and of how
         // finely the adaptive mesh is refined.
-        const int n_fill_cols = 512;
-        const int n_fill_rows = 100;
         auto x_of = [&](float t) {  // t in [0,1] across the x axis, in the axis' own (lin/log) spacing
             return xlog_axis ? std::pow(10.0f, std::log10(xmin) + t * (std::log10(xmax) - std::log10(xmin)))
                              : xmin + t * (xmax - xmin);
@@ -1478,25 +1495,45 @@ void plot_brazil_band_pdf(
         for (int r = 0; r < n_fill_rows; ++r) {
             const float ylo = y_of((float)r / (float)n_fill_rows);
             const float yhi = y_of((float)(r + 1) / (float)n_fill_rows);
-            int run_color = -1;  // -1 means "no active fillable run"
+            int run_class = 0;   // 0 means "no active fillable run"
             int run_start = 0;
             for (int i = 0; i <= n_fill_cols; ++i) {
-                int color = -2; // sentinel: forces emit at i == n_fill_cols
+                int cls = -1; // sentinel: forces emit at i == n_fill_cols
                 if (i < n_fill_cols) {
-                    color = color_for_v(v_at(i, r));
+                    cls = class_for_v(v_at(i, r));
                 }
-                if (color != run_color) {
-                    if (run_color >= 0) {
+                if (cls != run_class) {
+                    if (run_class > 0) {
                         const float xlo = x_of((float)run_start / (float)n_fill_cols);
                         const float xhi = x_of((float)i / (float)n_fill_cols);
                         TBox *box = new TBox(xlo, ylo, xhi, yhi);
-                        box->SetFillColor(run_color);
-                        box->SetLineColor(run_color);
+                        const int col = box_color(run_class, r);
+                        box->SetFillColor(col);
+                        box->SetLineColor(col);
                         box->SetLineWidth(0);
                         box->Draw();
                     }
-                    run_color = color;
+                    run_class = cls;
                     run_start = i;
+                }
+            }
+        }
+
+        // america_style: white stars over the ±1σ (blue) band, staggered on
+        // alternate rows like the flag's star field.
+        if (america_style) {
+            const int star_row_step = 6;
+            const int star_col_step = 20;
+            int parity = 0;
+            for (int r = star_row_step / 2; r < n_fill_rows; r += star_row_step, ++parity) {
+                const int off = (parity % 2) ? star_col_step / 2 : 0;
+                for (int i = star_col_step / 2 + off; i < n_fill_cols; i += star_col_step) {
+                    if (class_for_v(v_at(i, r)) != 1) continue;
+                    TMarker *star = new TMarker(x_of(((float)i + 0.5f) / (float)n_fill_cols),
+                                                y_of(((float)r + 0.5f) / (float)n_fill_rows), 29);
+                    star->SetMarkerColor(kWhite);
+                    star->SetMarkerSize(1.5);
+                    star->Draw();
                 }
             }
         }
@@ -1516,9 +1553,10 @@ void plot_brazil_band_pdf(
         outline_at(segs_q84);
         outline_at(segs_q975);
 
-        // (3) Median dashed black line on top.
+        // (3) Median dashed line on top. Black, except white in america
+        // style where it runs over the dark blue ±1σ band.
         for (TGraph *g : segs_med) {
-            g->SetLineColor(kBlack);
+            g->SetLineColor(america_style ? kWhite : kBlack);
             g->SetLineStyle(2);
             g->SetLineWidth(2);
             g->Draw("L SAME");
@@ -1548,19 +1586,19 @@ void plot_brazil_band_pdf(
 
         // Median proxy (dashed black line).
         TGraph *median_proxy = new TGraph();
-        median_proxy->SetLineColor(kBlack);
+        median_proxy->SetLineColor(america_style ? kGray + 2 : kBlack); // white is invisible on the legend, use gray
         median_proxy->SetLineStyle(2);
         median_proxy->SetLineWidth(2);
         leg->AddEntry(median_proxy, "Median Exclusion", "l");
 
-        // ±1σ band proxy (green fill).
+        // ±1σ band proxy (green fill; blue in america style).
         TBox *box_1sig = new TBox();
-        box_1sig->SetFillColor(brazil_green);
+        box_1sig->SetFillColor(america_style ? glory_blue : brazil_green);
         leg->AddEntry(box_1sig, "#pm 1#sigma", "f");
 
-        // ±2σ band proxy (yellow fill).
+        // ±2σ band proxy (yellow fill; red in america style).
         TBox *box_2sig = new TBox();
-        box_2sig->SetFillColor(brazil_yellow);
+        box_2sig->SetFillColor(america_style ? glory_red : brazil_yellow);
         leg->AddEntry(box_2sig, "#pm 2#sigma", "f");
 
         if (draw_truth_marker) {
