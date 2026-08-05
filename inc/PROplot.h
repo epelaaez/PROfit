@@ -531,8 +531,6 @@ namespace PROfit{
                 float scale_factor = scale ? 1.0/config.collapsed_bin_widths.at(var_index)(i) :  1.0;
                 if(std::isnan(scale_factor)) scale_factor = 1;
                 std::sort(binconts.begin(), binconts.end());
-		int testint = int(0.840*specs.size());
-                float inside = (binconts[int(0.840*specs.size())] - cv(i));
                 float ehi = std::abs((binconts[int(0.840*specs.size())] - cv(i))*scale_factor);
                 float elo = std::abs((cv(i) - binconts[int(0.160*specs.size())])*scale_factor);
                 ebar.error_up(i) =  ehi;
