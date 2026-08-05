@@ -425,32 +425,10 @@ namespace PROfit{
                 }
             }
 
-            /*log<LOG_INFO>(L"%1% || very first cv %2%") % __func__ % cv;
-            bool has_zero = (cv.array() <= 0.0f).any();
-            bool has_floor = (cv.array() == 1e-06f).any(); // Change 1e-06f to match your exact floor value if different
-            bool is_finite = cv.allFinite();
-            
-            if (!is_finite || has_zero || has_floor) {
-                log<LOG_INFO>(L"%1% || Input spectrum flooring warning! "
-                              L"allFinite: %2%, has_zero/neg: %3%, contains_exact_floor: %4%")
-                    % __func__ 
-                    % is_finite 
-                    % has_zero 
-                    % has_floor;
-            
-                // Optional: Print the exact indices causing the issue
-                for (int i = 0; i < cv.size(); ++i) {
-                    if (std::isnan(cv(i)) || std::isinf(cv(i)) || cv(i) <= 0.0f || cv(i) == 1e-06f) {
-                        std::cout << "[DEBUG] cv bin " << i << " has problematic value: " << cv(i) << std::endl;
-                    }
-                }
-            }*/
             Eigen::VectorXf cv_coll = CollapseMatrix(config, cv);
-            //log<LOG_INFO>(L"%1% || very first cv_coll %2%") % __func__ % cv_coll;
             Eigen::MatrixXf L;
             if(metric.GetSysts().GetNCovar() > 0) L = metric.GetSysts().DecomposeFractionalCovariance(config, cv);
             else L = Eigen::MatrixXf::Zero(config.m_num_variable_bins_total_collapsed[var_index], config.m_num_variable_bins_total_collapsed[var_index]);
-            //log<LOG_INFO>(L"%1% || very first L %2%") % __func__ % L;
             std::normal_distribution<float> nd;
             Eigen::VectorXf throws = Eigen::VectorXf::Constant(config.m_num_variable_bins_total_collapsed[var_index], 0);
 
@@ -463,7 +441,6 @@ namespace PROfit{
             std::vector<Eigen::VectorXf> specs;
             std::vector<std::vector<float>> param_samples(nspline);
 
-            //log<LOG_INFO>(L"%1% || nsteps %2%") % __func__ % nsteps;
 	    std::function<void(const Eigen::VectorXf&)> action;
 	    
             if (data_spec.rows() == 0){
@@ -472,7 +449,6 @@ namespace PROfit{
 		for(size_t i = 0; i < config.m_num_variable_bins_total_collapsed[var_index]; ++i)
                         throws(i) = nd(PROseed::global_rng);
                 specs.push_back(CollapseMatrix(config, FillSpectra(config, prop, metric.GetSysts(), metric.GetModel(), value, true,var_index).Spec())+L*throws);
-                //log<LOG_INFO>(L"%1% || first specs.back %2%") % __func__ % specs.back();
                 for(int i = 0; i < nspline; ++i) {
                     posteriors[i].Fill(value(i+nphys));
                     param_samples[i].push_back(value(i+nphys));
@@ -488,7 +464,6 @@ namespace PROfit{
                 action = [&](const Eigen::VectorXf &value) {
                     nsteps += 1;
                     specs.push_back(CollapseMatrix(config, FillSpectra(config, prop, metric.GetSysts(), metric.GetModel(), value, true,var_index).Spec()));
-                    //log<LOG_INFO>(L"%1% || second specs.back %2%") % __func__ % specs.back();
                     for(int i = 0; i < nspline; ++i) {
                         posteriors[i].Fill(value(i+nphys));
                         param_samples[i].push_back(value(i+nphys));
@@ -501,68 +476,39 @@ namespace PROfit{
             met.run(burnin, iterations, action, pbar);
 
             post_covar /= nsteps;
-            log<LOG_INFO>(L"%1% || nsteps again %2%") % __func__ % nsteps;
             if (data_spec.size() != 0) {
                 // 1. Pre-compute static matrices ONCE outside the loop
                 Eigen::MatrixXf C_stat = cv_coll.asDiagonal();
-                log<LOG_INFO>(L"%1% || C_stat %2%") % __func__ % C_stat;
                 Eigen::MatrixXf M = C_stat + L.transpose() * L;
-                log<LOG_INFO>(L"%1% || M %2%") % __func__ % M;
                 auto M_solver = M.ldlt(); // Pre-factorize M once
             
                 size_t k = L.cols();
                 Eigen::VectorXf C_inv_diag = cv_coll.cwiseInverse();
-                log<LOG_INFO>(L"%1% || C_inv_diag %2%") % __func__ % C_inv_diag;
                 Eigen::MatrixXf inner_matrix = Eigen::MatrixXf::Identity(k, k) 
                                              + L.transpose() * C_inv_diag.asDiagonal() * L;
-                log<LOG_INFO>(L"%1% || inner_matrix %2%") % __func__ % inner_matrix;
                 Eigen::MatrixXf inner_inv = inner_matrix.ldlt().solve(Eigen::MatrixXf::Identity(k, k));
-		if (inner_matrix.ldlt().info() != Eigen::Success) {
-		    log<LOG_ERROR>(L"inner_matrix LDLT factorization failed!");
-		}
-                log<LOG_INFO>(L"%1% || inner_inv %2%") % __func__ % inner_inv;
                 Eigen::LLT<Eigen::MatrixXf> llt(inner_inv);
                 Eigen::MatrixXf C_chol = llt.matrixL();
-                log<LOG_INFO>(L"%1% || C_chol %2%") % __func__ % C_chol;
             
                 // 2. Fast loop over steps
                 for(int ai = 0; ai < nsteps; ai++) {
-                    log<LOG_INFO>(L"%1% || ai %2%") % __func__ % ai;
                     for(size_t i = 0; i < throws.size(); ++i) {
                         throws(i) = nd(PROseed::global_rng);
                     }
             
                     // Uses pre-factorized solver: fast O(k^2) instead of O(k^3)
                     Eigen::VectorXf residual = data_spec - specs.at(ai);
-                    log<LOG_INFO>(L"%1% || initial specs %2%") % __func__ % specs.at(ai);
-                    log<LOG_INFO>(L"%1% || data_spec %2%") % __func__ % data_spec;
-                    log<LOG_INFO>(L"%1% || residual %2%") % __func__ % residual;
-                    log<LOG_INFO>(L"%1% || L %2%") % __func__ % L;
                     Eigen::VectorXf alpha_min = L * M_solver.solve(residual);
             
-                    log<LOG_INFO>(L"%1% || alpha_min %2%") % __func__ % alpha_min;
-                    log<LOG_INFO>(L"%1% || C_chol %2%") % __func__ % C_chol;
-                    log<LOG_INFO>(L"%1% || throws %2%") % __func__ % throws;
                     Eigen::VectorXf alpha_hat = alpha_min + C_chol * throws;
-                    log<LOG_INFO>(L"%1% || alpha_hat %2%") % __func__ % alpha_hat;
                     specs.at(ai) += L * alpha_hat;
                     
                     Eigen::VectorXf diff_hist = specs.at(ai) - cv_coll;
-		    if (!cv_coll.allFinite()){
-                        log<LOG_INFO>(L"%1% || really bad cv_coll %2%") % __func__ % cv_coll;
-		    }
-		    if (!diff_hist.allFinite()){
-                        log<LOG_INFO>(L"%1% || really bad diff_hist %2%") % __func__ % diff_hist;
-		    }
 
                     post_hist_covar += diff_hist * diff_hist.transpose();
-		    if (!specs.at(ai).allFinite()){
-                        log<LOG_INFO>(L"%1% || really bad specs.at(ai) %2%") % __func__ % specs.at(ai);
-		    }
                 }
             }
 
-            log<LOG_INFO>(L"%1% || nsteps again again %2%") % __func__ % nsteps;
             post_hist_covar /= nsteps;
             param_err_lo = Eigen::VectorXf::Zero(nspline);
             param_err_hi = Eigen::VectorXf::Zero(nspline);
@@ -576,45 +522,19 @@ namespace PROfit{
             log<LOG_INFO>(L"%1% || Acceptance rate %2%") % __func__ % ((float)met.naccept / iterations);
 
             cv = CollapseMatrix(config, cv);
-
-            log<LOG_INFO>(L"%1% || cv %2% ") % __func__ % cv;
-            //std::vector<float> centers;
-            //size_t global_channel_index = 0;
-            //for(size_t mode = 0; mode < config.m_num_modes; ++mode) {
-            //    for(size_t det = 0; det < config.m_num_detectors; ++det) {
-            //        for(size_t channel = 0; channel < config.m_num_channels; ++channel) {
-            //            std::vector<float> tedges =  config.GetChannelVariableBins(global_channel_index, var_index).Edges();
-            //            global_channel_index++;
-            //            for(size_t p=0; p<tedges.size(); p++){
-            //                if(p<tedges.size()-1){
-            //                    centers.push_back((tedges[p+1]+tedges[p])/2.0);
-            //                }
-            //            }
-
-            //        }
-            //    }
-            //}
-
             PROerrorbar ebar(cv.size());
             for(int i = 0; i < cv.size(); ++i) {
                 std::vector<float> binconts(specs.size());
                 for(size_t j = 0; j < specs.size(); ++j) {
-                log<LOG_INFO>(L"%1% || inside binconts") % __func__;
                     binconts[j] = specs[j](i);
                 }
                 float scale_factor = scale ? 1.0/config.collapsed_bin_widths.at(var_index)(i) :  1.0;
                 if(std::isnan(scale_factor)) scale_factor = 1;
                 std::sort(binconts.begin(), binconts.end());
-                log<LOG_INFO>(L"%1% || specs.size() %2% ") % __func__ % specs.size();
 		int testint = int(0.840*specs.size());
-                log<LOG_INFO>(L"%1% || testin %2% ") % __func__ % testint;
-                log<LOG_INFO>(L"%1% || cvi %2% ") % __func__ % cv(i);
                 float inside = (binconts[int(0.840*specs.size())] - cv(i));
-                log<LOG_INFO>(L"%1% || inside %2% ") % __func__ % inside;
                 float ehi = std::abs((binconts[int(0.840*specs.size())] - cv(i))*scale_factor);
                 float elo = std::abs((cv(i) - binconts[int(0.160*specs.size())])*scale_factor);
-                log<LOG_INFO>(L"%1% || ehi %2% ") % __func__ % ehi;
-                log<LOG_INFO>(L"%1% || elo %2% ") % __func__ % elo;
                 ebar.error_up(i) =  ehi;
                 ebar.error_down(i) =  elo;
                 ebar.error_point(i) = cv(i)*scale_factor;
