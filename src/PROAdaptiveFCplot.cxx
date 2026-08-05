@@ -1376,15 +1376,18 @@ void plot_brazil_band_pdf(
         frame->GetYaxis()->SetTitleSize(0.045);
         frame->Draw();
 
-        // High-res IDW surface so marching-squares contours are smooth and the
-        // band fills (drawn at this bin resolution) don't visibly stair-step
-        // against them. The upsample factor targets a fixed ~512 bins per
-        // axis rather than a fixed multiplier: a coarse 64×64 finest grid
-        // gets 8×, while an already-fine mesh draws at native resolution.
-        // This bounds the IDW cost (O(W·H·n_cells)) and the number of RLE
-        // fill boxes no matter how deep the adaptive mesh is refined.
-        const int target_res = 512;
-        const int upsample = std::max(1, target_res / std::max({1, bank.finest_nx, bank.finest_ny}));
+        // IDW surface the contour outlines are extracted from and the band
+        // fills are classified against. Upsampled 4× relative to the bank's
+        // finest grid — the multiplier this plot has always used. Do NOT
+        // raise it: beyond ~4× the marching-squares contours start resolving
+        // the IDW field's bull's-eye ripples around each cell center and the
+        // outlines grow scalloped lobes. The ~256-bins-per-axis cap only
+        // binds for deeply refined meshes, where it bounds the IDW cost
+        // (O(W·H·n_cells)) by lowering the multiplier toward native
+        // resolution.
+        const int target_res = 256;
+        const int finest = std::max({1, bank.finest_nx, bank.finest_ny});
+        const int upsample = std::max(1, std::min(4, target_res / finest));
         TH2D *h_incl = build_inclusion_th2d(bank, inclusion_frac[k], A,
                                             Form("incl_cl%zu", k), upsample);
 
@@ -1424,33 +1427,68 @@ void plot_brazil_band_pdf(
             return -1; // outside bands
         };
 
-        // RLE over the smoothed field, in coarse rows. Box HEIGHT is floored
-        // at 1/100 of the y-axis span — the band colouring never needs finer
-        // vertical granularity — while the run boundaries inside each row
-        // keep the field's full horizontal resolution (the RLE merge makes
-        // wide boxes free; the per-row box count is just the number of
-        // colour transitions). Each coarse row is classified along its
-        // centre scanline. Total element count is therefore bounded at
-        // ~100 rows × a few runs per page, independent of the render
-        // resolution and of how finely the adaptive mesh is refined.
-        const int n_fill_rows = std::min(H_up, 100);
+        // RLE fills over a FIXED fine sampling lattice (512 columns × 100
+        // rows), classifying each sample by interpolating h_incl between bin
+        // centers in axis coordinates — the same linear interpolation the
+        // marching-squares outline extraction uses — so the fill transitions
+        // land on the drawn contours instead of stair-stepping a coarse bin
+        // past them. Box HEIGHT is floored at 1/100 of the y-axis span (the
+        // band colouring never needs finer vertical granularity), and the
+        // RLE merge makes wide boxes free: the per-row box count is just the
+        // number of colour transitions. Element count and sampling cost are
+        // therefore bounded regardless of the render resolution and of how
+        // finely the adaptive mesh is refined.
+        const int n_fill_cols = 512;
+        const int n_fill_rows = 100;
+        auto x_of = [&](float t) {  // t in [0,1] across the x axis, in the axis' own (lin/log) spacing
+            return xlog_axis ? std::pow(10.0f, std::log10(xmin) + t * (std::log10(xmax) - std::log10(xmin)))
+                             : xmin + t * (xmax - xmin);
+        };
+        auto y_of = [&](float t) {
+            return ylog_axis ? std::pow(10.0f, std::log10(ymin) + t * (std::log10(ymax) - std::log10(ymin)))
+                             : ymin + t * (ymax - ymin);
+        };
+        // Per-column / per-row bracketing bin center and interpolation weight.
+        auto lattice_pos = [](float t, int nbins, float coord, auto coord_of, int &i0, float &w) {
+            const float g = std::min(std::max(t * (float)nbins - 0.5f, 0.0f), (float)(nbins - 1));
+            i0 = std::min((int)g, std::max(0, nbins - 2));
+            const float c0 = coord_of(((float)i0 + 0.5f) / (float)nbins);
+            const float c1 = coord_of(((float)i0 + 1.5f) / (float)nbins);
+            w = c1 > c0 ? std::min(std::max((coord - c0) / (c1 - c0), 0.0f), 1.0f) : 0.0f;
+        };
+        std::vector<int> col_i0(n_fill_cols); std::vector<float> col_w(n_fill_cols);
+        for (int i = 0; i < n_fill_cols; ++i) {
+            const float t = ((float)i + 0.5f) / (float)n_fill_cols;
+            lattice_pos(t, W_up, x_of(t), x_of, col_i0[i], col_w[i]);
+        }
+        std::vector<int> row_j0(n_fill_rows); std::vector<float> row_w(n_fill_rows);
         for (int r = 0; r < n_fill_rows; ++r) {
-            const int j0 = (int)((long)r       * H_up / n_fill_rows); // first fine row in group
-            const int j1 = (int)((long)(r + 1) * H_up / n_fill_rows); // one past last
-            const int jc = (j0 + j1 - 1) / 2;                         // centre scanline
-            const float ylo = (float)h_incl->GetYaxis()->GetBinLowEdge(j0 + 1);
-            const float yhi = (float)h_incl->GetYaxis()->GetBinUpEdge(j1);
+            const float t = ((float)r + 0.5f) / (float)n_fill_rows;
+            lattice_pos(t, H_up, y_of(t), y_of, row_j0[r], row_w[r]);
+        }
+        auto v_at = [&](int i, int r) -> float {
+            const int i0 = col_i0[i], j0 = row_j0[r];
+            const float tx = col_w[i], ty = row_w[r];
+            const int i1 = std::min(i0 + 1, W_up - 1), j1 = std::min(j0 + 1, H_up - 1);
+            return (1 - tx) * (1 - ty) * (float)h_incl->GetBinContent(i0 + 1, j0 + 1)
+                 +      tx  * (1 - ty) * (float)h_incl->GetBinContent(i1 + 1, j0 + 1)
+                 + (1 - tx) *      ty  * (float)h_incl->GetBinContent(i0 + 1, j1 + 1)
+                 +      tx  *      ty  * (float)h_incl->GetBinContent(i1 + 1, j1 + 1);
+        };
+        for (int r = 0; r < n_fill_rows; ++r) {
+            const float ylo = y_of((float)r / (float)n_fill_rows);
+            const float yhi = y_of((float)(r + 1) / (float)n_fill_rows);
             int run_color = -1;  // -1 means "no active fillable run"
             int run_start = 0;
-            for (int i = 0; i <= W_up; ++i) {
-                int color = -2; // sentinel: forces emit at i == W_up
-                if (i < W_up) {
-                    color = color_for_v((float)h_incl->GetBinContent(i + 1, jc + 1));
+            for (int i = 0; i <= n_fill_cols; ++i) {
+                int color = -2; // sentinel: forces emit at i == n_fill_cols
+                if (i < n_fill_cols) {
+                    color = color_for_v(v_at(i, r));
                 }
                 if (color != run_color) {
                     if (run_color >= 0) {
-                        const float xlo = (float)h_incl->GetXaxis()->GetBinLowEdge(run_start + 1);
-                        const float xhi = (float)h_incl->GetXaxis()->GetBinUpEdge(i);
+                        const float xlo = x_of((float)run_start / (float)n_fill_cols);
+                        const float xhi = x_of((float)i / (float)n_fill_cols);
                         TBox *box = new TBox(xlo, ylo, xhi, yhi);
                         box->SetFillColor(run_color);
                         box->SetLineColor(run_color);
