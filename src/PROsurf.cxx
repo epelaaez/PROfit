@@ -965,11 +965,11 @@ void PROsurf::PlotCurve(const PROconfig &config, const PROmodel &model, const PR
     textbox->SetTextAlign(12);  // Left align
     textbox->SetTextSize(0.04);
 
-    textbox->AddText(("Start: " + xlabel + " = " + to_string_prec(A[0],3)).c_str());
-    textbox->AddText(("       " + ylabel + " = " + to_string_prec(A[1],3)).c_str());
+    textbox->AddText(("Start: " + xlabel + " = " + to_string_prec(to_plot_x(A[xaxis_idx]),3)).c_str());
+    textbox->AddText(("       " + ylabel + " = " + to_string_prec(to_plot_y(A[yaxis_idx]),3)).c_str());
     textbox->AddText("");  // Blank line
-    textbox->AddText(("End:   " + xlabel + " = " + to_string_prec(B[0],3)).c_str());
-    textbox->AddText(("       " + ylabel + " = " + to_string_prec(B[1],3)).c_str());
+    textbox->AddText(("End:   " + xlabel + " = " + to_string_prec(to_plot_x(B[xaxis_idx]),3)).c_str());
+    textbox->AddText(("       " + ylabel + " = " + to_string_prec(to_plot_y(B[yaxis_idx]),3)).c_str());
     textbox->Draw();
 
     p1->RedrawAxis();
