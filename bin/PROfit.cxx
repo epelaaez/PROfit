@@ -331,6 +331,7 @@ int main(int argc, char* argv[])
     bool statonly_brazil = false;
     bool single_brazil = false;
     bool only_brazil = false;
+    int n_brazil_throws = 1000;
     std::vector<std::string> brazil_throws;
     std::vector<float> procurve_points;
 
@@ -475,7 +476,8 @@ int main(int argc, char* argv[])
     surface_command->add_option("--ylabel", ylabel, "Y-axis label");
     surface_command->add_flag("--logx,!--linx", logx, "Specify if x-axis is logarithmic or linear (default log)");
     surface_command->add_flag("--logy,!--liny", logy, "Specify if y-axis is logarithmic or linear (default log)");
-    surface_command->add_flag("--brazil-band", run_brazil, "Run 1000 throws of stats+systs and draw 1 sigma and 2 sigma Brazil bands");
+    surface_command->add_flag("--brazil-band", run_brazil, "Run throws of stats+systs and draw 1 sigma and 2 sigma Brazil bands");
+    surface_command->add_option("--n-brazil-throws", n_brazil_throws, "Number of throws for the Brazil band")->needs("--brazil-band")->default_val(1000);
     surface_command->add_flag("--stat-throws", statonly_brazil, "Only do stat throws for the Brazil band")->needs("--brazil-band");
     surface_command->add_flag("--single-throw", single_brazil, "Only run a single iteration of the Brazil band")->needs("--brazil-band");
     surface_command->add_flag("--only-throw", only_brazil, "Only run Brazil band throws and not the nominal surface")->needs("--brazil-band");
@@ -1721,7 +1723,7 @@ int main(int argc, char* argv[])
 
             PROspec collapsed_cv = PROspec(CollapseMatrix(config, cv.Spec()), CollapseMatrix(config, cv.Error()));
             Eigen::MatrixXf L = metric->GetSysts().DecomposeFractionalCovariance(config, cv.Spec());
-            for(size_t i = 0; i < 1000; ++i) {
+            for(size_t i = 0; i < (size_t)n_brazil_throws; ++i) {
                 Eigen::VectorXf throwp = fakeDataParams;
                 Eigen::VectorXf throwC = Eigen::VectorXf::Constant(config.m_num_variable_bins_total_collapsed[config.i_prime], 0);
                 // Shared truncated-Gaussian helper: samples each spline's actual prior
