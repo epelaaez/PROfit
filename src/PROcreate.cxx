@@ -1163,6 +1163,14 @@ namespace PROfit {
             }
         }
 
+        // "Data" from these files is often weighted MC (POT-scaled fake data):
+        // its statistical error is Poisson sqrt(N) of the bin content, not the
+        // sqrt(sum w^2) accumulated by Fill. Identical for unit-weight data.
+        for(auto &d : data) {
+            Eigen::VectorXf poisson_err = d.Spec().array().max(0.0f).sqrt();
+            d = PROdata(d.Spec(), poisson_err);
+        }
+
         return data;
     }
 
