@@ -586,12 +586,6 @@ namespace PROfit {
                     std::string sflat_percent  = sys_name.substr(colonPos + 1);
                     float flat_percent = std::stof(sflat_percent);
 
-                    // norm_to_covariance should be able to handle >= 0.33
-                    if(sys_mode == "norm" && flat_percent >= 0.33333){
-                        log<LOG_ERROR>(L"%1% || Currently norm takes +-3,2,1 sigma. Greater than 33.33% norm error isn't allowed. You entered %2%. Dont.  ") % __func__  %  flat_percent;
-                        exit(EXIT_FAILURE);
-                    }
-
                     log<LOG_INFO>(L"%1% || Wildcard %2% (and percent %3%) which matches: ") % __func__  % wild.c_str() % flat_percent;
                     std::vector<std::string> flatnames;
                     for(auto & name: inconfig.m_fullnames){
