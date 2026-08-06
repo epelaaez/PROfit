@@ -583,8 +583,8 @@ namespace PROfit {
                     if(sys_mode == "norm"){
                         sv.back().has_restrict = true;
                         sv.back().restrict_hi = 3.0f;
-                        log<LOG_INFO>(L"%1% || Setting restrict=[%2%, %3%] for systematic %4%") % __func__ % sv.back().restrict_lo % sv.back().restrict_hi % sys_name.c_str();
                         sv.back().restrict_lo = -1.0/std::floor(flat_percent);
+                        log<LOG_INFO>(L"%1% || Setting restrict=[%2%, %3%] for systematic %4%") % __func__ % sv.back().restrict_lo % sv.back().restrict_hi % sys_name.c_str();
                     }
                     map_systematic_knob_vals[sys_name] = {-3.0f, -2.0f, -1.0f, 0.0f, 1.0f, 2.0f, 3.0f};
                     sv.back().knob_index = map_systematic_knob_vals[sys_name];
