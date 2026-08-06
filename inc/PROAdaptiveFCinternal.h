@@ -249,7 +249,7 @@ void plot_brazil_band_pdf(
     float truth_y_phys,
     const std::vector<int> &n_throws_kept,     // [cl] throws entering the band
     const std::vector<int> &n_throws_dropped,  // [cl] closed-contour throws removed
-    bool america_style = false);               // flag-styled bands (blue/stars, red/white stripes)
+    const std::string &band_flag = "");        // flag-styled bands: "america", "ireland" ("" = standard)
 
 void save_brazil_root(
     const PEBank &bank,

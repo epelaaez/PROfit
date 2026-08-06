@@ -765,7 +765,7 @@ AdaptiveFCResult run_adaptive_fc(
                               /*draw_truth_marker=*/ true,
                               truth_x_phys, truth_y_phys,
                               agg.n_kept_per_cl, agg.n_dropped_per_cl,
-                              acfg.america_style);
+                              acfg.band_flag);
 
         save_brazil_root(bank, agg.per_throw_verdicts, arc.per_throw_dchi2,
                           arc.per_throw_global_chi2, agg.inclusion_frac, agg.throw_kept,

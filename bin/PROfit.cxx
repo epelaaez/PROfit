@@ -367,6 +367,7 @@ int main(int argc, char* argv[])
     int   afc_update_layer = 0;
     int   afc_only_layer   = -1;
     int   afc_n_brazil_throws = 100;
+    std::string afc_flag;
     float afc_roi_band = 8.0f;
     std::vector<std::string> afc_merge_inputs;
     std::vector<float> afc_cleanup_quantiles = {0.025f, 0.975f};
@@ -530,7 +531,6 @@ int main(int argc, char* argv[])
         "asimov: load <tag>_bank.bin and write FC contour + verdict PDFs. "
         "merge-mesh: union-merge >=2 --merge-input mesh binaries into <tag>_mesh.bin. "
         "merge-bank: harvest PEs from >=1 --merge-input bank binaries onto <tag>_mesh.bin. "
-        "america: brazil with a flag-styled band PDF (same <tag>_brazil.bin archive). "
         "brazil-cleanup: mesh densified at the Brazil +-2sigma contours -> <tag>_cleanup_mesh.bin. "
         "print-mesh: plot <tag>_mesh.bin (or --merge-input mesh files) as PDFs.")
         ->default_str("build-mesh");
@@ -592,6 +592,11 @@ int main(int argc, char* argv[])
         "Number of pseudo-experiment throws for --mode brazil. Each throw is one FC-style realisation "
         "(syst+stat) classified against the bank. Aggregated into per-cell inclusion fractions and "
         "median +/- 1sigma / +/- 2sigma Brazil-band contours.");
+    afc_command->add_option("--flag", afc_flag,
+        "Draw the --mode brazil band PDF styled after a national flag (same <tag>_brazil.bin archive). "
+        "america: +-1sigma blue with white stars, +-2sigma red/white horizontal stripes. "
+        "ireland: alternating green/off-white/orange/off-white vertical stripes (+-2sigma paler).")
+        ->check(CLI::IsMember({"america", "ireland"}));
     afc_command->add_option("--roi-band", afc_roi_band, "ROI Delta-chi^2 band (slice 2c).");
 
     //PROglobal
@@ -2792,10 +2797,6 @@ int main(int argc, char* argv[])
         else if (afc_mode_str == "print-bank") acfg.mode = PROfit::AdaptiveFCMode::PrintBank;
         else if (afc_mode_str == "asimov")     acfg.mode = PROfit::AdaptiveFCMode::Asimov;
         else if (afc_mode_str == "brazil")     acfg.mode = PROfit::AdaptiveFCMode::Brazil;
-        else if (afc_mode_str == "america") {  // brazil, but the band PDF is flag-styled
-            acfg.mode = PROfit::AdaptiveFCMode::Brazil;
-            acfg.america_style = true;
-        }
         else if (afc_mode_str == "classify")   acfg.mode = PROfit::AdaptiveFCMode::Classify;
         else if (afc_mode_str == "merge-mesh") acfg.mode = PROfit::AdaptiveFCMode::MergeMesh;
         else if (afc_mode_str == "merge-bank") acfg.mode = PROfit::AdaptiveFCMode::MergeBank;
@@ -2835,6 +2836,11 @@ int main(int argc, char* argv[])
         acfg.update_layer = afc_update_layer;
         acfg.only_layer = afc_only_layer;
         acfg.n_brazil_throws = afc_n_brazil_throws;
+        acfg.band_flag = afc_flag;
+        if (!afc_flag.empty() && acfg.mode != PROfit::AdaptiveFCMode::Brazil) {
+            log<LOG_WARNING>(L"%1% || fc-adaptive: --flag %2% only styles the --mode brazil band PDF; ignored for --mode %3%.")
+                % __func__ % afc_flag.c_str() % afc_mode_str.c_str();
+        }
         acfg.roi_band = afc_roi_band;
         acfg.cleanup_quantiles = afc_cleanup_quantiles;
         acfg.cleanup_halo      = afc_cleanup_halo;

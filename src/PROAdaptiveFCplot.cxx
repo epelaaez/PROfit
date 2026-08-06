@@ -1332,8 +1332,10 @@ void plot_brazil_band_pdf(
     float truth_y_phys,
     const std::vector<int> &n_throws_kept,
     const std::vector<int> &n_throws_dropped,
-    bool america_style)
+    const std::string &band_flag)
 {
+    const bool america_style = band_flag == "america";
+    const bool ireland_style = band_flag == "ireland";
     if (bank.n_cells <= 0 || cl_targets.empty()) {
         log<LOG_WARNING>(L"%1% || plot_brazil_band_pdf: empty input, skipping.") % __func__;
         return;
@@ -1355,9 +1357,18 @@ void plot_brazil_band_pdf(
     // separately as TGraphs.
     const int brazil_yellow = TColor::GetColor(244, 229, 160);  // ±2σ band fill
     const int brazil_green  = TColor::GetColor(152, 215, 152);  // ±1σ band fill
-    // america_style: US-flag palette (Old Glory blue/red) for the fun mode.
+    // --flag america: US-flag palette (Old Glory blue/red).
     const int glory_blue    = TColor::GetColor(60, 59, 110);    // ±1σ fill, starred
     const int glory_red     = TColor::GetColor(178, 34, 52);    // ±2σ stripe fill
+    // --flag ireland: alternating vertical stripes cycling green / off-white /
+    // orange / off-white across the x span, full saturation for ±1σ and a
+    // paler tint of the same stripe colour for ±2σ.
+    const int eire_fill[3]      = {TColor::GetColor(22, 155, 98),    // green (left)
+                                   TColor::GetColor(240, 235, 220),  // off-white (center)
+                                   TColor::GetColor(255, 136, 62)};  // orange (right)
+    const int eire_fill_pale[3] = {TColor::GetColor(150, 210, 184),
+                                   TColor::GetColor(248, 245, 238),
+                                   TColor::GetColor(255, 201, 168)};
 
     for (size_t k = 0; k < cl_targets.size(); ++k) {
         c.Clear();
@@ -1433,12 +1444,26 @@ void plot_brazil_band_pdf(
             else if (v > 0.84f   && v <= 0.975f) return 2;
             return 0; // outside bands
         };
-        // Band class -> fill colour, per fill row. Default: flat green/yellow.
-        // america_style: Old Glory blue ±1σ; ±2σ becomes 13 horizontal
-        // stripes across the axis span, red at the top like the flag.
-        auto box_color = [&](int cls, int r) -> int {
-            if (cls == 1) return america_style ? glory_blue : brazil_green;
+        // Vertical flag stripe a fill column falls in. ireland: 21 stripes
+        // across the x span cycling green/off-white/orange/off-white — 21 ≡ 1
+        // (mod 4) makes the sequence palindromic, green at both edges. Other
+        // styles return a constant so stripe boundaries never split RLE runs.
+        const int n_eire_stripes = 21;
+        auto panel_of_col = [&](int i) -> int {
+            return ireland_style ? (i * n_eire_stripes / n_fill_cols) % 4 : 0;
+        };
+        // Band class -> fill colour, per fill row/stripe. Default: flat
+        // green/yellow. america: Old Glory blue ±1σ; ±2σ becomes 21
+        // horizontal stripes across the axis span. ireland: vertical stripes
+        // by panel (0/2 → green/orange, odd → off-white), paler tint for ±2σ.
+        auto box_color = [&](int cls, int r, int panel) -> int {
+            const int eire_idx = (panel % 2) ? 1 : panel; // 0→green, 1,3→off-white, 2→orange
+            if (cls == 1) {
+                if (ireland_style) return eire_fill[eire_idx];
+                return america_style ? glory_blue : brazil_green;
+            }
             if (cls == 2) {
+                if (ireland_style) return eire_fill_pale[eire_idx];
                 if (!america_style) return brazil_yellow;
                 const int stripe = ((n_fill_rows - 1 - r) * 21) / n_fill_rows; // odd count: red at top and bottom
                 return (stripe % 2 == 0) ? glory_red : kWhite;
@@ -1496,24 +1521,28 @@ void plot_brazil_band_pdf(
             const float ylo = y_of((float)r / (float)n_fill_rows);
             const float yhi = y_of((float)(r + 1) / (float)n_fill_rows);
             int run_class = 0;   // 0 means "no active fillable run"
+            int run_panel = 0;
             int run_start = 0;
             for (int i = 0; i <= n_fill_cols; ++i) {
-                int cls = -1; // sentinel: forces emit at i == n_fill_cols
+                int cls = -1;   // sentinel: forces emit at i == n_fill_cols
+                int panel = 0;
                 if (i < n_fill_cols) {
                     cls = class_for_v(v_at(i, r));
+                    panel = panel_of_col(i);
                 }
-                if (cls != run_class) {
+                if (cls != run_class || panel != run_panel) {
                     if (run_class > 0) {
                         const float xlo = x_of((float)run_start / (float)n_fill_cols);
                         const float xhi = x_of((float)i / (float)n_fill_cols);
                         TBox *box = new TBox(xlo, ylo, xhi, yhi);
-                        const int col = box_color(run_class, r);
+                        const int col = box_color(run_class, r, run_panel);
                         box->SetFillColor(col);
                         box->SetLineColor(col);
                         box->SetLineWidth(0);
                         box->Draw();
                     }
                     run_class = cls;
+                    run_panel = panel;
                     run_start = i;
                 }
             }
@@ -1591,14 +1620,16 @@ void plot_brazil_band_pdf(
         median_proxy->SetLineWidth(2);
         leg->AddEntry(median_proxy, "Median Exclusion", "l");
 
-        // ±1σ band proxy (green fill; blue in america style).
+        // ±1σ band proxy (green fill; blue in america, flag green in ireland).
         TBox *box_1sig = new TBox();
-        box_1sig->SetFillColor(america_style ? glory_blue : brazil_green);
+        box_1sig->SetFillColor(ireland_style ? eire_fill[0]
+                                             : america_style ? glory_blue : brazil_green);
         leg->AddEntry(box_1sig, "#pm 1#sigma", "f");
 
-        // ±2σ band proxy (yellow fill; red in america style).
+        // ±2σ band proxy (yellow fill; red in america, pale green in ireland).
         TBox *box_2sig = new TBox();
-        box_2sig->SetFillColor(america_style ? glory_red : brazil_yellow);
+        box_2sig->SetFillColor(ireland_style ? eire_fill_pale[0]
+                                             : america_style ? glory_red : brazil_yellow);
         leg->AddEntry(box_2sig, "#pm 2#sigma", "f");
 
         if (draw_truth_marker) {
