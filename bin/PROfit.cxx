@@ -49,48 +49,17 @@
 
 using namespace PROfit;
 
-
-/*void writeVectorToFile(const std::string& filename, const std::vector<float>& dataVector) {
-    // 1. Create/Overwrite the specified ROOT file
-    TFile* outFile = TFile::Open(filename.c_str(), "RECREATE");
-    if (!outFile || outFile->IsZombie()) {
-        std::cerr << "Error: Could not create file " << filename << std::endl;
-        return;
-    }
-    
-    // 2. Create the TTree
-    TTree* tree = new TTree("myTree", "A tree with a vector");
-    
-    // 3. ROOT needs a pointer to the vector. 
-    // Since dataVector is const&, we make a local pointer to a non-const copy 
-    // or simply point to a local copy to ensure safety.
-    std::vector<float> localCopy = dataVector;
-    std::vector<float>* vecPtr = &localCopy;
-    
-    // 4. Create the branch pointing to our pointer address
-    tree->Branch("floatVector", &vecPtr);
-    
-    // 5. Fill the tree with the vector data (creates 1 entry containing the entire vector)
-    tree->Fill();
-    
-    // 6. Write and clean up
-    outFile->Write();
-    //outFile->Close();
-    //delete outFile;
-    
-    std::cout << "Successfully wrote vector of size " << dataVector.size() << " to " << filename << std::endl;
-}*/
-
 std::vector<fc_out> readAnalysisFromFile(const std::string& filename,
                                          const PROmodel &model,                                    // To parse log10 parameters
                                          const std::vector<PROsyst>& variable_systs,         // To map spline names to Eigen indices
-                                         size_t i_prime) {                                    // Current system config index
+                                         size_t i_prime,                                     // Current system config index
+                                         bool gof_mode_requested) {                           // Requested runtime mode
     std::vector<fc_out> entries;
 
     // 1. Open the file
     TFile* inFile = TFile::Open(filename.c_str(), "READ");
     if (!inFile || inFile->IsZombie()) {
-        std::cerr << "Error: Could not open file " << filename << std::endl;
+        log<LOG_ERROR>(L"%1% || Error: Could not open file %2%") % __func__ % filename.c_str();
         return entries;
     }
 
@@ -98,13 +67,29 @@ std::vector<fc_out> readAnalysisFromFile(const std::string& filename,
     TTree* tree = nullptr;
     inFile->GetObject("tree", tree);
     if (!tree) {
-        std::cerr << "Error: Could not find TTree 'tree' in " << filename << std::endl;
+        log<LOG_ERROR>(L"%1% || Error: Could not find TTree 'tree' in %2%") % __func__ % filename.c_str();
         inFile->Close();
         delete inFile;
         return entries;
     }
 
-    // 3. Set up local reading buffers
+    // 3. Inspect branch existence
+    TBranch* b_osc  = tree->GetBranch("chi2_osc");
+    TBranch* b_sosc = tree->GetBranch("best_systs_osc");
+
+    if (!b_osc || !b_sosc) {
+        if (!gof_mode_requested) {
+            log<LOG_ERROR>(L"%1% || ERROR: The reused file '%2%' is missing oscillation branches ('chi2_osc' / 'best_systs_osc').") 
+                % __func__ % filename.c_str();
+            log<LOG_ERROR>(L"%1% || Cannot compute standard Feldman-Cousins p-values (--pval) without oscillation fit data.") % __func__;
+            log<LOG_ERROR>(L"%1% || Please re-run fresh throws without --gof to generate a complete distribution.") % __func__;
+            inFile->Close();
+            delete inFile;
+            return entries; // Returns empty vector to halt main execution
+        }
+    }
+
+    // 4. Set up local reading buffers
     float chi2_osc = 0;
     float chi2_syst = 0;
     std::map<std::string, float>* p_best_systs_osc = nullptr;
@@ -114,10 +99,10 @@ std::vector<fc_out> readAnalysisFromFile(const std::string& filename,
     // Allocate memory for physical parameter values matching model size
     std::vector<float> phys_param_vals(model.nparams, 0.0f);
 
-    // 4. Bind tree branches to our buffers
-    tree->SetBranchAddress("chi2_osc", &chi2_osc);
+    // 5. Bind tree branches to our buffers
+    if (b_osc) tree->SetBranchAddress("chi2_osc", &chi2_osc);
     tree->SetBranchAddress("chi2_syst", &chi2_syst);
-    tree->SetBranchAddress("best_systs_osc", &p_best_systs_osc);
+    if (b_sosc) tree->SetBranchAddress("best_systs_osc", &p_best_systs_osc);
     tree->SetBranchAddress("best_systs", &p_best_systs);
     tree->SetBranchAddress("syst_throw", &p_syst_throw);
 
@@ -127,7 +112,7 @@ std::vector<fc_out> readAnalysisFromFile(const std::string& filename,
         if (tree->GetBranch(branch_name.c_str())) {
             tree->SetBranchAddress(branch_name.c_str(), &phys_param_vals[i]);
         } else {
-            std::cerr << "Warning: Branch " << branch_name << " not found in file." << std::endl;
+            log<LOG_WARNING>(L"%1% || Warning: Branch %2% not found in file.") % __func__ % branch_name.c_str();
             phys_param_vals[i] = 0.0f; 
         }
     }
@@ -135,12 +120,23 @@ std::vector<fc_out> readAnalysisFromFile(const std::string& filename,
     // Get the systematic size details 
     size_t n_splines = variable_systs[i_prime].GetNSplines();
 
-    // 5. Loop over all records and reconstruct fc_out structures
+    // 6. Loop over all records, reconstruct fc_out structures, and validate oscillation values
     Long64_t nEntries = tree->GetEntries();
     entries.reserve(nEntries);
 
+    bool non_zero_osc_found = false;
+
     for (Long64_t entry = 0; entry < nEntries; ++entry) {
+        // Reset buffers to sentinel value before reading entry
+        chi2_osc = -999.0f;
+        chi2_syst = -999.0f;
+
         tree->GetEntry(entry);
+
+        // Only count oscillation fits as valid if the branch existed AND yielded a physical chi2 (chi2 >= 0)
+        if (b_osc && chi2_osc >= 0.0f) {
+            non_zero_osc_found = true;
+        }
 
         fc_out fco;
         fco.chi2_osc = chi2_osc;
@@ -150,7 +146,6 @@ std::vector<fc_out> readAnalysisFromFile(const std::string& filename,
         fco.best_phys_osc.resize(model.nparams);
         for (size_t i = 0; i < model.nparams; ++i) {
             float val = phys_param_vals[i];
-            // If the parameter was log-scaled, the file has 10^val. We retrieve val = log10(stored_val)
             if (model.is_log10[i]) {
                 fco.best_phys_osc(i) = (val > 0.0f) ? std::log10(val) : 0.0f; 
             } else {
@@ -183,6 +178,21 @@ std::vector<fc_out> readAnalysisFromFile(const std::string& filename,
     // Clean up ROOT IO
     inFile->Close();
     delete inFile;
+
+    // 7. Validate oscillation data contents against requested mode
+    if (!gof_mode_requested && !non_zero_osc_found) {
+        log<LOG_ERROR>(L"%1% || ERROR: The reused file '%2%' contains only zeroed oscillation fits (chi2_osc == 0).") 
+            % __func__ % filename.c_str();
+        log<LOG_ERROR>(L"%1% || This occurs when reusing a file generated with --gof.") % __func__;
+        log<LOG_ERROR>(L"%1% || Cannot compute standard Feldman-Cousins p-values (--pval) from a GOF-only distribution.") % __func__;
+        log<LOG_ERROR>(L"%1% || Please re-run fresh throws without --gof to generate a full distribution.") % __func__;
+        entries.clear();
+        return entries;
+    }
+
+    if (gof_mode_requested && non_zero_osc_found) {
+        log<LOG_INFO>(L"%1% || Reusing full Feldman-Cousins distribution for GOF evaluation (extracting chi2_syst).") % __func__;
+    }
 
     return entries;
 }
@@ -2694,40 +2704,35 @@ int main(int argc, char* argv[])
                 t.join();
             }
             fc_progress.finish_all();
-
-            for(const auto& v: dchi2s) for(const auto& dchi2: v) flattened_dchi2s.push_back(dchi2);
-            std::sort(flattened_dchi2s.begin(), flattened_dchi2s.end());
-            //writeVectorToFile(FC_file, flattened_dchi2s);
-	}
-	else if(!gen_null_dist){
+        }
+        else if(!gen_null_dist){
             fc_progress.finish_all();
-            std::vector<fc_out> flat_outs = readAnalysisFromFile(FC_file, *model, variable_systs, config.i_prime);
-            // The following code assumes non-flat, so we can just make it fake non-flat
-            outs.push_back(flat_outs);
-            float dchi2;
-            float chi2_osc;
-            float chi2_syst;
-            for(const auto &out: outs) {
-                for(const auto &fco: out) {
-                    chi2_osc  = fco.chi2_osc;
-                    chi2_syst = fco.chi2_syst;
-                    if(gof_pvalue){
-                      dchi2 = chi2_syst;
-                    }
-                    else{
-                      dchi2 = chi2_syst - chi2_osc;
-                    }
-                    flattened_dchi2s.push_back(dchi2);
-                }
+            std::vector<fc_out> flat_outs = readAnalysisFromFile(FC_file, *model, variable_systs, config.i_prime, gof_pvalue);
+            nuniv = flat_outs.size();
+            if(flat_outs.empty()) {
+                log<LOG_ERROR>(L"%1% || Aborting execution due to invalid or unreadable Feldman-Cousins distribution.") % __func__;
+                return 1;
             }
-	}
-	log<LOG_INFO>(L"%1% || 90%% Feldman-Cousins delta chi2 after throwing %2% universes is %3%") 
+
+            outs.push_back(flat_outs);
+	    }
+        // Unify array flattening across fresh generation and reused distributions
+        std::vector<float> flattened_syst_chi2;
+        for(const auto &out: outs) {
+            for(const auto &fco: out) {
+                float dchi2 = gof_pvalue ? fco.chi2_syst : (fco.chi2_syst - fco.chi2_osc);
+                flattened_dchi2s.push_back(dchi2);
+                flattened_syst_chi2.push_back(fco.chi2_syst);
+            }
+        }
+        std::sort(flattened_dchi2s.begin(), flattened_dchi2s.end());
+        std::sort(flattened_syst_chi2.begin(), flattened_syst_chi2.end());
+
+    	log<LOG_INFO>(L"%1% || 90%% Feldman-Cousins delta chi2 after throwing %2% universes is %3%") 
             % __func__ % nuniv % flattened_dchi2s[0.9*flattened_dchi2s.size()];
 
         if(gof_pvalue) {
-            std::vector<float> flattened_syst_chi2;
-            for(const auto &out : outs) for(const auto &fco : out) flattened_syst_chi2.push_back(fco.chi2_syst);
-            std::sort(flattened_syst_chi2.begin(), flattened_syst_chi2.end());
+
             log<LOG_ERROR>(L"%1% || All: %2% ") % __func__ % flattened_syst_chi2;
             log<LOG_ERROR>(L"%1% || chi: %2% ") % __func__ % global_chi2;
             auto it = std::lower_bound(flattened_syst_chi2.begin(), flattened_syst_chi2.end(), global_chi2);
