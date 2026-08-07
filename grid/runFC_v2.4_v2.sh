@@ -130,7 +130,10 @@ XML=PROfit_Tutorial_Oct2025v1_SPINE_ICARUS_numu_dis.xml
 NTHROWS=2                       # <-- bump this for a real bank
 
 # Namespace by cluster so a resubmit doesn't silently clobber the last one.
-OUTDIR=/pnfs/sbnd/scratch/users/markrl/PROfit_Grid/${CLUSTER:-manual}
+# The username MUST be the job's mapped grid identity (jobsub sets GRID_USER):
+# writing into anyone else's scratch tree gets a dCache 403 that gfal-copy
+# misreports as "File exists" (error 17).
+OUTDIR=/pnfs/sbnd/scratch/users/${GRID_USER:-$(whoami)}/PROfit_Grid/${CLUSTER:-manual}
 
 say "job parameters:"
 say "  PROCESS  = ${PROCESS}"
@@ -215,7 +218,9 @@ fi
 say "copying back ${#outputs[@]} file(s): ${outputs[*]}"
 
 export IFDH_CP_MAXRETRIES=3
-ifdh mkdir_p "$OUTDIR" 2>/dev/null
+# Don't discard mkdir errors: a failed mkdir here is the first visible symptom
+# of a wrong/unwritable OUTDIR, long before the copy's misleading error 17.
+ifdh mkdir_p "$OUTDIR" || say "WARNING: ifdh mkdir_p $OUTDIR returned $? (may just already exist)"
 
 # dCache refuses overwrites (gfal error 17 / HTTP 403), so a re-executed job
 # (eviction, FERMIHTC auto-release) must clear its own leftovers first to make
@@ -228,6 +233,9 @@ ifdh cp -D "${outputs[@]}" "$OUTDIR/"
 crc=$?
 if [ $crc -ne 0 ]; then
     fail "ifdh cp failed ($crc)"
+    say "destination listing (does it exist? do you own it?):"
+    ifdh ls "$OUTDIR" 2>&1 | sed 's/^/    /'
+    say "GRID_USER = ${GRID_USER:-unset}, whoami = $(whoami)"
     say "X509_USER_PROXY = ${X509_USER_PROXY:-unset}"
     exit $crc
 fi
