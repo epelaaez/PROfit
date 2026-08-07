@@ -106,6 +106,7 @@ namespace PROfit {
         float wilson_eps = 0.05f; ///< Unused for bank generation now; reserved for the future classify mode.
         float roi_band = 8.0f;   ///< Reserved for the future classify mode; unused for now.
         int   n_brazil_throws = 100; ///< Number of pseudo-experiment throws for --mode brazil.
+        std::string band_flag = "";    ///< --flag: brazil band PDF styled after a national flag ("america", "ireland"); empty = standard green/yellow.
 
         // ---- merge-mesh / merge-bank inputs ----
         // Concrete artifact filenames (glob patterns already expanded by the
