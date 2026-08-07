@@ -125,7 +125,16 @@ say "  smoke test passed"
 
 # --- job parameters ----------------------------------------------------------
 RNG=$((PROCESS + 1))
-SEED=$((190000 + RNG))          # unique per process, and won't collide once RNG>9
+# PROCESS restarts at 0 in EVERY submission, so a seed built from it alone
+# collides across batches — and with -n 1 the duplicate jobs are bitwise
+# identical, so merge-bank dedupes them away (wasted CPU). Fold in CLUSTER
+# (unique per jobsub_submit); modulo keeps the seed under 2^31 with up to
+# 1000 jobs per submission.
+SEED=$(( (${CLUSTER:-0} % 1000000) * 1000 + PROCESS ))
+# Batch-unique output tag too, so banks from different campaigns can sit in
+# one directory for --merge-input without basename collisions.
+OTAG="fc_${CLUSTER:-manual}_${RNG}"
+META="${OTAG}.meta"
 XML=PROfit_Tutorial_Oct2025v1_SPINE_ICARUS_numu_dis.xml
 NTHROWS=2                       # <-- bump this for a real bank
 
@@ -139,6 +148,7 @@ say "job parameters:"
 say "  PROCESS  = ${PROCESS}"
 say "  RNG      = ${RNG}"
 say "  SEED     = ${SEED}"
+say "  OTAG     = ${OTAG}"
 say "  XML      = ${XML}"
 say "  NTHROWS  = ${NTHROWS}"
 say "  OUTDIR   = ${OUTDIR}"
@@ -148,8 +158,8 @@ say "XML found: $(ls -l "$XML" | awk '{print $5" bytes"}'), md5 $(md5sum "$XML" 
 
 
 # --- locate the pre-built mesh and rename it to what init-bank expects --------
-# PROfit looks for ${tag}_${output}_mesh.bin, i.e. GRID_fc_2_mesh.bin for PROCESS=1
-MESH_EXPECTED="GRID_fc_${RNG}_mesh.bin"
+# PROfit looks for ${tag}_${output}_mesh.bin, i.e. GRID_${OTAG}_mesh.bin
+MESH_EXPECTED="GRID_${OTAG}_mesh.bin"
 
 shopt -s nullglob
 mesh_candidates=( *mesh*.bin )
@@ -181,7 +191,7 @@ say "launching PROfit..."
 echo "----------------------------------------------------------------------"
 t0=$SECONDS
 
-./PROfit -x "$XML" -t GRID -o "fc_${RNG}" -s "$SEED" -v 2 -n 1 --log "fc.${RNG}.meta" \
+./PROfit -x "$XML" -t GRID -o "$OTAG" -s "$SEED" -v 2 -n 1 --log "$META" \
          fc-adaptive \
          --cl 90 \
          --mode init-bank \
@@ -196,16 +206,16 @@ if [ $rc -ne 0 ]; then
     say "scratch dir contents at time of failure:"
     ls -l | sed 's/^/    /'
     say "tail of meta log:"
-    tail -n 100 "fc.${RNG}.meta" 2>/dev/null | sed 's/^/    /'
+    tail -n 100 "$META" 2>/dev/null | sed 's/^/    /'
     exit $rc
 fi
 
 # --- copy back ---------------------------------------------------------------
-# Artifacts are prefixed ${tag}_${output}_ = GRID_fc_${RNG}_ (bank, mesh, PDFs).
+# Artifacts are prefixed ${tag}_${output}_ = GRID_${OTAG}_ (bank, mesh, PDFs).
 # Trailing underscore keeps RNG=1 from matching a hypothetical fc_10.
 shopt -s nullglob
-outputs=( GRID_fc_${RNG}_* )
-[ -f "fc.${RNG}.meta" ] && outputs+=( "fc.${RNG}.meta" )
+outputs=( GRID_${OTAG}_* )
+[ -f "$META" ] && outputs+=( "$META" )
 
 say "scratch dir after run:"
 ls -l | sed 's/^/    /'

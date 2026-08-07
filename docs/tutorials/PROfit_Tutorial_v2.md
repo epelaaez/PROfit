@@ -1338,10 +1338,16 @@ reference implementation and worth reading in full. Its contract:
 * the binary is `./PROfit`; the script sets up ROOT/Boost/etc. from CVMFS
   (UPS) before touching it, and sanity-checks with `ldd` and `./PROfit
   --help` so "missing library" and "bad physics" fail distinguishably;
-* `$PROCESS` (0..N-1) is the job's identity: derive a **distinct `--seed`
-  and a distinct `-o` tag** from it (e.g. `SEED=$((190000 + PROCESS + 1))`,
-  `-o fc_$((PROCESS+1))`), and run with `-n 1` — the merge-bank dedupe rules
-  from section 8 apply with full force;
+* `$PROCESS` (0..N-1) is the job's identity, but it **restarts at 0 in every
+  submission** — a seed or `-o` tag built from it alone collides across
+  batches. Fold in `$CLUSTER` (unique per `jobsub_submit`), e.g.
+  `SEED=$(( (CLUSTER % 1000000) * 1000 + PROCESS ))` and
+  `-o fc_${CLUSTER}_$((PROCESS+1))`, and run with `-n 1`. Colliding seeds
+  are not just statistically dubious: with `-n 1` the duplicate jobs are
+  bitwise identical, merge-bank silently dedupes their PEs (section 8), and
+  the CPU is wasted; colliding `-o` tags additionally give different
+  campaigns identical output *filenames*, which then can't share a
+  directory at `--merge-input` time;
 * copy outputs back with `ifdh cp` to a `/pnfs` scratch area, namespaced by
   `$CLUSTER` so a resubmission doesn't clobber the last campaign.
 
@@ -1399,7 +1405,8 @@ PROfit -x tutorial.xml -t TUT -o merged $AFC --mode merge-bank --merge-input 'TU
 * Submission needs a working **jobsub client** (a GPVM, valid token/proxy).
   Everything up to and including `--dry-run` works anywhere.
 * **Seeds are your job.** `proletariat` submits N identical scripts; the
-  worker script must diversify `--seed`/`-o` from `$PROCESS`. Identical
+  worker script must diversify `--seed`/`-o` from `$PROCESS` **and**
+  `$CLUSTER` — `$PROCESS` alone repeats across submissions. Identical
   seeds silently dedupe at merge-bank time (section 8).
 * The old `grid/maketar_submit_v2.4.sh` is kept for reference but
   deprecated; it had a latent bug (the `file://` script URL broke unless the
