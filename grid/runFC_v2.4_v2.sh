@@ -198,8 +198,11 @@ if [ $rc -ne 0 ]; then
 fi
 
 # --- copy back ---------------------------------------------------------------
+# Artifacts are prefixed ${tag}_${output}_ = GRID_fc_${RNG}_ (bank, mesh, PDFs).
+# Trailing underscore keeps RNG=1 from matching a hypothetical fc_10.
 shopt -s nullglob
-outputs=( *mesh*bin fc_${RNG}* )
+outputs=( GRID_fc_${RNG}_* )
+[ -f "fc.${RNG}.meta" ] && outputs+=( "fc.${RNG}.meta" )
 
 say "scratch dir after run:"
 ls -l | sed 's/^/    /'
@@ -213,6 +216,14 @@ say "copying back ${#outputs[@]} file(s): ${outputs[*]}"
 
 export IFDH_CP_MAXRETRIES=3
 ifdh mkdir_p "$OUTDIR" 2>/dev/null
+
+# dCache refuses overwrites (gfal error 17 / HTTP 403), so a re-executed job
+# (eviction, FERMIHTC auto-release) must clear its own leftovers first to make
+# the copy idempotent. Re-runs produce identical files anyway (-n 1, fixed seed).
+for f in "${outputs[@]}"; do
+    ifdh rm "$OUTDIR/$f" >/dev/null 2>&1 || true
+done
+
 ifdh cp -D "${outputs[@]}" "$OUTDIR/"
 crc=$?
 if [ $crc -ne 0 ]; then
