@@ -197,45 +197,6 @@ std::vector<fc_out> readAnalysisFromFile(const std::string& filename,
     return entries;
 }
 
-/*std::vector<float> readVectorFromFile(const std::string& filename) {
-    std::vector<float> resultVector;
-
-    // 1. Open the specified file
-    TFile* inFile = TFile::Open(filename.c_str(), "READ");
-    if (!inFile || inFile->IsZombie()) {
-        std::cerr << "Error: Could not open file " << filename << std::endl;
-        return resultVector; // Returns empty vector
-    }
-    
-    // 2. Get the TTree
-    TTree* tree = nullptr;
-    inFile->GetObject("myTree", tree);
-    if (!tree) {
-        std::cerr << "Error: Could not find TTree 'myTree' in " << filename << std::endl;
-        //inFile->Close();
-        //delete inFile;
-        return resultVector;
-    }
-    
-    // 3. Set up the pointer for ROOT tracking
-    std::vector<float>* vecPtr = nullptr;
-    tree->SetBranchAddress("floatVector", &vecPtr);
-    
-    // 4. Read the first entry (assuming 1 entry containing your saved vector)
-    if (tree->GetEntries() > 0) {
-        tree->GetEntry(0); 
-        if (vecPtr) {
-            resultVector = *vecPtr; // Copy the data to our return vector
-        }
-    }
-    
-    // 5. Clean up ROOT memory
-    //inFile->Close();
-    //delete inFile;
-    
-    return resultVector;
-}*/
-
 // Unique key for DetVar propeller maps (names can be reused across sections).
 static std::string DetVarKey(const PROconfig& config, size_t file_index) {
     const auto& dv = config.m_detvar_files[file_index];
@@ -3350,7 +3311,6 @@ int main(int argc, char* argv[])
         }
         log<LOG_INFO>(L"%1% || ########################################################") % __func__;
     }
-    log<LOG_INFO>(L"%1% || Before timing info") % __func__;
     if(global_fit_out.is_open()) global_fit_out.close();
 
     delete metric;
