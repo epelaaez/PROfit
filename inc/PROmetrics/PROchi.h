@@ -134,7 +134,7 @@ namespace PROfit{
              * @param var_index             Variable index.
              * @return Chi-squared for that channel.
              */
-            float getSingleChannelChi(size_t global_channel_index, const PROspec &cv, size_t var_index);
+            float getSingleChannelChi(size_t global_channel_index, const PROspec &cv, size_t var_index, const Eigen::MatrixXf &projection = Eigen::MatrixXf());
 
             /**
              * @brief Print a breakdown of the chi-squared contributions at @p param.

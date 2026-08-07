@@ -400,7 +400,7 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
     return value;
 }
 
-float PROchi::getSingleChannelChi(size_t global_channel_index, const PROspec & cv, size_t var_index) {
+float PROchi::getSingleChannelChi(size_t global_channel_index, const PROspec &cv, size_t var_index, const Eigen::MatrixXf &projection) {
 
     size_t nbin = config.m_channel_variable_bins[config.GetLocalChannelIndexFromGlobalChannelIndex(global_channel_index)][var_index].NBins();
     size_t startBin = config.GetCollapsedGlobalVariableBinStart(global_channel_index, var_index);
@@ -428,6 +428,14 @@ float PROchi::getSingleChannelChi(size_t global_channel_index, const PROspec & c
     }
 
     Eigen::VectorXf delta = (CollapseMatrix(config, cv.Spec()) - (shape_only ? data.Normalize(config,cv) : data.Spec()))(idx);
+    if(projection.size()) {
+        Eigen::MatrixXf active_projection(projection.rows(), idx.size());
+        for(Eigen::Index col = 0; col < idx.size(); ++col) {
+            active_projection.col(col) = projection.col(idx(col) - (Eigen::Index)startBin);
+        }
+        M = active_projection * M * active_projection.transpose();
+        delta = active_projection * delta;
+    }
     float covar_portion = delta.dot(M.llt().solve(delta));
     float value = covar_portion;//pull;
 
@@ -439,4 +447,3 @@ void PROchi::print([[maybe_unused]] const Eigen::VectorXf &param){
 
 return;
 }
-
