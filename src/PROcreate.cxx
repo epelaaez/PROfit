@@ -571,42 +571,41 @@ namespace PROfit {
                 }
                 if(sys_mode == "norm" || sys_mode == "norm_to_covariance") {
                     log<LOG_INFO>(L"%1% || Systematic variation %2% is a match for a normalization systematic. Processing as such. ") % __func__ % sys_name.c_str();
-                    map_systematic_knob_vals[sys_name] = {-3.0f, -2.0f, -1.0f, 0.0f, 1.0f, 2.0f, 3.0f};
-                    sv.back().knob_index = map_systematic_knob_vals[sys_name];
-                    sv.back().knobval = sv.back().knob_index;
-                    std::sort(sv.back().knobval.begin(), sv.back().knobval.end());
-
                     size_t colonPos = sys_name.find(':');
                     if (colonPos == std::string::npos) {
                         log<LOG_ERROR>(L"%1% || ERROR, you asked for a norm spline systematic but its not in NAME:percentate format %2%") % __func__  % sys_name.c_str();
                         exit(EXIT_FAILURE);
                     }
-
                     std::string wild = sys_name.substr(0, colonPos);
                     std::string sflat_percent  = sys_name.substr(colonPos + 1);
                     float flat_percent = std::stof(sflat_percent);
-
-                    // norm_to_covariance should be able to handle >= 0.33
-                    if(sys_mode == "norm" && flat_percent >= 0.33333){
-                        log<LOG_ERROR>(L"%1% || Currently norm takes +-3,2,1 sigma. Greater than 33.33% norm error isn't allowed. You entered %2%. Dont.  ") % __func__  %  flat_percent;
-                        exit(EXIT_FAILURE);
+                    std::vector<double> knob_vals;
+                    if(sys_mode == "norm"){
+                        sv.back().has_restrict = true;
+                        sv.back().restrict_hi = 3.0f;
+                        sv.back().restrict_lo = -1.0/std::floor(flat_percent);
+                        log<LOG_INFO>(L"%1% || Setting restrict=[%2%, %3%] for systematic %4%") % __func__ % sv.back().restrict_lo % sv.back().restrict_hi % sys_name.c_str();
                     }
+                    map_systematic_knob_vals[sys_name] = {-3.0f, -2.0f, -1.0f, 0.0f, 1.0f, 2.0f, 3.0f};
+                    sv.back().knob_index = map_systematic_knob_vals[sys_name];
+                    sv.back().knobval = sv.back().knob_index;
+                    std::sort(sv.back().knobval.begin(), sv.back().knobval.end());
 
                     log<LOG_INFO>(L"%1% || Wildcard %2% (and percent %3%) which matches: ") % __func__  % wild.c_str() % flat_percent;
                     std::vector<std::string> flatnames;
                     for(auto & name: inconfig.m_fullnames){
                         if(name.find(wild)!=std::string::npos){
-                            flatnames.push_back(name); 
+                            flatnames.push_back(name);
                         }
                     }
                     log<LOG_INFO>(L"%1% || %2% . ") % __func__  % flatnames;
 
                     std::vector<int> flatbins;
                     for(auto &name: flatnames){
-                        size_t is = inconfig.GetSubchannelIndex(name);     
-                        size_t ic = inconfig.GetLocalChannelIndexFromGlobalSubchannelIndex(is);     
+                        size_t is = inconfig.GetSubchannelIndex(name);
+                        size_t ic = inconfig.GetLocalChannelIndexFromGlobalSubchannelIndex(is);
 
-                        size_t start = inconfig.GetGlobalVariableBinStart(is,iv); 
+                        size_t start = inconfig.GetGlobalVariableBinStart(is,iv);
                         for(size_t b = 0; b < inconfig.m_channel_variable_bins[ic][iv].NBins(); b++) {
                             flatbins.push_back((int)(start+b));
                         }
