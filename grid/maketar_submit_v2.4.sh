@@ -1,5 +1,8 @@
 #!/bin/bash
 #
+# DEPRECATED: superseded by `PROfit -x cfg.xml -t TAG proletariat --script <worker.sh> ...`
+# (see inc/PROletariat.h). Kept until the subcommand is validated on the grid.
+#
 # Usage:
 #   ./mktar_and_submit.sh -n 500 path/to/grid_script.sh [other_file ...]
 #

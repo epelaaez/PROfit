@@ -48,7 +48,8 @@ set -u
 for prod in "root v6_28_12 -q e26:p3915:prof" \
             "cmake v3_27_4" \
             "hdf5 v1_12_2b -q e26:prof" \
-            "boost v1_82_0 -q e26:prof"; do
+            "boost v1_82_0 -q e26:prof" \
+            "ifdhc v2_8_0 -q e26:p3915:prof"; do
     set +u
     # shellcheck disable=SC2086
     setup $prod
@@ -126,7 +127,7 @@ say "  smoke test passed"
 RNG=$((PROCESS + 1))
 SEED=$((190000 + RNG))          # unique per process, and won't collide once RNG>9
 XML=PROfit_Tutorial_Oct2025v1_SPINE_ICARUS_numu_dis.xml
-NTHROWS=5                       # <-- bump this for a real bank
+NTHROWS=2                       # <-- bump this for a real bank
 
 # Namespace by cluster so a resubmit doesn't silently clobber the last one.
 OUTDIR=/pnfs/sbnd/scratch/users/markrl/PROfit_Grid/${CLUSTER:-manual}
@@ -179,9 +180,9 @@ t0=$SECONDS
 
 ./PROfit -x "$XML" -t GRID -o "fc_${RNG}" -s "$SEED" -v 2 -n 1 --log "fc.${RNG}.meta" \
          fc-adaptive \
+         --cl 90 \
          --mode init-bank \
-         --throws "$NTHROWS" \
-         --xlo 0.01 --xhi 1
+         --n-pe-min "$NTHROWS" --n-pe-max "$NTHROWS" 
 rc=$?
 
 echo "----------------------------------------------------------------------"
