@@ -744,7 +744,7 @@ namespace PROfit{
         log<LOG_DEBUG>(L"%1% || Finished plot_detector_ratios") % __func__;
     }                                                                              
 
-    void plot_hist1ds(TCanvas* c, TH1D* cv_hist, TGraphAsymmErrors* errband, THStack* cvstack, std::vector<std::pair<std::string, const char*>>* subplots, TH1D* bf_hist, TGraphAsymmErrors* posterrband, TH1D* data_hist, std::string* dat_str, PlotOptions opt, std::string hist_titles, std::string ratio_titles, const std::string &filename, PlotBounds &bounds, TText* text){
+    void plot_hist1ds(TCanvas* c, TH1D* cv_hist, TGraphAsymmErrors* errband, THStack* cvstack, std::vector<std::pair<std::string, const char*>>* subplots, TH1D* bf_hist, TGraphAsymmErrors* posterrband, TH1D* data_hist, std::string* dat_str, PlotOptions opt, std::string hist_titles, std::string ratio_titles, const std::string &filename, PlotBounds &bounds, const std::string &text){
 
         log<LOG_DEBUG>(L"%1% || Plotting 1D Histogram %2%") % __func__ % hist_titles.c_str();
         std::unique_ptr<TLegend> leg = std::make_unique<TLegend>(0.38,0.74,0.89,0.91);
@@ -904,12 +904,11 @@ namespace PROfit{
             posterrband->Draw("2 same");
         }
 
-        if(text) {
+        if(!text.empty()) {
             TLine *dummy_line = new TLine(0,0,0.1,0);
             dummy_line->SetLineColor(kWhite);
             dummy_line->SetLineWidth(0);
-            const char* label = text->GetTitle();
-            TLegendEntry *chi_entry = leg->AddEntry(dummy_line,label,"l");
+            TLegendEntry *chi_entry = leg->AddEntry(dummy_line,text.c_str(),"l");
             chi_entry->SetTextFont(42);
             chi_entry->SetTextSize(0.03);
         }
@@ -1162,6 +1161,11 @@ namespace PROfit{
 
                         // Helpers to plot chi^2 for each heatmap/slice/projection
                         const size_t channel_start = config.GetCollapsedGlobalVariableBinStart(global_channel_index, other_index);
+
+                        // In `groups`, each outer vector is one displayed bin; its inner vector lists the flattened
+                        // source bins to sum. For a 3x2 Y projection, groups looks like {{0, 2, 4}, {1, 3, 5}}, i.e.,
+                        // the first bin contains bins 0, 2, and 4 from the flat bins, and the second bin contains bins
+                        // 1, 3, and 5 from the flat bins.
                         auto make_projection = [&](const std::vector<std::vector<size_t>> &groups) {
                             size_t nrows = 0;
                             for(const auto &group : groups) {
@@ -1345,9 +1349,7 @@ namespace PROfit{
                                 objs[mdc+"_data_slice_ybin"+std::to_string(ybin)] = data_hist_slice->Clone();
                             }
 
-                            TText slice_chi_text;
-                            slice_chi_text.SetTitle(slice_chi_label.c_str());
-                            plot_hist1ds(&c, &cv_hist_slice, channel_errband, {}, {}, bf_hist_slice, post_channel_errband, data_hist_slice, &dat_str, {}, ybin_str, ratio_titles, filename, bounds, slice_chi_label.empty() ? nullptr : &slice_chi_text);
+                            plot_hist1ds(&c, &cv_hist_slice, channel_errband, {}, {}, bf_hist_slice, post_channel_errband, data_hist_slice, &dat_str, {}, ybin_str, ratio_titles, filename, bounds, slice_chi_label);
                         }
 
                         // Plot the second variable in bins of the first variable
@@ -1409,9 +1411,7 @@ namespace PROfit{
                                 objs[mdc+"_data_slice_xbin"+std::to_string(xbin)] = data_hist_slice->Clone();
                             }
 
-                            TText slice_chi_text;
-                            slice_chi_text.SetTitle(slice_chi_label.c_str());
-                            plot_hist1ds(&c, &cv_hist_slice, channel_errband, {}, {}, bf_hist_slice, post_channel_errband, data_hist_slice, &dat_str, {}, xbin_str, ratio_titles_y, filename, bounds, slice_chi_label.empty() ? nullptr : &slice_chi_text);
+                            plot_hist1ds(&c, &cv_hist_slice, channel_errband, {}, {}, bf_hist_slice, post_channel_errband, data_hist_slice, &dat_str, {}, xbin_str, ratio_titles_y, filename, bounds, slice_chi_label);
                         }
 
                         const std::string hist_title_y = config.m_mode_plotnames[mode]+" "+config.m_detector_plotnames[det]+" "+config.m_channel_names[channel]+";"+ytitle2d+";"+ytitle;
@@ -1511,9 +1511,7 @@ namespace PROfit{
                             }
                         }
                         const std::string y_chi_label = chi_label(make_projection(y_projection_groups));
-                        TText y_chi_text;
-                        y_chi_text.SetTitle(y_chi_label.c_str());
-                        plot_hist1ds(&c, &cv_hist_y, channel_errband_y, cvstack_y, &subplots_y, bf_hist_y, post_channel_errband_y, data_hist_y, &dat_str, opt, hist_title_y, ratio_titles_y, filename, bounds, y_chi_label.empty() ? nullptr : &y_chi_text);
+                        plot_hist1ds(&c, &cv_hist_y, channel_errband_y, cvstack_y, &subplots_y, bf_hist_y, post_channel_errband_y, data_hist_y, &dat_str, opt, hist_title_y, ratio_titles_y, filename, bounds, y_chi_label);
                     }
 
                     std::vector<float> edges = config.m_channel_variable_bins[channel][other_index].Edges();
@@ -1637,20 +1635,15 @@ namespace PROfit{
                         objs[mdc+"_posterrband"] = post_channel_errband->Clone();
                     }
 
-                    TText* text = NULL;
-                    TText projected_x_chi_text;
+                    std::string chi_label_text;
                     if(config.m_channel_variable_dims[channel][other_index] == 2 && !projected_x_chi_label.empty()) {
-                        projected_x_chi_text.SetTitle(projected_x_chi_label.c_str());
-                        text = &projected_x_chi_text;
+                        chi_label_text = projected_x_chi_label;
                     } else if(texts.size()!=0) {
-                        if(texts.size()==1){
-                            text = (TText*)texts.front().GetListOfLines()->First();
-                        }else{
-                            text = (TText*)texts.at(global_channel_index).GetListOfLines()->First();
-                        }
+                        TPaveText &box = texts.size() == 1 ? texts.front() : texts.at(global_channel_index);
+                        if(TText *line = (TText*)box.GetListOfLines()->First()) chi_label_text = line->GetTitle();
                     }
                     // should probably be switching this to a more clear boolean...
-                    plot_hist1ds(&c, &cv_hist, channel_errband, cvstack, &subplots, bf_hist, post_channel_errband, data_hist, &dat_str, opt, hist_titles, ratio_titles, filename, bounds, text);
+                    plot_hist1ds(&c, &cv_hist, channel_errband, cvstack, &subplots, bf_hist, post_channel_errband, data_hist, &dat_str, opt, hist_titles, ratio_titles, filename, bounds, chi_label_text);
                     ++global_channel_index;
                     cv_hists.push_back(cv_hist);
 		    if(data){
