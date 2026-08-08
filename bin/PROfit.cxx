@@ -368,6 +368,7 @@ int main(int argc, char* argv[])
     int   afc_update_layer = 0;
     int   afc_only_layer   = -1;
     int   afc_n_brazil_throws = 100;
+    std::string afc_flag;
     float afc_roi_band = 8.0f;
     std::vector<std::string> afc_merge_inputs;
     std::vector<float> afc_cleanup_quantiles = {0.025f, 0.975f};
@@ -593,6 +594,11 @@ int main(int argc, char* argv[])
         "Number of pseudo-experiment throws for --mode brazil. Each throw is one FC-style realisation "
         "(syst+stat) classified against the bank. Aggregated into per-cell inclusion fractions and "
         "median +/- 1sigma / +/- 2sigma Brazil-band contours.");
+    afc_command->add_option("--flag", afc_flag,
+        "Draw the --mode brazil band PDF styled after a national flag (same <tag>_brazil.bin archive). "
+        "america: +-1sigma blue with white stars, +-2sigma red/white horizontal stripes. "
+        "ireland: alternating green/off-white/orange/off-white vertical stripes (+-2sigma paler).")
+        ->check(CLI::IsMember({"america", "ireland"}));
     afc_command->add_option("--roi-band", afc_roi_band, "ROI Delta-chi^2 band (slice 2c).");
 
     //PROglobal
@@ -2834,6 +2840,11 @@ int main(int argc, char* argv[])
         acfg.update_layer = afc_update_layer;
         acfg.only_layer = afc_only_layer;
         acfg.n_brazil_throws = afc_n_brazil_throws;
+        acfg.band_flag = afc_flag;
+        if (!afc_flag.empty() && acfg.mode != PROfit::AdaptiveFCMode::Brazil) {
+            log<LOG_WARNING>(L"%1% || fc-adaptive: --flag %2% only styles the --mode brazil band PDF; ignored for --mode %3%.")
+                % __func__ % afc_flag.c_str() % afc_mode_str.c_str();
+        }
         acfg.roi_band = afc_roi_band;
         acfg.cleanup_quantiles = afc_cleanup_quantiles;
         acfg.cleanup_halo      = afc_cleanup_halo;

@@ -1331,8 +1331,11 @@ void plot_brazil_band_pdf(
     float truth_x_phys,
     float truth_y_phys,
     const std::vector<int> &n_throws_kept,
-    const std::vector<int> &n_throws_dropped)
+    const std::vector<int> &n_throws_dropped,
+    const std::string &band_flag)
 {
+    const bool america_style = band_flag == "america";
+    const bool ireland_style = band_flag == "ireland";
     if (bank.n_cells <= 0 || cl_targets.empty()) {
         log<LOG_WARNING>(L"%1% || plot_brazil_band_pdf: empty input, skipping.") % __func__;
         return;
@@ -1354,6 +1357,18 @@ void plot_brazil_band_pdf(
     // separately as TGraphs.
     const int brazil_yellow = TColor::GetColor(244, 229, 160);  // ±2σ band fill
     const int brazil_green  = TColor::GetColor(152, 215, 152);  // ±1σ band fill
+    // --flag america: US-flag palette (Old Glory blue/red).
+    const int glory_blue    = TColor::GetColor(60, 59, 110);    // ±1σ fill, starred
+    const int glory_red     = TColor::GetColor(178, 34, 52);    // ±2σ stripe fill
+    // --flag ireland: alternating vertical stripes cycling green / off-white /
+    // orange / off-white across the x span, full saturation for ±1σ and a
+    // paler tint of the same stripe colour for ±2σ.
+    const int eire_fill[3]      = {TColor::GetColor(22, 155, 98),    // green (left)
+                                   TColor::GetColor(240, 235, 220),  // off-white (center)
+                                   TColor::GetColor(255, 136, 62)};  // orange (right)
+    const int eire_fill_pale[3] = {TColor::GetColor(150, 210, 184),
+                                   TColor::GetColor(248, 245, 238),
+                                   TColor::GetColor(255, 201, 168)};
 
     for (size_t k = 0; k < cl_targets.size(); ++k) {
         c.Clear();
@@ -1376,10 +1391,20 @@ void plot_brazil_band_pdf(
         frame->GetYaxis()->SetTitleSize(0.045);
         frame->Draw();
 
-        // High-res IDW surface so marching-squares contours are smooth.
-        // 4× upsampling → 256×256 from a 64×64 finest grid (sub-second cost).
+        // IDW surface the contour outlines are extracted from and the band
+        // fills are classified against. Upsampled 4× relative to the bank's
+        // finest grid — the multiplier this plot has always used. Do NOT
+        // raise it: beyond ~4× the marching-squares contours start resolving
+        // the IDW field's bull's-eye ripples around each cell center and the
+        // outlines grow scalloped lobes. The ~256-bins-per-axis cap only
+        // binds for deeply refined meshes, where it bounds the IDW cost
+        // (O(W·H·n_cells)) by lowering the multiplier toward native
+        // resolution.
+        const int target_res = 256;
+        const int finest = std::max({1, bank.finest_nx, bank.finest_ny});
+        const int upsample = std::max(1, std::min(4, target_res / finest));
         TH2D *h_incl = build_inclusion_th2d(bank, inclusion_frac[k], A,
-                                            Form("incl_cl%zu", k), /*upsample=*/ 4);
+                                            Form("incl_cl%zu", k), upsample);
 
         // Extract each contour level as TGraphs once and reuse for both the
         // filled band and the outline overlay. extract_contour_graphs mutates
@@ -1391,27 +1416,16 @@ void plot_brazil_band_pdf(
         auto segs_q84  = extract_contour_graphs(h_incl, 0.84);
         auto segs_q975 = extract_contour_graphs(h_incl, 0.975);
 
-        // (1) Brazil-band fills via cell-based, per-row run-length-encoded
-        //   TBoxes.
-        //
-        //   Earlier attempts used h_incl (the IDW-smoothed surface) for the
-        //   per-bin color decision. That gave smooth visual transitions but
-        //   bled the ±2σ yellow into the deep basin: IDW averages a bin's
-        //   value from its 4 nearest decided cells, so a bin sitting between
-        //   a decided "deep-basin" cell (v≈1) and a decided "boundary" cell
-        //   (v≈0.5) gets an interpolated value in the 0.84–0.975 band, even
-        //   though no actual cell *believes* it sits in the inner-2σ rim.
-        //   With large baseline cells in sparse-bank regions, the IDW
-        //   smoothing zone covers a huge swath of the plot.
-        //
-        //   Fix: for the *fills*, each bin inherits the value of the
-        //   meta-cell that physically contains it — no IDW. Cell-edges in
-        //   the fills are then hidden by the smooth IDW-based contour
-        //   outlines drawn in step (2). Result: bands appear *only* where
-        //   some actual cell has its own inclusion fraction in the band
-        //   range. Undecidable cells (sentinel v<0) are skipped entirely
-        //   and stay white, which is the correct "unknown" presentation
-        //   instead of being smeared into a band colour.
+        // (1) Brazil-band fills via per-row run-length-encoded TBoxes over
+        //   the SAME IDW-smoothed surface (h_incl) the contour outlines in
+        //   step (2) are extracted from, so the fill edges coincide with
+        //   the outlines exactly. An earlier version coloured each bin from
+        //   the meta-cell that contains it (no IDW) to avoid smearing bands
+        //   into regions where no decided cell sits in the band range — but
+        //   with coarse meta-cells that painted large blocks that visibly
+        //   disagreed with the smooth contours. Where the fills and curves
+        //   conflict, the curves are the published statement, so the fills
+        //   follow them.
         //
         //   Five-region classification of P(included):
         //       v < 0.025 or v > 0.975          → outside bands (no fill)
@@ -1419,62 +1433,136 @@ void plot_brazil_band_pdf(
         //       0.16 ≤ v ≤ 0.84                 → ±1σ (green)
         const int W_up = h_incl->GetNbinsX();
         const int H_up = h_incl->GetNbinsY();
-        // upsample factor relative to bank.finest_nx (must match the call
-        // to build_inclusion_th2d above).
-        const int up = std::max(1, W_up / std::max(1, bank.finest_nx));
+        const int n_fill_cols = 512;
+        const int n_fill_rows = 100;
 
-        // Precompute a [W_up × H_up] lookup mapping each upsampled bin to
-        // the index of the meta-cell that contains it. -1 = no cell covers
-        // this bin (shouldn't happen if the meta-mesh tiles the parameter
-        // space, but we guard for safety).
-        std::vector<int> cell_id_at((size_t)W_up * (size_t)H_up, -1);
-        for (int c = 0; c < bank.n_cells; ++c) {
-            const int i0  = bank.cell_i_bl[(size_t)c] * up;
-            const int j0  = bank.cell_j_bl[(size_t)c] * up;
-            const int len = bank.cell_step[(size_t)c] * up;
-            const int i_end = std::min(W_up, i0 + len);
-            const int j_end = std::min(H_up, j0 + len);
-            const int i_beg = std::max(0, i0);
-            const int j_beg = std::max(0, j0);
-            for (int ii = i_beg; ii < i_end; ++ii) {
-                for (int jj = j_beg; jj < j_end; ++jj) {
-                    cell_id_at[(size_t)ii * (size_t)H_up + (size_t)jj] = c;
+        // 0 = outside bands / undecidable (white), 1 = ±1σ, 2 = ±2σ.
+        auto class_for_v = [&](float v) -> int {
+            if (v < 0.0f) return 0; // undecidable cell: leave white
+            if      (v >= 0.025f && v < 0.16f)   return 2;
+            else if (v >= 0.16f  && v <= 0.84f)  return 1;
+            else if (v > 0.84f   && v <= 0.975f) return 2;
+            return 0; // outside bands
+        };
+        // Vertical flag stripe a fill column falls in. ireland: 21 stripes
+        // across the x span cycling green/off-white/orange/off-white — 21 ≡ 1
+        // (mod 4) makes the sequence palindromic, green at both edges. Other
+        // styles return a constant so stripe boundaries never split RLE runs.
+        const int n_eire_stripes = 21;
+        auto panel_of_col = [&](int i) -> int {
+            return ireland_style ? (i * n_eire_stripes / n_fill_cols) % 4 : 0;
+        };
+        // Band class -> fill colour, per fill row/stripe. Default: flat
+        // green/yellow. america: Old Glory blue ±1σ; ±2σ becomes 21
+        // horizontal stripes across the axis span. ireland: vertical stripes
+        // by panel (0/2 → green/orange, odd → off-white), paler tint for ±2σ.
+        auto box_color = [&](int cls, int r, int panel) -> int {
+            const int eire_idx = (panel % 2) ? 1 : panel; // 0→green, 1,3→off-white, 2→orange
+            if (cls == 1) {
+                if (ireland_style) return eire_fill[eire_idx];
+                return america_style ? glory_blue : brazil_green;
+            }
+            if (cls == 2) {
+                if (ireland_style) return eire_fill_pale[eire_idx];
+                if (!america_style) return brazil_yellow;
+                const int stripe = ((n_fill_rows - 1 - r) * 21) / n_fill_rows; // odd count: red at top and bottom
+                return (stripe % 2 == 0) ? glory_red : kWhite;
+            }
+            return -1;
+        };
+
+        // RLE fills over a FIXED fine sampling lattice (512 columns × 100
+        // rows), classifying each sample by interpolating h_incl between bin
+        // centers in axis coordinates — the same linear interpolation the
+        // marching-squares outline extraction uses — so the fill transitions
+        // land on the drawn contours instead of stair-stepping a coarse bin
+        // past them. Box HEIGHT is floored at 1/100 of the y-axis span (the
+        // band colouring never needs finer vertical granularity), and the
+        // RLE merge makes wide boxes free: the per-row box count is just the
+        // number of colour transitions. Element count and sampling cost are
+        // therefore bounded regardless of the render resolution and of how
+        // finely the adaptive mesh is refined.
+        auto x_of = [&](float t) {  // t in [0,1] across the x axis, in the axis' own (lin/log) spacing
+            return xlog_axis ? std::pow(10.0f, std::log10(xmin) + t * (std::log10(xmax) - std::log10(xmin)))
+                             : xmin + t * (xmax - xmin);
+        };
+        auto y_of = [&](float t) {
+            return ylog_axis ? std::pow(10.0f, std::log10(ymin) + t * (std::log10(ymax) - std::log10(ymin)))
+                             : ymin + t * (ymax - ymin);
+        };
+        // Per-column / per-row bracketing bin center and interpolation weight.
+        auto lattice_pos = [](float t, int nbins, float coord, auto coord_of, int &i0, float &w) {
+            const float g = std::min(std::max(t * (float)nbins - 0.5f, 0.0f), (float)(nbins - 1));
+            i0 = std::min((int)g, std::max(0, nbins - 2));
+            const float c0 = coord_of(((float)i0 + 0.5f) / (float)nbins);
+            const float c1 = coord_of(((float)i0 + 1.5f) / (float)nbins);
+            w = c1 > c0 ? std::min(std::max((coord - c0) / (c1 - c0), 0.0f), 1.0f) : 0.0f;
+        };
+        std::vector<int> col_i0(n_fill_cols); std::vector<float> col_w(n_fill_cols);
+        for (int i = 0; i < n_fill_cols; ++i) {
+            const float t = ((float)i + 0.5f) / (float)n_fill_cols;
+            lattice_pos(t, W_up, x_of(t), x_of, col_i0[i], col_w[i]);
+        }
+        std::vector<int> row_j0(n_fill_rows); std::vector<float> row_w(n_fill_rows);
+        for (int r = 0; r < n_fill_rows; ++r) {
+            const float t = ((float)r + 0.5f) / (float)n_fill_rows;
+            lattice_pos(t, H_up, y_of(t), y_of, row_j0[r], row_w[r]);
+        }
+        auto v_at = [&](int i, int r) -> float {
+            const int i0 = col_i0[i], j0 = row_j0[r];
+            const float tx = col_w[i], ty = row_w[r];
+            const int i1 = std::min(i0 + 1, W_up - 1), j1 = std::min(j0 + 1, H_up - 1);
+            return (1 - tx) * (1 - ty) * (float)h_incl->GetBinContent(i0 + 1, j0 + 1)
+                 +      tx  * (1 - ty) * (float)h_incl->GetBinContent(i1 + 1, j0 + 1)
+                 + (1 - tx) *      ty  * (float)h_incl->GetBinContent(i0 + 1, j1 + 1)
+                 +      tx  *      ty  * (float)h_incl->GetBinContent(i1 + 1, j1 + 1);
+        };
+        for (int r = 0; r < n_fill_rows; ++r) {
+            const float ylo = y_of((float)r / (float)n_fill_rows);
+            const float yhi = y_of((float)(r + 1) / (float)n_fill_rows);
+            int run_class = 0;   // 0 means "no active fillable run"
+            int run_panel = 0;
+            int run_start = 0;
+            for (int i = 0; i <= n_fill_cols; ++i) {
+                int cls = -1;   // sentinel: forces emit at i == n_fill_cols
+                int panel = 0;
+                if (i < n_fill_cols) {
+                    cls = class_for_v(v_at(i, r));
+                    panel = panel_of_col(i);
+                }
+                if (cls != run_class || panel != run_panel) {
+                    if (run_class > 0) {
+                        const float xlo = x_of((float)run_start / (float)n_fill_cols);
+                        const float xhi = x_of((float)i / (float)n_fill_cols);
+                        TBox *box = new TBox(xlo, ylo, xhi, yhi);
+                        const int col = box_color(run_class, r, run_panel);
+                        box->SetFillColor(col);
+                        box->SetLineColor(col);
+                        box->SetLineWidth(0);
+                        box->Draw();
+                    }
+                    run_class = cls;
+                    run_panel = panel;
+                    run_start = i;
                 }
             }
         }
 
-        auto color_for_v = [&](float v) -> int {
-            if (v < 0.0f) return -1; // undecidable cell: leave white
-            if      (v >= 0.025f && v < 0.16f)   return brazil_yellow;
-            else if (v >= 0.16f  && v <= 0.84f)  return brazil_green;
-            else if (v > 0.84f   && v <= 0.975f) return brazil_yellow;
-            return -1; // outside bands
-        };
-
-        // RLE per row over cell-based v lookups.
-        for (int j = 0; j < H_up; ++j) {
-            const float ylo = (float)h_incl->GetYaxis()->GetBinLowEdge(j + 1);
-            const float yhi = (float)h_incl->GetYaxis()->GetBinUpEdge(j + 1);
-            int run_color = -1;  // -1 means "no active fillable run"
-            int run_start = 0;
-            for (int i = 0; i <= W_up; ++i) {
-                int color = -2; // sentinel: forces emit at i == W_up
-                if (i < W_up) {
-                    const int cid = cell_id_at[(size_t)i * (size_t)H_up + (size_t)j];
-                    color = (cid >= 0) ? color_for_v(inclusion_frac[k][(size_t)cid]) : -1;
-                }
-                if (color != run_color) {
-                    if (run_color >= 0) {
-                        const float xlo = (float)h_incl->GetXaxis()->GetBinLowEdge(run_start + 1);
-                        const float xhi = (float)h_incl->GetXaxis()->GetBinUpEdge(i);
-                        TBox *box = new TBox(xlo, ylo, xhi, yhi);
-                        box->SetFillColor(run_color);
-                        box->SetLineColor(run_color);
-                        box->SetLineWidth(0);
-                        box->Draw();
-                    }
-                    run_color = color;
-                    run_start = i;
+        // america_style: white stars over the ±1σ (blue) band, staggered on
+        // alternate rows like the flag's star field.
+        if (america_style) {
+            const int star_row_step = 6;
+            const int star_col_step = 20;
+            int parity = 0;
+            for (int r = star_row_step / 2; r < n_fill_rows; r += star_row_step, ++parity) {
+                const int off = (parity % 2) ? star_col_step / 2 : 0;
+                for (int i = star_col_step / 2 + off; i < n_fill_cols; i += star_col_step) {
+                    if (class_for_v(v_at(i, r)) != 1) continue;
+                    TMarker *star = new TMarker(x_of(((float)i + 0.5f) / (float)n_fill_cols),
+                                                y_of(((float)r + 0.5f) / (float)n_fill_rows), 29);
+                    star->SetMarkerColor(kWhite);
+                    star->SetMarkerSize(1.5);
+                    star->Draw();
                 }
             }
         }
@@ -1494,9 +1582,10 @@ void plot_brazil_band_pdf(
         outline_at(segs_q84);
         outline_at(segs_q975);
 
-        // (3) Median dashed black line on top.
+        // (3) Median dashed line on top. Black, except white in america
+        // style where it runs over the dark blue ±1σ band.
         for (TGraph *g : segs_med) {
-            g->SetLineColor(kBlack);
+            g->SetLineColor(america_style ? kWhite : kBlack);
             g->SetLineStyle(2);
             g->SetLineWidth(2);
             g->Draw("L SAME");
@@ -1526,19 +1615,21 @@ void plot_brazil_band_pdf(
 
         // Median proxy (dashed black line).
         TGraph *median_proxy = new TGraph();
-        median_proxy->SetLineColor(kBlack);
+        median_proxy->SetLineColor(america_style ? kGray + 2 : kBlack); // white is invisible on the legend, use gray
         median_proxy->SetLineStyle(2);
         median_proxy->SetLineWidth(2);
         leg->AddEntry(median_proxy, "Median Exclusion", "l");
 
-        // ±1σ band proxy (green fill).
+        // ±1σ band proxy (green fill; blue in america, flag green in ireland).
         TBox *box_1sig = new TBox();
-        box_1sig->SetFillColor(brazil_green);
+        box_1sig->SetFillColor(ireland_style ? eire_fill[0]
+                                             : america_style ? glory_blue : brazil_green);
         leg->AddEntry(box_1sig, "#pm 1#sigma", "f");
 
-        // ±2σ band proxy (yellow fill).
+        // ±2σ band proxy (yellow fill; red in america, pale green in ireland).
         TBox *box_2sig = new TBox();
-        box_2sig->SetFillColor(brazil_yellow);
+        box_2sig->SetFillColor(ireland_style ? eire_fill_pale[0]
+                                             : america_style ? glory_red : brazil_yellow);
         leg->AddEntry(box_2sig, "#pm 2#sigma", "f");
 
         if (draw_truth_marker) {
