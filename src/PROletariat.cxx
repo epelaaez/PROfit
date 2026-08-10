@@ -84,14 +84,22 @@ int PROletariat::AddInput(const std::filesystem::path &src, bool required, const
         return 0;
     }
 
-    std::filesystem::path dst = grid_dir_ / (stage_as.empty() ? src.filename().string() : stage_as);
+    std::string name = stage_as.empty() ? src.filename().string() : stage_as;
+    std::filesystem::path dst = grid_dir_ / name;
     if(std::filesystem::exists(dst)) {
-        // Flat grid_dir/ layout: two different sources with the same basename
-        // would silently clobber each other on the worker node.
-        log<LOG_ERROR>(L"%1% || Basename collision in tarball: '%2%' already staged, refusing to overwrite with '%3%'")
-            % __func__ % dst.filename().c_str() % src.c_str();
+        // The same file reachable twice (e.g. --input naming an auto-bundled
+        // artifact) is fine — skip. Two DIFFERENT sources with one basename
+        // would silently clobber each other on the worker node: refuse.
+        auto it = staged_sources_.find(name);
+        if(it != staged_sources_.end() && std::filesystem::equivalent(src, it->second, ec)) {
+            log<LOG_INFO>(L"%1% || Already staged, skipping duplicate: %2%") % __func__ % src.c_str();
+            return 0;
+        }
+        log<LOG_ERROR>(L"%1% || Basename collision in tarball: '%2%' already staged from '%3%', refusing to overwrite with '%4%'")
+            % __func__ % name.c_str() % (it != staged_sources_.end() ? it->second.c_str() : "?") % src.c_str();
         return 1;
     }
+    staged_sources_[name] = std::filesystem::absolute(src);
     if(!std::filesystem::copy_file(src, dst, ec) || ec) {
         log<LOG_ERROR>(L"%1% || Failed to copy '%2%' into staging dir: %3%") % __func__ % src.c_str() % ec.message().c_str();
         return 1;

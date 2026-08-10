@@ -26,6 +26,7 @@
 #define PROLETARIAT_H
 
 #include <filesystem>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -87,6 +88,7 @@ private:
     std::filesystem::path grid_dir_;    ///< stage_dir_/grid_dir.
     std::filesystem::path tarball_;     ///< <cwd>/grid_dir.tar (absolute).
     std::string script_abs_;            ///< Canonical absolute path of opts_.script (used for the file:// URL).
+    std::map<std::string, std::filesystem::path> staged_sources_; ///< staged basename -> source path (collision check).
 };
 
 }

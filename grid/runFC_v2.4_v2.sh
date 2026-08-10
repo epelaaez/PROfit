@@ -186,6 +186,35 @@ fi
 
 say "  mesh: $(stat -c%s "$MESH_EXPECTED") bytes, md5 $(md5sum "$MESH_EXPECTED" | cut -d' ' -f1)"
 
+# --- optional: pre-existing bank for top-up campaigns -------------------------
+# Ship a (merged) bank alongside the mesh and init-bank loads it, throwing only
+# at cells below --n-pe-min and skipping cells already at --n-pe-max. Like the
+# mesh, it must be renamed to what -t/-o imply: ${tag}_${output}_bank.bin.
+# No bank shipped = fresh production, normal for a first campaign.
+BANK_EXPECTED="GRID_${OTAG}_bank.bin"
+
+shopt -s nullglob
+bank_candidates=( *bank*.bin )
+shopt -u nullglob
+
+if [ ${#bank_candidates[@]} -gt 1 ]; then
+    fail "expected at most 1 bank file, found ${#bank_candidates[@]}: ${bank_candidates[*]}"
+    say "refusing to guess which one to use"
+    exit 71
+elif [ ${#bank_candidates[@]} -eq 1 ]; then
+    BANK_FOUND=${bank_candidates[0]}
+    if [ "$BANK_FOUND" = "$BANK_EXPECTED" ]; then
+        say "bank already correctly named: $BANK_EXPECTED"
+    else
+        say "renaming bank for top-up: $BANK_FOUND -> $BANK_EXPECTED"
+        mv "$BANK_FOUND" "$BANK_EXPECTED" || { fail "bank rename failed"; exit 72; }
+    fi
+    say "  bank: $(stat -c%s "$BANK_EXPECTED") bytes, md5 $(md5sum "$BANK_EXPECTED" | cut -d' ' -f1)"
+    say "  top-up mode: init-bank will skip cells already at --n-pe-max"
+else
+    say "no bank shipped — init-bank starts fresh (normal for a first campaign)"
+fi
+
 # --- run ---------------------------------------------------------------------
 say "launching PROfit..."
 echo "----------------------------------------------------------------------"
