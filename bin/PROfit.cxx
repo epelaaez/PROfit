@@ -233,7 +233,7 @@ std::vector<FixedSeed> buildBkgOnlyFixedSeeds(const PROmodel &model, const Eigen
     return out;
 }
 
-std::map<std::string, TObject *> draw_fit_result(const PROconfig &config, const PROpeller &prop, const PROmodel &model, const PROsyst &syst, PROmetric &metric, const PROspec &cv, const PROdata &data, const GlobalFitResult &fitres, const std::string &prefix, PlotOptions popt, PlotBounds pbounds);
+std::map<std::string, TObject *> draw_fit_result(const PROconfig &config, const PROpeller &prop, const PROmodel &model, const PROsyst &syst, PROmetric &metric, const PROspec &cv, const PROdata &data, const GlobalFitResult &fitres, const std::string &prefix, PlotOptions popt, PlotBounds pbounds, bool plot_channel_ratios = false);
 void draw_harmonic_scan_pdf(const GlobalFitResult &fitres, const PROfitterConfig &fit_config, const PROmodel &model, const std::string &filename);
 
 // Walks the collapsed reco bins and logs any with prediction < threshold,
@@ -422,6 +422,12 @@ int main(int argc, char* argv[])
     app.add_flag("--data-mc-ratio", data_mc_ratio, "For ratio plots, use data/pre-fit mc instead of data/best-fit mc.");
     app.add_option("--scale", scale_arg, "Scale detector POT by a given value.");
     app.add_option("--plot-bounds", bound_list, "Plot bounds, set by  string float pairs. Available strings are ymax,ratmin,ratmax."); 
+    bool plot_channel_ratios = false;
+    app.add_flag("--plot-ratios", plot_channel_ratios,
+        "Also draw channel-to-channel ratio spectra within each detector (plot, "
+        "global and profile). The two channels must share the same binning for the "
+        "ratio to be defined; pairs with different binning are skipped and logged "
+        "as a warning.");
 
     //app.add_option("-f, --rwfile", reweights_file, "File containing histograms for reweighting");//deprociated, add back in later
     //app.add_option("-r, --mockrw",   mockreweights, "Vector of reweights to use for mock data");
@@ -514,7 +520,7 @@ int main(int argc, char* argv[])
         "correlation is retained in the band but not in the data errors. "
         "Example: --bkg-subtract numu_bkg matches every <detector>_numu_bkg "
         "subchannel.");
-
+        
     //PROfc, Feldmand-Cousins
     CLI::App *profc_command = app.add_subcommand("fc", "Run Feldman-Cousins for this injected signal");
     profc_command->add_option("-u,--universes", nuniv, "Number of Feldman Cousins universes to throw")->default_val(1000);
@@ -1499,8 +1505,8 @@ int main(int argc, char* argv[])
         }
         if(binwidth_scale) popt |= PlotOptions::BinWidthScaled;
         if(area_normalized) popt |= PlotOptions::AreaNormalized;
-        std::map<std::string, TObject *> drawn_objs = draw_fit_result(config, prop, metric->GetModel(), metric->GetSysts(), *metric, cv, data, fitres, final_output_tag+"_PROfile", popt, pbounds);
 
+        std::map<std::string, TObject *> drawn_objs = draw_fit_result(config, prop, metric->GetModel(), metric->GetSysts(), *metric, cv, data, fitres, final_output_tag+"_PROfile", popt, pbounds, plot_channel_ratios);
 
         plot_mcmc_1sigma(final_output_tag+"_PROfile", config, metric->GetSysts(), metric->GetModel(), fitres.fitter.best_fit, fitres.post_param_lo, fitres.post_param_hi, !systs_only, fakedataparams);
 
@@ -1941,7 +1947,7 @@ int main(int argc, char* argv[])
                 cv_plot.Spec() -= bkg_full;
             }
             auto objs = plot_channels(final_output_tag+"_PROplot_Variable_"+std::to_string(io)+"_CV.pdf", config, cv_plot, {}, {}, {}, {}, notext, pbounds, opt, io,
-                    false, do_bkg_subtract ? &bkg_subchannels : nullptr);
+                    false, plot_channel_ratios, do_bkg_subtract ? &bkg_subchannels : nullptr);
             cv_objs.push_back(objs);
         }
 
@@ -1950,6 +1956,10 @@ int main(int argc, char* argv[])
         std::string rfilename = final_output_tag+"_ratio_fractional_systematics.pdf";
         if(config.m_num_detectors > 1)
             plotPriorFractionalSystematicRatios(config, variable_cvs[config.i_prime], allcovsyst, rfilename,config.i_prime);
+
+        std::string crfilename = final_output_tag+"_channel_ratio_fractional_systematics.pdf";
+        if(plot_channel_ratios && config.m_num_channels > 1)
+            plotPriorFractionalSystematicChannelRatios(config, variable_cvs[config.i_prime], allcovsyst, crfilename, config.i_prime);
 
         std::vector<std::map<std::string, std::unique_ptr<TH1D>>> other_hists;
         for(size_t io = 0; io < config.m_num_variables; ++io) {
@@ -2522,7 +2532,7 @@ int main(int argc, char* argv[])
             }
             auto objs = plot_channels(final_output_tag+"_PROplot_Variable_"+std::to_string(io)+"_ErrorBand.pdf", config, cv_plot, {}, data_plot,
                     other_err_bands.back(), {}, other_channel_chitexts[io], pbounds, opt | PlotOptions::DataMCRatio, io,
-                    false, do_bkg_subtract ? &bkg_subchannels : nullptr,
+                    false, plot_channel_ratios, do_bkg_subtract ? &bkg_subchannels : nullptr,
                     io == config.i_prime ? allcov_metric.get() : nullptr,
                     io == config.i_prime ? &variable_cvs[io] : nullptr);
             errband_objs.push_back(objs);
@@ -2984,7 +2994,8 @@ int main(int argc, char* argv[])
         }
         if(binwidth_scale) popt |= PlotOptions::BinWidthScaled;
         if(area_normalized) popt |= PlotOptions::AreaNormalized;
-        std::map<std::string, TObject *> drawn_objs = draw_fit_result(config, prop, metric->GetModel(), metric->GetSysts(), *metric, cv, data, fitres, final_output_tag+"_PROglobal", popt, pbounds);
+
+        std::map<std::string, TObject *> drawn_objs = draw_fit_result(config, prop, metric->GetModel(), metric->GetSysts(), *metric, cv, data, fitres, final_output_tag+"_PROglobal", popt, pbounds, plot_channel_ratios);
 
         TFile fout((final_output_tag+"_PROglobal.root").c_str(), "RECREATE");
         for(const auto &[n, o] : drawn_objs)
@@ -3795,7 +3806,7 @@ void draw_harmonic_scan_pdf(const GlobalFitResult &fitres, const PROfitterConfig
     log<LOG_INFO>(L"%1% || Wrote harmonic scan summary to %2%") % __func__ % filename.c_str();
 }
 
-std::map<std::string, TObject *> draw_fit_result(const PROconfig &config, const PROpeller &prop, const PROmodel &model, const PROsyst &syst, PROmetric &metric, const PROspec &cv, const PROdata &data, const GlobalFitResult &fitres, const std::string &prefix, PlotOptions popt, PlotBounds pbounds) {
+std::map<std::string, TObject *> draw_fit_result(const PROconfig &config, const PROpeller &prop, const PROmodel &model, const PROsyst &syst, PROmetric &metric, const PROspec &cv, const PROdata &data, const GlobalFitResult &fitres, const std::string &prefix, PlotOptions popt, PlotBounds pbounds, bool plot_channel_ratios) {
     std::map<std::string, TObject *> drawn_objs;
 
     // Harmonic-scan diagnostics: the scan curve chi2(freq) and the refit seed
@@ -3918,7 +3929,7 @@ std::map<std::string, TObject *> draw_fit_result(const PROconfig &config, const 
         chi2text.SetTextAlign(12);
         texts.push_back(chi2text);
 
-        std::map<std::string, TObject *> tmp_objs = plot_channels((prefix+"_hists.pdf"), config, cv, bf, data, fitres.err_band, fitres.post_err_band, texts, pbounds, popt, config.i_prime, false, nullptr, &metric, &bf);
+        std::map<std::string, TObject *> tmp_objs = plot_channels((prefix+"_hists.pdf"), config, cv, bf, data, fitres.err_band, fitres.post_err_band, texts, pbounds, popt, config.i_prime, false, plot_channel_ratios, nullptr, &metric, &bf);
         for(const auto &[name, obj] : tmp_objs)
             drawn_objs[name] = obj;
     }
