@@ -23,6 +23,7 @@
 #include "PROplot.h"
 #include "PROjector.h"
 #include "PRObench.h"
+#include "PROletariat.h"
 
 #include "CLI11.h"
 #include "LBFGSB.h"
@@ -623,6 +624,31 @@ int main(int argc, char* argv[])
     bench_command->add_option("-N,--n", bench_N, "Base call count: FillSpectra=N, metric=N/10, fit=N/100.")->default_val(1000);
     bench_command->add_option("--tests", bench_tests_str, "Comma-separated subset of {a..n} or {fillspectra,metric,metricgrad,fit,pseudo,collapse,mcmc,all}. Default 'all'.")->default_val("all");
 
+    //PROletariat, stage+tar+submit grid jobs (replaces grid/maketar_submit_v2.4.sh)
+    PROletariatOptions grid_opts;
+    std::string grid_backend_str = "jobsub";
+    CLI::App *proletariat_command = app.add_subcommand("proletariat",
+        "Stage the PROfit binary, XML and analysis artifacts into grid_dir.tar and submit N grid jobs running a worker script via jobsub_submit. Replaces grid/maketar_submit_v2.4.sh.");
+    proletariat_command->add_option("--script", grid_opts.script,
+        "Worker script executed on each grid node (e.g. grid/runFC_v2.4_v2.sh).")->required();
+    proletariat_command->add_option("-N,--n-jobs", grid_opts.njobs, "Number of grid jobs.")->default_val(2);
+    proletariat_command->add_option("--lifetime", grid_opts.lifetime, "Expected job lifetime (3d is the FermiGrid ceiling).")->default_str("2d");
+    proletariat_command->add_option("--memory", grid_opts.memory_mb, "Requested memory in MB.")->default_val(4000);
+    proletariat_command->add_option("--disk", grid_opts.disk_mb, "Requested scratch disk in MB.")->default_val(10000);
+    proletariat_command->add_option("--input", grid_opts.extra_inputs,
+        "Extra file(s) to bundle into the tarball (repeatable). A missing file is a hard error. The XML and any <tag>_prop.bin/_syst.bin and <tag>_<output>_mesh.bin/_bank.bin in the current directory are bundled automatically.");
+    proletariat_command->add_flag("--dry-run", grid_opts.dry_run,
+        "Stage and build the tarball, print the exact jobsub_submit command, do not submit.");
+    proletariat_command->add_option("--backend", grid_backend_str, "Scheduler backend: jobsub or slurm (slurm not yet implemented).")->default_str("jobsub");
+    proletariat_command->add_option("--group", grid_opts.group, "jobsub experiment group (-G).")->default_str("sbnd");
+    proletariat_command->add_option("--role", grid_opts.role, "jobsub --role.")->default_str("Analysis");
+    proletariat_command->add_option("--singularity-image", grid_opts.singularity_image, "Apptainer/Singularity image path.");
+    proletariat_command->add_option("--resource-provides", grid_opts.resource_provides, "jobsub --resource-provides usage model.");
+    proletariat_command->add_option("--lines", grid_opts.condor_lines,
+        "Condor classad --lines entries. REPLACES the FERMIHTC defaults when given; to append instead, use --jobsub-arg.");
+    proletariat_command->add_option("--jobsub-arg", grid_opts.extra_jobsub_args, "Extra raw argument passed through to jobsub_submit verbatim (repeatable).");
+    proletariat_command->add_option("--profit-bin", grid_opts.profit_bin, "Override the PROfit binary to ship (default: this executable, via /proc/self/exe).");
+
     app.set_config("--config");
     surface_command->configurable(true);
     process_command->configurable(true);
@@ -633,6 +659,7 @@ int main(int argc, char* argv[])
     proplot_command->configurable(true);
     promcmc_command->configurable(true);
     bench_command->configurable(true);
+    proletariat_command->configurable(true);
 
     //Parse inputs. 
     CLI11_PARSE(app, argc, argv);
@@ -658,8 +685,21 @@ int main(int argc, char* argv[])
     log<LOG_WARNING>(L" %1% ") % getIcon().c_str()  ;
     std::string final_output_tag =analysis_tag +"_"+output_tag;
 
-
-
+    // Grid submission dispatches here, BEFORE PROconfig/CAF/syst setup: it
+    // only needs the XML path and tags, not the loaded analysis.
+    if(*proletariat_command){
+        grid_opts.xml              = xmlname;
+        grid_opts.analysis_tag     = analysis_tag;
+        grid_opts.final_output_tag = final_output_tag;
+        if(grid_backend_str == "slurm") {
+            grid_opts.backend = PROletariatOptions::Backend::Slurm;
+        } else if(grid_backend_str != "jobsub") {
+            log<LOG_ERROR>(L"%1% || Unknown --backend '%2%' (expected jobsub or slurm).") % __func__ % grid_backend_str.c_str();
+            return 1;
+        }
+        PROletariat submitter(grid_opts);
+        return submitter.Run();
+    }
 
     log<LOG_WARNING>(L"%1% || ##################################################################") % __func__  ;
     log<LOG_WARNING>(L"%1% || ####################### PROfit version v%2% ######################") % __func__ % PROJECT_VERSION_STR ;
