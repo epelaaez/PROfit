@@ -76,6 +76,8 @@
 #include <cmath>
 #include <cstdint>
 #include <functional>
+#include <limits>
+#include <mutex>
 #include <vector>
 
 namespace PROfit {
@@ -113,6 +115,57 @@ namespace PROfit {
     };
 
     /**
+     * @brief Cross-thread, cross-parameter tracker of the lowest chi² seen by
+     * ANY scan fit during a profile.
+     * @details A profile scan can stumble on a lower global minimum than the
+     * caller's global fit (the fit was trapped in a local minimum). The
+     * per-parameter seed_bank cannot propagate that discovery to the OTHER
+     * parameters' scans — this tracker can: initialised with the global fit's
+     * (chi², best-fit), every accepted scan fit is offered to update(), and
+     * once a fit has genuinely improved on the init value, seed_if_improved()
+     * hands the improved point to every subsequent fit of every parameter as
+     * one extra warm-start seed. This keeps all profile curves consistent with
+     * the true minimum (their Δχ² dips get found rather than missed), at the
+     * cost of one extra LBFGS pass per fit only AFTER an improvement exists.
+     * All methods are mutex-guarded (microseconds vs ~0.1-1 s per fit).
+     */
+    struct ScanGlobalMin {
+        /// Seed the tracker with the caller's global-fit minimum before a scan
+        /// starts. seed_if_improved() stays empty until a fit beats this value.
+        void init(float chi2, Eigen::VectorXf bf) {
+            std::lock_guard<std::mutex> lock(mutex);
+            chi2_ = chi2;
+            best_fit_ = std::move(bf);
+            improved_ = false;
+        }
+        /// Offer a completed fit; returns true (and adopts it) if it is the new minimum.
+        bool update(float chi2, const Eigen::VectorXf &bf) {
+            std::lock_guard<std::mutex> lock(mutex);
+            if(!(chi2 < chi2_)) return false;
+            chi2_ = chi2;
+            best_fit_ = bf;
+            improved_ = true;
+            return true;
+        }
+        /// Best-fit vector of the tracked minimum — but only once a scan fit has
+        /// improved on the init value; empty otherwise (so callers append it as a
+        /// warm-start seed only when it adds information beyond the global seeds).
+        Eigen::VectorXf seed_if_improved() const {
+            std::lock_guard<std::mutex> lock(mutex);
+            return improved_ ? best_fit_ : Eigen::VectorXf{};
+        }
+        float min_chi2() const {
+            std::lock_guard<std::mutex> lock(mutex);
+            return chi2_;
+        }
+    private:
+        mutable std::mutex mutex;
+        float chi2_ = std::numeric_limits<float>::infinity();
+        Eigen::VectorXf best_fit_;
+        bool improved_ = false;
+    };
+
+    /**
      * @brief The single "profile fit at fixed θ" primitive shared by the legacy
      * 18-point scan and PRObe.
      * @details fitAt pins the scanned axis (tlb[param_idx] = tub[param_idx] = θ
@@ -138,6 +191,10 @@ namespace PROfit {
         /// whose pins conflict with the scan point's bounds (e.g. profiling the very
         /// parameter it pins) is skipped inside PROfitter::Fit. Non-owning; may be null.
         const std::vector<FixedSeed> *fixed_seeds = nullptr;
+        /// Optional shared tracker of the scan-wide lowest chi² (see ScanGlobalMin).
+        /// When set, every accepted fit is offered to it, and its improved point (if
+        /// any) is appended to the warm-start seeds of every fit. Non-owning; may be null.
+        ScanGlobalMin *global_min = nullptr;
         int call_count = 0;                   ///< Fits attempted so far (advances the RNG sequence).
 
         struct Outcome {

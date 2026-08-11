@@ -372,7 +372,7 @@ std::vector<profOut> PROfile::PROfilePointHelper(const PROsyst *systs, const PRO
         }
         ScanFitContext ctx{*local_metric, tlb, tub, which_spline, fitconfig,
                            seed + (uint32_t)t_idx * 101u, seed_points, store, on_fit_cb,
-                           &fixed_seed_points};
+                           &fixed_seed_points, &global_min_tracker};
 
         // Fixed parameter (--fix / lb==ub): one fit at the pinned value, same
         // for both scan strategies (PRObe previously returned an EMPTY scan
@@ -965,11 +965,11 @@ void PROsurf::PlotCurve(const PROconfig &config, const PROmodel &model, const PR
     textbox->SetTextAlign(12);  // Left align
     textbox->SetTextSize(0.04);
 
-    textbox->AddText(("Start: " + xlabel + " = " + to_string_prec(A[0],3)).c_str());
-    textbox->AddText(("       " + ylabel + " = " + to_string_prec(A[1],3)).c_str());
+    textbox->AddText(("Start: " + xlabel + " = " + to_string_prec(to_plot_x(A[xaxis_idx]),3)).c_str());
+    textbox->AddText(("       " + ylabel + " = " + to_string_prec(to_plot_y(A[yaxis_idx]),3)).c_str());
     textbox->AddText("");  // Blank line
-    textbox->AddText(("End:   " + xlabel + " = " + to_string_prec(B[0],3)).c_str());
-    textbox->AddText(("       " + ylabel + " = " + to_string_prec(B[1],3)).c_str());
+    textbox->AddText(("End:   " + xlabel + " = " + to_string_prec(to_plot_x(B[xaxis_idx]),3)).c_str());
+    textbox->AddText(("       " + ylabel + " = " + to_string_prec(to_plot_y(B[yaxis_idx]),3)).c_str());
     textbox->Draw();
 
     p1->RedrawAxis();
@@ -1127,6 +1127,11 @@ PROfile::PROfile(const PROconfig &config, const PROsyst &systs, const PROmodel &
     // every completed scan-point fit and queried for the nearest-in-value seed.
     // Must be sized before any worker thread launches.
     seed_bank.assign(model.nparams + systs.GetNSplines(), {});
+
+    // Live global-minimum tracker: starts at the caller's global fit; a scan fit
+    // that beats it re-seeds all subsequent fits (of every parameter) from the
+    // improved point. Must be initialised before any worker thread launches.
+    global_min_tracker.init(minchi, seed_points.empty() ? Eigen::VectorXf{} : seed_points.front());
 
     // Resolve dispatcher state up-front so the progress-bar config knows per-bar totals.
     const int nparams_helper = (int)model.nparams + (int)systs.GetNSplines();
@@ -1298,6 +1303,55 @@ PROfile::PROfile(const PROconfig &config, const PROsyst &systs, const PROmodel &
     }
     if(fitconfig.progress_bar) prof_progress.finish_all();
 
+    // ------------------------------------------------------------------
+    // Re-baseline the curves to the true minimum found by the scan.
+    // knob_chis were collected as (chi2 - minchi) against the CALLER's global
+    // fit; if any scan fit found a lower minimum (the global fit was trapped
+    // in a local one — the live global_min_tracker will already have propagated
+    // it into later fits' seeds), those deltas are negative and every
+    // downstream consumer breaks: the Delta-chi2 plots clip at zero with
+    // curves diving below the axis, and the points file's deltas reference the
+    // wrong minimum. Shift every curve so Delta-chi2 is measured from the
+    // actual minimum, and publish a genuinely-lower minimum through
+    // newglob/newglob_param for the caller to adopt.
+    float updated_minchi = minchi;
+    {
+        float min_delta = 0.0f;
+        const Eigen::VectorXf *min_bf = nullptr;
+        for(const auto &out : combinedResults)
+            for(size_t u = 0; u < out.knob_chis.size(); ++u)
+                if(out.knob_chis[u] < min_delta && out.knob_bfs[u].size() > 0) {
+                    min_delta = out.knob_chis[u];
+                    min_bf = &out.knob_bfs[u];
+                }
+        if(min_bf) {
+            const float chidiff = -min_delta;
+            // Classify how different the new minimum really is: same point up
+            // to float noise, degenerate phase space, or a genuinely lower
+            // minimum. Only the last is published as a new global best fit;
+            // the curves are re-baselined in all three cases so the plotted
+            // Delta-chi2 never dips below zero.
+            float bfnorm_without_phys = seed_points.size() ? seed_points.front().tail(seed_points.front().size() - model.nparams).norm() : 1;
+            Eigen::VectorXf param_diff = seed_points.size() ? *min_bf - seed_points.front() : *min_bf;
+            float norm_without_phys = param_diff.tail(param_diff.size() - model.nparams).norm();
+            const float relative_tol1 = 1e-3f;
+            if( (norm_without_phys < relative_tol1*bfnorm_without_phys)  &&  (chidiff < relative_tol1*minchi) ){
+                log<LOG_WARNING>(L"%1% || Warning. A lower global best fit was found during PROfile, but less than relatively 1e-3f from global best fit (%2%), and pull parameters norm less than 1e-3 (%3%) from best_fit nuisence values. AKA same point.") % __func__ % float(chidiff/minchi) % float(norm_without_phys/bfnorm_without_phys);
+            } else if(chidiff < relative_tol1*minchi) {
+                log<LOG_WARNING>(L"%1% || Warning. A lower global best fit was found during PROfile, but less than relatively 1e-3f from global best fit (%2%), although pull parameters norm more than 1e-3 (%3%) from best_fit nuisence values. Not uncommon in degenerate phase space.") % __func__ % float(chidiff/minchi) % float(norm_without_phys/bfnorm_without_phys);
+            } else {
+                log<LOG_WARNING>(L"%1% || Warning. A lower global best fit was found during PROfile. Difference greater than relative 1e-3f from global best fit (%2%). Rel Difference pull parameters norm (%3%). Adopting it as the global best fit (newglob/newglob_param).") % __func__ % float(chidiff/minchi) % float(norm_without_phys/bfnorm_without_phys);
+                log<LOG_WARNING>(L"%1% || -- minchi %2% and chidiff %3% ") % __func__ % minchi % chidiff;
+                newglob = minchi + min_delta;
+                newglob_param = *min_bf;
+            }
+            updated_minchi = minchi + min_delta;
+            for(auto &out : combinedResults)
+                for(auto &c : out.knob_chis) c -= min_delta;
+            log<LOG_WARNING>(L"%1% || Re-baselined all profile curves to the scan minimum chi2 %2% (caller's global fit gave %3%); Delta-chi2 = 0 now sits at the true minimum.") % __func__ % updated_minchi % minchi;
+        }
+    }
+
     // Scan-mode timing summary. Logs at LOG_ERROR level so it shows up at any
     // verbosity. Emits parallelism efficiency = total CPU fit-time / (wall × nthreads):
     // close to 1.0 means all threads stayed busy; far below 1.0 means tail imbalance.
@@ -1348,6 +1402,10 @@ PROfile::PROfile(const PROconfig &config, const PROsyst &systs, const PROmodel &
     prof_file << "# PROfile scan points written by PROfit\n";
     prof_file << "# This file contains the profile curves shown in PROfile.pdf\n";
     prof_file << "# columns: param_index param_type param_name fixed_value delta_chi2 chi_post\n";
+    prof_file << "# delta_chi2 baseline (global minimum chi2): " << std::setprecision(12) << updated_minchi;
+    if(updated_minchi != minchi)
+        prof_file << "  (scan found a lower minimum than the caller's global fit chi2 = " << minchi << ")";
+    prof_file << "\n";
 
     size_t n_model_params = with_osc ? model.nparams : 0;
 
@@ -1360,7 +1418,7 @@ PROfile::PROfile(const PROconfig &config, const PROsyst &systs, const PROmodel &
         for(size_t j = 0; j < combinedResults[iparam].knob_vals.size(); ++j) {
             float fixed_value = combinedResults[iparam].knob_vals.at(j);
             float delta_chi2  = combinedResults[iparam].knob_chis.at(j);
-            float chi_post    = delta_chi2 + minchi;
+            float chi_post    = delta_chi2 + updated_minchi;
 
             prof_file << iparam << " "
                       << param_type << " "
@@ -1380,41 +1438,13 @@ PROfile::PROfile(const PROconfig &config, const PROsyst &systs, const PROmodel &
         % __func__ % outname.c_str();
 }
 
-    //create all graphs, used directly in first setion
+    //create all graphs, used directly in first setion. knob_chis are already
+    //re-baselined to the scan-wide minimum above, so no curve dips below zero.
     for(auto & out: combinedResults){
         log<LOG_INFO>(L"%1% || Knob Values: %2%") % __func__ %  out.knob_vals;
         log<LOG_INFO>(L"%1% || Knob Chis: %2%") % __func__ %  out.knob_chis;
         std::unique_ptr<TGraph> g = std::make_unique<TGraph>(out.knob_vals.size(), out.knob_vals.data(), out.knob_chis.data());
         graphs.push_back(std::move(g));
-        for(size_t u=0; u< out.knob_vals.size(); u++){
-            if(out.knob_chis.at(u)<0){
-                float chidiff = fabs(out.knob_chis.at(u));
-                float bfnorm_without_phys = seed_points.size() ? seed_points.front().tail(seed_points.front().size() - model.nparams).norm() : 1;
-
-                Eigen::VectorXf param_diff = seed_points.size() ? out.knob_bfs.at(u)-seed_points.front() : out.knob_bfs.at(u);
-                float norm_without_phys = param_diff.tail(param_diff.size() - model.nparams).norm();
-
-                float relative_tol1 = 1e-3;
-
-                if( (norm_without_phys < relative_tol1*bfnorm_without_phys)  &&  (chidiff< relative_tol1*minchi) ){
-                    log<LOG_WARNING>(L"%1% || Warning. A lower global best fit was found during PROfile, but less than relatively 1e-3f from global best fit (%2%), and pull parameters norm less than 1e-3 (%3%)from best_fit nuisence values. AKA same point.") % __func__ % float(chidiff/minchi) % float(norm_without_phys/bfnorm_without_phys);
-                }else if((chidiff< relative_tol1*minchi)){
-                    log<LOG_WARNING>(L"%1% || Warning. A lower global best fit was found during PROfile, but less than relatively 1e-3f from global best fit (%2%), although pull parameters norm more than 1e-3 (%3%) from best_fit nuisence values. Not uncommon in degenerate phase space.") % __func__ % float(chidiff/minchi) % float(norm_without_phys/bfnorm_without_phys); 
-                }else{
-                    log<LOG_WARNING>(L"%1% || Warning. A lower global best fit was found during PROfile. Difference greater than relative 1e-3f from global best fit (%2%). Rel Difference pull parameters norm (%3%). This is enough that could consider updating global best fit values and restarting.") % __func__ % float(chidiff/minchi) % float(norm_without_phys/bfnorm_without_phys)  ;
-                    log<LOG_WARNING>(L"%1% || -- minchi %2% and chidiff %3% ") % __func__ % minchi % chidiff  ;
-                    // log<LOG_ERROR>(L"%1% || TEMP chi glob %2% new %3% ") % __func__ % minchi % out.knob_chis.at(u);
-                    // log<LOG_ERROR>(L"%1% || TEMP norm %2% pull norm %3% ") % __func__ % norm % norm_without_phys;
-                    // log<LOG_ERROR>(L"%1% || TEMP chi param %2% ") % __func__ % seed_points.front() ;
-                    // log<LOG_ERROR>(L"%1% || TEMP new param %2% ") % __func__ % out.knob_bfs.at(u);
-
-
-                    newglob=out.knob_chis.at(u)+minchi;
-                    newglob_param = out.knob_bfs.at(u);
-
-                }
-            }
-        }
     }
 
     //Analyze them, used in later section

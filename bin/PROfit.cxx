@@ -23,6 +23,7 @@
 #include "PROplot.h"
 #include "PROjector.h"
 #include "PRObench.h"
+#include "PROletariat.h"
 
 #include "CLI11.h"
 #include "LBFGSB.h"
@@ -232,7 +233,7 @@ std::vector<FixedSeed> buildBkgOnlyFixedSeeds(const PROmodel &model, const Eigen
     return out;
 }
 
-std::map<std::string, TObject *> draw_fit_result(const PROconfig &config, const PROpeller &prop, const PROmodel &model, const PROsyst &syst, const PROspec &cv, const PROdata &data, const GlobalFitResult &fitres, const std::string &prefix, PlotOptions popt, PlotBounds pbounds, bool plot_channel_ratios = false);
+std::map<std::string, TObject *> draw_fit_result(const PROconfig &config, const PROpeller &prop, const PROmodel &model, const PROsyst &syst, PROmetric &metric, const PROspec &cv, const PROdata &data, const GlobalFitResult &fitres, const std::string &prefix, PlotOptions popt, PlotBounds pbounds, bool plot_channel_ratios = false);
 void draw_harmonic_scan_pdf(const GlobalFitResult &fitres, const PROfitterConfig &fit_config, const PROmodel &model, const std::string &filename);
 
 // Walks the collapsed reco bins and logs any with prediction < threshold,
@@ -331,6 +332,7 @@ int main(int argc, char* argv[])
     bool statonly_brazil = false;
     bool single_brazil = false;
     bool only_brazil = false;
+    int n_brazil_throws = 1000;
     std::vector<std::string> brazil_throws;
     std::vector<float> procurve_points;
 
@@ -367,6 +369,7 @@ int main(int argc, char* argv[])
     int   afc_update_layer = 0;
     int   afc_only_layer   = -1;
     int   afc_n_brazil_throws = 100;
+    std::string afc_flag;
     float afc_roi_band = 8.0f;
     std::vector<std::string> afc_merge_inputs;
     std::vector<float> afc_cleanup_quantiles = {0.025f, 0.975f};
@@ -481,7 +484,8 @@ int main(int argc, char* argv[])
     surface_command->add_option("--ylabel", ylabel, "Y-axis label");
     surface_command->add_flag("--logx,!--linx", logx, "Specify if x-axis is logarithmic or linear (default log)");
     surface_command->add_flag("--logy,!--liny", logy, "Specify if y-axis is logarithmic or linear (default log)");
-    surface_command->add_flag("--brazil-band", run_brazil, "Run 1000 throws of stats+systs and draw 1 sigma and 2 sigma Brazil bands");
+    surface_command->add_flag("--brazil-band", run_brazil, "Run throws of stats+systs and draw 1 sigma and 2 sigma Brazil bands");
+    surface_command->add_option("--n-brazil-throws", n_brazil_throws, "Number of throws for the Brazil band")->needs("--brazil-band")->default_val(1000);
     surface_command->add_flag("--stat-throws", statonly_brazil, "Only do stat throws for the Brazil band")->needs("--brazil-band");
     surface_command->add_flag("--single-throw", single_brazil, "Only run a single iteration of the Brazil band")->needs("--brazil-band");
     surface_command->add_flag("--only-throw", only_brazil, "Only run Brazil band throws and not the nominal surface")->needs("--brazil-band");
@@ -536,13 +540,16 @@ int main(int argc, char* argv[])
         "asimov: load <tag>_bank.bin and write FC contour + verdict PDFs. "
         "merge-mesh: union-merge >=2 --merge-input mesh binaries into <tag>_mesh.bin. "
         "merge-bank: harvest PEs from >=1 --merge-input bank binaries onto <tag>_mesh.bin. "
+        "merge-brazil: union throws from >=1 --merge-input brazil archives into <tag>_brazil.bin, "
+        "re-classify against <tag>_bank.bin and emit the band PDF + ROOT (no fits; "
+        "bitwise-duplicate throws from same---seed runs are dropped). "
         "brazil-cleanup: mesh densified at the Brazil +-2sigma contours -> <tag>_cleanup_mesh.bin. "
         "print-mesh: plot <tag>_mesh.bin (or --merge-input mesh files) as PDFs.")
         ->default_str("build-mesh");
     afc_command->add_option("--merge-input", afc_merge_inputs,
-        "Input artifact filenames for merge-mesh / merge-bank (repeatable; "
-        "glob patterns like 'run*_mesh.bin' are expanded). Output goes to the "
-        "normal <output_tag>-prefixed artifacts.")->expected(-1);
+        "Input artifact filenames for merge-mesh / merge-bank / merge-brazil "
+        "(repeatable; glob patterns like 'run*_mesh.bin' are expanded). Output "
+        "goes to the normal <output_tag>-prefixed artifacts.")->expected(-1);
     afc_command->add_option("--cleanup-quantiles", afc_cleanup_quantiles,
         "brazil-cleanup: inclusion-fraction quantile levels whose contour "
         "crossings get finest refinement (default 0.025 0.975 = the Brazil "
@@ -597,6 +604,11 @@ int main(int argc, char* argv[])
         "Number of pseudo-experiment throws for --mode brazil. Each throw is one FC-style realisation "
         "(syst+stat) classified against the bank. Aggregated into per-cell inclusion fractions and "
         "median +/- 1sigma / +/- 2sigma Brazil-band contours.");
+    afc_command->add_option("--flag", afc_flag,
+        "Draw the --mode brazil band PDF styled after a national flag (same <tag>_brazil.bin archive). "
+        "america: +-1sigma blue with white stars, +-2sigma red/white horizontal stripes. "
+        "ireland: alternating green/off-white/orange/off-white vertical stripes (+-2sigma paler).")
+        ->check(CLI::IsMember({"america", "ireland"}));
     afc_command->add_option("--roi-band", afc_roi_band, "ROI Delta-chi^2 band (slice 2c).");
 
     //PROglobal
@@ -618,6 +630,31 @@ int main(int argc, char* argv[])
     bench_command->add_option("-N,--n", bench_N, "Base call count: FillSpectra=N, metric=N/10, fit=N/100.")->default_val(1000);
     bench_command->add_option("--tests", bench_tests_str, "Comma-separated subset of {a..n} or {fillspectra,metric,metricgrad,fit,pseudo,collapse,mcmc,all}. Default 'all'.")->default_val("all");
 
+    //PROletariat, stage+tar+submit grid jobs (replaces grid/maketar_submit_v2.4.sh)
+    PROletariatOptions grid_opts;
+    std::string grid_backend_str = "jobsub";
+    CLI::App *proletariat_command = app.add_subcommand("proletariat",
+        "Stage the PROfit binary, XML and analysis artifacts into grid_dir.tar and submit N grid jobs running a worker script via jobsub_submit. Replaces grid/maketar_submit_v2.4.sh.");
+    proletariat_command->add_option("--script", grid_opts.script,
+        "Worker script executed on each grid node (e.g. grid/runFC_v2.4_v2.sh).")->required();
+    proletariat_command->add_option("-N,--n-jobs", grid_opts.njobs, "Number of grid jobs.")->default_val(2);
+    proletariat_command->add_option("--lifetime", grid_opts.lifetime, "Expected job lifetime (3d is the FermiGrid ceiling).")->default_str("2d");
+    proletariat_command->add_option("--memory", grid_opts.memory_mb, "Requested memory in MB.")->default_val(4000);
+    proletariat_command->add_option("--disk", grid_opts.disk_mb, "Requested scratch disk in MB.")->default_val(10000);
+    proletariat_command->add_option("--input", grid_opts.extra_inputs,
+        "Extra file(s) to bundle into the tarball (repeatable). A missing file is a hard error. The XML and any <tag>_prop.bin/_syst.bin and <tag>_<output>_mesh.bin/_bank.bin in the current directory are bundled automatically.");
+    proletariat_command->add_flag("--dry-run", grid_opts.dry_run,
+        "Stage and build the tarball, print the exact jobsub_submit command, do not submit.");
+    proletariat_command->add_option("--backend", grid_backend_str, "Scheduler backend: jobsub or slurm (slurm not yet implemented).")->default_str("jobsub");
+    proletariat_command->add_option("--group", grid_opts.group, "jobsub experiment group (-G).")->default_str("sbnd");
+    proletariat_command->add_option("--role", grid_opts.role, "jobsub --role.")->default_str("Analysis");
+    proletariat_command->add_option("--singularity-image", grid_opts.singularity_image, "Apptainer/Singularity image path.");
+    proletariat_command->add_option("--resource-provides", grid_opts.resource_provides, "jobsub --resource-provides usage model.");
+    proletariat_command->add_option("--lines", grid_opts.condor_lines,
+        "Condor classad --lines entries. REPLACES the FERMIHTC defaults when given; to append instead, use --jobsub-arg.");
+    proletariat_command->add_option("--jobsub-arg", grid_opts.extra_jobsub_args, "Extra raw argument passed through to jobsub_submit verbatim (repeatable).");
+    proletariat_command->add_option("--profit-bin", grid_opts.profit_bin, "Override the PROfit binary to ship (default: this executable, via /proc/self/exe).");
+
     app.set_config("--config");
     surface_command->configurable(true);
     process_command->configurable(true);
@@ -628,6 +665,7 @@ int main(int argc, char* argv[])
     proplot_command->configurable(true);
     promcmc_command->configurable(true);
     bench_command->configurable(true);
+    proletariat_command->configurable(true);
 
     //Parse inputs. 
     CLI11_PARSE(app, argc, argv);
@@ -653,8 +691,21 @@ int main(int argc, char* argv[])
     log<LOG_WARNING>(L" %1% ") % getIcon().c_str()  ;
     std::string final_output_tag =analysis_tag +"_"+output_tag;
 
-
-
+    // Grid submission dispatches here, BEFORE PROconfig/CAF/syst setup: it
+    // only needs the XML path and tags, not the loaded analysis.
+    if(*proletariat_command){
+        grid_opts.xml              = xmlname;
+        grid_opts.analysis_tag     = analysis_tag;
+        grid_opts.final_output_tag = final_output_tag;
+        if(grid_backend_str == "slurm") {
+            grid_opts.backend = PROletariatOptions::Backend::Slurm;
+        } else if(grid_backend_str != "jobsub") {
+            log<LOG_ERROR>(L"%1% || Unknown --backend '%2%' (expected jobsub or slurm).") % __func__ % grid_backend_str.c_str();
+            return 1;
+        }
+        PROletariat submitter(grid_opts);
+        return submitter.Run();
+    }
 
     log<LOG_WARNING>(L"%1% || ##################################################################") % __func__  ;
     log<LOG_WARNING>(L"%1% || ####################### PROfit version v%2% ######################") % __func__ % PROJECT_VERSION_STR ;
@@ -1454,8 +1505,8 @@ int main(int argc, char* argv[])
         }
         if(binwidth_scale) popt |= PlotOptions::BinWidthScaled;
         if(area_normalized) popt |= PlotOptions::AreaNormalized;
-        std::map<std::string, TObject *> drawn_objs = draw_fit_result(config, prop, metric->GetModel(), metric->GetSysts(), cv, data, fitres, final_output_tag+"_PROfile", popt, pbounds, plot_channel_ratios);
 
+        std::map<std::string, TObject *> drawn_objs = draw_fit_result(config, prop, metric->GetModel(), metric->GetSysts(), *metric, cv, data, fitres, final_output_tag+"_PROfile", popt, pbounds, plot_channel_ratios);
 
         plot_mcmc_1sigma(final_output_tag+"_PROfile", config, metric->GetSysts(), metric->GetModel(), fitres.fitter.best_fit, fitres.post_param_lo, fitres.post_param_hi, !systs_only, fakedataparams);
 
@@ -1474,6 +1525,22 @@ int main(int argc, char* argv[])
                 fakedataparams, use_probe, n_probe_chunks,
                 buildBkgOnlyFixedSeeds(metric->GetModel(), CVParams));
         if (profile_timing) PROfit::GetScanTimingEnabled() = false;
+        // The scan can find a lower global minimum than do_a_fit (trapped in a
+        // local minimum); PROfile has already re-baselined its curves against
+        // it. Mirror the harmonic-seed adoption in do_a_fit: everything
+        // downstream (Plot's best-fit markers, global_fit_result, the
+        // global_fit_result histogram written below) reads fitres, so update
+        // it to the minimum the curves are actually baselined on. The spectra
+        // PDFs from draw_fit_result above were drawn at the pre-scan fit.
+        if(profile.newglob_param.size() > 0) {
+            log<LOG_WARNING>(L"%1% || PROfile found a lower global minimum (chi^2 %2% vs global fit's %3%); adopting it as the global best fit for plots and recorded results.")
+                % __func__ % profile.newglob % fitres.chi2;
+            log<LOG_WARNING>(L"%1% || -- new best-fit params: %2%") % __func__ % profile.newglob_param;
+            fitres.chi2 = profile.newglob;
+            fitres.fitter.best_fit = profile.newglob_param;
+            global_fit_chi2 = profile.newglob;
+            global_fit_result = profile.newglob_param;
+        }
         log<LOG_INFO>(L"%1% || fakedataparams for Plot (true_params/red stars): %2%") % __func__ % fakedataparams;
         profile.Plot(config, metric->GetSysts(), metric->GetModel(), *metric, myseed,
                 final_output_tag+"_PROfile", !systs_only, fitres.fitter.best_fit,
@@ -1711,7 +1778,7 @@ int main(int argc, char* argv[])
 
             PROspec collapsed_cv = PROspec(CollapseMatrix(config, cv.Spec()), CollapseMatrix(config, cv.Error()));
             Eigen::MatrixXf L = metric->GetSysts().DecomposeFractionalCovariance(config, cv.Spec());
-            for(size_t i = 0; i < 1000; ++i) {
+            for(size_t i = 0; i < (size_t)n_brazil_throws; ++i) {
                 Eigen::VectorXf throwp = fakeDataParams;
                 Eigen::VectorXf throwC = Eigen::VectorXf::Constant(config.m_num_variable_bins_total_collapsed[config.i_prime], 0);
                 // Shared truncated-Gaussian helper: samples each spline's actual prior
@@ -2465,7 +2532,9 @@ int main(int argc, char* argv[])
             }
             auto objs = plot_channels(final_output_tag+"_PROplot_Variable_"+std::to_string(io)+"_ErrorBand.pdf", config, cv_plot, {}, data_plot,
                     other_err_bands.back(), {}, other_channel_chitexts[io], pbounds, opt | PlotOptions::DataMCRatio, io,
-                    false, plot_channel_ratios, do_bkg_subtract ? &bkg_subchannels : nullptr);
+                    false, plot_channel_ratios, do_bkg_subtract ? &bkg_subchannels : nullptr,
+                    io == config.i_prime ? allcov_metric.get() : nullptr,
+                    io == config.i_prime ? &variable_cvs[io] : nullptr);
             errband_objs.push_back(objs);
         }
 
@@ -2788,6 +2857,7 @@ int main(int argc, char* argv[])
         else if (afc_mode_str == "classify")   acfg.mode = PROfit::AdaptiveFCMode::Classify;
         else if (afc_mode_str == "merge-mesh") acfg.mode = PROfit::AdaptiveFCMode::MergeMesh;
         else if (afc_mode_str == "merge-bank") acfg.mode = PROfit::AdaptiveFCMode::MergeBank;
+        else if (afc_mode_str == "merge-brazil") acfg.mode = PROfit::AdaptiveFCMode::MergeBrazil;
         else if (afc_mode_str == "brazil-cleanup") acfg.mode = PROfit::AdaptiveFCMode::BrazilCleanup;
         else if (afc_mode_str == "print-mesh") acfg.mode = PROfit::AdaptiveFCMode::PrintMesh;
         else {
@@ -2824,6 +2894,12 @@ int main(int argc, char* argv[])
         acfg.update_layer = afc_update_layer;
         acfg.only_layer = afc_only_layer;
         acfg.n_brazil_throws = afc_n_brazil_throws;
+        acfg.band_flag = afc_flag;
+        if (!afc_flag.empty() && acfg.mode != PROfit::AdaptiveFCMode::Brazil
+            && acfg.mode != PROfit::AdaptiveFCMode::MergeBrazil) {
+            log<LOG_WARNING>(L"%1% || fc-adaptive: --flag %2% only styles the brazil / merge-brazil band PDF; ignored for --mode %3%.")
+                % __func__ % afc_flag.c_str() % afc_mode_str.c_str();
+        }
         acfg.roi_band = afc_roi_band;
         acfg.cleanup_quantiles = afc_cleanup_quantiles;
         acfg.cleanup_halo      = afc_cleanup_halo;
@@ -2918,7 +2994,8 @@ int main(int argc, char* argv[])
         }
         if(binwidth_scale) popt |= PlotOptions::BinWidthScaled;
         if(area_normalized) popt |= PlotOptions::AreaNormalized;
-        std::map<std::string, TObject *> drawn_objs = draw_fit_result(config, prop, metric->GetModel(), metric->GetSysts(), cv, data, fitres, final_output_tag+"_PROglobal", popt, pbounds, plot_channel_ratios);
+
+        std::map<std::string, TObject *> drawn_objs = draw_fit_result(config, prop, metric->GetModel(), metric->GetSysts(), *metric, cv, data, fitres, final_output_tag+"_PROglobal", popt, pbounds, plot_channel_ratios);
 
         TFile fout((final_output_tag+"_PROglobal.root").c_str(), "RECREATE");
         for(const auto &[n, o] : drawn_objs)
@@ -3378,8 +3455,8 @@ int main(int argc, char* argv[])
     delete metric;
     auto stop_time = std::chrono::high_resolution_clock::now();
     
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop_time - start_time);
-    log<LOG_INFO>(L"%1% || Total run time: %2%") % __func__ % duration.count();
+    auto duration = std::chrono::duration_cast<std::chrono::seconds>(stop_time - start_time);
+    log<LOG_INFO>(L"%1% || Total run time: %2% seconds") % __func__ % duration.count();
 
     return 0;
 }
@@ -3518,38 +3595,62 @@ GlobalFitResult do_a_fit(const PROconfig &config, const PROpeller &prop, const P
     bool preerr = (opt & GlobalFitOptions::PrefitErrorBand) != GlobalFitOptions::Default;
     bool mcmcpre = (opt & GlobalFitOptions::MCMCPrefitErrorBand) != GlobalFitOptions::Default;
     bool binwidth_scale = (opt & GlobalFitOptions::BinWidthScaled) != GlobalFitOptions::Default;
-    if(preerr || mcmcpre) {
-        // Fix physics parameters
-        std::vector<int> fixed_pars;
-        for(size_t i = 0; i < N_phys_params; ++i) fixed_pars.push_back(i);
-        for(size_t i = N_phys_params; i< global_fixed.size();i++){
-            if(global_fixed.at(i)==1)fixed_pars.push_back(i);
+
+    // The error-band chains fix all physics params plus any --fix'd splines; if
+    // that leaves zero free parameters the chain never moves and its band is
+    // exactly Gaussian throws of the covariance around the best-fit spectrum —
+    // computed analytically instead (getCovarianceOnlyErrorBand), skipping
+    // MCMCburn+MCMCiter identical spectrum evaluations.
+    std::vector<int> errband_fixed_pars;
+    for(size_t i = 0; i < N_phys_params; ++i) errband_fixed_pars.push_back(i);
+    for(size_t i = N_phys_params; i< global_fixed.size();i++){
+        if(global_fixed.at(i)==1)errband_fixed_pars.push_back(i);
+    }
+    const bool errband_chain_degenerate = errband_fixed_pars.size() >= N_params;
+    // Delta-function stand-ins for the chain's parameter-posterior outputs.
+    const auto degenerate_mcmc_params = [&](std::vector<TH1D> &posts, Eigen::MatrixXf &covar, Eigen::VectorXf &lo, Eigen::VectorXf &hi) {
+        for(size_t i = 0; i < N_nuisance; ++i) {
+            posts.emplace_back("", (";"+config.m_mcgen_variation_plotname_map.at(metric->GetSysts().spline_names[i])).c_str(), 60, -3, 3);
+            posts.back().Fill(best_fit(N_phys_params + i));
         }
+        covar = Eigen::MatrixXf::Zero(N_nuisance, N_nuisance);
+        lo = Eigen::VectorXf::Zero(N_nuisance);
+        hi = Eigen::VectorXf::Zero(N_nuisance);
+    };
 
+    if(preerr || mcmcpre) {
         log<LOG_INFO>(L"%1% || Starting global getErrorBand() ") % __func__;
-        Metropolis mh_pre(prior_only_target{*metric}, adaptive_proposal(*metric, dseed(PROseed::global_rng), fixed_pars), best_fit, dseed(PROseed::global_rng));
-
-        std::optional<PROgressBar> errband_pre_pbar;
-        if(progress_bar && mcmcpre) errband_pre_pbar.emplace(int(fit_config.MCMCburn + fit_config.MCMCiter), 30, "MCMC prefit");
-        res.err_band =
-            mcmcpre
-            ? getMCMCErrorBand(mh_pre, fit_config.MCMCburn, fit_config.MCMCiter, config, prop, *metric, best_fit, res.priors, res.prior_covariance, res.prior_param_lo, res.prior_param_hi, binwidth_scale, config.i_prime, errband_pre_pbar ? &*errband_pre_pbar : nullptr)
-            : getErrorBand(config, prop, metric->GetSysts(), metric->GetModel(), cv ,CVParams, binwidth_scale, config.i_prime);
+        if(mcmcpre && errband_chain_degenerate) {
+            log<LOG_INFO>(L"%1% || No free nuisance parameters; computing the pre-fit error band analytically from the covariance instead of MCMC.") % __func__;
+            res.err_band = getCovarianceOnlyErrorBand(config, prop, metric->GetSysts(), metric->GetModel(), best_fit, binwidth_scale, config.i_prime);
+            degenerate_mcmc_params(res.priors, res.prior_covariance, res.prior_param_lo, res.prior_param_hi);
+        } else if(mcmcpre) {
+            Metropolis mh_pre(prior_only_target{*metric}, adaptive_proposal(*metric, dseed(PROseed::global_rng), errband_fixed_pars), best_fit, dseed(PROseed::global_rng));
+            std::optional<PROgressBar> errband_pre_pbar;
+            if(progress_bar) errband_pre_pbar.emplace(int(fit_config.MCMCburn + fit_config.MCMCiter), 30, "MCMC prefit");
+            res.err_band = getMCMCErrorBand(mh_pre, fit_config.MCMCburn, fit_config.MCMCiter, config, prop, *metric, best_fit, res.priors, res.prior_covariance, res.prior_param_lo, res.prior_param_hi, binwidth_scale, config.i_prime, errband_pre_pbar ? &*errband_pre_pbar : nullptr);
+        } else {
+            // Keep the global RNG stream where existing seeded runs expect it:
+            // this branch used to construct an unused prefit Metropolis chain,
+            // consuming two seed draws before getErrorBand's own throws.
+            dseed(PROseed::global_rng);
+            dseed(PROseed::global_rng);
+            res.err_band = getErrorBand(config, prop, metric->GetSysts(), metric->GetModel(), cv ,CVParams, binwidth_scale, config.i_prime);
+        }
     }
 
     if((opt & GlobalFitOptions::PostFitErrorBand) != GlobalFitOptions::Default) {
-        // Fix physics parameters
-        std::vector<int> fixed_pars;
-        for(size_t i = 0; i < N_phys_params; ++i) fixed_pars.push_back(i);
-        for(size_t i = N_phys_params; i< global_fixed.size();i++){
-            if(global_fixed.at(i)==1)fixed_pars.push_back(i);
-        }
-
-        Metropolis mh_post(simple_target{*metric}, adaptive_proposal(*metric, dseed(PROseed::global_rng), fixed_pars), best_fit, dseed(PROseed::global_rng));
         log<LOG_INFO>(L"%1% || Starting global getPostFitErrorBand() ") % __func__;
-        std::optional<PROgressBar> errband_post_pbar;
-        if(progress_bar) errband_post_pbar.emplace(int(fit_config.MCMCburn + fit_config.MCMCiter), 30, "MCMC postfit band");
-        res.post_err_band = getMCMCErrorBand(mh_post, fit_config.MCMCburn, fit_config.MCMCiter, config, prop, *metric, best_fit, res.posteriors, res.spline_covariance, res.post_param_lo, res.post_param_hi, binwidth_scale,config.i_prime, errband_post_pbar ? &*errband_post_pbar : nullptr);
+        if(errband_chain_degenerate) {
+            log<LOG_INFO>(L"%1% || No free nuisance parameters; computing the post-fit error band analytically from the covariance instead of MCMC.") % __func__;
+            res.post_err_band = getCovarianceOnlyErrorBand(config, prop, metric->GetSysts(), metric->GetModel(), best_fit, binwidth_scale, config.i_prime);
+            degenerate_mcmc_params(res.posteriors, res.spline_covariance, res.post_param_lo, res.post_param_hi);
+        } else {
+            Metropolis mh_post(simple_target{*metric}, adaptive_proposal(*metric, dseed(PROseed::global_rng), errband_fixed_pars), best_fit, dseed(PROseed::global_rng));
+            std::optional<PROgressBar> errband_post_pbar;
+            if(progress_bar) errband_post_pbar.emplace(int(fit_config.MCMCburn + fit_config.MCMCiter), 30, "MCMC postfit band");
+            res.post_err_band = getMCMCErrorBand(mh_post, fit_config.MCMCburn, fit_config.MCMCiter, config, prop, *metric, best_fit, res.posteriors, res.spline_covariance, res.post_param_lo, res.post_param_hi, binwidth_scale,config.i_prime, errband_post_pbar ? &*errband_post_pbar : nullptr);
+        }
     }
     
     return res;
@@ -3705,7 +3806,7 @@ void draw_harmonic_scan_pdf(const GlobalFitResult &fitres, const PROfitterConfig
     log<LOG_INFO>(L"%1% || Wrote harmonic scan summary to %2%") % __func__ % filename.c_str();
 }
 
-std::map<std::string, TObject *> draw_fit_result(const PROconfig &config, const PROpeller &prop, const PROmodel &model, const PROsyst &syst, const PROspec &cv, const PROdata &data, const GlobalFitResult &fitres, const std::string &prefix, PlotOptions popt, PlotBounds pbounds, bool plot_channel_ratios) {
+std::map<std::string, TObject *> draw_fit_result(const PROconfig &config, const PROpeller &prop, const PROmodel &model, const PROsyst &syst, PROmetric &metric, const PROspec &cv, const PROdata &data, const GlobalFitResult &fitres, const std::string &prefix, PlotOptions popt, PlotBounds pbounds, bool plot_channel_ratios) {
     std::map<std::string, TObject *> drawn_objs;
 
     // Harmonic-scan diagnostics: the scan curve chi2(freq) and the refit seed
@@ -3826,10 +3927,9 @@ std::map<std::string, TObject *> draw_fit_result(const PROconfig &config, const 
         chi2text.SetFillColor(0);
         chi2text.SetBorderSize(0);
         chi2text.SetTextAlign(12);
-        //chi2text.SetTextSize(0.035); 
         texts.push_back(chi2text);
 
-        std::map<std::string, TObject *> tmp_objs = plot_channels((prefix+"_hists.pdf"), config, cv, bf, data, fitres.err_band, fitres.post_err_band, texts, pbounds, popt, config.i_prime, false, plot_channel_ratios);
+        std::map<std::string, TObject *> tmp_objs = plot_channels((prefix+"_hists.pdf"), config, cv, bf, data, fitres.err_band, fitres.post_err_band, texts, pbounds, popt, config.i_prime, false, plot_channel_ratios, nullptr, &metric, &bf);
         for(const auto &[name, obj] : tmp_objs)
             drawn_objs[name] = obj;
     }

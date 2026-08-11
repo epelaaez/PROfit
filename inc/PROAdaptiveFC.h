@@ -50,6 +50,7 @@ namespace PROfit {
         Classify,  ///< (not yet implemented) Classify real data against the bank.
         MergeMesh, ///< Union-merge ≥2 mesh binaries (--merge-input) into <tag>_mesh.bin.
         MergeBank, ///< Harvest PEs from ≥1 bank binaries (--merge-input) onto <tag>_mesh.bin, save <tag>_bank.bin.
+        MergeBrazil, ///< Union throws from ≥1 brazil archives (--merge-input) into <tag>_brazil.bin, re-classify against <tag>_bank.bin, emit band PDF + ROOT. No fits.
         BrazilCleanup, ///< From <tag>_bank.bin + <tag>_brazil.bin, build <tag>_cleanup_mesh.bin densified at the Brazil ±2σ contours. No fits.
         PrintMesh, ///< Plot <tag>_mesh.bin (or any mesh binaries given via --merge-input) as PDF(s). No fitting.
     };
@@ -106,11 +107,14 @@ namespace PROfit {
         float wilson_eps = 0.05f; ///< Unused for bank generation now; reserved for the future classify mode.
         float roi_band = 8.0f;   ///< Reserved for the future classify mode; unused for now.
         int   n_brazil_throws = 100; ///< Number of pseudo-experiment throws for --mode brazil.
+        std::string band_flag = "";    ///< --flag: brazil band PDF styled after a national flag ("america", "ireland"); empty = standard green/yellow.
 
-        // ---- merge-mesh / merge-bank inputs ----
+        // ---- merge-mesh / merge-bank / merge-brazil inputs ----
         // Concrete artifact filenames (glob patterns already expanded by the
         // CLI layer). merge-mesh: ≥2 *_mesh.bin; merge-bank: ≥1 *_bank.bin
-        // harvested onto this tag's already-merged <output_tag>_mesh.bin.
+        // harvested onto this tag's already-merged <output_tag>_mesh.bin;
+        // merge-brazil: ≥1 *_brazil.bin unioned onto this tag's
+        // <output_tag>_bank.bin (whole-archive footprint match required).
         std::vector<std::string> merge_inputs;
 
         // ---- brazil-cleanup ----

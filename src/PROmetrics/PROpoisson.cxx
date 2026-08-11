@@ -306,7 +306,7 @@ float PROpoisson::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &grad
     return value;
 }
 
-float PROpoisson::getSingleChannelChi(size_t global_channel_index, const PROspec &cv, size_t var_index) {
+float PROpoisson::getSingleChannelChi(size_t global_channel_index, const PROspec &cv, size_t var_index, const Eigen::MatrixXf &projection) {
 
     // m_channel_variable_bins is indexed by LOCAL channel index (PROchi and
     // PROCNP convert the same way); using the global index breaks any config
@@ -315,15 +315,21 @@ float PROpoisson::getSingleChannelChi(size_t global_channel_index, const PROspec
     size_t startBin = config.GetCollapsedGlobalVariableBinStart(global_channel_index,var_index);
 
 
-    //const Eigen::VectorXf &vdata = data.Spec().segment(startBin, nbin);
-    const Eigen::VectorXf vdata = (shape_only
+    // const Eigen::VectorXf &vdata = data.Spec().segment(startBin, nbin);
+    Eigen::VectorXf vdata = (shape_only
         ? data.Normalize(config,cv)
         : data.Spec()).segment(startBin, nbin);
-    const Eigen::VectorXf vmc = CollapseMatrix(config, cv.Spec()).segment(startBin, nbin);
+    Eigen::VectorXf vmc = CollapseMatrix(config, cv.Spec()).segment(startBin, nbin);
     // Mask applies only to the fitting variable (mask snapshot is for i_prime);
     // startBin offsets the channel-local segment into the global mask.
     const bool masked = (var_index == (size_t)config.i_prime) && hasActiveBinMask();
-    float poisson = BakerCousinsChi2(vmc, vdata, masked ? &active_bins : nullptr, (Eigen::Index)startBin);
+    if(projection.size()) {
+        vmc = projection * vmc;
+        vdata = projection * vdata;
+    }
+    float poisson = BakerCousinsChi2(vmc, vdata,
+        projection.size() ? nullptr : (masked ? &active_bins : nullptr),
+        projection.size() ? 0 : (Eigen::Index)startBin);
     //float pull = Pull(subvector2);
     float value = poisson; //+ pull
 

@@ -211,7 +211,7 @@ namespace PROfit{
      *        CV stack and legend (used by --bkg-subtract; their contents are expected to
      *        already be zero in `cv`).
      */
-    std::map<std::string, TObject *> plot_channels(const std::string &filename, const PROconfig &config, std::optional<PROspec> cv, std::optional<PROspec> best_fit, std::optional<PROdata> data, std::optional<PROerrorbar> errband, std::optional<PROerrorbar> posterrband, std::vector<TPaveText> &texts, PlotBounds &bounds, PlotOptions opt = PlotOptions::Default, int var_index = 0, bool ratio_bool = false, bool plot_channel_ratios = false, const std::vector<size_t> *skip_stack_subchannels = nullptr);
+    std::map<std::string, TObject *> plot_channels(const std::string &filename, const PROconfig &config, std::optional<PROspec> cv, std::optional<PROspec> best_fit, std::optional<PROdata> data, std::optional<PROerrorbar> errband, std::optional<PROerrorbar> posterrband, std::vector<TPaveText> &texts, PlotBounds &bounds, PlotOptions opt = PlotOptions::Default, int var_index = 0, bool ratio_bool = false, bool plot_channel_ratios = false, const std::vector<size_t> *skip_stack_subchannels = nullptr, PROmetric *chi_metric = nullptr, const PROspec *chi_spec = nullptr);
 
     /**
      * @brief Return global subchannel indices whose `m_fullnames[i]` contains `pattern` as a substring.
@@ -308,6 +308,24 @@ namespace PROfit{
      * @return PROerrorbar with asymmetric per-bin uncertainties.
      */
     PROerrorbar getErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const PROspec &cv_spec, const Eigen::VectorXf &cvparams,bool scale=false, int other_index=0);
+
+    /**
+     * @brief Compute an error band analytically from the covariance-type systematics alone.
+     * @details Exact replacement for getMCMCErrorBand when the sampling chain has zero
+     * free parameters (no spline nuisances, or all of them --fix'd): the chain never
+     * moves, so its band reduces to Gaussian throws of the collapsed scaled covariance
+     * around a single spectrum, whose 16/84 quantiles are exactly ±sqrt(diag).  Symmetric
+     * by construction; `covariance` is the collapsed scaled covariance itself.
+     * @param config    Analysis configuration.
+     * @param prop      MC event store.
+     * @param syst      Systematic object (only covariance-type systs contribute).
+     * @param model     Physics model.
+     * @param params    Parameter vector at which to evaluate the spectrum (e.g. best fit).
+     * @param scale     If true, divide errors by bin width.
+     * @param var_index Variable index.
+     * @return PROerrorbar with symmetric per-bin uncertainties and the bin covariance.
+     */
+    PROerrorbar getCovarianceOnlyErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const Eigen::VectorXf &params, bool scale=false, int var_index=0);
 
     /**
      * @brief Result of getErrorBandBkgSubtracted: a signal-only error band plus the
@@ -413,11 +431,18 @@ namespace PROfit{
      * @return PROerrorbar with per-bin asymmetric uncertainties and the histogram covariance.
      */
     template<class T, class P>
-        PROerrorbar getMCMCErrorBand(Metropolis<T, P> met, size_t burnin, size_t iterations, const PROconfig &config, const PROpeller &prop, PROmetric &metric, const Eigen::VectorXf &best_fit, std::vector<TH1D> &posteriors, Eigen::MatrixXf &post_covar, Eigen::VectorXf &param_err_lo, Eigen::VectorXf &param_err_hi, bool scale = false, int var_index=0, PROgressBar *pbar = nullptr) {
+        PROerrorbar getMCMCErrorBand(Metropolis<T, P> met, size_t burnin, size_t iterations, const PROconfig &config, const PROpeller &prop, PROmetric &metric, const Eigen::VectorXf &best_fit, std::vector<TH1D> &posteriors, Eigen::MatrixXf &post_covar, Eigen::VectorXf &param_err_lo, Eigen::VectorXf &param_err_hi, bool scale = false, int var_index=0, PROgressBar *pbar = nullptr, const Eigen::VectorXf &data_spec = Eigen::VectorXf()) {
             for(size_t i = 0; i < metric.GetSysts().GetNSplines(); ++i)
                 posteriors.emplace_back("", (";"+config.m_mcgen_variation_plotname_map.at(metric.GetSysts().spline_names[i])).c_str(), 60, -3, 3);
 
             Eigen::VectorXf cv = FillSpectra(config, prop, metric.GetSysts(), metric.GetModel(), best_fit, true, var_index).Spec();
+
+            for (int i = 0; i < cv.size(); ++i) {
+                if (cv(i) <= 0.0f) {
+                    cv(i) = 1e-6f; // Floor zero-count / inactive subchannels
+                }
+            }
+
             Eigen::VectorXf cv_coll = CollapseMatrix(config, cv);
             Eigen::MatrixXf L;
             if(metric.GetSysts().GetNCovar() > 0) L = metric.GetSysts().DecomposeFractionalCovariance(config, cv);
@@ -433,10 +458,14 @@ namespace PROfit{
             size_t nsteps = 0;
             std::vector<Eigen::VectorXf> specs;
             std::vector<std::vector<float>> param_samples(nspline);
-            const auto action = [&](const Eigen::VectorXf &value) {
+
+	    std::function<void(const Eigen::VectorXf&)> action;
+	    
+            if (data_spec.rows() == 0){
+	        action = [&](const Eigen::VectorXf &value) {
                 nsteps += 1;
-                for(size_t i = 0; i < config.m_num_variable_bins_total_collapsed[var_index]; ++i)
-                    throws(i) = nd(PROseed::global_rng);
+		for(size_t i = 0; i < config.m_num_variable_bins_total_collapsed[var_index]; ++i)
+                        throws(i) = nd(PROseed::global_rng);
                 specs.push_back(CollapseMatrix(config, FillSpectra(config, prop, metric.GetSysts(), metric.GetModel(), value, true,var_index).Spec())+L*throws);
                 for(int i = 0; i < nspline; ++i) {
                     posteriors[i].Fill(value(i+nphys));
@@ -444,14 +473,61 @@ namespace PROfit{
                 }
                 Eigen::VectorXf splines = value.segment(nphys, nspline);
                 Eigen::VectorXf diff = splines-splines_bf;
-                Eigen::VectorXf diff_hist = specs.back() - cv_coll;
                 post_covar += diff * diff.transpose();
+		Eigen::VectorXf diff_hist = specs.back() - cv_coll;
                 post_hist_covar += diff_hist * diff_hist.transpose();
-            };
+                };
+            }
+	    else{
+                action = [&](const Eigen::VectorXf &value) {
+                    nsteps += 1;
+                    specs.push_back(CollapseMatrix(config, FillSpectra(config, prop, metric.GetSysts(), metric.GetModel(), value, true,var_index).Spec()));
+                    for(int i = 0; i < nspline; ++i) {
+                        posteriors[i].Fill(value(i+nphys));
+                        param_samples[i].push_back(value(i+nphys));
+                    }
+		    Eigen::VectorXf splines = value.segment(nphys, nspline);
+                    Eigen::VectorXf diff = splines-splines_bf;
+                    post_covar += diff * diff.transpose();
+                };
+	    }
             met.run(burnin, iterations, action, pbar);
-            post_hist_covar /= nsteps;
-            post_covar /= nsteps;
 
+            post_covar /= nsteps;
+            if (data_spec.size() != 0) {
+                // 1. Pre-compute static matrices ONCE outside the loop
+                Eigen::MatrixXf C_stat = cv_coll.asDiagonal();
+                Eigen::MatrixXf M = C_stat + L.transpose() * L;
+                auto M_solver = M.ldlt(); // Pre-factorize M once
+            
+                size_t k = L.cols();
+                Eigen::VectorXf C_inv_diag = cv_coll.cwiseInverse();
+                Eigen::MatrixXf inner_matrix = Eigen::MatrixXf::Identity(k, k) 
+                                             + L.transpose() * C_inv_diag.asDiagonal() * L;
+                Eigen::MatrixXf inner_inv = inner_matrix.ldlt().solve(Eigen::MatrixXf::Identity(k, k));
+                Eigen::LLT<Eigen::MatrixXf> llt(inner_inv);
+                Eigen::MatrixXf C_chol = llt.matrixL();
+            
+                // 2. Fast loop over steps
+                for(int ai = 0; ai < nsteps; ai++) {
+                    for(size_t i = 0; i < throws.size(); ++i) {
+                        throws(i) = nd(PROseed::global_rng);
+                    }
+            
+                    // Uses pre-factorized solver: fast O(k^2) instead of O(k^3)
+                    Eigen::VectorXf residual = data_spec - specs.at(ai);
+                    Eigen::VectorXf alpha_min = L * M_solver.solve(residual);
+            
+                    Eigen::VectorXf alpha_hat = alpha_min + C_chol * throws;
+                    specs.at(ai) += L * alpha_hat;
+                    
+                    Eigen::VectorXf diff_hist = specs.at(ai) - cv_coll;
+
+                    post_hist_covar += diff_hist * diff_hist.transpose();
+                }
+            }
+
+            post_hist_covar /= nsteps;
             param_err_lo = Eigen::VectorXf::Zero(nspline);
             param_err_hi = Eigen::VectorXf::Zero(nspline);
             for(int i = 0; i < nspline; ++i) {
@@ -464,24 +540,6 @@ namespace PROfit{
             log<LOG_INFO>(L"%1% || Acceptance rate %2%") % __func__ % ((float)met.naccept / iterations);
 
             cv = CollapseMatrix(config, cv);
-
-            std::vector<float> centers;
-            size_t global_channel_index = 0;
-            for(size_t mode = 0; mode < config.m_num_modes; ++mode) {
-                for(size_t det = 0; det < config.m_num_detectors; ++det) {
-                    for(size_t channel = 0; channel < config.m_num_channels; ++channel) {
-                        std::vector<float> tedges =  config.GetChannelVariableBins(global_channel_index, var_index).Edges();
-                        global_channel_index++;
-                        for(size_t p=0; p<tedges.size(); p++){
-                            if(p<tedges.size()-1){
-                                centers.push_back((tedges[p+1]+tedges[p])/2.0);
-                            }
-                        }
-
-                    }
-                }
-            }
-
             PROerrorbar ebar(cv.size());
             for(int i = 0; i < cv.size(); ++i) {
                 std::vector<float> binconts(specs.size());
@@ -496,9 +554,56 @@ namespace PROfit{
                 ebar.error_up(i) =  ehi;
                 ebar.error_down(i) =  elo;
                 ebar.error_point(i) = cv(i)*scale_factor;
-                log<LOG_DEBUG>(L"%1% || ErrorBand bin %2% %3% %4% %5% %6% ") % __func__ % i % cv(i) % ehi % elo % scale_factor ;
+                log<LOG_INFO>(L"%1% || ErrorBand bin %2% %3% %4% %5% %6% ") % __func__ % i % cv(i) % ehi % elo % scale_factor ;
             }
             ebar.covariance = post_hist_covar;
+
+            // =========================================================================
+            //  DIAGNOSTIC SANITY CHECK LOOP
+            // =========================================================================
+            log<LOG_INFO>(L"%1% || Running pre-return sanity checks on PROerrorbar...") % __func__;
+
+            for (int i = 0; i < ebar.error_point.size(); ++i) {
+                float pt  = ebar.error_point(i);
+                float eup = ebar.error_up(i);
+                float elo = ebar.error_down(i);
+
+                if (std::isnan(pt) || std::isinf(pt)) {
+                    log<LOG_ERROR>(L"%1% || CRITICAL ERROR: error_point bin %2% is invalid (value: %3%)") % __func__ % i % pt;
+                    throw std::runtime_error("PROerrorbar error_point contains NaN or Inf at bin " + std::to_string(i));
+                }
+                if (std::isnan(eup) || std::isinf(eup)) {
+                    log<LOG_ERROR>(L"%1% || CRITICAL ERROR: error_up bin %2% is invalid (value: %3%)") % __func__ % i % eup;
+                    throw std::runtime_error("PROerrorbar error_up contains NaN or Inf at bin " + std::to_string(i));
+                }
+                if (std::isnan(elo) || std::isinf(elo)) {
+                    log<LOG_ERROR>(L"%1% || CRITICAL ERROR: error_down bin %2% is invalid (value: %3%)") % __func__ % i % elo;
+                    throw std::runtime_error("PROerrorbar error_down contains NaN or Inf at bin " + std::to_string(i));
+                }
+            }
+
+            // Check covariance matrix dimensions and values
+            if (ebar.covariance.rows() != cv.size() || ebar.covariance.cols() != cv.size()) {
+                log<LOG_ERROR>(L"%1% || CRITICAL ERROR: Covariance matrix dimension mismatch! Expected (%2%x%3%), got (%4%x%5%)") 
+                    % __func__ % cv.size() % cv.size() % ebar.covariance.rows() % ebar.covariance.cols();
+                throw std::runtime_error("PROerrorbar covariance matrix dimension mismatch!");
+            }
+
+            for (int r = 0; r < ebar.covariance.rows(); ++r) {
+                for (int c = 0; c < ebar.covariance.cols(); ++c) {
+                    float val = ebar.covariance(r, c);
+                    if (std::isnan(val) || std::isinf(val)) {
+                        log<LOG_ERROR>(L"%1% || CRITICAL ERROR: Covariance matrix element (%2%, %3%) is invalid (value: %4%)") 
+                            % __func__ % r % c % val;
+                        throw std::runtime_error("PROerrorbar covariance contains NaN or Inf at (" + std::to_string(r) + ", " + std::to_string(c) + ")");
+                    }
+                }
+            }
+
+            log<LOG_INFO>(L"%1% || Sanity check passed successfully!") % __func__;
+            // =========================================================================
+
+
             return ebar;
         }
 

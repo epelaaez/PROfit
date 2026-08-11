@@ -62,6 +62,7 @@ numbers should match.
 7. [Subcommand `surface` — 2D Wilks surfaces and AMR](#7-subcommand-surface--2d-wilks-surfaces-and-amr)
 8. [Feldman-Cousins: `fc` and `fc-adaptive`](#8-feldman-cousins-fc-and-fc-adaptive)
 9. [PROjector — two-stage pre-fit / projected fits](#9-projector--two-stage-pre-fit--projected-fits)
+10. [PROletariat — grid submission: `proletariat`](#10-proletariat--grid-submission-proletariat)
 
 Appendices:
 
@@ -1059,7 +1060,9 @@ PROfit -x tutorial.xml -t TUT -o merged --seed 405 -n 8 $AFC \
 
 1. **Grid / cluster PE production.** Build the mesh once, ship it to N jobs,
    run `init-bank` in each job under its own `-o` tag **with a distinct
-   `--seed`**, copy the banks back, and merge:
+   `--seed`**, copy the banks back, and merge (the shipping half is what
+   the [`proletariat` subcommand](#10-proletariat--grid-submission-proletariat)
+   automates):
 
    ```bash
    # one job, i = 0..N-1  (each job has its own copy of the shared mesh
@@ -1257,6 +1260,157 @@ on the promoted spline parameters.
 * FC/Brazil throws in projected mode sample the *marginal* widths of the
   constraint only — correlations enter the pull term, not the throws (PROfit
   prints a runtime warning to remind you).
+
+---
+
+# 10. PROletariat — grid submission: `proletariat`
+
+Everything above runs on one machine. For the artifacts that are genuinely
+expensive at scale — FC PE banks above all — the workflow is: ship PROfit and
+its inputs to N FermiGrid jobs, run a worker script in each, copy the outputs
+back, and merge (section 8). The shipping half used to be a hand-maintained
+shell script (`grid/maketar_submit_v2.4.sh`, now deprecated); it is now the
+`proletariat` subcommand, implemented by the `PROletariat` class
+(`inc/PROletariat.h`).
+
+`proletariat` does three things:
+
+1. **Stages** a fresh tarball: the running PROfit binary itself (located via
+   `/proc/self/exe` — the exact executable you invoked is what ships), your
+   `-x` XML, any analysis artifacts it finds in the current directory
+   (see below), and any `--input` extras, all under a directory literally
+   named `grid_dir/`.
+2. **Tars** it to `grid_dir.tar` in the current directory and prints the
+   contents.
+3. **Submits** N copies of your worker script with `jobsub_submit`, attaching
+   the tarball via the dropbox mechanism. On the worker node, jobsub unpacks
+   it at `$INPUT_TAR_DIR_LOCAL/grid_dir/`.
+
+Unlike every other subcommand, `proletariat` dispatches *before* the XML is
+parsed or any binaries are loaded — it only needs the file paths and tags, so
+it runs in seconds even for heavy configurations.
+
+### Quick start
+
+```bash
+# from the directory holding your XML and TUT_prop.bin / TUT_syst.bin:
+PROfit -x tutorial.xml -t TUT proletariat \
+    -N 500 --script ../../grid/runFC_v2.4_v2.sh \
+    --lifetime 2d --memory 4000 --disk 10000 \
+    --dry-run          # drop this to actually submit
+```
+
+`--dry-run` does the full staging and tarring, prints the exact
+`jobsub_submit` command it *would* run (copy-paste ready), and stops —
+useful for checking the tarball contents on a dev box that has no jobsub
+client. The staging directory is always cleaned up; the tarball is left
+behind on purpose.
+
+### What gets bundled
+
+Always (missing = hard error):
+
+* the PROfit binary, staged under the literal name `PROfit` (worker scripts
+  invoke `./PROfit`) — override which binary ships with `--profit-bin`;
+* the worker script (`--script`);
+* the `-x` XML;
+* every `--input` file (repeatable).
+
+Automatically, if present in the current directory (missing = an INFO line,
+not an error):
+
+* `<tag>_prop.bin` and `<tag>_syst.bin` — the binary caches, so workers skip
+  the expensive `process` step;
+* `<tag>_<output>_mesh.bin` and `<tag>_<output>_bank.bin` — AFC artifacts
+  matching your `-t`/`-o` tags, for `init-bank` grid production.
+
+The tarball layout is flat (`grid_dir/<basename>`), so two inputs with the
+same basename from different directories are refused loudly rather than
+silently clobbering each other.
+
+### The worker script
+
+The payload is still a shell script you own — `grid/runFC_v2.4_v2.sh` is the
+reference implementation and worth reading in full. Its contract:
+
+* inputs appear at `$INPUT_TAR_DIR_LOCAL/grid_dir/`; copy them into
+  `$_CONDOR_SCRATCH_DIR` and run there;
+* the binary is `./PROfit`; the script sets up ROOT/Boost/etc. from CVMFS
+  (UPS) before touching it, and sanity-checks with `ldd` and `./PROfit
+  --help` so "missing library" and "bad physics" fail distinguishably;
+* `$PROCESS` (0..N-1) is the job's identity, but it **restarts at 0 in every
+  submission** — a seed or `-o` tag built from it alone collides across
+  batches. Fold in `$CLUSTER` (unique per `jobsub_submit`), e.g.
+  `SEED=$(( (CLUSTER % 1000000) * 1000 + PROCESS ))` and
+  `-o fc_${CLUSTER}_$((PROCESS+1))`, and run with `-n 1`. Colliding seeds
+  are not just statistically dubious: with `-n 1` the duplicate jobs are
+  bitwise identical, merge-bank silently dedupes their PEs (section 8), and
+  the CPU is wasted; colliding `-o` tags additionally give different
+  campaigns identical output *filenames*, which then can't share a
+  directory at `--merge-input` time;
+* copy outputs back with `ifdh cp` to a `/pnfs` scratch area, namespaced by
+  `$CLUSTER` so a resubmission doesn't clobber the last campaign.
+
+### Arguments
+
+| Option | Default | What it does |
+|---|---|---|
+| `--script` | *(required)* | Worker script executed on each grid node. |
+| `-N, --n-jobs` | `2` | Number of jobs (`jobsub_submit -N`). Each sees its own `$PROCESS`. |
+| `--lifetime` | `2d` | `--expected-lifetime`; 3d is the FermiGrid ceiling before rejection. |
+| `--memory` | `4000` | Requested memory in MB. |
+| `--disk` | `10000` | Requested scratch disk in MB. |
+| `--input` | — | Extra file(s) for the tarball (repeatable). Missing file = hard error. |
+| `--dry-run` | off | Stage + tar + print the jobsub command; do not submit. |
+| `--backend` | `jobsub` | Scheduler backend: `jobsub` or `slurm` (SLURM is a stub for now and errors out). |
+| `--group` | `sbnd` | Experiment group (`jobsub_submit -G`). |
+| `--role` | `Analysis` | `--role`. |
+| `--singularity-image` | `fnal-wn-sl7:latest` (CVMFS path) | Apptainer/Singularity image the jobs run in. |
+| `--resource-provides` | `usage_model=DEDICATED,OPPORTUNISTIC,OFFSITE` | Usage model. |
+| `--lines` | the three `+FERMIHTC_*` classads | Condor classad `--lines` entries. **Replaces** the defaults when given — to *append*, use `--jobsub-arg` instead. |
+| `--jobsub-arg` | — | Raw argument passed to `jobsub_submit` verbatim (repeatable) — the escape hatch for anything not covered above. |
+| `--profit-bin` | this executable | Override the PROfit binary to ship. |
+
+The default `--lines` are `+FERMIHTC_AutoRelease=True`,
+`+FERMIHTC_GraceMemory=4000`, `+FERMIHTC_GraceLifetime=7200` — auto-release
+held jobs with a memory/lifetime grace margin. The submission also pins
+`(TARGET.HAS_SINGULARITY=?=true)` as a condor requirement.
+
+### End-to-end: a grid FC bank campaign
+
+```bash
+# 1. build the mesh locally (section 8)
+PROfit -x tutorial.xml -t TUT -o grid --seed 405 -n 8 $AFC --mode build-mesh
+
+# 2. ship it: TUT_prop.bin, TUT_syst.bin and TUT_grid_mesh.bin are picked up
+#    automatically from the cwd; check first with --dry-run
+PROfit -x tutorial.xml -t TUT -o grid proletariat \
+    -N 500 --script runFC.sh --lifetime 2d
+
+# 3. ...wait; fetch outputs from /pnfs to a local dir...
+
+# 4. merge and continue exactly as in section 8
+PROfit -x tutorial.xml -t TUT -o merged $AFC --mode merge-mesh --merge-input 'TUT_fc_*_mesh.bin'
+PROfit -x tutorial.xml -t TUT -o merged $AFC --mode merge-bank --merge-input 'TUT_fc_*_bank.bin'
+```
+
+### Rules and gotchas
+
+* **Run it where your artifacts live.** Auto-bundling searches the *current
+  directory* for `<tag>_prop.bin` etc.; the tarball also lands there. Anything
+  elsewhere needs an explicit `--input path/to/file`.
+* **The tarball is big.** The PROfit binary alone is ~250 MB; with the syst
+  cache a typical tarball is 300–400 MB. The size is logged before
+  submission — jobsub's dropbox handles it, but don't be surprised.
+* Submission needs a working **jobsub client** (a GPVM, valid token/proxy).
+  Everything up to and including `--dry-run` works anywhere.
+* **Seeds are your job.** `proletariat` submits N identical scripts; the
+  worker script must diversify `--seed`/`-o` from `$PROCESS` **and**
+  `$CLUSTER` — `$PROCESS` alone repeats across submissions. Identical
+  seeds silently dedupe at merge-bank time (section 8).
+* The old `grid/maketar_submit_v2.4.sh` is kept for reference but
+  deprecated; it had a latent bug (the `file://` script URL broke unless the
+  script sat in the submission directory) that the subcommand fixes.
 
 ---
 

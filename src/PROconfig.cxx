@@ -1252,7 +1252,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 }
 
                 //check for known attributes
-                const std::vector<std::string> expected_attrs = {"name", "type", "plotname", "binning", "knobvals", "tag", "prior", "center", "force_0_cv", "include_only_weights", "scale","filename", "xvar", "yvar", "restrict", "mirror", "num_decomp_knobs", "include_resid_cov", "inflate"};
+                const std::vector<std::string> expected_attrs = {"name", "type", "plotname", "binning", "knobvals", "tag", "prior", "center", "force_0_cv", "include_only_weights", "scale","filename", "xvar", "yvar", "restrict", "mirror", "num_decomp_knobs", "include_resid_cov", "inflate", "weights"};
                 for (const tinyxml2::XMLAttribute* attr = pAllowList->FirstAttribute(); attr; attr = attr->Next()) {
                     std::string name = attr->Name();
                     if (std::find(expected_attrs.begin(), expected_attrs.end(), name) == expected_attrs.end()) {
@@ -1280,6 +1280,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 const char *mirrored = pAllowList->Attribute("mirror");
                 const char *num_decomp_knobs = pAllowList->Attribute("num_decomp_knobs");
                 const char *include_resid_cov = pAllowList->Attribute("include_resid_cov");
+                const char *weights = pAllowList->Attribute("weights");
 
 
                 m_mcgen_variation_type.push_back(variation_type);
@@ -1363,6 +1364,19 @@ int PROconfig::LoadFromXML(const std::string &filename){
                     }
                     knobs_vec.push_back(strtod(begin, NULL));
                     m_mcgen_variation_knobval_override[wt] = knobs_vec;
+                }
+                if(weights) {
+                    std::vector<double> weights_vec;
+                    const char *c = weights, *begin = NULL;
+                    while(*c) {
+                        if(begin && isspace(*c)) {
+                            weights_vec.push_back(strtod(begin, NULL));
+                            begin = NULL;
+                        } else if(!begin && !isspace(*c)) begin = c;
+                        ++c;
+                    }
+                    weights_vec.push_back(strtod(begin, NULL));
+                    m_mcgen_explicit_weights[wt] = weights_vec;
                 }
                 if(tags) {
                     std::vector<std::string> tags_vec;
@@ -1755,6 +1769,10 @@ int PROconfig::LoadFromXML(const std::string &filename){
             m_num_variation_type_hist1d+=1;
         } else if(m_mcgen_variation_type[i] == "hist2d"){
             m_num_variation_type_hist2d+=1;
+        } else if(m_mcgen_variation_type[i] == "explicit_spline"){
+            m_num_variation_type_explicit+=1;
+        } else {
+            log<LOG_ERROR>(L"%1% || Unrecognized variation type %2%") % __func__ % m_mcgen_variation_type[i].c_str();
         }
 
     }
@@ -1768,6 +1786,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
     log<LOG_INFO>(L"%1% || num_variation_type_norm_to_covariance: %2% ") % __func__ % m_num_variation_type_norm_to_covariance;
     log<LOG_INFO>(L"%1% || num_variation_type_spline: %2% ") % __func__ % m_num_variation_type_spline;
     log<LOG_INFO>(L"%1% || num_variation_type_spline_to_covariance: %2% ") % __func__ % m_num_variation_type_spline_to_covariance;
+    log<LOG_INFO>(L"%1% || num_variation_type_explicit_spline: %2% ") % __func__ % m_num_variation_type_explicit;
     if(m_use_mcstats){
         log<LOG_INFO>(L"%1% || Using MC intrinsic stat uncertainty. ") % __func__  ;
     }else{

@@ -453,6 +453,16 @@ namespace PROfit {
                 }
             }
         }
+        
+        //Do we have any external systeatics?
+        if(inconfig.m_num_variation_type_explicit>0){
+            for(auto& allow_sys : inconfig.m_mcgen_variation_type_map){
+                if(allow_sys.second=="explicit_spline"){
+                    bool override_knobs = inconfig.m_mcgen_variation_knobval_override.find(allow_sys.first) != inconfig.m_mcgen_variation_knobval_override.end();
+                    map_systematic_num_universe[allow_sys.first] = override_knobs ? inconfig.m_mcgen_variation_knobval_override.at(allow_sys.first).size() : 7;
+                }
+            }
+        }
 
         size_t total_num_systematics = map_systematic_num_universe.size();
         log<LOG_INFO>(L"%1% || Found %2% unique variations") % __func__ % total_num_systematics;
@@ -492,11 +502,15 @@ namespace PROfit {
                     sv.back().inflate = inconfig.m_mcgen_variation_inflate.at(sys_name);
                     log<LOG_INFO>(L"%1% || Setting inflate=%2% for systematic %3%") % __func__ % sv.back().inflate % sys_name.c_str();
                 }
-                if(sys_mode == "spline" || sys_mode == "spline_to_covariance") {
+                if(sys_mode == "spline" || sys_mode == "spline_to_covariance" || sys_mode == "explicit_spline") {
                     bool override_knobs = inconfig.m_mcgen_variation_knobval_override.find(sys_name) != inconfig.m_mcgen_variation_knobval_override.end();
                     if(!override_knobs && map_systematic_knob_vals.find(sys_name) == map_systematic_knob_vals.end()) {
                         log<LOG_WARNING>(L"%1% || Expected %2% to have knob vals associated with it, but couldn't find any. Will use -3 to +3 as default.") % __func__ % sys_name.c_str();
                         map_systematic_knob_vals[sys_name] = {-3.0f, -2.0f, -1.0f, 0.0f, 1.0f, 2.0f, 3.0f};
+                        if(sys_mode == "explicit_spline" && inconfig.m_mcgen_explicit_weights.at(sys_name).size() != 7) {
+                            log<LOG_ERROR>(L"%1% || Expected exactly 7 weights if no knob values are given for explicit_spline type systematic. Found %2%. Aborting.")
+                                % __func__ % inconfig.m_mcgen_explicit_weights.at(sys_name).size();
+                        }
                     }
                     sv.back().knob_index = override_knobs ? inconfig.m_mcgen_variation_knobval_override.at(sys_name) : map_systematic_knob_vals[sys_name];
                     sv.back().knobval = sv.back().knob_index;
@@ -559,45 +573,53 @@ namespace PROfit {
                     sv.back().knob_index = map_systematic_knob_vals[sys_name];
                     sv.back().knobval = sv.back().knob_index;
                     sv.back().binning = binningindex;
+                    // restrict= widens the single linear parameter beyond its default
+                    // [0,1] knob range (the linear segments extrapolate; use with
+                    // mirror="false" for a symmetric response about the CV).
+                    if(inconfig.m_mcgen_variation_restrict.find(sys_name) != inconfig.m_mcgen_variation_restrict.end()) {
+                        sv.back().has_restrict = true;
+                        sv.back().restrict_lo = inconfig.m_mcgen_variation_restrict.at(sys_name).first;
+                        sv.back().restrict_hi = inconfig.m_mcgen_variation_restrict.at(sys_name).second;
+                        log<LOG_INFO>(L"%1% || Setting restrict=[%2%, %3%] for systematic %4%") % __func__ % sv.back().restrict_lo % sv.back().restrict_hi % sys_name.c_str();
+                    }
                 }
                 if(sys_mode == "norm" || sys_mode == "norm_to_covariance") {
                     log<LOG_INFO>(L"%1% || Systematic variation %2% is a match for a normalization systematic. Processing as such. ") % __func__ % sys_name.c_str();
-                    map_systematic_knob_vals[sys_name] = {-3.0f, -2.0f, -1.0f, 0.0f, 1.0f, 2.0f, 3.0f};
-                    sv.back().knob_index = map_systematic_knob_vals[sys_name];
-                    sv.back().knobval = sv.back().knob_index;
-                    std::sort(sv.back().knobval.begin(), sv.back().knobval.end());
-
                     size_t colonPos = sys_name.find(':');
                     if (colonPos == std::string::npos) {
                         log<LOG_ERROR>(L"%1% || ERROR, you asked for a norm spline systematic but its not in NAME:percentate format %2%") % __func__  % sys_name.c_str();
                         exit(EXIT_FAILURE);
                     }
-
                     std::string wild = sys_name.substr(0, colonPos);
                     std::string sflat_percent  = sys_name.substr(colonPos + 1);
                     float flat_percent = std::stof(sflat_percent);
-
-                    // norm_to_covariance should be able to handle >= 0.33
-                    if(sys_mode == "norm" && flat_percent >= 0.33333){
-                        log<LOG_ERROR>(L"%1% || Currently norm takes +-3,2,1 sigma. Greater than 33.33% norm error isn't allowed. You entered %2%. Dont.  ") % __func__  %  flat_percent;
-                        exit(EXIT_FAILURE);
+                    std::vector<double> knob_vals;
+                    if(sys_mode == "norm"){
+                        sv.back().has_restrict = true;
+                        sv.back().restrict_hi = 3.0f;
+                        sv.back().restrict_lo = -1.0/std::floor(flat_percent);
+                        log<LOG_INFO>(L"%1% || Setting restrict=[%2%, %3%] for systematic %4%") % __func__ % sv.back().restrict_lo % sv.back().restrict_hi % sys_name.c_str();
                     }
+                    map_systematic_knob_vals[sys_name] = {-3.0f, -2.0f, -1.0f, 0.0f, 1.0f, 2.0f, 3.0f};
+                    sv.back().knob_index = map_systematic_knob_vals[sys_name];
+                    sv.back().knobval = sv.back().knob_index;
+                    std::sort(sv.back().knobval.begin(), sv.back().knobval.end());
 
                     log<LOG_INFO>(L"%1% || Wildcard %2% (and percent %3%) which matches: ") % __func__  % wild.c_str() % flat_percent;
                     std::vector<std::string> flatnames;
                     for(auto & name: inconfig.m_fullnames){
                         if(name.find(wild)!=std::string::npos){
-                            flatnames.push_back(name); 
+                            flatnames.push_back(name);
                         }
                     }
                     log<LOG_INFO>(L"%1% || %2% . ") % __func__  % flatnames;
 
                     std::vector<int> flatbins;
                     for(auto &name: flatnames){
-                        size_t is = inconfig.GetSubchannelIndex(name);     
-                        size_t ic = inconfig.GetLocalChannelIndexFromGlobalSubchannelIndex(is);     
+                        size_t is = inconfig.GetSubchannelIndex(name);
+                        size_t ic = inconfig.GetLocalChannelIndexFromGlobalSubchannelIndex(is);
 
-                        size_t start = inconfig.GetGlobalVariableBinStart(is,iv); 
+                        size_t start = inconfig.GetGlobalVariableBinStart(is,iv);
                         for(size_t b = 0; b < inconfig.m_channel_variable_bins[ic][iv].NBins(); b++) {
                             flatbins.push_back((int)(start+b));
                         }
@@ -853,7 +875,7 @@ namespace PROfit {
                 //branch loop
                 for(int ib = 0; ib != num_branch; ++ib) {
                     const size_t prop_size_before = inprop.NEvent();
-                    process_cafana_event(inconfig, branches[ib], f_event_weights[fid][0], inconfig.m_mcgen_pot[fid] * inconfig.m_mcgen_partial_load_frac[fid], subchannel_index[ib], syst_vector, sys_weight_value, inprop);
+                    process_cafana_event(inconfig, branches[ib], f_event_weights[fid][0], inconfig.m_mcgen_pot[fid]  / inconfig.m_mcgen_scale[fid] * inconfig.m_mcgen_partial_load_frac[fid], subchannel_index[ib], syst_vector, sys_weight_value, inprop);
                     // Store matching vars only if process_cafana_event actually added an entry
                     // (it skips zero-weight events without pushing to added_weights).
                     if(has_matching_vars && inprop.NEvent() > prop_size_before) {
@@ -1154,6 +1176,14 @@ namespace PROfit {
             }
         }
 
+        // "Data" from these files is often weighted MC (POT-scaled fake data):
+        // its statistical error is Poisson sqrt(N) of the bin content, not the
+        // sqrt(sum w^2) accumulated by Fill. Identical for unit-weight data.
+        for(auto &d : data) {
+            Eigen::VectorXf poisson_err = d.Spec().array().max(0.0f).sqrt();
+            d = PROdata(d.Spec(), poisson_err);
+        }
+
         return data;
     }
 
@@ -1389,6 +1419,42 @@ namespace PROfit {
                 for(auto so: var_syst_objs) {
                     so->FillCV(spline_bin, mc_weight);
                     so->FillUniverse(0, spline_bin, wgt*mc_weight);
+                }
+            } else if(var_syst_objs.front()->mode == "explicit_spline") {
+                if(spline_bin < 0) continue;
+                for(auto so: var_syst_objs)
+                    so->FillCV(spline_bin, mc_weight);
+
+                for(int is = 0; is < var_syst_objs.front()->GetNUniverse(); ++is){
+                    size_t u = 0;
+                    for(; u < var_syst_objs.front()->knobval.size(); ++u)
+                        if(var_syst_objs.front()->knobval[u] == var_syst_objs.front()->knob_index[is]) break;
+                    
+                    float w = inconfig.m_mcgen_explicit_weights.at(var_syst_objs.front()->systname)[is];
+                    if(std::isnan(w) || std::isinf(w)) {
+                        log<LOG_WARNING>(L"%1% || Encountered a bad weight (%2%) for syst %3%. Setting to 1 instead.")
+                            % __func__ % w % map_iter->first.c_str();
+                        w = 1;
+                    } else if(w > 30) {
+                        log<LOG_WARNING>(L"%1% || Encountered a very large weight (%2%) for syst %3%. Setting to 1 instead.")
+                            % __func__ % w % map_iter->first.c_str();
+                        w = 1;
+                    }
+                    for(auto so: var_syst_objs){
+                        if (!so->include_only_weights.empty()) {
+                            // Compute weight using only the included weights (avoids divide-by-zero)
+                            float included_weight = 1.0;
+                            for(int idx : so->include_only_weights) {
+                                int wi = idx - 1; // convert 1-based to 0-based
+                                if(wi >= 0 && wi < num_weights) {
+                                    included_weight *= weight_vals[wi];
+                                }
+                            }
+                            so->FillUniverse(u, spline_bin, included_weight * pot_scale * additional_weight * w);
+                        } else {
+                            so->FillUniverse(u, spline_bin, mc_weight * additional_weight * w);
+                        }
+                    }
                 }
             }
         }
