@@ -56,12 +56,13 @@ numbers should match.
 1. [PROfit conceptual introduction](#1-profit-conceptual-introduction)
 2. [The PROfit XML](#2-the-profit-xml)
 3. [General arguments and how stuff works](#3-general-arguments-and-how-stuff-works)
-4. [Subcommand `plot` — exploring your spectra](#4-subcommand-plot--exploring-your-spectra)
-5. [Subcommand `global` — fitting and fitter configuration](#5-subcommand-global--fitting-and-fitter-configuration)
-6. [Subcommand `profile` — 1D profiled Δχ²](#6-subcommand-profile--1d-profiled-χ²)
-7. [Subcommand `surface` — 2D Wilks surfaces and AMR](#7-subcommand-surface--2d-wilks-surfaces-and-amr)
-8. [Feldman-Cousins: `fc` and `fc-adaptive`](#8-feldman-cousins-fc-and-fc-adaptive)
-9. [PROjector — two-stage pre-fit / projected fits](#9-projector--two-stage-pre-fit--projected-fits)
+4. [Subcommand `process` — loading your files](#4-subcommand-process--loading-your-files)
+5. [Subcommand `plot` — exploring your spectra](#5-subcommand-plot--exploring-your-spectra)
+6. [Subcommand `global` — fitting and fitter configuration](#6-subcommand-global--fitting-and-fitter-configuration)
+7. [Subcommand `profile` — 1D profiled Δχ²](#7-subcommand-profile--1d-profiled-χ²)
+8. [Subcommand `surface` — 2D Wilks surfaces and AMR](#8-subcommand-surface--2d-wilks-surfaces-and-amr)
+9. [Feldman-Cousins: `fc` and `fc-adaptive`](#9-feldman-cousins-fc-and-fc-adaptive)
+10. [PROjector — two-stage pre-fit / projected fits](#10-projector--two-stage-pre-fit--projected-fits)
 
 Appendices:
 
@@ -429,7 +430,21 @@ MC event loop (quick tests only).
 
 ---
 
-# 4. Subcommand `plot` — exploring your spectra
+# 4. Subcommand `process` — loading your files
+
+```
+Usage: PROfit process [OPTIONS]
+
+Options:
+  -h,--help                   Print this help message and exit
+```
+
+The process command loops through events in the input data, prediction, and systematic files and processes them to efficiently store only the necessary information described in the xml. 
+The output is _prop.bin and _syst.bin files which are efficiently loaded by the remaining PROfit commands.
+
+---
+
+# 5. Subcommand `plot` — exploring your spectra
 
 ```
 Usage: PROfit plot [OPTIONS]
@@ -556,7 +571,7 @@ PDFs are directly comparable by eye.
 
 ---
 
-# 5. Subcommand `global` — fitting and fitter configuration
+# 6. Subcommand `global` — fitting and fitter configuration
 
 `global` performs one full global best fit of all physics + spline parameters
 and draws the post-fit results. It takes no subcommand options of its own —
@@ -699,7 +714,7 @@ is deliberately easy — they all implement the same `PROmetric` interface.
 
 ---
 
-# 6. Subcommand `profile` — 1D profiled Δχ²
+# 7. Subcommand `profile` — 1D profiled Δχ²
 
 ```
 Usage: PROfit profile [OPTIONS]
@@ -797,7 +812,7 @@ PROfit -x tutorial.xml -t TUT -o profso --seed 405 -n 8 --syst-only profile --pr
 
 ---
 
-# 7. Subcommand `surface` — 2D Wilks surfaces and AMR
+# 8. Subcommand `surface` — 2D Wilks surfaces and AMR
 
 `surface` maps Δχ² over a 2D grid of two physics parameters, profiling over
 everything else at each point. Contours at Wilks-theorem critical values
@@ -869,21 +884,21 @@ PROfit -x tutorial.xml -t TUT -o surfnoflux --seed 405 -n 8 --exclude-systs Flux
 
 ### PROcurve: watching the pulls along a 1D path
 
-`--curve-mode x1 y1 x2 y2` (values in the axes' native — here log10 — space)
+`--curve-mode param1start param2start param1end param2end` (values in the axes' native — here log10 — space)
 replaces the 2D scan with a 1D walk from point A to point B across the
-(x, y) plane, fitting the nuisances at each step and plotting how every pull
+(param1, param2) plane, fitting the nuisances at each step and plotting how every pull
 evolves along the path. It's the quickest way to see *which* systematics
 bend to absorb an oscillation signal as you approach it. `-g` sets the
 number of points on the path.
 
 ```bash
 PROfit -x tutorial.xml -t TUT -o curve1 --seed 405 -n 8 \
-    surface $AXES -g 20 --curve-mode -3 -1 -1 1
+    surface $AXES -g 20 --curve-mode -1 -3 1 -1
 ```
 
 <img src="figures/TUT_curve1_PROcurve.png" width="800"/>
 
-*`TUT_curve1_PROcurve.pdf` — path across the plane + every nuisance parameter's best-fit value along it, here from (sin²2θμe, Δm²) = (10⁻³, 0.1 eV²) to (10⁻¹, 10 eV²).*
+*`TUT_curve1_PROcurve.pdf` — path across the plane + every nuisance parameter's best-fit value along it, here from (Δm², sin²2θμe) = (0.1 eV², 10⁻³) to (10 eV², 10⁻¹).*
 
 ### Adaptive mesh refinement: `--surface-amr`
 
@@ -929,10 +944,8 @@ PROfit -x tutorial.xml -t TUT -o surfbrz --seed 405 -n 16 --log surfbrz.log \
     surface $AXES --surface-amr --amr-initial 10 --amr-levels 2 --brazil-band
 ```
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_surfbrz_surface.pdf`
-> (median sensitivity with ±1σ/±2σ Brazil bands — regenerate with
-> `RUN_EXPENSIVE=1 make_tutorial_plots.sh` + `make_tutorial_figures.sh`, then uncomment:)
-> <!-- <img src="figures/TUT_surfbrz_surface.png" width="600"/> -->
+This command does not make a Brazil band itself, but outputs information that could be used to make a Brazil band externally.
+
 
 ### A note on models: parameterize in the variable you plot
 
@@ -952,7 +965,7 @@ if the end goal is a contour in an effective angle, fit in that angle.
 
 ---
 
-# 8. Feldman-Cousins: `fc` and `fc-adaptive`
+# 9. Feldman-Cousins: `fc` and `fc-adaptive`
 
 Wilks' theorem (Δχ² cuts of 2.30/5.99/...) assumes Gaussian-land: no physical
 boundaries, no degenerate minima. Oscillation fits violate both, so for
@@ -982,7 +995,7 @@ PROfit -x tutorial.xml -t TUT -o fc1 --seed 405 -n 8 \
 ```
 
 Output is `TUT_fc1_FC.root` containing a TTree with, per universe, the two
-χ² values, Δχ², and the best-fit parameters — from which you extract the
+χ² values and the best-fit parameters — from which you extract the
 90%/95% quantiles and compare to the Wilks values. This is the honest but
 brute-force approach: to calibrate a whole *contour* you would repeat it at
 every grid point, which is exactly what `fc-adaptive` automates.
@@ -1149,44 +1162,38 @@ into unsampled territory, and the top-up is what makes it decidable.
 
 Outputs along the way:
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_afc_metamesh.pdf`
-> (the meta-mesh: cell refinement levels, concentrated where throws put the contour —
-> regenerate with `make_tutorial_plots.sh` + `make_tutorial_figures.sh`, then uncomment:)
-> <!-- <img src="figures/TUT_afc_metamesh.png" width="600"/> -->
+<img src="figures/TUT_afc_metamesh.png" width="600"/>
+*`TUT_afc_metamesh.pdf` — the meta-mesh: cell refinement levels, concentrated where throws put the contour.*
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_afc_throws.pdf`
-> (the Wilks-prepass throw contours that built the mesh)
-> <!-- <img src="figures/TUT_afc_throws.png" width="600"/> -->
+<img src="figures/TUT_afc_throws.png" width="600"/>
+*`TUT_afc_throws.pdf` — the Wilks-prepass throw contours that built the mesh.*
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_afc_bank_summary.pdf` (PE bank occupancy per level)
-> <!-- <img src="figures/TUT_afc_bank_summary.png" width="600"/> -->
+<img src="figures/TUT_afc_bank_summary.png" width="600"/>
+*`TUT_afc_bank_summary.pdf` — PE bank occupancy per level.*
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_afc_asimov_contour.pdf`
-> (FC-corrected contour vs the Wilks contour)
-> <!-- <img src="figures/TUT_afc_asimov_contour.png" width="600"/> -->
+<img src="figures/TUT_afc_asimov_contour.png" width="600"/>
+*`TUT_afc_asimov_contour.pdf` — FC-corrected contour vs the Wilks contour.*
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_afc_asimov_verdict.pdf`
-> (per-cell FC vs Wilks verdict map)
-> <!-- <img src="figures/TUT_afc_asimov_verdict.png" width="600"/> -->
+<img src="figures/TUT_afc_asimov_verdict.png" width="600"/>
+*`TUT_afc_asimov_verdict.pdf` — per-cell FC vs Wilks verdict map.*
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_afc_brazil_band.pdf`
-> (FC-corrected Brazil band from the bank)
-> <!-- <img src="figures/TUT_afc_brazil_band.png" width="600"/> -->
+<img src="figures/TUT_afc_brazil_band.png" width="600"/>
+*`TUT_afc_brazil_band.pdf` — FC-corrected Brazil band from the bank.*
 
 Determinism note: with `-n 1` and a fixed `--seed` the entire pipeline is
 bit-reproducible; multithreaded runs are statistically equivalent.
 
 ---
 
-# 9. PROjector — two-stage pre-fit / projected fits
+# 10. PROjector — two-stage pre-fit / projected fits
 
 PROjector answers "what does my near detector buy me?" properly. Instead of
 fitting ND and FD simultaneously every time, you (1) fit **only** the ND
 channels once and save the nuisance posterior, then (2) run any FD study with
 those channels masked out and the saved posterior installed as a correlated
-prior. Same statistical content as the joint fit (to the Gaussian
-approximation), at a fraction of the per-fit cost — which matters enormously
-for FC studies.
+prior. Same statistical content as the joint fit (with a Gaussian
+approximation and a no-near-detector-oscillation approximation), at a fraction 
+of the per-fit cost — which matters enormously for FC studies.
 
 ### Stage 1: the pre-fit
 
@@ -1234,14 +1241,13 @@ the constraint file), masks the pre-fit channels OUT of the χ² (active-bins
 mask + zeroed data), and installs (θ̂, Σ) as a fully correlated Gaussian prior
 on the promoted spline parameters.
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_pjprof_PROfile_1sigma.pdf`
-> (projected nuisance constraints — compare against the joint-fit `TUT_prof1_PROfile_1sigma.pdf` —
-> regenerate with `make_tutorial_plots.sh` + `make_tutorial_figures.sh`, then uncomment:)
-> <!-- <img src="figures/TUT_pjprof_PROfile_1sigma.png" width="800"/> -->
+<img src="figures/TUT_pjprof_PROfile_1sigma.png" width="800"/>
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_pjsurf_surface.pdf`
-> (projected FD-only sensitivity with the ND constraint as prior, vs the joint surface `TUT_surfamr_surface.pdf`)
-> <!-- <img src="figures/TUT_pjsurf_surface.png" width="600"/> -->
+*`TUT_pjprof_PROfile_1sigma.pdf` — projected nuisance constraints — compare against the joint-fit `TUT_prof1_PROfile_1sigma.pdf`.*
+
+<img src="figures/TUT_pjsurf_surface.png" width="800"/>
+
+*`TUT_pjsurf_surface.pdf` — projected FD-only sensitivity with the ND constraint as prior, vs the joint surface `TUT_surfamr_surface.pdf`.*
 
 ### Rules and closure checks
 
@@ -1257,6 +1263,8 @@ on the promoted spline parameters.
 * FC/Brazil throws in projected mode sample the *marginal* widths of the
   constraint only — correlations enter the pull term, not the throws (PROfit
   prints a runtime warning to remind you).
+
+Note that autocorrelation and harmonic scan plots will not be filled properly with the projector option.
 
 ---
 
