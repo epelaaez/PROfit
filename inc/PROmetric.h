@@ -117,7 +117,7 @@ namespace PROfit {
              * @param var_index      Variable index.
              * @return Chi-squared for that channel.
              */
-            virtual float getSingleChannelChi(size_t channel_index, const PROspec& cv, size_t var_index) = 0;
+            virtual float getSingleChannelChi(size_t channel_index, const PROspec& cv, size_t var_index, const Eigen::MatrixXf &projection = Eigen::MatrixXf()) = 0;
             PROmetric() = default;
             virtual ~PROmetric() {}
             /**
@@ -280,4 +280,3 @@ namespace PROfit {
 };
 
 #endif
-

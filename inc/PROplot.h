@@ -162,6 +162,22 @@ namespace PROfit{
     void set_matrix_palette();
 
     /**
+     * @brief Plot the spectrum of the ratio between each pair of detectors, one page per channel.
+     * @param c                Canvas printing into an already-open multipage PDF.
+     * @param config           Analysis configuration.
+     * @param cv_coll          Collapsed CV prediction.
+     * @param bf_coll          Optional collapsed best-fit prediction.
+     * @param data_coll        Optional collapsed data spectrum.
+     * @param errband          Optional pre-fit error band, whose covariance propagates the inter-detector correlation.
+     * @param posterrband      Optional post-fit error band, used with bf_coll.
+     * @param channel_offsets  Collapsed bin start of each mode/detector/channel, in loop order.
+     * @param filename         Output PDF filename.
+     * @param other_index      Variable index (default 0).
+     */
+    void plot_detector_ratio_spectra(TCanvas &c, const PROconfig &config, const Eigen::VectorXf &cv_coll, const std::optional<Eigen::VectorXf> &bf_coll, const std::optional<Eigen::VectorXf> &data_coll, const std::optional<PROerrorbar> &errband, const std::optional<PROerrorbar> &posterrband, const std::vector<size_t> &channel_offsets, const std::string &filename, int other_index = 0);
+    void plot_channel_ratio_spectra(TCanvas &c, const PROconfig &config, const Eigen::VectorXf &cv_coll, const std::optional<Eigen::VectorXf> &bf_coll, const std::optional<Eigen::VectorXf> &data_coll, const std::optional<PROerrorbar> &errband, const std::optional<PROerrorbar> &posterrband, const std::vector<size_t> &channel_offsets, const std::string &filename, int other_index = 0, PlotOptions opt = PlotOptions{});
+
+    /**
      * @brief Produce a multi-panel detector ratio comparison plot.
      * @param config       Analysis configuration.
      * @param data_hists   Data histograms, one per channel.
@@ -190,11 +206,12 @@ namespace PROfit{
      * @param opt          Bitmask of PlotOptions flags.
      * @param var_index    Variable index (default 0).
      * @param ratio_bool   If true, add a ratio panel.
+     * @param plot_channel_ratios   If true, plot the ratios across different channels.
      * @param skip_stack_subchannels  Optional global subchannel indices to omit from the
      *        CV stack and legend (used by --bkg-subtract; their contents are expected to
      *        already be zero in `cv`).
      */
-    std::map<std::string, TObject *> plot_channels(const std::string &filename, const PROconfig &config, std::optional<PROspec> cv, std::optional<PROspec> best_fit, std::optional<PROdata> data, std::optional<PROerrorbar> errband, std::optional<PROerrorbar> posterrband, std::vector<TPaveText> &texts, PlotBounds &bounds, PlotOptions opt = PlotOptions::Default, int var_index = 0, bool ratio_bool = false, const std::vector<size_t> *skip_stack_subchannels = nullptr);
+    std::map<std::string, TObject *> plot_channels(const std::string &filename, const PROconfig &config, std::optional<PROspec> cv, std::optional<PROspec> best_fit, std::optional<PROdata> data, std::optional<PROerrorbar> errband, std::optional<PROerrorbar> posterrband, std::vector<TPaveText> &texts, PlotBounds &bounds, PlotOptions opt = PlotOptions::Default, int var_index = 0, bool ratio_bool = false, bool plot_channel_ratios = false, const std::vector<size_t> *skip_stack_subchannels = nullptr, PROmetric *chi_metric = nullptr, const PROspec *chi_spec = nullptr);
 
     /**
      * @brief Return global subchannel indices whose `m_fullnames[i]` contains `pattern` as a substring.
@@ -371,6 +388,7 @@ namespace PROfit{
      * @return 0 on success.
      */
     int plotPriorFractionalSystematicRatios(const PROconfig &config, const PROspec &spec, const PROsyst &allsplinesyst, std::string filename, int other_index);
+    int plotPriorFractionalSystematicChannelRatios(const PROconfig &config, const PROspec &spec, const PROsyst &allsplinesyst, std::string filename, int other_index);
 
     /**
      * @brief Produce a multi-page diagnostic PDF for every covariance_to_spline systematic.

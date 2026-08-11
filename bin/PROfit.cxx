@@ -23,6 +23,7 @@
 #include "PROplot.h"
 #include "PROjector.h"
 #include "PRObench.h"
+#include "PROletariat.h"
 
 #include "CLI11.h"
 #include "LBFGSB.h"
@@ -232,7 +233,7 @@ std::vector<FixedSeed> buildBkgOnlyFixedSeeds(const PROmodel &model, const Eigen
     return out;
 }
 
-std::map<std::string, TObject *> draw_fit_result(const PROconfig &config, const PROpeller &prop, const PROmodel &model, const PROsyst &syst, const PROspec &cv, const PROdata &data, const GlobalFitResult &fitres, const std::string &prefix, PlotOptions popt, PlotBounds pbounds);
+std::map<std::string, TObject *> draw_fit_result(const PROconfig &config, const PROpeller &prop, const PROmodel &model, const PROsyst &syst, PROmetric &metric, const PROspec &cv, const PROdata &data, const GlobalFitResult &fitres, const std::string &prefix, PlotOptions popt, PlotBounds pbounds, bool plot_channel_ratios = false);
 void draw_harmonic_scan_pdf(const GlobalFitResult &fitres, const PROfitterConfig &fit_config, const PROmodel &model, const std::string &filename);
 
 // Walks the collapsed reco bins and logs any with prediction < threshold,
@@ -421,6 +422,12 @@ int main(int argc, char* argv[])
     app.add_flag("--data-mc-ratio", data_mc_ratio, "For ratio plots, use data/pre-fit mc instead of data/best-fit mc.");
     app.add_option("--scale", scale_arg, "Scale detector POT by a given value.");
     app.add_option("--plot-bounds", bound_list, "Plot bounds, set by  string float pairs. Available strings are ymax,ratmin,ratmax."); 
+    bool plot_channel_ratios = false;
+    app.add_flag("--plot-ratios", plot_channel_ratios,
+        "Also draw channel-to-channel ratio spectra within each detector (plot, "
+        "global and profile). The two channels must share the same binning for the "
+        "ratio to be defined; pairs with different binning are skipped and logged "
+        "as a warning.");
 
     //app.add_option("-f, --rwfile", reweights_file, "File containing histograms for reweighting");//deprociated, add back in later
     //app.add_option("-r, --mockrw",   mockreweights, "Vector of reweights to use for mock data");
@@ -513,7 +520,7 @@ int main(int argc, char* argv[])
         "correlation is retained in the band but not in the data errors. "
         "Example: --bkg-subtract numu_bkg matches every <detector>_numu_bkg "
         "subchannel.");
-
+        
     //PROfc, Feldmand-Cousins
     CLI::App *profc_command = app.add_subcommand("fc", "Run Feldman-Cousins for this injected signal");
     profc_command->add_option("-u,--universes", nuniv, "Number of Feldman Cousins universes to throw")->default_val(1000);
@@ -533,13 +540,16 @@ int main(int argc, char* argv[])
         "asimov: load <tag>_bank.bin and write FC contour + verdict PDFs. "
         "merge-mesh: union-merge >=2 --merge-input mesh binaries into <tag>_mesh.bin. "
         "merge-bank: harvest PEs from >=1 --merge-input bank binaries onto <tag>_mesh.bin. "
+        "merge-brazil: union throws from >=1 --merge-input brazil archives into <tag>_brazil.bin, "
+        "re-classify against <tag>_bank.bin and emit the band PDF + ROOT (no fits; "
+        "bitwise-duplicate throws from same---seed runs are dropped). "
         "brazil-cleanup: mesh densified at the Brazil +-2sigma contours -> <tag>_cleanup_mesh.bin. "
         "print-mesh: plot <tag>_mesh.bin (or --merge-input mesh files) as PDFs.")
         ->default_str("build-mesh");
     afc_command->add_option("--merge-input", afc_merge_inputs,
-        "Input artifact filenames for merge-mesh / merge-bank (repeatable; "
-        "glob patterns like 'run*_mesh.bin' are expanded). Output goes to the "
-        "normal <output_tag>-prefixed artifacts.")->expected(-1);
+        "Input artifact filenames for merge-mesh / merge-bank / merge-brazil "
+        "(repeatable; glob patterns like 'run*_mesh.bin' are expanded). Output "
+        "goes to the normal <output_tag>-prefixed artifacts.")->expected(-1);
     afc_command->add_option("--cleanup-quantiles", afc_cleanup_quantiles,
         "brazil-cleanup: inclusion-fraction quantile levels whose contour "
         "crossings get finest refinement (default 0.025 0.975 = the Brazil "
@@ -620,6 +630,31 @@ int main(int argc, char* argv[])
     bench_command->add_option("-N,--n", bench_N, "Base call count: FillSpectra=N, metric=N/10, fit=N/100.")->default_val(1000);
     bench_command->add_option("--tests", bench_tests_str, "Comma-separated subset of {a..n} or {fillspectra,metric,metricgrad,fit,pseudo,collapse,mcmc,all}. Default 'all'.")->default_val("all");
 
+    //PROletariat, stage+tar+submit grid jobs (replaces grid/maketar_submit_v2.4.sh)
+    PROletariatOptions grid_opts;
+    std::string grid_backend_str = "jobsub";
+    CLI::App *proletariat_command = app.add_subcommand("proletariat",
+        "Stage the PROfit binary, XML and analysis artifacts into grid_dir.tar and submit N grid jobs running a worker script via jobsub_submit. Replaces grid/maketar_submit_v2.4.sh.");
+    proletariat_command->add_option("--script", grid_opts.script,
+        "Worker script executed on each grid node (e.g. grid/runFC_v2.4_v2.sh).")->required();
+    proletariat_command->add_option("-N,--n-jobs", grid_opts.njobs, "Number of grid jobs.")->default_val(2);
+    proletariat_command->add_option("--lifetime", grid_opts.lifetime, "Expected job lifetime (3d is the FermiGrid ceiling).")->default_str("2d");
+    proletariat_command->add_option("--memory", grid_opts.memory_mb, "Requested memory in MB.")->default_val(4000);
+    proletariat_command->add_option("--disk", grid_opts.disk_mb, "Requested scratch disk in MB.")->default_val(10000);
+    proletariat_command->add_option("--input", grid_opts.extra_inputs,
+        "Extra file(s) to bundle into the tarball (repeatable). A missing file is a hard error. The XML and any <tag>_prop.bin/_syst.bin and <tag>_<output>_mesh.bin/_bank.bin in the current directory are bundled automatically.");
+    proletariat_command->add_flag("--dry-run", grid_opts.dry_run,
+        "Stage and build the tarball, print the exact jobsub_submit command, do not submit.");
+    proletariat_command->add_option("--backend", grid_backend_str, "Scheduler backend: jobsub or slurm (slurm not yet implemented).")->default_str("jobsub");
+    proletariat_command->add_option("--group", grid_opts.group, "jobsub experiment group (-G).")->default_str("sbnd");
+    proletariat_command->add_option("--role", grid_opts.role, "jobsub --role.")->default_str("Analysis");
+    proletariat_command->add_option("--singularity-image", grid_opts.singularity_image, "Apptainer/Singularity image path.");
+    proletariat_command->add_option("--resource-provides", grid_opts.resource_provides, "jobsub --resource-provides usage model.");
+    proletariat_command->add_option("--lines", grid_opts.condor_lines,
+        "Condor classad --lines entries. REPLACES the FERMIHTC defaults when given; to append instead, use --jobsub-arg.");
+    proletariat_command->add_option("--jobsub-arg", grid_opts.extra_jobsub_args, "Extra raw argument passed through to jobsub_submit verbatim (repeatable).");
+    proletariat_command->add_option("--profit-bin", grid_opts.profit_bin, "Override the PROfit binary to ship (default: this executable, via /proc/self/exe).");
+
     app.set_config("--config");
     surface_command->configurable(true);
     process_command->configurable(true);
@@ -630,6 +665,7 @@ int main(int argc, char* argv[])
     proplot_command->configurable(true);
     promcmc_command->configurable(true);
     bench_command->configurable(true);
+    proletariat_command->configurable(true);
 
     //Parse inputs. 
     CLI11_PARSE(app, argc, argv);
@@ -655,8 +691,21 @@ int main(int argc, char* argv[])
     log<LOG_WARNING>(L" %1% ") % getIcon().c_str()  ;
     std::string final_output_tag =analysis_tag +"_"+output_tag;
 
-
-
+    // Grid submission dispatches here, BEFORE PROconfig/CAF/syst setup: it
+    // only needs the XML path and tags, not the loaded analysis.
+    if(*proletariat_command){
+        grid_opts.xml              = xmlname;
+        grid_opts.analysis_tag     = analysis_tag;
+        grid_opts.final_output_tag = final_output_tag;
+        if(grid_backend_str == "slurm") {
+            grid_opts.backend = PROletariatOptions::Backend::Slurm;
+        } else if(grid_backend_str != "jobsub") {
+            log<LOG_ERROR>(L"%1% || Unknown --backend '%2%' (expected jobsub or slurm).") % __func__ % grid_backend_str.c_str();
+            return 1;
+        }
+        PROletariat submitter(grid_opts);
+        return submitter.Run();
+    }
 
     log<LOG_WARNING>(L"%1% || ##################################################################") % __func__  ;
     log<LOG_WARNING>(L"%1% || ####################### PROfit version v%2% ######################") % __func__ % PROJECT_VERSION_STR ;
@@ -1456,8 +1505,8 @@ int main(int argc, char* argv[])
         }
         if(binwidth_scale) popt |= PlotOptions::BinWidthScaled;
         if(area_normalized) popt |= PlotOptions::AreaNormalized;
-        std::map<std::string, TObject *> drawn_objs = draw_fit_result(config, prop, metric->GetModel(), metric->GetSysts(), cv, data, fitres, final_output_tag+"_PROfile", popt, pbounds);
 
+        std::map<std::string, TObject *> drawn_objs = draw_fit_result(config, prop, metric->GetModel(), metric->GetSysts(), *metric, cv, data, fitres, final_output_tag+"_PROfile", popt, pbounds, plot_channel_ratios);
 
         plot_mcmc_1sigma(final_output_tag+"_PROfile", config, metric->GetSysts(), metric->GetModel(), fitres.fitter.best_fit, fitres.post_param_lo, fitres.post_param_hi, !systs_only, fakedataparams);
 
@@ -1898,7 +1947,7 @@ int main(int argc, char* argv[])
                 cv_plot.Spec() -= bkg_full;
             }
             auto objs = plot_channels(final_output_tag+"_PROplot_Variable_"+std::to_string(io)+"_CV.pdf", config, cv_plot, {}, {}, {}, {}, notext, pbounds, opt, io,
-                    false, do_bkg_subtract ? &bkg_subchannels : nullptr);
+                    false, plot_channel_ratios, do_bkg_subtract ? &bkg_subchannels : nullptr);
             cv_objs.push_back(objs);
         }
 
@@ -1907,6 +1956,10 @@ int main(int argc, char* argv[])
         std::string rfilename = final_output_tag+"_ratio_fractional_systematics.pdf";
         if(config.m_num_detectors > 1)
             plotPriorFractionalSystematicRatios(config, variable_cvs[config.i_prime], allcovsyst, rfilename,config.i_prime);
+
+        std::string crfilename = final_output_tag+"_channel_ratio_fractional_systematics.pdf";
+        if(plot_channel_ratios && config.m_num_channels > 1)
+            plotPriorFractionalSystematicChannelRatios(config, variable_cvs[config.i_prime], allcovsyst, crfilename, config.i_prime);
 
         std::vector<std::map<std::string, std::unique_ptr<TH1D>>> other_hists;
         for(size_t io = 0; io < config.m_num_variables; ++io) {
@@ -2479,7 +2532,9 @@ int main(int argc, char* argv[])
             }
             auto objs = plot_channels(final_output_tag+"_PROplot_Variable_"+std::to_string(io)+"_ErrorBand.pdf", config, cv_plot, {}, data_plot,
                     other_err_bands.back(), {}, other_channel_chitexts[io], pbounds, opt | PlotOptions::DataMCRatio, io,
-                    false, do_bkg_subtract ? &bkg_subchannels : nullptr);
+                    false, plot_channel_ratios, do_bkg_subtract ? &bkg_subchannels : nullptr,
+                    io == config.i_prime ? allcov_metric.get() : nullptr,
+                    io == config.i_prime ? &variable_cvs[io] : nullptr);
             errband_objs.push_back(objs);
         }
 
@@ -2802,6 +2857,7 @@ int main(int argc, char* argv[])
         else if (afc_mode_str == "classify")   acfg.mode = PROfit::AdaptiveFCMode::Classify;
         else if (afc_mode_str == "merge-mesh") acfg.mode = PROfit::AdaptiveFCMode::MergeMesh;
         else if (afc_mode_str == "merge-bank") acfg.mode = PROfit::AdaptiveFCMode::MergeBank;
+        else if (afc_mode_str == "merge-brazil") acfg.mode = PROfit::AdaptiveFCMode::MergeBrazil;
         else if (afc_mode_str == "brazil-cleanup") acfg.mode = PROfit::AdaptiveFCMode::BrazilCleanup;
         else if (afc_mode_str == "print-mesh") acfg.mode = PROfit::AdaptiveFCMode::PrintMesh;
         else {
@@ -2839,8 +2895,9 @@ int main(int argc, char* argv[])
         acfg.only_layer = afc_only_layer;
         acfg.n_brazil_throws = afc_n_brazil_throws;
         acfg.band_flag = afc_flag;
-        if (!afc_flag.empty() && acfg.mode != PROfit::AdaptiveFCMode::Brazil) {
-            log<LOG_WARNING>(L"%1% || fc-adaptive: --flag %2% only styles the --mode brazil band PDF; ignored for --mode %3%.")
+        if (!afc_flag.empty() && acfg.mode != PROfit::AdaptiveFCMode::Brazil
+            && acfg.mode != PROfit::AdaptiveFCMode::MergeBrazil) {
+            log<LOG_WARNING>(L"%1% || fc-adaptive: --flag %2% only styles the brazil / merge-brazil band PDF; ignored for --mode %3%.")
                 % __func__ % afc_flag.c_str() % afc_mode_str.c_str();
         }
         acfg.roi_band = afc_roi_band;
@@ -2937,7 +2994,8 @@ int main(int argc, char* argv[])
         }
         if(binwidth_scale) popt |= PlotOptions::BinWidthScaled;
         if(area_normalized) popt |= PlotOptions::AreaNormalized;
-        std::map<std::string, TObject *> drawn_objs = draw_fit_result(config, prop, metric->GetModel(), metric->GetSysts(), cv, data, fitres, final_output_tag+"_PROglobal", popt, pbounds);
+
+        std::map<std::string, TObject *> drawn_objs = draw_fit_result(config, prop, metric->GetModel(), metric->GetSysts(), *metric, cv, data, fitres, final_output_tag+"_PROglobal", popt, pbounds, plot_channel_ratios);
 
         TFile fout((final_output_tag+"_PROglobal.root").c_str(), "RECREATE");
         for(const auto &[n, o] : drawn_objs)
@@ -3748,7 +3806,7 @@ void draw_harmonic_scan_pdf(const GlobalFitResult &fitres, const PROfitterConfig
     log<LOG_INFO>(L"%1% || Wrote harmonic scan summary to %2%") % __func__ % filename.c_str();
 }
 
-std::map<std::string, TObject *> draw_fit_result(const PROconfig &config, const PROpeller &prop, const PROmodel &model, const PROsyst &syst, const PROspec &cv, const PROdata &data, const GlobalFitResult &fitres, const std::string &prefix, PlotOptions popt, PlotBounds pbounds) {
+std::map<std::string, TObject *> draw_fit_result(const PROconfig &config, const PROpeller &prop, const PROmodel &model, const PROsyst &syst, PROmetric &metric, const PROspec &cv, const PROdata &data, const GlobalFitResult &fitres, const std::string &prefix, PlotOptions popt, PlotBounds pbounds, bool plot_channel_ratios) {
     std::map<std::string, TObject *> drawn_objs;
 
     // Harmonic-scan diagnostics: the scan curve chi2(freq) and the refit seed
@@ -3869,10 +3927,9 @@ std::map<std::string, TObject *> draw_fit_result(const PROconfig &config, const 
         chi2text.SetFillColor(0);
         chi2text.SetBorderSize(0);
         chi2text.SetTextAlign(12);
-        //chi2text.SetTextSize(0.035); 
         texts.push_back(chi2text);
 
-        std::map<std::string, TObject *> tmp_objs = plot_channels((prefix+"_hists.pdf"), config, cv, bf, data, fitres.err_band, fitres.post_err_band, texts, pbounds, popt);
+        std::map<std::string, TObject *> tmp_objs = plot_channels((prefix+"_hists.pdf"), config, cv, bf, data, fitres.err_band, fitres.post_err_band, texts, pbounds, popt, config.i_prime, false, plot_channel_ratios, nullptr, &metric, &bf);
         for(const auto &[name, obj] : tmp_objs)
             drawn_objs[name] = obj;
     }
