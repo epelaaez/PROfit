@@ -21,6 +21,7 @@
 #include "PROspec.h"
 #include "PROcess.h"
 #include "PROtocall.h"
+#include "MurmurHash3.h"
 
 #include <Eigen/Eigen>
 
@@ -232,6 +233,46 @@ static BrazilAggregation aggregate_brazil_throws(
             % __func__ % total_undecidable_cells;
     }
     return agg;
+}
+
+// Band PDF + ROOT artifacts from an aggregated (bank, archive) pair —
+// the shared output tail of --mode brazil and --mode merge-brazil.
+static void emit_brazil_outputs(
+    const PEBank &bank,
+    const std::string &bank_in,
+    const BrazilArchive &arc,
+    const BrazilAggregation &agg,
+    const AdaptiveFCConfig &acfg,
+    const PROmodel &model,
+    size_t xaxis_idx, size_t yaxis_idx,
+    const Eigen::VectorXf &fakeDataParams)
+{
+    const std::string brazil_pdf  = acfg.output_tag + "_brazil_band.pdf";
+    const std::string brazil_root = acfg.output_tag + "_brazil.root";
+    const bool xlog_axis = (xaxis_idx < model.is_log10.size()) ? model.is_log10[xaxis_idx] : acfg.logx;
+    const bool ylog_axis = (yaxis_idx < model.is_log10.size()) ? model.is_log10[yaxis_idx] : acfg.logy;
+    const std::string xlabel = xaxis_idx < model.nparams
+        ? model.pretty_param_names.at(xaxis_idx) : std::string("x");
+    const std::string ylabel = yaxis_idx < model.nparams
+        ? model.pretty_param_names.at(yaxis_idx) : std::string("y");
+    const float truth_x_phys = xlog_axis
+        ? std::pow(10.0f, fakeDataParams((int)xaxis_idx))
+        : fakeDataParams((int)xaxis_idx);
+    const float truth_y_phys = ylog_axis
+        ? std::pow(10.0f, fakeDataParams((int)yaxis_idx))
+        : fakeDataParams((int)yaxis_idx);
+
+    plot_brazil_band_pdf(bank, agg.inclusion_frac, acfg.cl_targets, brazil_pdf, bank_in,
+                          xlabel, ylabel, acfg.logx, acfg.logy,
+                          xlog_axis, ylog_axis,
+                          /*draw_truth_marker=*/ true,
+                          truth_x_phys, truth_y_phys,
+                          agg.n_kept_per_cl, agg.n_dropped_per_cl,
+                          acfg.band_flag);
+
+    save_brazil_root(bank, agg.per_throw_verdicts, arc.per_throw_dchi2,
+                      arc.per_throw_global_chi2, agg.inclusion_frac, agg.throw_kept,
+                      acfg.cl_targets, brazil_root, xlog_axis, ylog_axis);
 }
 
 // ====================================================================
@@ -454,6 +495,161 @@ AdaptiveFCResult run_adaptive_fc(
         res.n_meta_cells = bank.n_cells;
         res.total_pes_generated = total_carried;
         res.mean_pes_per_cell = bank.n_cells > 0 ? (float)total_carried / (float)bank.n_cells : 0.0f;
+        return res;
+    }
+
+    // ---- Mode: merge-brazil -------------------------------------------------
+    // Union throws from >= 1 brazil archives (--merge-input) produced by
+    // independent --mode brazil runs (e.g. grid jobs) into <tag>_brazil.bin,
+    // then re-classify everything against this tag's <tag>_bank.bin and emit
+    // the band PDF + ROOT — the same outputs as --mode brazil, with zero fits.
+    //
+    // Unlike merge-bank there is no per-cell harvesting: a throw is a full
+    // per-cell dchi2 vector tied to the cell ORDERING of the mesh it was
+    // computed on, so each input archive must match the current bank's
+    // footprint (finest grid + n_cells) exactly or it is refused whole.
+    //
+    // Dedupe: the archive stores no per-throw RNG seed, but throws are driven
+    // by PROseed::global_rng, so two runs launched with the same --seed
+    // produce bitwise-identical observable rows. The dedupe key is therefore
+    // the bitwise fingerprint of (global chi2, dchi2 vector) — hash plus an
+    // exact byte compare on hash match — the direct analogue of merge-bank's
+    // (seed, dchi2) key. Generate grid archives with distinct --seed values;
+    // duplicates are dropped here with a warning.
+    //
+    // NOTE: like merge-bank, archives carry no XML/fit-config provenance, so
+    // pooling throws from mismatched configs/metrics/presets is on the caller.
+    if (acfg.mode == AdaptiveFCMode::MergeBrazil) {
+        if (acfg.merge_inputs.empty()) {
+            log<LOG_ERROR>(L"%1% || merge-brazil: need >= 1 --merge-input brazil archives.") % __func__;
+            return res;
+        }
+        const std::string bank_in    = acfg.output_tag + "_bank.bin";
+        const std::string brazil_bin = acfg.output_tag + "_brazil.bin";
+        PEBank bank;
+        if (!load_bank(bank, bank_in)) {
+            log<LOG_ERROR>(L"%1% || merge-brazil: failed to load %2%. "
+                           L"Run --mode merge-bank / init-bank (same -o) first.")
+                % __func__ % bank_in.c_str();
+            return res;
+        }
+        const int n_cells = bank.n_cells;
+
+        // The output archive is built from the inputs ONLY (mirrors
+        // merge-bank). If this tag already has an archive that isn't among
+        // the inputs, its throws would be silently replaced — warn.
+        {
+            std::ifstream test(brazil_bin, std::ios::binary);
+            if (test.is_open()
+                && std::find(acfg.merge_inputs.begin(), acfg.merge_inputs.end(),
+                             brazil_bin) == acfg.merge_inputs.end()) {
+                log<LOG_WARNING>(L"%1% || merge-brazil: existing %2% is NOT among the --merge-input files and will be overwritten; "
+                                 L"add it to --merge-input to keep its throws.")
+                    % __func__ % brazil_bin.c_str();
+            }
+        }
+
+        BrazilArchive merged;
+        merged.finest_nx = bank.finest_nx;
+        merged.finest_ny = bank.finest_ny;
+        merged.n_cells   = n_cells;
+
+        // Dedupe: hash -> accepted throw indices with that hash; exact byte
+        // compare on match so a hash collision can never drop a real throw.
+        std::unordered_map<uint64_t, std::vector<size_t>> seen;
+        auto throw_fingerprint = [](float global_chi2, const std::vector<float> &dchi2) -> uint64_t {
+            uint64_t h[2] = {0, 0};
+            MurmurHash3_x64_128(dchi2.data(), (int)(dchi2.size() * sizeof(float)),
+                                BrazilArchive::MAGIC, h);
+            uint32_t gbits;
+            std::memcpy(&gbits, &global_chi2, sizeof(gbits));
+            return h[0] ^ (h[1] << 1) ^ ((uint64_t)gbits * 0x9E3779B97F4A7C15ULL);
+        };
+        auto identical_throw = [&merged](size_t prev, float g, const std::vector<float> &d) -> bool {
+            if (std::memcmp(&merged.per_throw_global_chi2[prev], &g, sizeof(float)) != 0)
+                return false;
+            const auto &pd = merged.per_throw_dchi2[prev];
+            return pd.size() == d.size()
+                && std::memcmp(pd.data(), d.data(), d.size() * sizeof(float)) == 0;
+        };
+
+        int64_t total_carried = 0, total_dups = 0;
+        for (const auto &path : acfg.merge_inputs) {
+            BrazilArchive in;
+            if (!load_brazil_archive(in, path)) {
+                log<LOG_ERROR>(L"%1% || merge-brazil: failed to load %2%.") % __func__ % path.c_str();
+                return res;
+            }
+            if (in.finest_nx != bank.finest_nx || in.finest_ny != bank.finest_ny
+                || in.n_cells != n_cells
+                || in.per_throw_global_chi2.size() != in.per_throw_dchi2.size()) {
+                log<LOG_ERROR>(L"%1% || merge-brazil: %2% has an incompatible footprint "
+                               L"(finest %3%x%4%, n_cells=%5% vs bank %6%x%7%, n_cells=%8%). "
+                               L"Throws are tied to the mesh's cell set; refusing to merge.")
+                    % __func__ % path.c_str()
+                    % in.finest_nx % in.finest_ny % in.n_cells
+                    % bank.finest_nx % bank.finest_ny % n_cells;
+                return res;
+            }
+            int64_t carried = 0, dups = 0;
+            for (size_t t = 0; t < in.per_throw_dchi2.size(); ++t) {
+                const auto &d = in.per_throw_dchi2[t];
+                if ((int)d.size() != n_cells) {
+                    log<LOG_ERROR>(L"%1% || merge-brazil: %2% throw %3% has %4% cells (expected %5%) -- corrupt archive; refusing to merge.")
+                        % __func__ % path.c_str() % (int)t % (int)d.size() % n_cells;
+                    return res;
+                }
+                const float g = in.per_throw_global_chi2[t];
+                auto &bucket = seen[throw_fingerprint(g, d)];
+                bool dup = false;
+                for (size_t prev : bucket) {
+                    if (identical_throw(prev, g, d)) { dup = true; break; }
+                }
+                if (dup) { ++dups; continue; }
+                bucket.push_back(merged.per_throw_dchi2.size());
+                merged.per_throw_global_chi2.push_back(g);
+                merged.per_throw_dchi2.push_back(d);
+                ++carried;
+            }
+            log<LOG_INFO>(L"%1% || merge-brazil input %2%: throws carried=%3%, duplicate dropped=%4%.")
+                % __func__ % path.c_str() % (long long)carried % (long long)dups;
+            if (dups > 0) {
+                log<LOG_WARNING>(L"%1% || merge-brazil: %2% bitwise-identical throws dropped from %3% -- "
+                                 L"input archives share RNG seeds. Generate grid archives with distinct --seed values.")
+                    % __func__ % (long long)dups % path.c_str();
+            }
+            total_carried += carried; total_dups += dups;
+        }
+        const int n_total = (int)merged.per_throw_dchi2.size();
+        if (n_total == 0) {
+            log<LOG_ERROR>(L"%1% || merge-brazil: no throws survived the merge; nothing written.") % __func__;
+            return res;
+        }
+
+        save_brazil_archive(merged, brazil_bin);
+
+        // Re-classify all merged throws against the current bank and emit the
+        // band outputs — same tail as --mode brazil (see aggregate_brazil_throws).
+        const int min_pes = std::max(10, acfg.n_pe_min);
+        BrazilAggregation agg =
+            aggregate_brazil_throws(bank, merged, acfg.cl_targets, min_pes, nthreads);
+        emit_brazil_outputs(bank, bank_in, merged, agg, acfg, *model,
+                            xaxis_idx, yaxis_idx, fakeDataParams);
+
+        // Populate result.
+        res.bank_path     = bank_in;
+        res.n_meta_cells  = n_cells;
+        res.n_throws_done = n_total;
+        int64_t total_pes = 0;
+        for (const auto &v : bank.cell_pes) total_pes += (int64_t)v.size();
+        res.total_pes_generated = total_pes;
+        res.mean_pes_per_cell   = n_cells > 0 ? (float)total_pes / (float)n_cells : 0.0f;
+
+        log<LOG_INFO>(L"%1% || merge-brazil done: %2% throws carried from %3% archive(s) "
+                      L"(%4% duplicates dropped) across %5% cells; outputs %6%, %7%_brazil_band.pdf, %7%_brazil.root.")
+            % __func__ % (long long)total_carried % (int)acfg.merge_inputs.size()
+            % (long long)total_dups % n_cells
+            % brazil_bin.c_str() % acfg.output_tag.c_str();
         return res;
     }
 
@@ -746,30 +942,8 @@ AdaptiveFCResult run_adaptive_fc(
         // Outputs.
         const std::string brazil_pdf  = acfg.output_tag + "_brazil_band.pdf";
         const std::string brazil_root = acfg.output_tag + "_brazil.root";
-        const bool xlog_axis = (xaxis_idx < model->is_log10.size()) ? model->is_log10[xaxis_idx] : acfg.logx;
-        const bool ylog_axis = (yaxis_idx < model->is_log10.size()) ? model->is_log10[yaxis_idx] : acfg.logy;
-        const std::string xlabel = xaxis_idx < model->nparams
-            ? model->pretty_param_names.at(xaxis_idx) : std::string("x");
-        const std::string ylabel = yaxis_idx < model->nparams
-            ? model->pretty_param_names.at(yaxis_idx) : std::string("y");
-        const float truth_x_phys = xlog_axis
-            ? std::pow(10.0f, fakeDataParams((int)xaxis_idx))
-            : fakeDataParams((int)xaxis_idx);
-        const float truth_y_phys = ylog_axis
-            ? std::pow(10.0f, fakeDataParams((int)yaxis_idx))
-            : fakeDataParams((int)yaxis_idx);
-
-        plot_brazil_band_pdf(bank, agg.inclusion_frac, acfg.cl_targets, brazil_pdf, bank_in,
-                              xlabel, ylabel, acfg.logx, acfg.logy,
-                              xlog_axis, ylog_axis,
-                              /*draw_truth_marker=*/ true,
-                              truth_x_phys, truth_y_phys,
-                              agg.n_kept_per_cl, agg.n_dropped_per_cl,
-                              acfg.band_flag);
-
-        save_brazil_root(bank, agg.per_throw_verdicts, arc.per_throw_dchi2,
-                          arc.per_throw_global_chi2, agg.inclusion_frac, agg.throw_kept,
-                          acfg.cl_targets, brazil_root, xlog_axis, ylog_axis);
+        emit_brazil_outputs(bank, bank_in, arc, agg, acfg, *model,
+                            xaxis_idx, yaxis_idx, fakeDataParams);
 
         // Populate result.
         res.bank_path    = bank_in;

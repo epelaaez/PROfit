@@ -533,13 +533,16 @@ int main(int argc, char* argv[])
         "asimov: load <tag>_bank.bin and write FC contour + verdict PDFs. "
         "merge-mesh: union-merge >=2 --merge-input mesh binaries into <tag>_mesh.bin. "
         "merge-bank: harvest PEs from >=1 --merge-input bank binaries onto <tag>_mesh.bin. "
+        "merge-brazil: union throws from >=1 --merge-input brazil archives into <tag>_brazil.bin, "
+        "re-classify against <tag>_bank.bin and emit the band PDF + ROOT (no fits; "
+        "bitwise-duplicate throws from same---seed runs are dropped). "
         "brazil-cleanup: mesh densified at the Brazil +-2sigma contours -> <tag>_cleanup_mesh.bin. "
         "print-mesh: plot <tag>_mesh.bin (or --merge-input mesh files) as PDFs.")
         ->default_str("build-mesh");
     afc_command->add_option("--merge-input", afc_merge_inputs,
-        "Input artifact filenames for merge-mesh / merge-bank (repeatable; "
-        "glob patterns like 'run*_mesh.bin' are expanded). Output goes to the "
-        "normal <output_tag>-prefixed artifacts.")->expected(-1);
+        "Input artifact filenames for merge-mesh / merge-bank / merge-brazil "
+        "(repeatable; glob patterns like 'run*_mesh.bin' are expanded). Output "
+        "goes to the normal <output_tag>-prefixed artifacts.")->expected(-1);
     afc_command->add_option("--cleanup-quantiles", afc_cleanup_quantiles,
         "brazil-cleanup: inclusion-fraction quantile levels whose contour "
         "crossings get finest refinement (default 0.025 0.975 = the Brazil "
@@ -2802,6 +2805,7 @@ int main(int argc, char* argv[])
         else if (afc_mode_str == "classify")   acfg.mode = PROfit::AdaptiveFCMode::Classify;
         else if (afc_mode_str == "merge-mesh") acfg.mode = PROfit::AdaptiveFCMode::MergeMesh;
         else if (afc_mode_str == "merge-bank") acfg.mode = PROfit::AdaptiveFCMode::MergeBank;
+        else if (afc_mode_str == "merge-brazil") acfg.mode = PROfit::AdaptiveFCMode::MergeBrazil;
         else if (afc_mode_str == "brazil-cleanup") acfg.mode = PROfit::AdaptiveFCMode::BrazilCleanup;
         else if (afc_mode_str == "print-mesh") acfg.mode = PROfit::AdaptiveFCMode::PrintMesh;
         else {
@@ -2839,8 +2843,9 @@ int main(int argc, char* argv[])
         acfg.only_layer = afc_only_layer;
         acfg.n_brazil_throws = afc_n_brazil_throws;
         acfg.band_flag = afc_flag;
-        if (!afc_flag.empty() && acfg.mode != PROfit::AdaptiveFCMode::Brazil) {
-            log<LOG_WARNING>(L"%1% || fc-adaptive: --flag %2% only styles the --mode brazil band PDF; ignored for --mode %3%.")
+        if (!afc_flag.empty() && acfg.mode != PROfit::AdaptiveFCMode::Brazil
+            && acfg.mode != PROfit::AdaptiveFCMode::MergeBrazil) {
+            log<LOG_WARNING>(L"%1% || fc-adaptive: --flag %2% only styles the brazil / merge-brazil band PDF; ignored for --mode %3%.")
                 % __func__ % afc_flag.c_str() % afc_mode_str.c_str();
         }
         acfg.roi_band = afc_roi_band;
