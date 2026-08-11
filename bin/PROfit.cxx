@@ -376,6 +376,7 @@ int main(int argc, char* argv[])
     std::vector<std::string> afc_merge_inputs;
     std::vector<float> afc_cleanup_quantiles = {0.025f, 0.975f};
     int afc_cleanup_halo = 1;
+    bool hmc = false;
 
 
     //Global Arguments for all PROfit enables subcommands.
@@ -619,6 +620,7 @@ int main(int argc, char* argv[])
     CLI::App *promcmc_command = app.add_subcommand("mcmc", "Get bayesian posteriors using MCMC");
     promcmc_command->add_option("--vars", mcmc_vars, "Variables to find posteriors of.");
     promcmc_command->add_option("--nchains", mcmc_chains, "Number of chains to run with MCMC.")->default_val(1);
+    promcmc_command->add_flag("--hmc", hmc, "Run Hamiltonian MC instead of Metropolis");
 
     //PROtest, test things
     CLI::App *protest_command = app.add_subcommand("protest", "Testing ground for rapid quick tests.");
@@ -3036,7 +3038,7 @@ int main(int argc, char* argv[])
         size_t chains_per_thread = mcmc_chains / mcmc_threads;
         size_t addone = mcmc_threads - mcmc_chains%mcmc_threads;
         for(size_t i = 0; i < mcmc_threads; ++i) {
-            if(true) {
+            if(hmc) {
                 chains.emplace_back();
                 threads.emplace_back(
                         [&, i](){
@@ -3065,7 +3067,7 @@ int main(int argc, char* argv[])
         //oned.push_back(TH1D("one2", ";#Deltam^{2}_{41} [eV^{2}];Posterior PDF", 200, -2, 2));
         TFile fout((final_output_tag+"_PROMCMC_chains.root").c_str(), "RECREATE");
         size_t chain_counter = 0;
-        if(true) {
+        if(hmc) {
             for(const auto &tchain : chains) {
                 for(const auto &chain : tchain) {
                     chain_counter++;
