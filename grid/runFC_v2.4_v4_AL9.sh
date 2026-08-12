@@ -51,7 +51,7 @@ for prod in  "gcc@12.2.0"\
              "cmake@3.27.7"\
              "boost/iylabz2"\
              "hdf5@1.14.3"\
-             "root@6.28.12"
+             "root@6.28.12"\
              "ifdhc@2.7.2"; do
     set +u
     # shellcheck disable=SC2086
