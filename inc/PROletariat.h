@@ -54,7 +54,8 @@ struct PROletariatOptions {
     // jobsub knobs (defaults = current shell-script values)
     std::string group             = "sbnd";
     std::string role              = "Analysis";
-    std::string singularity_image = "/cvmfs/singularity.opensciencegrid.org/fermilab/fnal-wn-sl7:latest";
+    std::string singularity_image = "/cvmfs/singularity.opensciencegrid.org/fermilab/fnal-wn-el9:latest";
+    //"/cvmfs/singularity.opensciencegrid.org/fermilab/fnal-wn-sl7:latest";
     std::string resource_provides = "usage_model=DEDICATED,OPPORTUNISTIC,OFFSITE";
     std::vector<std::string> condor_lines = {
         "+FERMIHTC_AutoRelease=True", "+FERMIHTC_GraceMemory=4000", "+FERMIHTC_GraceLifetime=7200"};
