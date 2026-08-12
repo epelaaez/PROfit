@@ -215,7 +215,17 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
         // stencil pointing into the interior, and the "out-of-bounds gradient
         // bounce" is applied (zero the gradient when it would push further
         // out of the box).
-        const GradientMode mode = gradient_mode;
+        GradientMode mode = gradient_mode;
+        // The analytic gradient needs the binned factorised spectrum
+        // (spec = systw .* H*probs); the event-by-event fill mixes physics and
+        // systematics per event, so fall back to full FD there.
+        if (mode == GradientAnalytic && strat == EventByEvent) {
+            static std::atomic<bool> warned_ebe{false};
+            if(!warned_ebe.exchange(true))
+                log<LOG_WARNING>(L"%1% || Analytic gradient not available for EventByEvent strategy; falling back to central-full FD.") % __func__;
+            mode = GradientCentralFull;
+        }
+        const bool analytic   = (mode == GradientAnalytic);
         const bool linearised = (mode == GradientCentralLin) || (mode == GradientOneSidedLin);
         const bool one_sided  = (mode == GradientOneSidedFull) || (mode == GradientOneSidedLin);
 
@@ -226,7 +236,7 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
         // prior_covariance_inv (correlated) — no FD on the pull.
         Eigen::VectorXf Minv_delta_b;
         Eigen::VectorXf pull_grad_nuis; // size = nsyst, dP/dθ_n
-        if (linearised) {
+        if (linearised || analytic) {
             Minv_delta_b = M.llt().solve(delta);
             const Eigen::VectorXf centered = subvector2 - syst->spline_centers;
             if (!correlated_systematics) {
@@ -236,6 +246,45 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
             } else {
                 pull_grad_nuis = 2.0f * (prior_covariance_inv * centered);
             }
+        }
+
+        if (analytic) {
+            // ----- Fully analytic gradient -----
+            // dχ²/dθ = 2 uᵀ (Tᵀ ds/dθ)|idx − uᵀ (dM/dθ) u + dP/dθ,  u = M⁻¹δ.
+            // With M_sys = (Tᵀ diag(s) F diag(s) T)(idx,idx) and w = T·expand(u),
+            // the covariance term collapses to uᵀ(dM/dθ)u = 2 (ds/dθ)·(w∘g) with
+            // g = F (w∘s) computed ONCE per gradient call — so unlike the
+            // linearised FD modes this term is NOT dropped.
+            const Eigen::SparseMatrix<float> &T = config.GetCollapsingMatrixSparse();
+            Eigen::VectorXf u_c = Eigen::VectorXf::Zero(T.cols());
+            for(size_t k = 0; k < reduced_size; ++k)
+                u_c(non_empty_indices[k]) = Minv_delta_b(k);
+            const Eigen::VectorXf w_full = T * u_c;
+            const Eigen::VectorXf g_full = syst->fractional_covariance * w_full.cwiseProduct(result.Spec());
+            const Eigen::VectorXf wg = w_full.cwiseProduct(g_full);
+
+            Eigen::MatrixXf G = FillSpectraGradient(config, peller, *syst, model, param, fs_cache, config.i_prime);
+            Eigen::MatrixXf TtG = T.transpose() * G; // collapsed-space Jacobian (ncollapsed × nparams)
+            Eigen::VectorXf grad_vec = 2.0f * (TtG(idx, Eigen::all).transpose() * Minv_delta_b)
+                                     - 2.0f * (G.transpose() * wg);
+            grad_vec.segment(model.nparams, nsyst) += pull_grad_nuis;
+
+            for (size_t i = 0; i < model.nparams + nsyst; i++) {
+                if(is_fixed.size() > 0 && is_fixed.at(i)) { gradient(i) = 0.0f; continue; }
+                gradient(i) = grad_vec(i);
+                // Same boundary "bounce" as the FD paths: zero the gradient when
+                // it would push further out of the box (LBFGSB depends on this).
+                const float boundary_tol = 2.0f * std::numeric_limits<float>::epsilon();
+                const bool at_lower = std::fabs(param(i) - lb(i)) < boundary_tol;
+                const bool at_upper = std::fabs(ub(i) - param(i)) < boundary_tol;
+                if ((at_lower && gradient(i) > 0) || (at_upper && gradient(i) < 0))
+                    gradient(i) = 0.0f;
+                if (!std::isfinite(gradient(i))) gradient(i) = 0.0f;
+            }
+
+            last_param = param;
+            last_value = value;
+            return value;
         }
 
         // ----- Helpers (closures over the outer scope) -----

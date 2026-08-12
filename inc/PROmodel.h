@@ -117,6 +117,21 @@ public:
      */
     virtual Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<std::vector<float>> &var_arrs) const;
 
+    /**
+     * @brief Derivatives of get_probs with respect to each physics parameter.
+     * @details grads[p] has the same shape as get_probs' return (n_phys_bins x
+     * n_prob_types) and holds d(prob)/d(phys_p) in the fitter's INTERNAL space
+     * (i.e. the log10 chain factor is included for is_log10 parameters). The
+     * base-class default computes a central finite difference on get_probs —
+     * well-conditioned since probabilities are O(1) — so every model supports
+     * the analytic-gradient chi² mode; models with closed-form derivatives
+     * (2-flavour family, PRO3p1) override for exactness.
+     * @param phys      Physics parameter vector in the fitter's internal space.
+     * @param var_arrs  Same flat-grid layout as get_probs.
+     * @return One matrix per physics parameter.
+     */
+    virtual std::vector<Eigen::MatrixXf> get_probs_grad(const Eigen::VectorXf &phys, const std::vector<std::vector<float>> &var_arrs) const;
+
     std::unordered_map<std::string, size_t> param_name_to_index; ///< Fast lookup: parameter name -> index in param_names.
 
     /**

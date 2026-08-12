@@ -169,7 +169,16 @@ float PROCNP::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
         // Linearised modes intentionally freeze M (including M_stat) at the
         // base point — this is the Gauss-Newton approximation, dropping the
         // (M⁻¹δ)^T (dM/dθ) (M⁻¹δ) term that's second-order in δ.
-        const GradientMode mode = gradient_mode;
+        GradientMode mode = gradient_mode;
+        // Analytic gradient is implemented in PROchi only so far; the CNP stat
+        // covariance adds a μ-dependent term that is not yet wired up. Use the
+        // closest approximation (Gauss-Newton linearised, exact at the minimum).
+        if (mode == GradientAnalytic) {
+            static std::atomic<bool> warned_analytic{false};
+            if(!warned_analytic.exchange(true))
+                log<LOG_WARNING>(L"%1% || Analytic gradient not implemented for PROCNP; using central-linearised.") % __func__;
+            mode = GradientCentralLin;
+        }
         const bool linearised = (mode == GradientCentralLin) || (mode == GradientOneSidedLin);
         const bool one_sided  = (mode == GradientOneSidedFull) || (mode == GradientOneSidedLin);
         const size_t nsyst = syst->GetNSplines();

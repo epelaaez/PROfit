@@ -570,6 +570,11 @@ namespace PROfit {
             MultiPROgressBar * progress;           ///< Pointer to progress bar (non-owning); null when not used.
             bool run_progress;                     ///< True if a progress bar should be updated during fitting.
 
+            /// Total L-BFGS-B iterations summed over every local refinement in the most
+            /// recent Fit() call (reset at Fit() entry). Diagnostic for gradient-mode
+            /// benchmarking: pairs with PROmetric::getCallCount() to characterise cost.
+            size_t total_lbfgs_iterations = 0;
+
             std::vector<Eigen::VectorXf> freq_seed_points; ///< Seed points found by the harmonic frequency scan.
             std::vector<float> freq_seed_values;           ///< Chi-squared values at the harmonic seed points.
             std::vector<float> harmonic_scan_pos;          ///< Diagnostic: frequency positions of the last harmonic scan curve (sorted, finite points only).

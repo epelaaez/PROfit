@@ -179,6 +179,40 @@ Eigen::MatrixXf PRO3p1::get_probs(const Eigen::VectorXf &phys, const std::vector
     return probs;
 }
 
+std::vector<Eigen::MatrixXf> PRO3p1::get_probs_grad(const Eigen::VectorXf &phys, const std::vector<std::vector<float>> &var_arrs) const {
+    const auto &le_arr = var_arrs[0];
+    float dmsq  = maybe_convert_log("dmsq",  phys(0));
+    float Ue4sq = maybe_convert_log("Ue4^2", phys(1));
+    float Um4sq = maybe_convert_log("Um4^2", phys(2));
+
+    // Chain factors d(linear)/d(internal); all three params are log10 by default.
+    constexpr float LN10 = 2.302585093f;
+    float ddm = is_log10[0] ? LN10 * dmsq  : 1.0f;
+    float dUe = is_log10[1] ? LN10 * Ue4sq : 1.0f;
+    float dUm = is_log10[2] ? LN10 * Um4sq : 1.0f;
+
+    constexpr float k = 1.266932679f;
+    std::vector<Eigen::MatrixXf> grads(3, Eigen::MatrixXf::Zero(le_arr.size(), model_functions.size()));
+    for(size_t i = 0; i < le_arr.size(); ++i) {
+        float x = k * dmsq * le_arr[i];
+        float sinterm = std::sin(x);
+        float s2 = sinterm * sinterm;
+        float dsin2_ddm = std::sin(2.0f*x) * k * le_arr[i] * ddm;  // d(sin^2 x)/d(internal dmsq)
+
+        // col 1: P_mumu = 1 - 4 Um(1-Um) sin^2
+        grads[0](i, 1) = -4.0f * Um4sq * (1.0f - Um4sq) * dsin2_ddm;
+        grads[2](i, 1) = -4.0f * (1.0f - 2.0f*Um4sq) * s2 * dUm;
+        // col 2: P_mue = 4 Ue Um sin^2
+        grads[0](i, 2) =  4.0f * Ue4sq * Um4sq * dsin2_ddm;
+        grads[1](i, 2) =  4.0f * Um4sq * s2 * dUe;
+        grads[2](i, 2) =  4.0f * Ue4sq * s2 * dUm;
+        // col 3: P_ee = 1 - 4 Ue(1-Ue) sin^2
+        grads[0](i, 3) = -4.0f * Ue4sq * (1.0f - Ue4sq) * dsin2_ddm;
+        grads[1](i, 3) = -4.0f * (1.0f - 2.0f*Ue4sq) * s2 * dUe;
+    }
+    return grads;
+}
+
 // ------------------------------------------------------------------
 // PRO3p1_angles
 // ------------------------------------------------------------------

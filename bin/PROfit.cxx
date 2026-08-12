@@ -402,7 +402,9 @@ int main(int argc, char* argv[])
                    "central-full (central FD on full chi^2; most accurate, slowest), "
                    "one-sided-full (forward FD on full chi^2; ~2x faster, O(h)), "
                    "central-lin (default; central FD on delta only, M frozen at base; Gauss-Newton, ~5-10x), "
-                   "one-sided-lin (forward FD on delta only, M frozen at base; ~10-20x).")
+                   "one-sided-lin (forward FD on delta only, M frozen at base; ~10-20x), "
+                   "analytic (exact closed-form gradient incl. the dM/dtheta term; no FD truncation, "
+                   "no extra spectrum fills; PROchi binned strategies only, others fall back).")
         ->default_str("central-lin");
 
     app.add_option("--inject-systs", injected_systs, "Systematic shifts to inject. Map of name and shift value in sigmas. Only spline systs are supported right now.");
@@ -628,7 +630,7 @@ int main(int argc, char* argv[])
     std::string bench_tests_str = "all";
     CLI::App *bench_command = app.add_subcommand("scale-test", "Run timing benchmarks for FillSpectra / metric / fit hot paths and emit greppable [SCALETEST] LOG lines.");
     bench_command->add_option("-N,--n", bench_N, "Base call count: FillSpectra=N, metric=N/10, fit=N/100.")->default_val(1000);
-    bench_command->add_option("--tests", bench_tests_str, "Comma-separated subset of {a..n} or {fillspectra,metric,metricgrad,fit,pseudo,collapse,mcmc,all}. Default 'all'.")->default_val("all");
+    bench_command->add_option("--tests", bench_tests_str, "Comma-separated subset of {a..p} or {fillspectra,metric,metricgrad,fit,pseudo,collapse,mcmc,all,gradcheck,gradmodes,grad}. Default 'all'. gradcheck (o) validates every gradient mode vs central-full FD; gradmodes (p) runs N/100 full fits per (fit preset x gradient mode) with matched seeds and emits [GRADBENCH] lines. Neither is in 'all'.")->default_val("all");
 
     //PROletariat, stage+tar+submit grid jobs (replaces grid/maketar_submit_v2.4.sh)
     PROletariatOptions grid_opts;
@@ -3132,6 +3134,9 @@ int main(int argc, char* argv[])
             else if (tok == "l")           bench_mask |= Bench_MetricGrad_Nuis;
             else if (tok == "m")           bench_mask |= Bench_MCMC_Burnin;
             else if (tok == "n")           bench_mask |= Bench_MCMC_Post;
+            else if (tok == "grad")        bench_mask |= Bench_Grad_Group;
+            else if (tok == "gradcheck" || tok == "o") bench_mask |= Bench_GradCheck;
+            else if (tok == "gradmodes" || tok == "gradfit" || tok == "p") bench_mask |= Bench_GradModeFit;
             else log<LOG_WARNING>(L"%1% || scale-test: unknown --tests token '%2%' (ignored)") % __func__ % tok.c_str();
         };
         const std::string &s = bench_tests_str;
@@ -3148,11 +3153,14 @@ int main(int argc, char* argv[])
         if (bench_mask == 0u) bench_mask = PROfit::PRObench::Bench_All;
 
         PROfit::PRObench::BenchOptions bopts;
-        bopts.N      = bench_N;
-        bopts.tests  = bench_mask;
-        bopts.binned = !eventbyevent;
+        bopts.N        = bench_N;
+        bopts.tests    = bench_mask;
+        bopts.binned   = !eventbyevent;
+        bopts.nthreads = (int)nthread;
+        bopts.truth_params = fakeDataParams;
+        bopts.grad_csv = analysis_tag + "_gradbench_fits.csv";
 
-        PROfit::PRObench::run_scale_test(config, prop, *metric, fitConfig, bopts);
+        PROfit::PRObench::run_scale_test(config, prop, *metric, data, fitConfig, bopts);
     }
 
     if(*protest_command){

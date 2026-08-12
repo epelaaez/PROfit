@@ -95,6 +95,31 @@ Eigen::MatrixXf PROnumudis::get_probs(const Eigen::VectorXf &phys, const std::ve
     return probs;
 }
 
+std::vector<Eigen::MatrixXf> PROnumudis::get_probs_grad(const Eigen::VectorXf &phys, const std::vector<std::vector<float>> &var_arrs) const {
+    const auto &le_arr = var_arrs[0];
+    float dmsq = maybe_convert_log("dmsq", phys(0));
+    float sinsq2thmumu = maybe_convert_log("sinsq2thmm", phys(1));
+
+    // Chain factors d(linear)/d(internal); log10 params: d(10^x)/dx = ln10 * 10^x.
+    constexpr float LN10 = 2.302585093f;
+    float ddm = is_log10[0] ? LN10 * dmsq : 1.0f;
+    float dss = is_log10[1] ? LN10 * sinsq2thmumu : 1.0f;
+    // Match get_probs' clamp: the clamped parameter has zero local sensitivity.
+    if(sinsq2thmumu > 1) { sinsq2thmumu = 1; dss = 0; }
+    if(sinsq2thmumu < 0) { sinsq2thmumu = 0; dss = 0; }
+
+    float freq = 1.266932679f * dmsq;
+    std::vector<Eigen::MatrixXf> grads(2, Eigen::MatrixXf::Zero(le_arr.size(), model_functions.size()));
+    for(size_t i = 0; i < le_arr.size(); ++i) {
+        // P_mumu = 1 - s * sin^2(freq * le)
+        float x = freq * le_arr[i];
+        float sinterm = std::sin(x);
+        grads[0](i, 1) = -sinsq2thmumu * std::sin(2.0f*x) * 1.266932679f * le_arr[i] * ddm;
+        grads[1](i, 1) = -sinterm * sinterm * dss;
+    }
+    return grads;
+}
+
 // ------------------------------------------------------------------
 // PROnumudisTEST
 // ------------------------------------------------------------------
@@ -261,6 +286,29 @@ Eigen::MatrixXf PROnueapp::get_probs(const Eigen::VectorXf &phys, const std::vec
     return probs;
 }
 
+std::vector<Eigen::MatrixXf> PROnueapp::get_probs_grad(const Eigen::VectorXf &phys, const std::vector<std::vector<float>> &var_arrs) const {
+    const auto &le_arr = var_arrs[0];
+    float dmsq = maybe_convert_log("dmsq", phys(0));
+    float sinsq2thmue = maybe_convert_log("sinsq2thme", phys(1));
+
+    constexpr float LN10 = 2.302585093f;
+    float ddm = is_log10[0] ? LN10 * dmsq : 1.0f;
+    float dss = is_log10[1] ? LN10 * sinsq2thmue : 1.0f;
+    if(sinsq2thmue > 1) { sinsq2thmue = 1; dss = 0; }
+    if(sinsq2thmue < 0) { sinsq2thmue = 0; dss = 0; }
+
+    float freq = 1.266932679f * dmsq;
+    std::vector<Eigen::MatrixXf> grads(2, Eigen::MatrixXf::Zero(le_arr.size(), model_functions.size()));
+    for(size_t i = 0; i < le_arr.size(); ++i) {
+        // P_mue = s * sin^2(freq * le)
+        float x = freq * le_arr[i];
+        float sinterm = std::sin(x);
+        grads[0](i, 1) = sinsq2thmue * std::sin(2.0f*x) * 1.266932679f * le_arr[i] * ddm;
+        grads[1](i, 1) = sinterm * sinterm * dss;
+    }
+    return grads;
+}
+
 // ------------------------------------------------------------------
 // PROnuedis
 // ------------------------------------------------------------------
@@ -345,6 +393,29 @@ Eigen::MatrixXf PROnuedis::get_probs(const Eigen::VectorXf &phys, const std::vec
     }
 
     return probs;
+}
+
+std::vector<Eigen::MatrixXf> PROnuedis::get_probs_grad(const Eigen::VectorXf &phys, const std::vector<std::vector<float>> &var_arrs) const {
+    const auto &le_arr = var_arrs[0];
+    float dmsq = maybe_convert_log("dmsq", phys(0));
+    float sinsq2thee = maybe_convert_log("sinsq2thee", phys(1));
+
+    constexpr float LN10 = 2.302585093f;
+    float ddm = is_log10[0] ? LN10 * dmsq : 1.0f;
+    float dss = is_log10[1] ? LN10 * sinsq2thee : 1.0f;
+    if(sinsq2thee > 1) { sinsq2thee = 1; dss = 0; }
+    if(sinsq2thee < 0) { sinsq2thee = 0; dss = 0; }
+
+    float freq = 1.266932679f * dmsq;
+    std::vector<Eigen::MatrixXf> grads(2, Eigen::MatrixXf::Zero(le_arr.size(), model_functions.size()));
+    for(size_t i = 0; i < le_arr.size(); ++i) {
+        // P_ee = 1 - s * sin^2(freq * le)
+        float x = freq * le_arr[i];
+        float sinterm = std::sin(x);
+        grads[0](i, 1) = -sinsq2thee * std::sin(2.0f*x) * 1.266932679f * le_arr[i] * ddm;
+        grads[1](i, 1) = -sinterm * sinterm * dss;
+    }
+    return grads;
 }
 
 }

@@ -155,6 +155,7 @@ float PROfitter::Fit(PROmetric &metric, const Eigen::VectorXf &seed_pt ) {
 float PROfitter::Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed_points, const std::vector<FixedSeed> &fixed_seeds ) {
 
     metric.setGradientMode(fitconfig.gradient_mode);
+    total_lbfgs_iterations = 0;
 
     const bool tim_on = PROfit::GetScanTimingEnabled();
     auto fit_t0 = tim_on ? std::chrono::steady_clock::now()
@@ -272,6 +273,7 @@ float PROfitter::Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed
             log<LOG_INFO>(L"%1% || Starting local minimization attempt %2%/%3%") % __func__ % attempt % fitconfig.n_max_local_retries;
 
             niter = solver.minimize(metric, x, fx, lb, ub);
+            total_lbfgs_iterations += (size_t)std::max(niter, 0);
 
             chi2s_localfits.push_back(fx);
 
@@ -339,6 +341,7 @@ float PROfitter::Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed
                     log<LOG_INFO>(L"%1% || Starting local minimization attempt %2%/%3%") % __func__ % attempt % fitconfig.n_max_local_retries;
 
                     niter = solver.minimize(metric, x, fx, lb, ub);
+                    total_lbfgs_iterations += (size_t)std::max(niter, 0);
 
                     chi2s_localfits.push_back(fx);
 
@@ -431,6 +434,7 @@ float PROfitter::Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed
                 log<LOG_INFO>(L"%1% || Starting fixed-seed local minimization attempt %2%/%3%") % __func__ % attempt % fitconfig.n_max_local_retries;
 
                 niter = solver.minimize(metric, x, fx, flb, fub);
+                total_lbfgs_iterations += (size_t)std::max(niter, 0);
 
                 chi2s_localfits.push_back(fx);
 
@@ -476,6 +480,7 @@ float PROfitter::Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed
                 log<LOG_INFO>(L"%1% || Starting local minimization attempt %2%/%3%") % __func__ % attempt % fitconfig.n_max_local_retries;
 
                 niter = solver.minimize(metric, x, fx, lb, ub);
+                total_lbfgs_iterations += (size_t)std::max(niter, 0);
 
                 chi2s_localfits.push_back(fx);
 
