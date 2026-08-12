@@ -534,7 +534,7 @@ class HMC {
                 for(long i = 0; i < r.size(); ++i) r(i) = normal(rng);
                 r0 = r;
                 for(size_t i = 0; i < L; ++i) leapfrog(theta, r, metric);
-                float alpha = std::min(1.0f, std::expf(metric(theta, empty, false) - 0.5 * r.dot(r) - metric(chain.back(), empty, false) + 0.5 * r0.dot(r0)));
+                float alpha = std::min(1.0f, expf(metric(theta, empty, false) - 0.5 * r.dot(r) - metric(chain.back(), empty, false) + 0.5 * r0.dot(r0)));
                 if(alpha < uniform(rng)) {
                     chain.push_back(theta);
                 } else {
@@ -605,9 +605,9 @@ class NUTS {
             Eigen::VectorXf thetap = theta;
             Eigen::VectorXf rp = r;
             leapfrog(thetap, rp, epsilon, metric);
-            float a = 2*(std::expf(eval(metric, thetap, empty, false) - eval(metric, theta, empty, false) + 0.5 * (r.dot(r) - rp.dot(rp)) ) > 0.5) - 1;
-            while(std::powf(std::expf(eval(metric, thetap, empty, false) -  eval(metric, theta, empty, false) + 0.5 * (r.dot(r) - rp.dot(rp))), a) > std::powf(2, -a)) {
-                epsilon *= std::powf(2, a);
+            float a = 2*(expf(eval(metric, thetap, empty, false) - eval(metric, theta, empty, false) + 0.5 * (r.dot(r) - rp.dot(rp)) ) > 0.5) - 1;
+            while(powf(expf(eval(metric, thetap, empty, false) -  eval(metric, theta, empty, false) + 0.5 * (r.dot(r) - rp.dot(rp))), a) > powf(2, -a)) {
+                epsilon *= powf(2, a);
                 thetap = theta;
                 rp = r;
                 leapfrog(thetap, rp, epsilon, metric);
