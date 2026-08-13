@@ -4,8 +4,11 @@
  * @author PROfit Collaboration
  *
  * @details Replaces grid/maketar_submit_v2.4.sh as the "submitter half" of the
- * grid workflow. The payload is still a user-supplied worker script (e.g.
- * grid/runFC_v2.4_v2.sh); PROletariat stages the PROfit binary (self-located
+ * grid workflow. Jobs run in the AL9 (el9) container by default; the --sl7
+ * CLI flag swaps in the legacy SL7 image (an explicit --singularity-image
+ * always wins and excludes --sl7). The payload is still a user-supplied worker
+ * script (e.g. grid/runFC_v2.4_v4_AL9.sh, which detects the container OS and
+ * uses Spack on AL9 / UPS on SL7); PROletariat stages the PROfit binary (self-located
  * via /proc/self/exe, override with --profit-bin), the analysis XML,
  * auto-detected analysis artifacts in the current directory
  * (<tag>_prop.bin, <tag>_syst.bin, <tag>_<out>_mesh.bin, <tag>_<out>_bank.bin)
@@ -51,11 +54,18 @@ struct PROletariatOptions {
     std::vector<std::string> extra_inputs;  ///< --input files; a missing one is a hard error.
     std::string profit_bin;                 ///< Override binary to ship; empty => /proc/self/exe.
 
+    // Container images: AL9 (el9) is the default now that FermiGrid nodes have
+    // migrated; --sl7 at the CLI swaps in the legacy SL7 image. Worker scripts
+    // detect the OS at runtime and use Spack (AL9) or UPS (SL7) accordingly.
+    static constexpr const char *kImageAL9 =
+        "/cvmfs/singularity.opensciencegrid.org/fermilab/fnal-wn-el9:latest";
+    static constexpr const char *kImageSL7 =
+        "/cvmfs/singularity.opensciencegrid.org/fermilab/fnal-wn-sl7:latest";
+
     // jobsub knobs (defaults = current shell-script values)
     std::string group             = "sbnd";
     std::string role              = "Analysis";
-    std::string singularity_image = "/cvmfs/singularity.opensciencegrid.org/fermilab/fnal-wn-el9:latest";
-    //"/cvmfs/singularity.opensciencegrid.org/fermilab/fnal-wn-sl7:latest";
+    std::string singularity_image = kImageAL9;
     std::string resource_provides = "usage_model=DEDICATED,OPPORTUNISTIC,OFFSITE";
     std::vector<std::string> condor_lines = {
         "+FERMIHTC_AutoRelease=True", "+FERMIHTC_GraceMemory=4000", "+FERMIHTC_GraceLifetime=7200"};

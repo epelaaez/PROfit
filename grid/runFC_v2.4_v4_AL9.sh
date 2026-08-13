@@ -34,36 +34,68 @@ ls -l "$INPUT_TAR_DIR_LOCAL"/grid_dir/ | sed 's/^/    /' || {
     exit 59
 }
 
-# --- UPS setup ---------------------------------------------------------------
-# UPS scripts poke at unset variables; relax -u across the setup block only.
-say "sourcing enviro setup..."
-set +u
-source /cvmfs/larsoft.opensciencegrid.org/spack-packages/setup-env.sh
-src_rc=$?
-set -u
-[ $src_rc -ne 0 ] && { fail "setup-env.sh returned $src_rc"; exit 58; }
+# --- environment setup: Spack on AL9 (default image), UPS on SL7 -------------
+# The container OS decides the toolchain: AL9/EL9 nodes use the Spack
+# distribution, the legacy SL7 image still uses UPS. Detect at runtime so one
+# worker script serves both (the submitter picks the image: --sl7 vs default).
+os_major=$(sed -n 's/^VERSION_ID="\{0,1\}\([0-9]*\).*/\1/p' /etc/os-release 2>/dev/null | head -1)
+say "detected OS major version: ${os_major:-unknown} (assuming AL9/Spack if unknown)"
 
-# setup <product> failing is a silent killer: it returns non-zero but nothing
-# downstream notices until the binary can't find a library.
-
-#AL9 version
-for prod in  "gcc@12.2.0"\
-             "cmake@3.27.7"\
-             "boost/iylabz2"\
-             "hdf5@1.14.3"\
-             "root@6.28.12"\
-             "ifdhc@2.7.2"; do
+# Setup scripts poke at unset variables; relax -u across the setup blocks only.
+# A product setup failing is a silent killer either way: it returns non-zero
+# but nothing downstream notices until the binary can't find a library.
+if [ "${os_major:-9}" -le 7 ]; then
+    # SL7: UPS
+    say "sourcing UPS larsoft setup..."
     set +u
-    # shellcheck disable=SC2086
-    spack load $prod
-    rc=$?
+    source /cvmfs/larsoft.opensciencegrid.org/setup_larsoft.sh
+    src_rc=$?
     set -u
-    if [ $rc -ne 0 ]; then
-        fail "spack load $prod returned $rc"
-        exit 58
-    fi
-    say "  spack load ok: $prod"
-done
+    [ $src_rc -ne 0 ] && { fail "setup_larsoft.sh returned $src_rc"; exit 58; }
+
+    for prod in "root v6_28_12 -q e26:p3915:prof" \
+                "cmake v3_27_4" \
+                "hdf5 v1_12_2b -q e26:prof" \
+                "boost v1_82_0 -q e26:prof" \
+                "ifdhc v2_8_0 -q e26:p3915:prof"; do
+        set +u
+        # shellcheck disable=SC2086
+        setup $prod
+        rc=$?
+        set -u
+        if [ $rc -ne 0 ]; then
+            fail "setup $prod returned $rc"
+            exit 58
+        fi
+        say "  setup ok: $prod"
+    done
+else
+    # AL9: Spack
+    say "sourcing Spack setup..."
+    set +u
+    source /cvmfs/larsoft.opensciencegrid.org/spack-packages/setup-env.sh
+    src_rc=$?
+    set -u
+    [ $src_rc -ne 0 ] && { fail "setup-env.sh returned $src_rc"; exit 58; }
+
+    for prod in "gcc@12.2.0" \
+                "cmake@3.27.7" \
+                "boost/iylabz2" \
+                "hdf5@1.14.3" \
+                "root@6.28.12" \
+                "ifdhc@2.7.2"; do
+        set +u
+        # shellcheck disable=SC2086
+        spack load $prod
+        rc=$?
+        set -u
+        if [ $rc -ne 0 ]; then
+            fail "spack load $prod returned $rc"
+            exit 58
+        fi
+        say "  spack load ok: $prod"
+    done
+fi
 
 say "=== Setup's complete ==="
 say "  ROOTSYS   = ${ROOTSYS:-unset}"
