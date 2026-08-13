@@ -96,6 +96,11 @@ namespace PRObench {
         /// repeated-format lines after ~1000 emissions, so per-fit data goes to a
         /// file; only the per-cell [GRADBENCH-SUMMARY] lines are logged.
         std::string grad_csv = "gradbench_fits.csv";
+        /// Comma-separated preset names restricting the (p) benchmark's grid
+        /// (e.g. "grad-fast,grad-good"). Empty = run every preset. Universes and
+        /// per-universe fitter seeds depend only on rng_seed, so a filtered run's
+        /// CSV rows can be concatenated with an earlier full run's.
+        std::string grad_presets;
     };
 
     /**

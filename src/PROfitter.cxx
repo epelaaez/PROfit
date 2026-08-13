@@ -465,6 +465,74 @@ float PROfitter::Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed
         }
     }
 
+    if (fitconfig.localfit_triage_iterations > 0) {
+        // Successive-halving multistart ("triage"): run a descent truncated at
+        // localfit_triage_iterations from EVERY latin start, then polish to
+        // full depth only the champions — triage endpoints within
+        // localfit_triage_margin chi2 of the best endpoint, at most
+        // n_localfit_champions of them. A truncated exact-gradient descent is
+        // a cheap, reliable ranking signal (most of the chi2 drop happens in
+        // the first ~10-20 iterations), so descents parked in uncompetitive
+        // basins are abandoned before their convergence tail is paid for.
+        // Every triage endpoint still counts as a best-fit candidate.
+        LBFGSpp::LBFGSBParam<float> tri_param = fitconfig.param;
+        tri_param.max_iterations = fitconfig.localfit_triage_iterations;
+        LBFGSpp::LBFGSBSolver<float> tri_solver(tri_param);
+
+        std::vector<std::pair<float, Eigen::VectorXf>> triage_ends;
+        for(int i=0; i< fitconfig.n_localfit-1-fudge && (size_t)(i+1) < best_multistart.size(); i++){
+            ++n_latin_starts;
+            x = Eigen::Map<Eigen::VectorXf>(latin_samples[best_multistart[i+1]].data(), latin_samples[best_multistart[i+1]].size());
+            if(run_progress)progress->increment_bar(2);
+            try {
+                niter = tri_solver.minimize(metric, x, fx, lb, ub);
+                total_lbfgs_iterations += (size_t)std::max(niter, 0);
+                if (std::isfinite(fx)) {
+                    triage_ends.emplace_back(fx, x);
+                    if (fx < chimin) { best_fit = x; chimin = fx; }
+                }
+            } catch (const std::exception &except) {
+                // Benign, same as full-depth latin refinements: the start's
+                // own LHS chi2 was already a swarm candidate.
+                exception_string_map[std::string(except.what())]++;
+                fit_exception_counts[std::string(except.what())]++;
+                ++n_fail_latin;
+                log<LOG_DEBUG>(L"%1% || Triage descent from latin start %2% failed: %3%") % __func__ % i % except.what();
+            }
+        }
+        std::sort(triage_ends.begin(), triage_ends.end(),
+                  [](const auto &a, const auto &b){ return a.first < b.first; });
+
+        int n_polished = 0;
+        for (const auto &te : triage_ends) {
+            if (n_polished >= fitconfig.n_localfit_champions) break;
+            if (te.first > triage_ends.front().first + fitconfig.localfit_triage_margin) break;
+            ++n_polished;
+            success = false;
+            for (size_t attempt = 1; attempt <= fitconfig.n_max_local_retries; ++attempt) {
+                try {
+                    x = te.second;
+                    niter = solver.minimize(metric, x, fx, lb, ub);
+                    total_lbfgs_iterations += (size_t)std::max(niter, 0);
+                    chi2s_localfits.push_back(fx);
+                    if (fx < chimin) { best_fit = x; chimin = fx; }
+                    success = true;
+                    break;
+                } catch (const std::exception &except) {
+                    exception_string_map[std::string(except.what())]++;
+                    fit_exception_counts[std::string(except.what())]++;
+                    log<LOG_DEBUG>(L"%1% || Champion polish attempt %2%/%3% failed: %4%") % __func__ % attempt % fitconfig.n_max_local_retries % except.what();
+                }
+            }
+            // A failed polish is benign: the champion's triage endpoint was
+            // already recorded as a candidate above.
+            if (!success) ++n_fail_latin;
+        }
+        log<LOG_INFO>(L"%1% || Triage multistart: %2% truncated descents (cap %3% iters), %4% champions polished (margin %5% chi2, cap %6%), best chi2 %7%")
+            % __func__ % (int)triage_ends.size() % fitconfig.localfit_triage_iterations
+            % n_polished % fitconfig.localfit_triage_margin
+            % fitconfig.n_localfit_champions % chimin;
+    } else
     for(int i=0; i< fitconfig.n_localfit-1-fudge && (size_t)(i+1) < best_multistart.size(); i++){
         ++n_latin_starts;
         success = false;

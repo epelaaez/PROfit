@@ -20,6 +20,8 @@
 #include <cmath>
 #include <fstream>
 #include <random>
+#include <set>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -492,7 +494,8 @@ void run_grad_mode_fits(const PROconfig &config, const PROpeller &prop,
                         PROmetric &base_metric, const PROdata &base_data,
                         int n_universes, uint32_t base_seed, int nthreads,
                         const Eigen::VectorXf &truth_params,
-                        const std::string &csv_path)
+                        const std::string &csv_path,
+                        const std::string &preset_filter)
 {
     const PROmodel &model = base_metric.GetModel();
     const PROsyst  &syst  = base_metric.GetSysts();
@@ -532,14 +535,44 @@ void run_grad_mode_fits(const PROconfig &config, const PROpeller &prop,
     csv << "\n";
     log<LOG_INFO>(L"[GRADBENCH] per-fit records -> %1%") % csv_path.c_str();
 
-    const std::vector<std::string> presets = {"sensitivity", "fast", "good", "overkill"};
-    const std::vector<PROmetric::GradientMode> modes = {
+    // Standard presets are compared across every gradient mode; the grad-*
+    // presets are designed around GradientAnalytic (their PSO budget is cut in
+    // favour of L-BFGS-B multistarts, which only pays off with a cheap exact
+    // gradient), so they run analytic-only.
+    const std::vector<PROmetric::GradientMode> all_modes = {
         PROmetric::GradientCentralFull,
         PROmetric::GradientOneSidedFull,
         PROmetric::GradientCentralLin,
         PROmetric::GradientOneSidedLin,
         PROmetric::GradientAnalytic,
     };
+    const std::vector<PROmetric::GradientMode> analytic_only = {
+        PROmetric::GradientAnalytic,
+    };
+    struct GradCell { std::string preset; const std::vector<PROmetric::GradientMode> *modes; };
+    std::vector<GradCell> cells = {
+        {"sensitivity", &all_modes}, {"fast", &all_modes},
+        {"good", &all_modes}, {"overkill", &all_modes},
+        {"grad-fast", &analytic_only}, {"grad-good", &analytic_only},
+        {"grad-lhs", &analytic_only}, {"grad-lhs-lite", &analytic_only},
+        {"grad-lhs-wide", &analytic_only}, {"grad-lhs-all", &analytic_only},
+        {"grad-triage", &analytic_only}, {"grad-deep", &analytic_only},
+    };
+    if (!preset_filter.empty()) {
+        std::set<std::string> keep;
+        std::stringstream ss(preset_filter);
+        for (std::string tok; std::getline(ss, tok, ',');)
+            if (!tok.empty()) keep.insert(tok);
+        std::vector<GradCell> filtered;
+        for (auto &c : cells)
+            if (keep.count(c.preset)) filtered.push_back(c);
+        if (filtered.empty()) {
+            log<LOG_ERROR>(L"[GRADBENCH] --grad-presets '%1%' matches no known preset; aborting fit benchmark.")
+                % preset_filter.c_str();
+            return;
+        }
+        cells = std::move(filtered);
+    }
 
     struct FitRec {
         double wall_s = 0;
@@ -548,11 +581,12 @@ void run_grad_mode_fits(const PROconfig &config, const PROpeller &prop,
         Eigen::VectorXf phys;
     };
 
-    for (const auto &preset : presets) {
+    for (const auto &cell : cells) {
+        const std::string &preset = cell.preset;
         // Preset defaults only — CLI --fit-options are deliberately NOT applied
-        // here so the four presets are compared as-shipped.
+        // here so the presets are compared as-shipped.
         PROfitterConfig pcfg({}, preset, /*isScan=*/false);
-        for (auto mode : modes) {
+        for (auto mode : *cell.modes) {
             pcfg.gradient_mode = mode;
 
             std::vector<FitRec> recs(n_universes);
@@ -747,7 +781,7 @@ std::vector<BenchResult> run_scale_test(
     if (opts.tests & Bench_GradModeFit) {
         run_grad_mode_fits(config, prop, metric, data, N_fit,
                            opts.rng_seed ^ 0x80u, opts.nthreads, opts.truth_params,
-                           opts.grad_csv);
+                           opts.grad_csv, opts.grad_presets);
     }
 
     log<LOG_INFO>(L"%1% || ===== PRObench scale-test complete: %2% tests =====")
