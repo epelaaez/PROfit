@@ -329,6 +329,15 @@ The `<allowlist>` attributes:
 * `mode="covariance_to_spline"` with `num_decomp_knobs=` promotes a
   covariance to its leading eigenmode splines (the same machinery PROjector
   uses — see section 9). `restrict` bounds a spline's allowed range.
+* `apply_to_subchannel="pattern"` — restrict a weight-based systematic
+  (`spline`, `covariance`, `covariance_to_spline`, `hist1d/2d`, ...) to the
+  subchannels whose fullname contains the pattern (same plain substring
+  matching as `norm`/`flat`, e.g. `apply_to_subchannel="nu_SBND"` or
+  `"_ND_"`). Non-matching subchannels get exactly no response (flat spline
+  at 1 / zero covariance block), and the systematic's weight branch is only
+  required — or even looked for — in MCFiles that fill a matching
+  subchannel. This is how per-detector systematics work in multi-detector
+  fits where each detector's MC carries a different set of weight branches.
 
 ---
 
