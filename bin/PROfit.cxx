@@ -640,7 +640,7 @@ int main(int argc, char* argv[])
     CLI::App *proletariat_command = app.add_subcommand("proletariat",
         "Stage the PROfit binary, XML and analysis artifacts into grid_dir.tar and submit N grid jobs running a worker script via jobsub_submit. Replaces grid/maketar_submit_v2.4.sh.");
     proletariat_command->add_option("--script", grid_opts.script,
-        "Worker script executed on each grid node (e.g. grid/runFC_v2.4_v2.sh).")->required();
+        "Worker script executed on each grid node (e.g. grid/runFC_v2.4_v4_AL9.sh, which handles both AL9/Spack and SL7/UPS).")->required();
     proletariat_command->add_option("-N,--n-jobs", grid_opts.njobs, "Number of grid jobs.")->default_val(2);
     proletariat_command->add_option("--lifetime", grid_opts.lifetime, "Expected job lifetime (3d is the FermiGrid ceiling).")->default_str("2d");
     proletariat_command->add_option("--memory", grid_opts.memory_mb, "Requested memory in MB.")->default_val(4000);
@@ -652,7 +652,11 @@ int main(int argc, char* argv[])
     proletariat_command->add_option("--backend", grid_backend_str, "Scheduler backend: jobsub or slurm (slurm not yet implemented).")->default_str("jobsub");
     proletariat_command->add_option("--group", grid_opts.group, "jobsub experiment group (-G).")->default_str("sbnd");
     proletariat_command->add_option("--role", grid_opts.role, "jobsub --role.")->default_str("Analysis");
-    proletariat_command->add_option("--singularity-image", grid_opts.singularity_image, "Apptainer/Singularity image path.");
+    bool grid_sl7 = false;
+    CLI::Option *grid_image_opt = proletariat_command->add_option("--singularity-image", grid_opts.singularity_image,
+        "Apptainer/Singularity image path (default: the AL9 image " + std::string(PROletariatOptions::kImageAL9) + "; see also --sl7).");
+    proletariat_command->add_flag("--sl7", grid_sl7,
+        "Submit with the legacy SL7 container image instead of the default AL9 (el9) one. Worker scripts detect the OS at runtime and use UPS (SL7) or Spack (AL9) setup.")->excludes(grid_image_opt);
     proletariat_command->add_option("--resource-provides", grid_opts.resource_provides, "jobsub --resource-provides usage model.");
     proletariat_command->add_option("--lines", grid_opts.condor_lines,
         "Condor classad --lines entries. REPLACES the FERMIHTC defaults when given; to append instead, use --jobsub-arg.");
@@ -701,6 +705,7 @@ int main(int argc, char* argv[])
         grid_opts.xml              = xmlname;
         grid_opts.analysis_tag     = analysis_tag;
         grid_opts.final_output_tag = final_output_tag;
+        if(grid_sl7) grid_opts.singularity_image = PROletariatOptions::kImageSL7;
         if(grid_backend_str == "slurm") {
             grid_opts.backend = PROletariatOptions::Backend::Slurm;
         } else if(grid_backend_str != "jobsub") {
