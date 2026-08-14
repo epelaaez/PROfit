@@ -25,9 +25,10 @@ Useful contacts and links:
 
 ### Getting set up
 
-PROfit needs ROOT, Boost, HDF5, and CMake (on the FNAL gpvms set these up
-from cvmfs inside an SL7 container first; on your own machine apt-get or
-homebrew versions are fine). Then:
+PROfit needs ROOT, Boost, HDF5, and CMake (on the FNAL gpvms — AL9 since the
+2024/25 migration — set these up from cvmfs with `spack load`; on legacy SL7
+containers use UPS `setup`; on your own machine apt-get or homebrew versions
+are fine). Then:
 
 ```bash
 git clone https://github.com/markrosslonergan/Elephant_Vanishes.git
@@ -1295,7 +1296,7 @@ it runs in seconds even for heavy configurations.
 ```bash
 # from the directory holding your XML and TUT_prop.bin / TUT_syst.bin:
 PROfit -x tutorial.xml -t TUT proletariat \
-    -N 500 --script ../../grid/runFC_v2.4_v2.sh \
+    -N 500 --script ../../grid/runFC_v2.4_v4_AL9.sh \
     --lifetime 2d --memory 4000 --disk 10000 \
     --dry-run          # drop this to actually submit
 ```
@@ -1305,6 +1306,25 @@ PROfit -x tutorial.xml -t TUT proletariat \
 useful for checking the tarball contents on a dev box that has no jobsub
 client. The staging directory is always cleaned up; the tarball is left
 behind on purpose.
+
+### The container: AL9 by default, `--sl7` for legacy
+
+Grid jobs run inside an Apptainer/Singularity container, and the OS inside
+it decides how the worker script sets up its environment:
+
+* **AL9 (default)** — the `fnal-wn-el9` image; software comes from the CVMFS
+  **Spack** distribution (`spack load root@6.28.12` etc.). This matches the
+  migrated FermiGrid worker nodes and gpvms.
+* **SL7 (legacy)** — pass `--sl7` to submit with the old `fnal-wn-sl7` image
+  instead; software comes from CVMFS **UPS** (`setup root v6_28_12 -q ...`).
+  Use this only if you need to reproduce an old campaign or your worker
+  script predates the migration.
+
+An explicit `--singularity-image <path>` overrides the choice entirely and
+is mutually exclusive with `--sl7` (passing both is a parse error). The
+reference worker script (below) detects the OS at runtime from
+`/etc/os-release` and picks Spack or UPS itself, so the same script works
+under either image — the submitter's flag is the only switch you touch.
 
 ### What gets bundled
 
@@ -1330,14 +1350,17 @@ silently clobbering each other.
 
 ### The worker script
 
-The payload is still a shell script you own — `grid/runFC_v2.4_v2.sh` is the
-reference implementation and worth reading in full. Its contract:
+The payload is still a shell script you own — `grid/runFC_v2.4_v4_AL9.sh` is
+the reference implementation and worth reading in full (the older
+`runFC_v2.4_v2.sh` is its UPS/SL7-only predecessor). Its contract:
 
 * inputs appear at `$INPUT_TAR_DIR_LOCAL/grid_dir/`; copy them into
   `$_CONDOR_SCRATCH_DIR` and run there;
 * the binary is `./PROfit`; the script sets up ROOT/Boost/etc. from CVMFS
-  (UPS) before touching it, and sanity-checks with `ldd` and `./PROfit
-  --help` so "missing library" and "bad physics" fail distinguishably;
+  before touching it — Spack on AL9, UPS on SL7, chosen at runtime from the
+  container's `/etc/os-release` — and sanity-checks with `ldd` and
+  `./PROfit --help` so "missing library" and "bad physics" fail
+  distinguishably;
 * `$PROCESS` (0..N-1) is the job's identity, but it **restarts at 0 in every
   submission** — a seed or `-o` tag built from it alone collides across
   batches. Fold in `$CLUSTER` (unique per `jobsub_submit`), e.g.
@@ -1365,7 +1388,8 @@ reference implementation and worth reading in full. Its contract:
 | `--backend` | `jobsub` | Scheduler backend: `jobsub` or `slurm` (SLURM is a stub for now and errors out). |
 | `--group` | `sbnd` | Experiment group (`jobsub_submit -G`). |
 | `--role` | `Analysis` | `--role`. |
-| `--singularity-image` | `fnal-wn-sl7:latest` (CVMFS path) | Apptainer/Singularity image the jobs run in. |
+| `--singularity-image` | `fnal-wn-el9:latest` (CVMFS path) | Apptainer/Singularity image the jobs run in. Excludes `--sl7`. |
+| `--sl7` | off | Use the legacy `fnal-wn-sl7:latest` image instead of AL9. Excludes `--singularity-image`. |
 | `--resource-provides` | `usage_model=DEDICATED,OPPORTUNISTIC,OFFSITE` | Usage model. |
 | `--lines` | the three `+FERMIHTC_*` classads | Condor classad `--lines` entries. **Replaces** the defaults when given — to *append*, use `--jobsub-arg` instead. |
 | `--jobsub-arg` | — | Raw argument passed to `jobsub_submit` verbatim (repeatable) — the escape hatch for anything not covered above. |
@@ -1385,7 +1409,7 @@ PROfit -x tutorial.xml -t TUT -o grid --seed 405 -n 8 $AFC --mode build-mesh
 # 2. ship it: TUT_prop.bin, TUT_syst.bin and TUT_grid_mesh.bin are picked up
 #    automatically from the cwd; check first with --dry-run
 PROfit -x tutorial.xml -t TUT -o grid proletariat \
-    -N 500 --script runFC.sh --lifetime 2d
+    -N 500 --script runFC_v2.4_v4_AL9.sh --lifetime 2d
 
 # 3. ...wait; fetch outputs from /pnfs to a local dir...
 
@@ -1408,6 +1432,11 @@ PROfit -x tutorial.xml -t TUT -o merged $AFC --mode merge-bank --merge-input 'TU
   worker script must diversify `--seed`/`-o` from `$PROCESS` **and**
   `$CLUSTER` — `$PROCESS` alone repeats across submissions. Identical
   seeds silently dedupe at merge-bank time (section 8).
+* **Match the image to the script.** A worker script that only knows UPS
+  (`setup <prod>`) dies during environment setup under the default AL9
+  image, and a Spack-only script dies under `--sl7`. The reference script
+  detects the OS and handles both; if you maintain your own, either make it
+  do the same or submit with the image it expects.
 * The old `grid/maketar_submit_v2.4.sh` is kept for reference but
   deprecated; it had a latent bug (the `file://` script URL broke unless the
   script sat in the submission directory) that the subcommand fixes.
