@@ -712,7 +712,7 @@ struct PROpt {
     }
 };
 
-PROdata construct_data(std::vector<PROdata> variable_data, bool use_real_data, const PROconfig &config, const PROpeller &prop, const PROmodel &model, const std::vector<PROsyst> &variable_systs, const Eigen::VectorXf &fakedataparams, const PROpt &options) {
+PROdata construct_data(std::vector<PROdata> &variable_data, bool use_real_data, const PROconfig &config, const PROpeller &prop, const PROmodel &model, const std::vector<PROsyst> &variable_systs, const Eigen::VectorXf &fakedataparams, const PROpt &options) {
     PROdata data;
     std::uniform_int_distribution<uint32_t> dseed(0, std::numeric_limits<uint32_t>::max());
     if(use_real_data){
@@ -2997,6 +2997,132 @@ int run_proletariat(PROpt &options) {
     return submitter.Run();
 }
 
+Eigen::VectorXf make_param_vectors(Eigen::VectorXf &cv_osc_param_vector, Eigen::VectorXf &fake_data_osc_param_vector, const PROconfig &config, const PROpt &options, const PROmodel &model, const PROsyst &systs) {
+    //loop over input fake data physics params and check/set
+    for(const auto &[name, value]: options.fake_data_osc_params) {
+        const auto it = std::find(model.param_names.begin(), model.param_names.end(), name);
+        if(it == std::end(model.param_names)) {
+            log<LOG_ERROR>(L"%1% || Unrecognized model parameter name %2%.\n"
+                    L"Valid names for model %3% are %4%") %
+                __func__% name.c_str()% config.m_model_tag.c_str()%
+                model.param_names;
+            exit(1);
+        }
+        int loc = std::distance(model.param_names.begin(), it);
+        fake_data_osc_param_vector(loc) = model.is_log10[loc] ? std::log10(value) : value;
+        log<LOG_INFO>(L"%1% Set fake data injected parameter %2% to value %3%, internally %4%") % __func__ % name.c_str() % value % fake_data_osc_param_vector(loc);
+    }
+
+    //loop over input CV physics params and check/set
+    for(const auto &[name, value]: options.cv_osc_params) {
+        const auto it = std::find(model.param_names.begin(), model.param_names.end(), name);
+        if(it == std::end(model.param_names)) {
+            log<LOG_ERROR>(L"%1% || Unrecognized model parameter name %2%.\n"
+                    L"Valid names for model %3% are %4%") %
+                __func__% name.c_str()% config.m_model_tag.c_str()%
+                model.param_names;
+            exit(1);
+        }
+        int loc = std::distance(model.param_names.begin(), it);
+        cv_osc_param_vector(loc) = model.is_log10[loc] ? std::log10(value) : value;
+        log<LOG_INFO>(L"%1% Set CV injected parameter %2% to value %3%, internally %4%") % __func__ % name.c_str() % value % fake_data_osc_param_vector(loc);
+    }
+
+
+    //Spline fake data injection studies
+    Eigen::VectorXf fakedataparams = Eigen::VectorXf::Constant(model.nparams + systs.GetNSplines(), 0);
+    for(size_t i = 0; i < model.nparams; ++i) fakedataparams(i) = fake_data_osc_param_vector(i);
+    log<LOG_INFO>(L"%1% || model.default_val: %2%") % __func__ % model.default_val;
+    log<LOG_INFO>(L"%1% || fake_data_osc_param_vector: %2%") % __func__ % fake_data_osc_param_vector;
+    if(fakedataparams.size() >= 2) {
+        log<LOG_INFO>(L"%1% || fakedataparams (physics portion): %2% %3%") % __func__ % fakedataparams(0) % fakedataparams(1);
+    } else if(fakedataparams.size() == 1) {
+        log<LOG_INFO>(L"%1% || fakedataparams (physics portion): %2%") % __func__ % fakedataparams(0);
+    } else {
+        log<LOG_INFO>(L"%1% || fakedataparams (physics portion): empty") % __func__;
+    }
+    for(const auto& [name, shift]: options.injected_systs) {
+        log<LOG_INFO>(L"%1% || Injected syst: %2% shifted by %3%") % __func__ % name.c_str() % shift;
+
+        auto it = std::find(systs.spline_names.begin(), systs.spline_names.end(), name);
+        if(it == systs.spline_names.end()) {
+            for(const auto &[xml_name, plot_name]: config.m_mcgen_variation_plotname_map) {
+                if(name == plot_name) {
+                    it = std::find(systs.spline_names.begin(), systs.spline_names.end(), xml_name);
+                    break;
+                }
+            }
+            if(it == systs.spline_names.end()) {
+                log<LOG_ERROR>(L"%1% || Error: Unrecognized spline %2%. Ignoring this injected shift.") % __func__ % name.c_str();
+                continue;
+            }
+
+        }
+        int idx = std::distance(systs.spline_names.begin(), it);
+        fakedataparams(idx+model.nparams) = shift;
+    }
+    return fakedataparams;
+}
+
+void include_or_exclude_systs(std::vector<PROsyst> &variable_systs, const PROconfig &config, const PROpt &options) {
+    if(options.syst_list.size()) {
+
+        std::vector<std::string> systs_to_include;
+        for(const auto &s: options.syst_list) {
+            bool istag = false;
+            for(const auto &[syst, tags]: config.m_mcgen_variation_tags) {
+                if(std::find(tags.begin(), tags.end(), s) != std::end(tags)) {
+                    istag = true;
+                    systs_to_include.push_back(syst);
+                }
+            }
+            if(!istag) systs_to_include.push_back(s);
+        }
+        for(std::string &name: systs_to_include) {
+            for(const auto &[xml_name, plot_name]: config.m_mcgen_variation_plotname_map) {
+                if(name == plot_name) {
+                    name = xml_name;
+                }
+            }
+        }
+        int io=0;
+        for(PROsyst &syst: variable_systs){
+            if(config.m_channel_variable_plot_bool.at(io)){
+                syst = syst.subset(systs_to_include);
+            }
+            io++;
+        }
+    } else if(options.systs_excluded.size()) {
+
+        std::vector<std::string> systs_to_exclude;
+        for(const auto &s: options.systs_excluded) {
+            log<LOG_INFO>(L"%1% || Excluding systematic %2% by command line argument.") % __func__ % s.c_str();
+            bool istag = false;
+            for(const auto &[syst, tags]: config.m_mcgen_variation_tags) {
+                if(std::find(tags.begin(), tags.end(), s) != std::end(tags)) {
+                    istag = true;
+                    systs_to_exclude.push_back(syst);
+                }
+            }
+            if(!istag) systs_to_exclude.push_back(s);
+        }
+        for(std::string &name: systs_to_exclude) {
+            for(const auto &[xml_name, plot_name]: config.m_mcgen_variation_plotname_map) {
+                if(name == plot_name) {
+                    name = xml_name;
+                }
+            }
+        }
+        int io=0;
+        for(PROsyst &syst: variable_systs){
+            if(config.m_channel_variable_plot_bool.at(io)){
+                syst = syst.excluding(systs_to_exclude);
+            }
+            io++;
+        }
+    }
+}
+
 void empty_bin_check(const PROconfig &config, const PROpt &options, const PROpeller &prop, const PROmodel &model, const PROsyst &systs, const PROdata data, bool use_real_data) {
     Eigen::VectorXf cv_check_params =
         Eigen::VectorXf::Zero(model.nparams + systs.GetNSplines());
@@ -3122,13 +3248,11 @@ int main(int argc, char* argv[])
 
     //Seed time
     PROseed myseed(options.nthread, options.global_seed);
-    std::uniform_int_distribution<uint32_t> dseed(0, std::numeric_limits<uint32_t>::max());
 
     std::unique_ptr<PROmodel> model = get_model_from_string(config, prop);
     std::unique_ptr<PROmodel> null_model = std::make_unique<NullModel>(prop);
 
     //Build a PROsyst to sort and analyze all systematics
-    //PROsyst systs(prop, config, systsstructs.front(), shapeonly);
     std::vector<PROsyst> variable_systs;
     for(size_t i = 0; i < config.m_num_variables; ++i){
         if(config.m_channel_variable_plot_bool.at(i) || i == config.i_prime){ 
@@ -3140,70 +3264,7 @@ int main(int argc, char* argv[])
 
     Eigen::VectorXf fake_data_osc_param_vector = model->default_val;
     Eigen::VectorXf cv_osc_param_vector = model->default_val;
-
-    //loop over input fake data physics params and check/set
-    for(const auto &[name, value]: options.fake_data_osc_params) {
-        const auto it = std::find(model->param_names.begin(), model->param_names.end(), name);
-        if(it == std::end(model->param_names)) {
-            log<LOG_ERROR>(L"%1% || Unrecognized model parameter name %2%.\n"
-                    L"Valid names for model %3% are %4%") %
-                __func__% name.c_str()% config.m_model_tag.c_str()%
-                model->param_names;
-            return 1;
-        }
-        int loc = std::distance(model->param_names.begin(), it);
-        fake_data_osc_param_vector(loc) = model->is_log10[loc] ? std::log10(value) : value;
-        log<LOG_INFO>(L"%1% Set fake data injected parameter %2% to value %3%, internally %4%") % __func__ % name.c_str() % value % fake_data_osc_param_vector(loc);
-    }
-
-    //loop over input CV physics params and check/set
-    for(const auto &[name, value]: options.cv_osc_params) {
-        const auto it = std::find(model->param_names.begin(), model->param_names.end(), name);
-        if(it == std::end(model->param_names)) {
-            log<LOG_ERROR>(L"%1% || Unrecognized model parameter name %2%.\n"
-                    L"Valid names for model %3% are %4%") %
-                __func__% name.c_str()% config.m_model_tag.c_str()%
-                model->param_names;
-            return 1;
-        }
-        int loc = std::distance(model->param_names.begin(), it);
-        cv_osc_param_vector(loc) = model->is_log10[loc] ? std::log10(value) : value;
-        log<LOG_INFO>(L"%1% Set CV injected parameter %2% to value %3%, internally %4%") % __func__ % name.c_str() % value % fake_data_osc_param_vector(loc);
-    }
-
-
-    //Spline fake data injection studies
-    Eigen::VectorXf fakedataparams = Eigen::VectorXf::Constant(model->nparams + variable_systs[config.i_prime].GetNSplines(), 0);
-    for(size_t i = 0; i < model->nparams; ++i) fakedataparams(i) = fake_data_osc_param_vector(i);
-    log<LOG_INFO>(L"%1% || model->default_val: %2%") % __func__ % model->default_val;
-    log<LOG_INFO>(L"%1% || fake_data_osc_param_vector: %2%") % __func__ % fake_data_osc_param_vector;
-    if(fakedataparams.size() >= 2) {
-        log<LOG_INFO>(L"%1% || fakedataparams (physics portion): %2% %3%") % __func__ % fakedataparams(0) % fakedataparams(1);
-    } else if(fakedataparams.size() == 1) {
-        log<LOG_INFO>(L"%1% || fakedataparams (physics portion): %2%") % __func__ % fakedataparams(0);
-    } else {
-        log<LOG_INFO>(L"%1% || fakedataparams (physics portion): empty") % __func__;
-    }
-    for(const auto& [name, shift]: options.injected_systs) {
-        log<LOG_INFO>(L"%1% || Injected syst: %2% shifted by %3%") % __func__ % name.c_str() % shift;
-
-        auto it = std::find(variable_systs[config.i_prime].spline_names.begin(), variable_systs[config.i_prime].spline_names.end(), name);
-        if(it == variable_systs[config.i_prime].spline_names.end()) {
-            for(const auto &[xml_name, plot_name]: config.m_mcgen_variation_plotname_map) {
-                if(name == plot_name) {
-                    it = std::find(variable_systs[config.i_prime].spline_names.begin(), variable_systs[config.i_prime].spline_names.end(), xml_name);
-                    break;
-                }
-            }
-            if(it == variable_systs[config.i_prime].spline_names.end()) {
-                log<LOG_ERROR>(L"%1% || Error: Unrecognized spline %2%. Ignoring this injected shift.") % __func__ % name.c_str();
-                continue;
-            }
-
-        }
-        int idx = std::distance(variable_systs[config.i_prime].spline_names.begin(), it);
-        fakedataparams(idx+model->nparams) = shift;
-    }
+    Eigen::VectorXf fakedataparams = make_param_vectors(cv_osc_param_vector, fake_data_osc_param_vector, config, options, *model, variable_systs[config.i_prime]);
 
     // variable_data is data for all variable, data is data for i_prime
     std::vector<PROdata> variable_data;
@@ -3212,64 +3273,7 @@ int main(int argc, char* argv[])
 
     // Leave this after creating fake data so we can make fake data using systs that aren't
     // included in the fit.
-    if(options.syst_list.size()) {
-
-        std::vector<std::string> systs_to_include;
-        for(const auto &s: options.syst_list) {
-            bool istag = false;
-            for(const auto &[syst, tags]: config.m_mcgen_variation_tags) {
-                if(std::find(tags.begin(), tags.end(), s) != std::end(tags)) {
-                    istag = true;
-                    systs_to_include.push_back(syst);
-                }
-            }
-            if(!istag) systs_to_include.push_back(s);
-        }
-        for(std::string &name: systs_to_include) {
-            for(const auto &[xml_name, plot_name]: config.m_mcgen_variation_plotname_map) {
-                if(name == plot_name) {
-                    name = xml_name;
-                }
-            }
-        }
-        //systs = systs.subset(systs_to_include);
-        int io=0;
-        for(PROsyst &syst: variable_systs){
-            if(config.m_channel_variable_plot_bool.at(io)){
-                syst = syst.subset(systs_to_include);
-            }
-            io++;
-        }
-    } else if(options.systs_excluded.size()) {
-
-        std::vector<std::string> systs_to_exclude;
-        for(const auto &s: options.systs_excluded) {
-            log<LOG_INFO>(L"%1% || Excluding systematic %2% by command line argument.") % __func__ % s.c_str();
-            bool istag = false;
-            for(const auto &[syst, tags]: config.m_mcgen_variation_tags) {
-                if(std::find(tags.begin(), tags.end(), s) != std::end(tags)) {
-                    istag = true;
-                    systs_to_exclude.push_back(syst);
-                }
-            }
-            if(!istag) systs_to_exclude.push_back(s);
-        }
-        for(std::string &name: systs_to_exclude) {
-            for(const auto &[xml_name, plot_name]: config.m_mcgen_variation_plotname_map) {
-                if(name == plot_name) {
-                    name = xml_name;
-                }
-            }
-        }
-        //systs = systs.excluding(systs_to_exclude);
-        int io=0;
-        for(PROsyst &syst: variable_systs){
-            if(config.m_channel_variable_plot_bool.at(io)){
-                syst = syst.excluding(systs_to_exclude);
-            }
-            io++;
-        }
-    }
+    include_or_exclude_systs(variable_systs, config, options);
 
     //***********************************************************************
     //******************** PROjector pre-fit / projected fit ****************
