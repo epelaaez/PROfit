@@ -296,7 +296,7 @@ struct PROpt {
     int global_seed = -1;
     std::string log_file = "";
     std::vector<std::string> fit_preset = {"good","fast"};
-    std::unordered_set<std::string> allowed_preset = {"good","fast","overkill","sensitivity"};
+    inline static const std::unordered_set<std::string> allowed_preset = {"good","fast","overkill","sensitivity"};
     bool with_splines = false, binwidth_scale = false, area_normalized = false, data_mc_ratio = false;
     std::map<std::string, float> fake_data_osc_params;
     std::map<std::string, float> cv_osc_params;
@@ -711,6 +711,148 @@ struct PROpt {
         final_output_tag = analysis_tag +"_"+ output_tag;
     }
 };
+
+PROdata construct_data(std::vector<PROdata> variable_data, bool use_real_data, const PROconfig &config, const PROpeller &prop, const PROmodel &model, const std::vector<PROsyst> &variable_systs, const Eigen::VectorXf &fakedataparams, const PROpt &options) {
+    PROdata data;
+    std::uniform_int_distribution<uint32_t> dseed(0, std::numeric_limits<uint32_t>::max());
+    if(use_real_data){
+        PROconfig dataconfig;
+        if(!options.data_xml.empty()){
+            // Explicit --data flag takes precedence
+            dataconfig = PROconfig(options.data_xml);
+        } else {
+            // Use embedded <data> section from the unified XML
+            log<LOG_INFO>(L"%1% || Using embedded <data> section from XML for data config") % __func__;
+            dataconfig = config.BuildDataConfig();
+        }
+        std::string dataBinName = options.analysis_tag+"_data.bin";
+        for(size_t i = 0; i < dataconfig.m_num_channels; ++i) {
+            size_t nsubch = dataconfig.m_num_subchannels[i];
+            if(nsubch != 1) {
+                log<LOG_ERROR>(L"%1% || Data xml required to have exactly 1 subchannel per channel. Found %2% for channel %3%")
+                    % __func__ % nsubch % i;
+                log<LOG_ERROR>(L"Terminating.");
+                exit(EXIT_FAILURE);
+            }
+            std::string &subchname = dataconfig.m_subchannel_names[i][0];
+            if(subchname != "data") {
+                log<LOG_ERROR>(L"%1% || Data subchannel required to be called \"data.\" Found name %2% for channel %3%")
+                    % __func__ % subchname.c_str() % i;
+                log<LOG_ERROR>(L"Terminating.");
+                exit(EXIT_FAILURE);
+            }
+        }
+        if(!PROconfig::SameChannels(config, dataconfig)) {
+            log<LOG_ERROR>(L"%1% || Require data and MC to have same channels. A difference was found, check messages above.")
+                % __func__;
+            log<LOG_ERROR>(L"Terminating.");
+            exit(EXIT_FAILURE);
+        }
+
+        if((*options.process_command) || (!std::filesystem::exists(dataBinName))  ){
+            log<LOG_INFO>(L"%1% || Processing Data Spectrum and saving to binary output also: %2%") % __func__ % dataBinName.c_str();
+
+            //Process the CAF files to grab and fill spectrum directly
+            std::vector<PROdata> alldata = CreatePROdata(dataconfig);
+            PROdata::saveVector(dataconfig, alldata, dataBinName);
+            data = alldata[config.i_prime];
+            //data.save(dataconfig,dataBinName);
+            
+            for(size_t io = 0; io < dataconfig.m_num_variables; ++io)
+                variable_data.push_back(alldata[io]);
+
+            log<LOG_INFO>(L"%1% || Done processing Data from XML defined root files, and saving to binary output also: %2%") % __func__ % dataBinName.c_str();
+        }else{
+            log<LOG_INFO>(L"%1% || Loading Data from precalc binary input: %2%") % __func__ % dataBinName.c_str();
+            //data.load(dataBinName);
+            std::vector<PROdata> alldata;
+            PROdata::loadVector(alldata, dataBinName);
+            data = alldata[config.i_prime];
+            //data.save(dataconfig,dataBinName);
+
+            for(size_t io = 0; io < dataconfig.m_num_variables; ++io)
+                variable_data.push_back(alldata[io]);
+
+            log<LOG_INFO>(L"%1% || Done loading. Config hash (%2%) and binary loaded Data (%3%) hash are here. ") % __func__ %  dataconfig.hash % data.hash;
+            if(dataconfig.hash!=data.hash){
+                if(options.force){
+                    log<LOG_WARNING>(L"%1% || WARNING config hash (%2%) and binary loaded data (%3%) hash not compatable! ") % __func__ %  dataconfig.hash % data.hash ;
+                    log<LOG_WARNING>(L"%1% || WARNING But we are forcing ahead, be SUPER clear and happy you understand what your doing.  ") % __func__;
+                }else{
+                    log<LOG_ERROR>(L"%1% || ERROR config hash (%2%) and binary loaded data (%3%) hash not compatable! ") % __func__ %  dataconfig.hash % data.hash ;
+                    return 1;
+                }
+            }
+        }
+
+    }//if no data, use injected or fake data;
+    else{
+        log<LOG_INFO>(L"%1% || Going to get fake data set up for each variable.") % __func__ ;
+        for(size_t io = 0; io < config.m_num_variables; ++io) {
+            if (options.pseudo_experiment && io == config.i_prime && config.m_channel_variable_plot_bool.at(io)) {
+                // True FC-style pseudo-experiment for the i_prime variable.
+                // Pattern lifted verbatim from src/PROfc.cxx::fc_worker's per-PE body:
+                //   1. CV spectrum + Cholesky of the bin-bin covariance once.
+                //   2. Throw spline pulls Gaussian, rejection-sampled within restrict bounds.
+                //   3. Throw covariance bin shifts (Gaussian in standardised units).
+                //   4. Build shifted spectrum, add L*throwC to the collapsed spec, Poisson-variate.
+                std::normal_distribution<float> d;
+                const size_t nphys   = model.nparams;
+                const size_t nspline = variable_systs[io].GetNSplines();
+
+                PROspec cv_for_L = FillSpectra(config, prop, variable_systs[io], model,
+                                               fakedataparams, !options.eventbyevent, io);
+                Eigen::MatrixXf L_chol = variable_systs[io].DecomposeFractionalCovariance(config, cv_for_L.Spec());
+
+                Eigen::VectorXf throws = fakedataparams;
+                // Shared truncated-Gaussian helper: samples each spline's actual prior
+                // N(center, sigma) within its restrict bounds, OOB-safe (never spins
+                // forever on unreachable bounds; clamps to the in-range value nearest
+                // the prior center and warns).
+                for (size_t i = 0; i < nspline; ++i) {
+                    throws((int)(i + nphys)) = ThrowRestrictedSplinePull(variable_systs[io], i, PROseed::global_rng, d);
+                }
+
+                const int nbins_coll = config.m_num_variable_bins_total_collapsed[io];
+                Eigen::VectorXf throwC(nbins_coll);
+                for (int i = 0; i < nbins_coll; ++i) throwC(i) = d(PROseed::global_rng);
+
+                PROspec shifted = FillSpectra(config, prop, variable_systs[io], model,
+                                              throws, !options.eventbyevent, io);
+                PROspec newSpec = PROspec::PoissonVariation(
+                    PROspec(CollapseMatrix(config, shifted.Spec(), io) + L_chol * throwC,
+                            CollapseMatrix(config, shifted.Error(), io)),
+                    dseed(PROseed::global_rng));
+
+                log<LOG_INFO>(L"%1% || Generated FC-style pseudo-experiment for i_prime variable %2% "
+                              L"(splines thrown=%3%, cov bins thrown=%4%).")
+                    % __func__ % io % (int)nspline % nbins_coll;
+
+                // List the thrown spline pulls (in sigma) that produced this pseudo-experiment.
+                std::string thrown_str;
+                for (size_t i = 0; i < nspline; ++i) {
+                    const std::string sn = i < variable_systs[io].spline_names.size()
+                        ? variable_systs[io].spline_names[i] : ("spline#" + std::to_string(i));
+                    thrown_str += sn + "=" + std::to_string(throws((int)(i + nphys)));
+                    if (i + 1 < nspline) thrown_str += ", ";
+                }
+                log<LOG_INFO>(L"%1% || Pseudo-experiment thrown spline pulls (sigma): %2%")
+                    % __func__ % thrown_str.c_str();
+
+                variable_data.push_back(PROdata(newSpec.Spec(), newSpec.Error()));
+                continue;
+            }
+
+            PROspec data_spec = config.m_channel_variable_plot_bool.at(io) ?  FillSpectra(config, prop, variable_systs[io], model, fakedataparams, !options.eventbyevent, io) : PROspec(config.m_num_variable_bins_total[io]) ;
+            if(options.poisson_throw) data_spec = PROspec::PoissonVariation(data_spec, dseed(PROseed::global_rng));
+            Eigen::VectorXf data_vec = CollapseMatrix(config, data_spec.Spec(), io);
+            variable_data.push_back(PROdata(data_vec, data_vec.array().sqrt()));
+        }
+    }
+
+    data = variable_data[config.i_prime];
+    return data;
+}
 
 void run_process(PROpeller &prop, std::vector<std::vector<SystStruct>> &systsstructs, const PROconfig &config, PROpt &options) {
     //input/output logic
@@ -2855,6 +2997,95 @@ int run_proletariat(PROpt &options) {
     return submitter.Run();
 }
 
+void empty_bin_check(const PROconfig &config, const PROpt &options, const PROpeller &prop, const PROmodel &model, const PROsyst &systs, const PROdata data, bool use_real_data) {
+    Eigen::VectorXf cv_check_params =
+        Eigen::VectorXf::Zero(model.nparams + systs.GetNSplines());
+    for(size_t i = 0; i < model.nparams; ++i)
+        cv_check_params(i) = model.default_val(i);
+
+    PROspec cv_check_spec = FillSpectra(config, prop, systs, model,
+                                        cv_check_params, !options.eventbyevent, config.i_prime);
+    Eigen::VectorXf collapsed_cv = CollapseMatrix(config, cv_check_spec.Spec(), config.i_prime);
+
+    int n_zero = 0, n_tiny = 0;
+    for(Eigen::Index b = 0; b < collapsed_cv.size(); ++b) {
+        // Bins outside the fit region (PROjector / future bin-off masks) never enter
+        // a chi2, so an empty CV there is not a problem.
+        if(!config.IsBinActive(config.i_prime, (size_t)b)) continue;
+        if(collapsed_cv(b) <= 0.0f) {
+            log<LOG_ERROR>(L"%1% || Default-CV collapsed bin %2% has %3% expected events (<=0). Empty-bin would make CNP/stat covariance singular.") % __func__ % (long)b % collapsed_cv(b);
+            ++n_zero;
+        } else if(collapsed_cv(b) < 1.0f) {
+            log<LOG_WARNING>(L"%1% || Default-CV collapsed bin %2% has %3% expected events (<1). Low-stat region; results in this bin may be unreliable.") % __func__ % (long)b % collapsed_cv(b);
+            ++n_tiny;
+        }
+    }
+    if(n_zero > 0) {
+        if(!options.force) {
+            log<LOG_ERROR>(L"%1% || %2% collapsed CV bins are empty. Aborting. Re-run with --force to override (NOT recommended).") % __func__ % n_zero;
+            exit(1);
+        }
+        log<LOG_WARNING>(L"%1% || %2% collapsed CV bins are empty but --force was set; proceeding at user's risk.") % __func__ % n_zero;
+    }
+    if(n_tiny > 0)
+        log<LOG_WARNING>(L"%1% || %2% collapsed CV bins have <1 expected event.") % __func__ % n_tiny;
+
+    if(use_real_data) {
+        int n_nan = 0, n_neg = 0;
+        const Eigen::VectorXf &dvec = data.Spec();
+        for(Eigen::Index b = 0; b < dvec.size(); ++b) {
+            if(std::isnan(dvec(b)) || std::isinf(dvec(b))) {
+                log<LOG_ERROR>(L"%1% || Data bin %2% is NaN/inf.") % __func__ % (long)b;
+                ++n_nan;
+            } else if(dvec(b) < 0.0f) {
+                log<LOG_WARNING>(L"%1% || Data bin %2% is negative (%3%).") % __func__ % (long)b % dvec(b);
+                ++n_neg;
+            }
+        }
+        if(n_nan > 0 && !options.force) {
+            log<LOG_ERROR>(L"%1% || %2% data bins are NaN/inf. Aborting. Re-run with --force to override.") % __func__ % n_nan;
+            exit(1);
+        }
+        (void)n_neg; // Get rid of unused variable warning
+    }
+}
+
+void set_global_bounds(Eigen::VectorXf &lb, Eigen::VectorXf &ub, std::vector<int> &fixed, const PROconfig &config, const PROpt &options, PROmodel &model, PROsyst &systs, const Eigen::VectorXf &CVParams) {
+    log<LOG_INFO>(L"%1% || We are hoping to FIX : %2% ") % __func__ % options.fixed_params;
+    for(size_t i = 0; i < model.nparams; ++i) {
+                std::string name = model.param_names[i];
+                std::string pname = model.pretty_param_names[i];
+                if( options.systs_only || std::find(options.fixed_params.begin(), options.fixed_params.end(), pname) != options.fixed_params.end() || std::find(options.fixed_params.begin(), options.fixed_params.end(), name) != options.fixed_params.end()){
+                    log<LOG_INFO>(L"%1% || We are FIXING physics parameter %2% (%3%) at value %4% ") % __func__ % i % name.c_str() % CVParams(i);  
+                    model.lb(i) = CVParams(i);
+                    model.ub(i) = CVParams(i);
+                    fixed.at(i)=1;
+                }
+                lb(i) = model.lb(i);
+                ub(i) = model.ub(i);
+    }
+    for(size_t i = model.nparams; i < model.nparams + systs.GetNSplines(); ++i) {
+                std::string name = systs.spline_names[i-model.nparams];
+                std::string pname =config.m_mcgen_variation_plotname_map.at(name); 
+
+                if( std::find(options.fixed_params.begin(), options.fixed_params.end(), name) != options.fixed_params.end() || std::find(options.fixed_params.begin(), options.fixed_params.end(), pname) != options.fixed_params.end()){
+                    log<LOG_INFO>(L"%1% || We are FIXING syst parameter %2% (%3%) at value %4% ") % __func__ % i % name.c_str() % CVParams(i);  
+                    systs.spline_hi[i-model.nparams] = CVParams(i);
+                    systs.spline_lo[i-model.nparams] = CVParams(i);
+                    fixed.at(i)=1;
+                }
+                lb(i) = systs.spline_lo[i-model.nparams];
+                ub(i) = systs.spline_hi[i-model.nparams];
+
+    }
+    if( (options.fixed_params.size()!=std::accumulate(fixed.begin(), fixed.end(), (size_t)0)) && !options.systs_only ){
+            log<LOG_ERROR>(L"%1% || ERROR. The fixed parameters you passed, check they exist? the number of fixed params is not the same as input params.") % __func__;
+            log<LOG_ERROR>(L"%1% || ERROR. fixed_params %2% ") % __func__ % options.fixed_params;
+            log<LOG_ERROR>(L"%1% || ERROR. global_fixed %2% : sum %3% ") % __func__ % fixed % ((int)std::accumulate(fixed.begin(), fixed.end(), 0)) ;
+            exit(EXIT_FAILURE);
+    }
+}
+
 int main(int argc, char* argv[])
 {
     auto start_time = std::chrono::high_resolution_clock::now();
@@ -2974,221 +3205,69 @@ int main(int argc, char* argv[])
         fakedataparams(idx+model->nparams) = shift;
     }
 
-    
-
-    //Some logic for EITHER injecting fake/mock data of oscillated signal/syst shifts OR using real data
-    //Main data for the i_prime fitting.
-    PROdata data;
-
-    //We will load all other variables too, but many are truth level so data won't be as common.
+    // variable_data is data for all variable, data is data for i_prime
     std::vector<PROdata> variable_data;
-    // Support data from either --data flag or embedded <data> section in the XML
     bool use_real_data = (!options.data_xml.empty() || config.m_has_data_section) && !options.use_fake_data;
-    if(use_real_data){
-        PROconfig dataconfig;
-        if(!options.data_xml.empty()){
-            // Explicit --data flag takes precedence
-            dataconfig = PROconfig(options.data_xml);
-        } else {
-            // Use embedded <data> section from the unified XML
-            log<LOG_INFO>(L"%1% || Using embedded <data> section from XML for data config") % __func__;
-            dataconfig = config.BuildDataConfig();
-        }
-        std::string dataBinName = options.analysis_tag+"_data.bin";
-        for(size_t i = 0; i < dataconfig.m_num_channels; ++i) {
-            size_t nsubch = dataconfig.m_num_subchannels[i];
-            if(nsubch != 1) {
-                log<LOG_ERROR>(L"%1% || Data xml required to have exactly 1 subchannel per channel. Found %2% for channel %3%")
-                    % __func__ % nsubch % i;
-                log<LOG_ERROR>(L"Terminating.");
-                exit(EXIT_FAILURE);
-            }
-            std::string &subchname = dataconfig.m_subchannel_names[i][0];
-            if(subchname != "data") {
-                log<LOG_ERROR>(L"%1% || Data subchannel required to be called \"data.\" Found name %2% for channel %3%")
-                    % __func__ % subchname.c_str() % i;
-                log<LOG_ERROR>(L"Terminating.");
-                exit(EXIT_FAILURE);
-            }
-        }
-        if(!PROconfig::SameChannels(config, dataconfig)) {
-            log<LOG_ERROR>(L"%1% || Require data and MC to have same channels. A difference was found, check messages above.")
-                % __func__;
-            log<LOG_ERROR>(L"Terminating.");
-            exit(EXIT_FAILURE);
-        }
-
-        if((*options.process_command) || (!std::filesystem::exists(dataBinName))  ){
-            log<LOG_INFO>(L"%1% || Processing Data Spectrum and saving to binary output also: %2%") % __func__ % dataBinName.c_str();
-
-            //Process the CAF files to grab and fill spectrum directly
-            std::vector<PROdata> alldata = CreatePROdata(dataconfig);
-            PROdata::saveVector(dataconfig, alldata, dataBinName);
-            data = alldata[config.i_prime];
-            //data.save(dataconfig,dataBinName);
-            
-            for(size_t io = 0; io < dataconfig.m_num_variables; ++io)
-                variable_data.push_back(alldata[io]);
-
-            log<LOG_INFO>(L"%1% || Done processing Data from XML defined root files, and saving to binary output also: %2%") % __func__ % dataBinName.c_str();
-        }else{
-            log<LOG_INFO>(L"%1% || Loading Data from precalc binary input: %2%") % __func__ % dataBinName.c_str();
-            //data.load(dataBinName);
-            std::vector<PROdata> alldata;
-            PROdata::loadVector(alldata, dataBinName);
-            data = alldata[config.i_prime];
-            //data.save(dataconfig,dataBinName);
-
-            for(size_t io = 0; io < dataconfig.m_num_variables; ++io)
-                variable_data.push_back(alldata[io]);
-
-            log<LOG_INFO>(L"%1% || Done loading. Config hash (%2%) and binary loaded Data (%3%) hash are here. ") % __func__ %  dataconfig.hash % data.hash;
-            if(dataconfig.hash!=data.hash){
-                if(options.force){
-                    log<LOG_WARNING>(L"%1% || WARNING config hash (%2%) and binary loaded data (%3%) hash not compatable! ") % __func__ %  dataconfig.hash % data.hash ;
-                    log<LOG_WARNING>(L"%1% || WARNING But we are forcing ahead, be SUPER clear and happy you understand what your doing.  ") % __func__;
-                }else{
-                    log<LOG_ERROR>(L"%1% || ERROR config hash (%2%) and binary loaded data (%3%) hash not compatable! ") % __func__ %  dataconfig.hash % data.hash ;
-                    return 1;
-                }
-            }
-        }
-
-        /*if(*profile_command || *surface_command || *protest_command){
-            log<LOG_ERROR>(L"%1% || ERROR --data can only be used with plot subcommand! ") % __func__  ;
-            return 1;
-        }*/
-
-
-    }//if no data, use injected or fake data;
-    else{
-        log<LOG_INFO>(L"%1% || Going to get fake data set up for each variable.") % __func__ ;
-        for(size_t io = 0; io < config.m_num_variables; ++io) {
-            if (options.pseudo_experiment && io == config.i_prime && config.m_channel_variable_plot_bool.at(io)) {
-                // True FC-style pseudo-experiment for the i_prime variable.
-                // Pattern lifted verbatim from src/PROfc.cxx::fc_worker's per-PE body:
-                //   1. CV spectrum + Cholesky of the bin-bin covariance once.
-                //   2. Throw spline pulls Gaussian, rejection-sampled within restrict bounds.
-                //   3. Throw covariance bin shifts (Gaussian in standardised units).
-                //   4. Build shifted spectrum, add L*throwC to the collapsed spec, Poisson-variate.
-                std::normal_distribution<float> d;
-                const size_t nphys   = model->nparams;
-                const size_t nspline = variable_systs[io].GetNSplines();
-
-                PROspec cv_for_L = FillSpectra(config, prop, variable_systs[io], *model,
-                                               fakedataparams, !options.eventbyevent, io);
-                Eigen::MatrixXf L_chol = variable_systs[io].DecomposeFractionalCovariance(config, cv_for_L.Spec());
-
-                Eigen::VectorXf throws = fakedataparams;
-                // Shared truncated-Gaussian helper: samples each spline's actual prior
-                // N(center, sigma) within its restrict bounds, OOB-safe (never spins
-                // forever on unreachable bounds; clamps to the in-range value nearest
-                // the prior center and warns).
-                for (size_t i = 0; i < nspline; ++i) {
-                    throws((int)(i + nphys)) = ThrowRestrictedSplinePull(variable_systs[io], i, PROseed::global_rng, d);
-                }
-
-                const int nbins_coll = config.m_num_variable_bins_total_collapsed[io];
-                Eigen::VectorXf throwC(nbins_coll);
-                for (int i = 0; i < nbins_coll; ++i) throwC(i) = d(PROseed::global_rng);
-
-                PROspec shifted = FillSpectra(config, prop, variable_systs[io], *model,
-                                              throws, !options.eventbyevent, io);
-                PROspec newSpec = PROspec::PoissonVariation(
-                    PROspec(CollapseMatrix(config, shifted.Spec(), io) + L_chol * throwC,
-                            CollapseMatrix(config, shifted.Error(), io)),
-                    dseed(myseed.global_rng));
-
-                log<LOG_INFO>(L"%1% || Generated FC-style pseudo-experiment for i_prime variable %2% "
-                              L"(splines thrown=%3%, cov bins thrown=%4%).")
-                    % __func__ % io % (int)nspline % nbins_coll;
-
-                // List the thrown spline pulls (in sigma) that produced this pseudo-experiment.
-                std::string thrown_str;
-                for (size_t i = 0; i < nspline; ++i) {
-                    const std::string sn = i < variable_systs[io].spline_names.size()
-                        ? variable_systs[io].spline_names[i] : ("spline#" + std::to_string(i));
-                    thrown_str += sn + "=" + std::to_string(throws((int)(i + nphys)));
-                    if (i + 1 < nspline) thrown_str += ", ";
-                }
-                log<LOG_INFO>(L"%1% || Pseudo-experiment thrown spline pulls (sigma): %2%")
-                    % __func__ % thrown_str.c_str();
-
-                variable_data.push_back(PROdata(newSpec.Spec(), newSpec.Error()));
-                continue;
-            }
-
-            PROspec data_spec = config.m_channel_variable_plot_bool.at(io) ?  FillSpectra(config, prop, variable_systs[io], *model, fakedataparams, !options.eventbyevent, io) : PROspec(config.m_num_variable_bins_total[io]) ;
-            if(options.poisson_throw) data_spec = PROspec::PoissonVariation(data_spec, dseed(myseed.global_rng));
-            Eigen::VectorXf data_vec = CollapseMatrix(config, data_spec.Spec(), io);
-            variable_data.push_back(PROdata(data_vec, data_vec.array().sqrt()));
-        }
-    }
-
-    data = variable_data[config.i_prime];
+    PROdata data = construct_data(variable_data, use_real_data, config, prop, *model, variable_systs, fakedataparams, options);
 
     // Leave this after creating fake data so we can make fake data using systs that aren't
     // included in the fit.
+    if(options.syst_list.size()) {
 
-    //for(auto & systs : variable_systs){
-    {
-        if(options.syst_list.size()) {
+        std::vector<std::string> systs_to_include;
+        for(const auto &s: options.syst_list) {
+            bool istag = false;
+            for(const auto &[syst, tags]: config.m_mcgen_variation_tags) {
+                if(std::find(tags.begin(), tags.end(), s) != std::end(tags)) {
+                    istag = true;
+                    systs_to_include.push_back(syst);
+                }
+            }
+            if(!istag) systs_to_include.push_back(s);
+        }
+        for(std::string &name: systs_to_include) {
+            for(const auto &[xml_name, plot_name]: config.m_mcgen_variation_plotname_map) {
+                if(name == plot_name) {
+                    name = xml_name;
+                }
+            }
+        }
+        //systs = systs.subset(systs_to_include);
+        int io=0;
+        for(PROsyst &syst: variable_systs){
+            if(config.m_channel_variable_plot_bool.at(io)){
+                syst = syst.subset(systs_to_include);
+            }
+            io++;
+        }
+    } else if(options.systs_excluded.size()) {
 
-            std::vector<std::string> systs_to_include;
-            for(const auto &s: options.syst_list) {
-                bool istag = false;
-                for(const auto &[syst, tags]: config.m_mcgen_variation_tags) {
-                    if(std::find(tags.begin(), tags.end(), s) != std::end(tags)) {
-                        istag = true;
-                        systs_to_include.push_back(syst);
-                    }
-                }
-                if(!istag) systs_to_include.push_back(s);
-            }
-            for(std::string &name: systs_to_include) {
-                for(const auto &[xml_name, plot_name]: config.m_mcgen_variation_plotname_map) {
-                    if(name == plot_name) {
-                        name = xml_name;
-                    }
+        std::vector<std::string> systs_to_exclude;
+        for(const auto &s: options.systs_excluded) {
+            log<LOG_INFO>(L"%1% || Excluding systematic %2% by command line argument.") % __func__ % s.c_str();
+            bool istag = false;
+            for(const auto &[syst, tags]: config.m_mcgen_variation_tags) {
+                if(std::find(tags.begin(), tags.end(), s) != std::end(tags)) {
+                    istag = true;
+                    systs_to_exclude.push_back(syst);
                 }
             }
-            //systs = systs.subset(systs_to_include);
-            int io=0;
-            for(PROsyst &syst: variable_systs){
-                if(config.m_channel_variable_plot_bool.at(io)){
-                    syst = syst.subset(systs_to_include);
-                }
-                io++;
-            }
-        } else if(options.systs_excluded.size()) {
-
-            std::vector<std::string> systs_to_exclude;
-            for(const auto &s: options.systs_excluded) {
-                log<LOG_INFO>(L"%1% || Excluding systematic %2% by command line argument.") % __func__ % s.c_str();
-                bool istag = false;
-                for(const auto &[syst, tags]: config.m_mcgen_variation_tags) {
-                    if(std::find(tags.begin(), tags.end(), s) != std::end(tags)) {
-                        istag = true;
-                        systs_to_exclude.push_back(syst);
-                    }
-                }
-                if(!istag) systs_to_exclude.push_back(s);
-            }
-            for(std::string &name: systs_to_exclude) {
-                for(const auto &[xml_name, plot_name]: config.m_mcgen_variation_plotname_map) {
-                    if(name == plot_name) {
-                        name = xml_name;
-                    }
+            if(!istag) systs_to_exclude.push_back(s);
+        }
+        for(std::string &name: systs_to_exclude) {
+            for(const auto &[xml_name, plot_name]: config.m_mcgen_variation_plotname_map) {
+                if(name == plot_name) {
+                    name = xml_name;
                 }
             }
-            //systs = systs.excluding(systs_to_exclude);
-            int io=0;
-            for(PROsyst &syst: variable_systs){
-                if(config.m_channel_variable_plot_bool.at(io)){
-                    syst = syst.excluding(systs_to_exclude);
-                }
-                io++;
+        }
+        //systs = systs.excluding(systs_to_exclude);
+        int io=0;
+        for(PROsyst &syst: variable_systs){
+            if(config.m_channel_variable_plot_bool.at(io)){
+                syst = syst.excluding(systs_to_exclude);
             }
+            io++;
         }
     }
 
@@ -3206,60 +3285,7 @@ int main(int argc, char* argv[])
             return 1;
     }
 
-    // Empty-bin sanity check: build a default-CV spectrum and look for collapsed bins
-    // that would make stat-only / CNP statistics singular (CV<=0) or untrustworthy (CV<1).
-    {
-        const size_t io = config.i_prime;
-        Eigen::VectorXf cv_check_params =
-            Eigen::VectorXf::Zero(model->nparams + variable_systs[io].GetNSplines());
-        for(size_t i = 0; i < model->nparams; ++i)
-            cv_check_params(i) = model->default_val(i);
-
-        PROspec cv_check_spec = FillSpectra(config, prop, variable_systs[io], *model,
-                                            cv_check_params, !options.eventbyevent, io);
-        Eigen::VectorXf collapsed_cv = CollapseMatrix(config, cv_check_spec.Spec(), io);
-
-        int n_zero = 0, n_tiny = 0;
-        for(Eigen::Index b = 0; b < collapsed_cv.size(); ++b) {
-            // Bins outside the fit region (PROjector / future bin-off masks) never enter
-            // a chi2, so an empty CV there is not a problem.
-            if(!config.IsBinActive(io, (size_t)b)) continue;
-            if(collapsed_cv(b) <= 0.0f) {
-                log<LOG_ERROR>(L"%1% || Default-CV collapsed bin %2% has %3% expected events (<=0). Empty-bin would make CNP/stat covariance singular.") % __func__ % (long)b % collapsed_cv(b);
-                ++n_zero;
-            } else if(collapsed_cv(b) < 1.0f) {
-                log<LOG_WARNING>(L"%1% || Default-CV collapsed bin %2% has %3% expected events (<1). Low-stat region; results in this bin may be unreliable.") % __func__ % (long)b % collapsed_cv(b);
-                ++n_tiny;
-            }
-        }
-        if(n_zero > 0) {
-            if(!options.force) {
-                log<LOG_ERROR>(L"%1% || %2% collapsed CV bins are empty. Aborting. Re-run with --force to override (NOT recommended).") % __func__ % n_zero;
-                return 1;
-            }
-            log<LOG_WARNING>(L"%1% || %2% collapsed CV bins are empty but --force was set; proceeding at user's risk.") % __func__ % n_zero;
-        }
-        if(n_tiny > 0)
-            log<LOG_WARNING>(L"%1% || %2% collapsed CV bins have <1 expected event.") % __func__ % n_tiny;
-
-        if(use_real_data) {
-            int n_nan = 0, n_neg = 0;
-            const Eigen::VectorXf &dvec = data.Spec();
-            for(Eigen::Index b = 0; b < dvec.size(); ++b) {
-                if(std::isnan(dvec(b)) || std::isinf(dvec(b))) {
-                    log<LOG_ERROR>(L"%1% || Data bin %2% is NaN/inf.") % __func__ % (long)b;
-                    ++n_nan;
-                } else if(dvec(b) < 0.0f) {
-                    log<LOG_WARNING>(L"%1% || Data bin %2% is negative (%3%).") % __func__ % (long)b % dvec(b);
-                    ++n_neg;
-                }
-            }
-            if(n_nan > 0 && !options.force) {
-                log<LOG_ERROR>(L"%1% || %2% data bins are NaN/inf. Aborting. Re-run with --force to override.") % __func__ % n_nan;
-                return 1;
-            }
-        }
-    }
+    empty_bin_check(config, options, prop, *model, variable_systs[config.i_prime], data, use_real_data);
 
     //Pysics parameter input
     Eigen::VectorXf fakeDataParams = Eigen::VectorXf::Constant(model->nparams + variable_systs[config.i_prime].GetNSplines(), 0);
@@ -3334,52 +3360,11 @@ int main(int argc, char* argv[])
         log<LOG_INFO>(L"%1% || Gradient mode: %2%") % __func__ % PROmetric::gradientModeName(gmode_a);
     }
 
-
-
-    //Section to set bounds, as well as fix 
-    size_t N_phys_params = model->nparams;
-    size_t N_syst_params = variable_systs[config.i_prime].GetNSplines();
-    size_t N_params = N_phys_params+N_syst_params;
-
+    size_t N_params = model->nparams+variable_systs[config.i_prime].GetNSplines();
     Eigen::VectorXf global_lb = Eigen::VectorXf::Constant(N_params, -3.0);
     Eigen::VectorXf global_ub = Eigen::VectorXf::Constant(N_params, 3.0);
-    std::vector<int> global_fixed(N_params,0); 
-    log<LOG_INFO>(L"%1% || We are hoping to FIX : %2% ") % __func__ % options.fixed_params;
-    for(size_t i = 0; i < N_phys_params; ++i) {
-                std::string name = model->param_names[i];
-                std::string pname = model->pretty_param_names[i];
-                if( options.systs_only || std::find(options.fixed_params.begin(), options.fixed_params.end(), pname) != options.fixed_params.end() || std::find(options.fixed_params.begin(), options.fixed_params.end(), name) != options.fixed_params.end()){
-                    log<LOG_INFO>(L"%1% || We are FIXING physics parameter %2% (%3%) at value %4% ") % __func__ % i % name.c_str() % CVParams(i);  
-                    model->lb(i) = CVParams(i);
-                    model->ub(i) = CVParams(i);
-                    global_fixed.at(i)=1;
-                }
-                global_lb(i) = model->lb(i);
-                global_ub(i) = model->ub(i);
-
-           
-    }
-    for(size_t i = N_phys_params; i < N_params; ++i) {
-                std::string name = variable_systs[config.i_prime].spline_names[i-N_phys_params];
-                std::string pname =config.m_mcgen_variation_plotname_map.at(name); 
-
-                if( std::find(options.fixed_params.begin(), options.fixed_params.end(), name) != options.fixed_params.end() || std::find(options.fixed_params.begin(), options.fixed_params.end(), pname) != options.fixed_params.end()){
-                    log<LOG_INFO>(L"%1% || We are FIXING syst parameter %2% (%3%) at value %4% ") % __func__ % i % name.c_str() % CVParams(i);  
-                    variable_systs[config.i_prime].spline_hi[i-N_phys_params] = CVParams(i);
-                    variable_systs[config.i_prime].spline_lo[i-N_phys_params] = CVParams(i);
-                    global_fixed.at(i)=1;
-                }
-                global_lb(i) = variable_systs[config.i_prime].spline_lo[i-N_phys_params];
-                global_ub(i) = variable_systs[config.i_prime].spline_hi[i-N_phys_params];
-
-    }
-    if( (options.fixed_params.size()!=std::accumulate(global_fixed.begin(), global_fixed.end(), (size_t)0)) && !options.systs_only ){
-            log<LOG_ERROR>(L"%1% || ERROR. The fixed parameters you passed, check they exist? the number of fixed params is not the same as input params.") % __func__;
-            log<LOG_ERROR>(L"%1% || ERROR. fixed_params %2% ") % __func__ % options.fixed_params;
-            log<LOG_ERROR>(L"%1% || ERROR. global_fixed %2% : sum %3% ") % __func__ % global_fixed % ((int)std::accumulate(global_fixed.begin(), global_fixed.end(), 0)) ;
-            exit(EXIT_FAILURE);
-    }
-
+    std::vector<int> global_fixed(N_params, 0); 
+    set_global_bounds(global_lb, global_ub, global_fixed, config, options, *model, variable_systs[config.i_prime], CVParams);
 
     //Metric Time
     //Metrics are for i_prime only for now
@@ -3463,14 +3448,14 @@ int main(int argc, char* argv[])
 
         global_fit_out << "Global best fit:\n";
 
-        bool use_phys = (size_t)global_fit_result.size() == N_phys_params + metric->GetSysts().GetNSplines();
+        bool use_phys = (size_t)global_fit_result.size() == model->nparams + metric->GetSysts().GetNSplines();
         for(long i = 0; i < global_fit_result.size(); i++){
 
-            if(use_phys && i < (long)N_phys_params){
+            if(use_phys && i < (long)model->nparams){
                 log<LOG_INFO>(L"%1% || %2%  : %3% (log) %4% (nonlog) ") % __func__ % metric->GetModel().pretty_param_names[i].c_str() % global_fit_result(i) % pow(10,global_fit_result(i));
                 global_fit_out << metric->GetModel().param_names[i] << " : " << global_fit_result(i) << "\n";
             }else{
-                long idx = use_phys ? i - N_phys_params : i;
+                long idx = use_phys ? i - model->nparams : i;
                 log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % config.m_mcgen_variation_plotname_map.at(metric->GetSysts().spline_names[idx]).c_str() % global_fit_result(i);
 
                 global_fit_out <<  config.m_mcgen_variation_plotname_map.at(metric->GetSysts().spline_names[idx])
@@ -3493,7 +3478,7 @@ int main(int argc, char* argv[])
         log<LOG_INFO>(L"%1% || at paramters: ") % __func__;
 
         for(long i = 0; i < global_fit_result.size(); i++){
-            if(i < (long)N_phys_params){
+            if(i < (long)model->nparams){
                 log<LOG_INFO>(L"%1% || %2%  : %3% (log) %4% (nonlog) ") % __func__ % metric->GetModel().pretty_param_names[i].c_str() % global_fit_result(i) % pow(10,global_fit_result(i));
                 global_fit_out << metric->GetModel().param_names[i] << " : " << global_fit_result(i) << "\n";
             }else{
