@@ -86,7 +86,7 @@ namespace PROfit{
             }
         return 1;
         };
-        bool hasBound(std::string bound_name){
+        bool hasBound(std::string bound_name) const {
                 if(bound_name == "xmin") {
                     return xmin!=-9999? true : false;
                 }else if(bound_name == "xmax") {
@@ -105,7 +105,7 @@ namespace PROfit{
                 }
         return false;
         };
-        float getBound(std::string bound_name){
+        float getBound(std::string bound_name) const {
                 if(bound_name == "xmin") {
                     return xmin;
                 }else if(bound_name == "xmax") {
@@ -211,7 +211,7 @@ namespace PROfit{
      *        CV stack and legend (used by --bkg-subtract; their contents are expected to
      *        already be zero in `cv`).
      */
-    std::map<std::string, TObject *> plot_channels(const std::string &filename, const PROconfig &config, std::optional<PROspec> cv, std::optional<PROspec> best_fit, std::optional<PROdata> data, std::optional<PROerrorbar> errband, std::optional<PROerrorbar> posterrband, std::vector<TPaveText> &texts, PlotBounds &bounds, PlotOptions opt = PlotOptions::Default, int var_index = 0, bool ratio_bool = false, bool plot_channel_ratios = false, const std::vector<size_t> *skip_stack_subchannels = nullptr, PROmetric *chi_metric = nullptr, const PROspec *chi_spec = nullptr);
+    std::map<std::string, TObject *> plot_channels(const std::string &filename, const PROconfig &config, std::optional<PROspec> cv, std::optional<PROspec> best_fit, std::optional<PROdata> data, std::optional<PROerrorbar> errband, std::optional<PROerrorbar> posterrband, std::vector<TPaveText> &texts, const PlotBounds &bounds, PlotOptions opt = PlotOptions::Default, int var_index = 0, bool ratio_bool = false, bool plot_channel_ratios = false, const std::vector<size_t> *skip_stack_subchannels = nullptr, PROmetric *chi_metric = nullptr, const PROspec *chi_spec = nullptr);
 
     /**
      * @brief Return global subchannel indices whose `m_fullnames[i]` contains `pattern` as a substring.
