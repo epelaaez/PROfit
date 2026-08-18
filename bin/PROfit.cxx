@@ -1997,18 +1997,20 @@ void run_profile(float &global_fit_chi2, Eigen::VectorXf &global_fit_result, con
     }
 }
 
-void run_surface(float &global_fit_chi2_surf, Eigen::VectorXf &global_fit_result_surf, const PROconfig &config, const PROpeller &prop, PROmetric &metric, const PROdata &data, const Eigen::VectorXf &CVParams, const Eigen::VectorXf &fakeDataParams, const Eigen::VectorXf &lb, const Eigen::VectorXf &ub, const std::vector<int> &fixed, PROfitterConfig &fitConfig, PROfitterConfig &scanFitConfig, PROpt &options, PROseed &myseed) {
+void run_surface(float &global_fit_chi2, Eigen::VectorXf &global_fit_result, const PROconfig &config, const PROpeller &prop, PROmetric &metric, const PROdata &data, const Eigen::VectorXf &CVParams, const Eigen::VectorXf &fakeDataParams, const Eigen::VectorXf &lb, const Eigen::VectorXf &ub, const std::vector<int> &fixed, PROfitterConfig &fitConfig, PROfitterConfig &scanFitConfig, PROpt &options, PROseed &myseed) {
 
     std::uniform_int_distribution<uint32_t> dseed(0, std::numeric_limits<uint32_t>::max());
 
-    GlobalFitOptions opt = GlobalFitOptions::Default;
-    if(options.progress_bar) opt |= GlobalFitOptions::Progress;
-    opt |= GlobalFitOptions::FreqSeedPts;
-    PROspec cv = FillSpectra(config, prop, metric.GetSysts(), metric.GetModel(), CVParams , true ,config.i_prime);
-    // Should we pass in global fixed here? This mostly gets used with syst_only which would not make sense for a surface.
-    GlobalFitResult fitres = do_a_fit(config, prop, data, metric, ub, lb, fitConfig, CVParams, cv, fixed, opt); 
-    global_fit_chi2_surf = fitres.chi2;
-    global_fit_result_surf = fitres.fitter.best_fit;
+    if(global_fit_chi2 < 0) {
+        GlobalFitOptions opt = GlobalFitOptions::Default;
+        if(options.progress_bar) opt |= GlobalFitOptions::Progress;
+        opt |= GlobalFitOptions::FreqSeedPts;
+        PROspec cv = FillSpectra(config, prop, metric.GetSysts(), metric.GetModel(), CVParams , true ,config.i_prime);
+        // Should we pass in global fixed here? This mostly gets used with syst_only which would not make sense for a surface.
+        GlobalFitResult fitres = do_a_fit(config, prop, data, metric, ub, lb, fitConfig, CVParams, cv, fixed, opt); 
+        global_fit_chi2 = fitres.chi2;
+        global_fit_result = fitres.fitter.best_fit;
+    }
 
     if (options.grid_size.empty()) {
         options.grid_size = {40, 40};
@@ -2073,7 +2075,7 @@ void run_surface(float &global_fit_chi2_surf, Eigen::VectorXf &global_fit_result
         log<LOG_INFO>(L"%1% || Running a PROcurve from %2% to point %3% with %4% points") % __func__ % A% B %Ncurvep;
         
         if(options.progress_bar) fitConfig.progress_bar = true;
-        std::vector<surfOut> cpoints = surface.FillCurve(fitConfig, myseed, global_fit_chi2_surf, global_fit_result_surf, options.nthread, A, B, Ncurvep);
+        std::vector<surfOut> cpoints = surface.FillCurve(fitConfig, myseed, global_fit_chi2, global_fit_result, options.nthread, A, B, Ncurvep);
         surface.PlotCurve(config, metric.GetModel(), metric.GetSysts(), cpoints,options.final_output_tag,options.logx,options.logy,xaxis_idx,yaxis_idx,A, B, Ncurvep); 
         exit(0);
     }
@@ -2101,8 +2103,8 @@ void run_surface(float &global_fit_chi2_surf, Eigen::VectorXf &global_fit_result
             // Subsequent level fits still get cell-corner best_fits from
             // PROmesh::run_amr.
             std::vector<Eigen::VectorXf> caller_seeds;
-            if (global_fit_result_surf.size() > 0)
-                caller_seeds.push_back(global_fit_result_surf);
+            if (global_fit_result.size() > 0)
+                caller_seeds.push_back(global_fit_result);
             PROmesh::AMRResult amr_result = surface.FillSurfaceAMR(
                 scanFitConfig,
                 options.final_output_tag+"_surface_amr.txt",
@@ -2114,7 +2116,7 @@ void run_surface(float &global_fit_chi2_surf, Eigen::VectorXf &global_fit_result
             surface.PlotAMRMesh(amr_result, metric.GetModel(), options.final_output_tag,
                                 options.logx, options.logy, xaxis_idx, yaxis_idx);
         } else {
-            surface.FillSurface(scanFitConfig, options.final_output_tag+"_surface.txt",myseed, global_fit_chi2_surf, global_fit_result_surf, options.nthread);
+            surface.FillSurface(scanFitConfig, options.final_output_tag+"_surface.txt",myseed, global_fit_chi2, global_fit_result, options.nthread);
         }
     }
 
@@ -2997,7 +2999,7 @@ int run_proletariat(PROpt &options) {
     return submitter.Run();
 }
 
-Eigen::VectorXf make_param_vectors(Eigen::VectorXf &cv_osc_param_vector, Eigen::VectorXf &fake_data_osc_param_vector, const PROconfig &config, const PROpt &options, const PROmodel &model, const PROsyst &systs) {
+Eigen::VectorXf make_fakedata_params(Eigen::VectorXf &fake_data_osc_param_vector, const PROconfig &config, const PROpt &options, const PROmodel &model, const PROsyst &systs) {
     //loop over input fake data physics params and check/set
     for(const auto &[name, value]: options.fake_data_osc_params) {
         const auto it = std::find(model.param_names.begin(), model.param_names.end(), name);
@@ -3012,22 +3014,6 @@ Eigen::VectorXf make_param_vectors(Eigen::VectorXf &cv_osc_param_vector, Eigen::
         fake_data_osc_param_vector(loc) = model.is_log10[loc] ? std::log10(value) : value;
         log<LOG_INFO>(L"%1% Set fake data injected parameter %2% to value %3%, internally %4%") % __func__ % name.c_str() % value % fake_data_osc_param_vector(loc);
     }
-
-    //loop over input CV physics params and check/set
-    for(const auto &[name, value]: options.cv_osc_params) {
-        const auto it = std::find(model.param_names.begin(), model.param_names.end(), name);
-        if(it == std::end(model.param_names)) {
-            log<LOG_ERROR>(L"%1% || Unrecognized model parameter name %2%.\n"
-                    L"Valid names for model %3% are %4%") %
-                __func__% name.c_str()% config.m_model_tag.c_str()%
-                model.param_names;
-            exit(1);
-        }
-        int loc = std::distance(model.param_names.begin(), it);
-        cv_osc_param_vector(loc) = model.is_log10[loc] ? std::log10(value) : value;
-        log<LOG_INFO>(L"%1% Set CV injected parameter %2% to value %3%, internally %4%") % __func__ % name.c_str() % value % fake_data_osc_param_vector(loc);
-    }
-
 
     //Spline fake data injection studies
     Eigen::VectorXf fakedataparams = Eigen::VectorXf::Constant(model.nparams + systs.GetNSplines(), 0);
@@ -3056,12 +3042,53 @@ Eigen::VectorXf make_param_vectors(Eigen::VectorXf &cv_osc_param_vector, Eigen::
                 log<LOG_ERROR>(L"%1% || Error: Unrecognized spline %2%. Ignoring this injected shift.") % __func__ % name.c_str();
                 continue;
             }
-
         }
         int idx = std::distance(systs.spline_names.begin(), it);
         fakedataparams(idx+model.nparams) = shift;
     }
     return fakedataparams;
+}
+
+void make_param_vectors(Eigen::VectorXf &fakeDataParams, Eigen::VectorXf &CVParams, const PROconfig &config, const PROpt &options, const PROmodel &model, const PROsyst &systs, const Eigen::VectorXf &fake_data_osc_param_vector) {
+    for(const auto& [name, shift]: options.cv_injected_systs) {
+        log<LOG_INFO>(L"%1% || Injected syst: %2% shifted by %3%") % __func__ % name.c_str() % shift;
+
+        auto it = std::find(systs.spline_names.begin(), systs.spline_names.end(), name);
+        if(it == systs.spline_names.end()) {
+            for(const auto &[xml_name, plot_name]: config.m_mcgen_variation_plotname_map) {
+                if(name == plot_name) {
+                    it = std::find(systs.spline_names.begin(), systs.spline_names.end(), xml_name);
+                    break;
+                }
+            }
+            if(it == systs.spline_names.end()) {
+                log<LOG_ERROR>(L"%1% || Error: Unrecognized spline %2%. Ignoring this injected shift.") % __func__ % name.c_str();
+                continue;
+            }
+
+        }
+        int idx = std::distance(systs.spline_names.begin(), it);
+        CVParams(idx+model.nparams) = shift;
+    }
+
+    for(long i = 0; i < fake_data_osc_param_vector.size(); ++i) {
+        fakeDataParams(i) = fake_data_osc_param_vector(i);
+        CVParams(i) = model.default_val(i); // Set default here, cv-injected below
+    }
+    //loop over input CV physics params and check/set
+    for(const auto &[name, value]: options.cv_osc_params) {
+        const auto it = std::find(model.param_names.begin(), model.param_names.end(), name);
+        if(it == std::end(model.param_names)) {
+            log<LOG_ERROR>(L"%1% || Unrecognized model parameter name %2%.\n"
+                    L"Valid names for model %3% are %4%") %
+                __func__% name.c_str()% config.m_model_tag.c_str()%
+                model.param_names;
+            exit(1);
+        }
+        int loc = std::distance(model.param_names.begin(), it);
+        CVParams(loc) = model.is_log10[loc] ? std::log10(value) : value;
+        log<LOG_INFO>(L"%1% Set CV injected parameter %2% to value %3%, internally %4%") % __func__ % name.c_str() % value % fake_data_osc_param_vector(loc);
+    }
 }
 
 void include_or_exclude_systs(std::vector<PROsyst> &variable_systs, const PROconfig &config, const PROpt &options) {
@@ -3212,6 +3239,37 @@ void set_global_bounds(Eigen::VectorXf &lb, Eigen::VectorXf &ub, std::vector<int
     }
 }
 
+void print_global_fit_results(float global_fit_chi2, const Eigen::VectorXf &global_fit_result, const PROconfig &config, const PROpt &options, const PROmetric &metric) {
+    std::ofstream global_fit_out;
+    if(global_fit_result.size() > 0) {
+        global_fit_out.open(options.final_output_tag+"_global_fit.txt");
+        log<LOG_INFO>(L"%1% || ################################################") % __func__;
+        log<LOG_INFO>(L"%1% || ########### Global Best Fit Results ############") % __func__;
+        log<LOG_INFO>(L"%1% || ################################################") % __func__;
+        log<LOG_INFO>(L"%1% || Global Best Fit chi^2: %2%") %__func__ % global_fit_chi2;
+        log<LOG_INFO>(L"%1% || at paramters: ") % __func__;
+
+        global_fit_out << "Global best fit:\n";
+
+        bool use_phys = (size_t)global_fit_result.size() == metric.GetModel().nparams + metric.GetSysts().GetNSplines();
+        for(long i = 0; i < global_fit_result.size(); i++){
+
+            if(use_phys && i < (long)metric.GetModel().nparams){
+                log<LOG_INFO>(L"%1% || %2%  : %3% (log) %4% (nonlog) ") % __func__ % metric.GetModel().pretty_param_names[i].c_str() % global_fit_result(i) % pow(10,global_fit_result(i));
+                global_fit_out << metric.GetModel().param_names[i] << " : " << global_fit_result(i) << "\n";
+            }else{
+                long idx = use_phys ? i - metric.GetModel().nparams : i;
+                log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % config.m_mcgen_variation_plotname_map.at(metric.GetSysts().spline_names[idx]).c_str() % global_fit_result(i);
+
+                global_fit_out <<  config.m_mcgen_variation_plotname_map.at(metric.GetSysts().spline_names[idx])
+                    << " : " << global_fit_result(i) << "\n";
+            }
+        }
+        log<LOG_INFO>(L"%1% || ################################################") % __func__;
+    }
+    if(global_fit_out.is_open()) global_fit_out.close();
+}
+
 int main(int argc, char* argv[])
 {
     auto start_time = std::chrono::high_resolution_clock::now();
@@ -3246,13 +3304,9 @@ int main(int argc, char* argv[])
            config.m_mcgen_variation_prior_centers[sys]= options.cv_injected_systs.count(sys) ? options.cv_injected_systs.at(sys) : def ;
     }
 
-    //Seed time
+    // Build internal objects: PROseed, PROmodel, and PROsyst
     PROseed myseed(options.nthread, options.global_seed);
-
     std::unique_ptr<PROmodel> model = get_model_from_string(config, prop);
-    std::unique_ptr<PROmodel> null_model = std::make_unique<NullModel>(prop);
-
-    //Build a PROsyst to sort and analyze all systematics
     std::vector<PROsyst> variable_systs;
     for(size_t i = 0; i < config.m_num_variables; ++i){
         if(config.m_channel_variable_plot_bool.at(i) || i == config.i_prime){ 
@@ -3262,9 +3316,9 @@ int main(int argc, char* argv[])
         }
     }
 
+    // Setup parameter vectors pre-exclusion/subset of PROsyst (needed to make fake data)
     Eigen::VectorXf fake_data_osc_param_vector = model->default_val;
-    Eigen::VectorXf cv_osc_param_vector = model->default_val;
-    Eigen::VectorXf fakedataparams = make_param_vectors(cv_osc_param_vector, fake_data_osc_param_vector, config, options, *model, variable_systs[config.i_prime]);
+    Eigen::VectorXf fakedataparams = make_fakedata_params(fake_data_osc_param_vector, config, options, *model, variable_systs[config.i_prime]);
 
     // variable_data is data for all variable, data is data for i_prime
     std::vector<PROdata> variable_data;
@@ -3286,51 +3340,23 @@ int main(int argc, char* argv[])
     if(options.projector_config.active()) {
         if(!PROjectorSetup(options.projector_config, config, variable_systs[config.i_prime],
                     variable_data, data, fakedataparams, options.fixed_params, *model, options.chi2))
-            return 1;
+            exit(1);
     }
 
     empty_bin_check(config, options, prop, *model, variable_systs[config.i_prime], data, use_real_data);
 
     //Pysics parameter input
+    //Spline CV  injection studies [NEED TO GO AFTER the remove exclude systs]
     Eigen::VectorXf fakeDataParams = Eigen::VectorXf::Constant(model->nparams + variable_systs[config.i_prime].GetNSplines(), 0);
     Eigen::VectorXf CVParams = Eigen::VectorXf::Constant(model->nparams + variable_systs[config.i_prime].GetNSplines(), 0);
-
-    //Spline CV  injection studies [NEED TO GO AFTER the remove exclude systs]
-    for(const auto& [name, shift]: options.cv_injected_systs) {
-        log<LOG_INFO>(L"%1% || Injected syst: %2% shifted by %3%") % __func__ % name.c_str() % shift;
-
-        auto it = std::find(variable_systs[config.i_prime].spline_names.begin(), variable_systs[config.i_prime].spline_names.end(), name);
-        if(it == variable_systs[config.i_prime].spline_names.end()) {
-            for(const auto &[xml_name, plot_name]: config.m_mcgen_variation_plotname_map) {
-                if(name == plot_name) {
-                    it = std::find(variable_systs[config.i_prime].spline_names.begin(), variable_systs[config.i_prime].spline_names.end(), xml_name);
-                    break;
-                }
-            }
-            if(it == variable_systs[config.i_prime].spline_names.end()) {
-                log<LOG_ERROR>(L"%1% || Error: Unrecognized spline %2%. Ignoring this injected shift.") % __func__ % name.c_str();
-                continue;
-            }
-
-        }
-        int idx = std::distance(variable_systs[config.i_prime].spline_names.begin(), it);
-        CVParams(idx+model->nparams) = shift;
-    }
-
-    for(long i = 0; i < fake_data_osc_param_vector.size(); ++i) {
-        fakeDataParams(i) = fake_data_osc_param_vector(i);
-        CVParams(i) = model->default_val(i);
-    }
-    for(long i = 0; i < cv_osc_param_vector.size(); ++i) {
-        CVParams(i) = cv_osc_param_vector(i);
-    }
+    make_param_vectors(fakeDataParams, CVParams, config, options, *model, variable_systs[config.i_prime], fake_data_osc_param_vector);
 
 
     log<LOG_INFO>(L"%1% || Starting from fit preset :  %2%.")% __func__ % options.fit_preset;
     for(auto &fit_pre: options.fit_preset){
         if (options.allowed_preset.find(fit_pre) == options.allowed_preset.end()) {
             log<LOG_ERROR>(L"%1% || ERROR allowed fit_presets are good, fast, sensitivity or overkill. You entred : %2%.")% __func__ % fit_pre.c_str();
-            return 1;
+            exit(1);
         }
     }
     //Some global minimizer params
@@ -3393,8 +3419,8 @@ int main(int argc, char* argv[])
     //***********************************************************************
     //***********************************************************************
     
-    Eigen::VectorXf global_fit_result, global_fit_result_surf;
-    float global_fit_chi2 = -1, global_fit_chi2_surf = -1;
+    Eigen::VectorXf global_fit_result;
+    float global_fit_chi2 = -1;
 
     if(*options.proplot_command){
         run_plot(config, prop, *metric, *model, variable_systs, CVParams, fakeDataParams, fake_data_osc_param_vector, variable_data, options);
@@ -3406,7 +3432,7 @@ int main(int argc, char* argv[])
         run_profile(global_fit_chi2, global_fit_result, config, prop, *metric, data, CVParams, fakedataparams, global_lb, global_ub, global_fixed, fitConfig, scanFitConfig, options, myseed);
     }
     if(*options.surface_command ){
-        run_surface(global_fit_chi2_surf, global_fit_result_surf, config, prop, *metric, data, CVParams, fakeDataParams, global_lb, global_ub, global_fixed, fitConfig, scanFitConfig, options, myseed);
+        run_surface(global_fit_chi2, global_fit_result, config, prop, *metric, data, CVParams, fakeDataParams, global_lb, global_ub, global_fixed, fitConfig, scanFitConfig, options, myseed);
     }
     if(*options.profc_command) {
         run_fc(config, prop, *metric, data, CVParams, fakeDataParams, global_lb, global_ub, global_fixed, fitConfig, scanFitConfig, options, myseed);
@@ -3424,76 +3450,7 @@ int main(int argc, char* argv[])
         run_test(config, prop, *metric, data, CVParams);
     }
 
-    /*
-    if(*protest_command){
-        log<LOG_INFO>(L"%1% || PROtest. Place anything here, a playground for testing things.") % __func__;
-        //PrintVariableInfo(config);
-        auto start = std::chrono::high_resolution_clock::now();
-        int N=1000;
-        for(int i=0; i< N; i++){
-            FillSpectra(config, prop, metric->GetSysts(), metric->GetModel(), fakeDataParams , true,config.i_prime);
-        }
-        auto end = std::chrono::high_resolution_clock::now();
-        std::chrono::duration<double> duration = end - start;
-        log<LOG_INFO>(L"%1% || PROtest took %2% seconds total, or %3% per call of FillSpectra; ") % __func__ % duration.count() % float(duration.count()/(double(N)));
-        // *************************** END *********************************
-    }
-    */
-
-    std::ofstream global_fit_out;
-    if(global_fit_result.size() > 0) {
-        global_fit_out.open(options.final_output_tag+"_global_fit.txt");
-        float chi2 = global_fit_chi2 >= 0 ? global_fit_chi2 : global_fit_chi2_surf;
-        log<LOG_INFO>(L"%1% || ################################################") % __func__;
-        log<LOG_INFO>(L"%1% || ########### Global Best Fit Results ############") % __func__;
-        log<LOG_INFO>(L"%1% || ################################################") % __func__;
-        log<LOG_INFO>(L"%1% || Global Best Fit chi^2: %2%") %__func__ % chi2;
-        log<LOG_INFO>(L"%1% || at paramters: ") % __func__;
-
-        global_fit_out << "Global best fit:\n";
-
-        bool use_phys = (size_t)global_fit_result.size() == model->nparams + metric->GetSysts().GetNSplines();
-        for(long i = 0; i < global_fit_result.size(); i++){
-
-            if(use_phys && i < (long)model->nparams){
-                log<LOG_INFO>(L"%1% || %2%  : %3% (log) %4% (nonlog) ") % __func__ % metric->GetModel().pretty_param_names[i].c_str() % global_fit_result(i) % pow(10,global_fit_result(i));
-                global_fit_out << metric->GetModel().param_names[i] << " : " << global_fit_result(i) << "\n";
-            }else{
-                long idx = use_phys ? i - model->nparams : i;
-                log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % config.m_mcgen_variation_plotname_map.at(metric->GetSysts().spline_names[idx]).c_str() % global_fit_result(i);
-
-                global_fit_out <<  config.m_mcgen_variation_plotname_map.at(metric->GetSysts().spline_names[idx])
-                    << " : " << global_fit_result(i) << "\n";
-            }
-        }
-        log<LOG_INFO>(L"%1% || ################################################") % __func__;
-    }
-    if(global_fit_result_surf.size() > 0) {
-        if(!global_fit_out.is_open()) {
-            global_fit_out.open(options.final_output_tag+"_global_fit.txt");
-            global_fit_out << "Global best fit:\n";
-        } else {
-            global_fit_out << "\nSurface global best fit:\n";
-        }
-        log<LOG_INFO>(L"%1% || ########################################################") % __func__;
-        log<LOG_INFO>(L"%1% || ########### Surface Global Best Fit Results ############") % __func__;
-        log<LOG_INFO>(L"%1% || ########################################################") % __func__;
-        log<LOG_INFO>(L"%1% || Global Best Fit chi^2: %2%") %__func__ % global_fit_chi2_surf;
-        log<LOG_INFO>(L"%1% || at paramters: ") % __func__;
-
-        for(long i = 0; i < global_fit_result.size(); i++){
-            if(i < (long)model->nparams){
-                log<LOG_INFO>(L"%1% || %2%  : %3% (log) %4% (nonlog) ") % __func__ % metric->GetModel().pretty_param_names[i].c_str() % global_fit_result(i) % pow(10,global_fit_result(i));
-                global_fit_out << metric->GetModel().param_names[i] << " : " << global_fit_result(i) << "\n";
-            }else{
-                log<LOG_INFO>(L"%1% || %2%  :  %3% ") % __func__ % metric->GetSysts().spline_names[i - metric->GetModel().nparams].c_str() % global_fit_result(i);
-                global_fit_out << metric->GetSysts().spline_names[i - metric->GetModel().nparams]
-                    << " : " << global_fit_result(i) << "\n";
-            }
-        }
-        log<LOG_INFO>(L"%1% || ########################################################") % __func__;
-    }
-    if(global_fit_out.is_open()) global_fit_out.close();
+    print_global_fit_results(global_fit_chi2, global_fit_result, config, options, *metric);
 
     delete metric;
     auto stop_time = std::chrono::high_resolution_clock::now();
