@@ -1438,7 +1438,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                     }
                     m_mcgen_variation_inflate[wt] = inflate_val;
                     log<LOG_INFO>(L"%1% || Parsed inflate=%2% for systematic %3%") % __func__ % inflate_val % wt.c_str();
-                    const std::vector<std::string> inflatable_types = {"spline", "spline_to_covariance", "covariance", "external_covariance", "norm", "norm_to_covariance", "hist1d", "hist2d"};
+                    const std::vector<std::string> inflatable_types = {"spline", "spline_uniform", "spline_to_covariance", "covariance", "external_covariance", "norm", "norm_to_covariance", "hist1d", "hist2d"};
                     if(!variation_type || std::find(inflatable_types.begin(), inflatable_types.end(), variation_type) == inflatable_types.end()) {
                         log<LOG_WARNING>(L"%1% || inflate is not supported for systematic %2% (type %3%); it will have no effect.")
                             % __func__ % wt.c_str() % (variation_type ? variation_type : "unspecified");
@@ -1737,7 +1737,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
     }//end model
 
     for(size_t i = 0 ; i<m_mcgen_variation_type.size(); ++i){
-        if(m_mcgen_variation_type[i] == "spline"){
+        if(m_mcgen_variation_type[i] == "spline" || m_mcgen_variation_type[i] == "spline_uniform"){
             m_num_variation_type_spline+=1;
         }
 

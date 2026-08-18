@@ -50,6 +50,11 @@ PROCNP::PROCNP(const std::string tag, const PROconfig &conin, const PROpeller &p
             prior_covariance(iB, iA) = std::get<2>(t);
         }
         prior_covariance = systin->spline_priors.asDiagonal() * prior_covariance * systin->spline_priors.asDiagonal();
+        for(size_t i = 0; i < systin->spline_uniform.size(); ++i) if(systin->spline_uniform[i]) {
+            prior_covariance.row(i).setZero();
+            prior_covariance.col(i).setZero();
+            prior_covariance(i, i) = 1.0f;
+        }
         prior_covariance_inv = prior_covariance.inverse();
     }
 }
@@ -57,6 +62,9 @@ PROCNP::PROCNP(const std::string tag, const PROconfig &conin, const PROpeller &p
 float PROCNP::Pull(const Eigen::VectorXf &systs) {
     // No correlations: sum of squares
     Eigen::VectorXf centered = systs - syst->spline_centers;
+    for(size_t i = 0; i < syst->spline_uniform.size(); ++i) {
+        if(syst->spline_uniform[i]) centered(i) = 0.0f;
+    }
     if (!correlated_systematics) {
         return (centered.array().square() / syst->spline_priors.array().square()).sum();
     }

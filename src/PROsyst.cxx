@@ -17,7 +17,7 @@ namespace PROfit {
         shape_only = shapeonly;
         for(const auto& syst: systs) {
             log<LOG_DEBUG>(L"%1% || syst mode: %2%") % __func__ % syst.mode.c_str();
-            if(syst.mode == "spline" || syst.mode == "norm" || syst.mode == "hist1d" || syst.mode == "hist2d" || syst.mode == "explicit_spline") {
+            if(syst.mode == "spline" || syst.mode == "spline_uniform" || syst.mode == "norm" || syst.mode == "hist1d" || syst.mode == "hist2d" || syst.mode == "explicit_spline") {
                 bool unmirrored = config.m_mcgen_variation_unmirrored.find(syst.systname) != config.m_mcgen_variation_unmirrored.end();
                 FillSpline(syst, unmirrored);
                 ++n_splines;
@@ -84,6 +84,7 @@ namespace PROfit {
                 spline_restrict_lo.pop_back();
                 spline_restrict_hi.pop_back();
                 spline_binnings.pop_back();
+                spline_uniform.pop_back();
 
                 // Store as covariance instead
                 syst_map[syst.systname] = {covmat.size(), SystType::Covariance};
@@ -231,6 +232,7 @@ namespace PROfit {
                         ret.spline_restrict_lo.push_back(spline_restrict_lo[idx]);
                         ret.spline_restrict_hi.push_back(spline_restrict_hi[idx]);
                         ret.spline_binnings.push_back(spline_binnings[idx]);
+                        ret.spline_uniform.push_back(spline_uniform[idx]);
                         tmp_priors(ret.n_splines) = spline_priors(idx);
                         tmp_centers(ret.n_splines) = spline_centers(idx);
                         ++ret.n_splines;
@@ -282,6 +284,7 @@ namespace PROfit {
             ret.spline_restrict_lo.push_back(spline_restrict_lo[idx]);
             ret.spline_restrict_hi.push_back(spline_restrict_hi[idx]);
             ret.spline_binnings.push_back(spline_binnings[idx]);
+            ret.spline_uniform.push_back(spline_uniform[idx]);
             tmp_priors(ret.n_splines) = spline_priors(idx);
             tmp_centers(ret.n_splines) = spline_centers(idx);
             ++ret.n_splines;
@@ -913,6 +916,7 @@ namespace PROfit {
         spline_restrict_lo.push_back(syst.restrict_lo);
         spline_restrict_hi.push_back(syst.restrict_hi);
         spline_binnings.push_back(syst.binning);
+        spline_uniform.push_back(syst.mode == "spline_uniform");
 
     }
 
@@ -999,6 +1003,7 @@ namespace PROfit {
             syst_map[knob_name] = {splines.size(), SystType::Spline};
             splines.push_back(std::move(spline));
             spline_names.push_back(knob_name);
+            spline_uniform.push_back(false);
             spline_lo.push_back(lo);
             spline_hi.push_back(hi);
             // Keep the restrict bookkeeping vectors the SAME length as splines/spline_lo,

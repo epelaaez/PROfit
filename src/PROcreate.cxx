@@ -366,7 +366,7 @@ namespace PROfit {
                     if(branch_variable->GetIncludeSystematics()){
                         for(const auto &variation: inconfig.m_mcgen_variation_allowlist){
                             std::string type = inconfig.m_mcgen_variation_type_map.at(variation);
-                            if (std::find(allowlist_check.begin(), allowlist_check.end(), variation  ) == allowlist_check.end() && (type=="covariance" || type=="covariance_to_spline" || type=="spline" || type=="spline_to_covariance")) {
+                            if (std::find(allowlist_check.begin(), allowlist_check.end(), variation  ) == allowlist_check.end() && (type=="covariance" || type=="covariance_to_spline" || type=="spline" || type=="spline_uniform" || type=="spline_to_covariance")) {
                                 log<LOG_ERROR>(L"%1% || ERROR! You have a variation named %2% in your allowlist, so you definitely want it, but its NOT found in the files. Is this a typo? FileID %3%") % __func__ % variation.c_str() %fid  ;
                                 throw std::runtime_error("Allowlist variation not in file.");
                             }
@@ -502,7 +502,7 @@ namespace PROfit {
                     sv.back().inflate = inconfig.m_mcgen_variation_inflate.at(sys_name);
                     log<LOG_INFO>(L"%1% || Setting inflate=%2% for systematic %3%") % __func__ % sv.back().inflate % sys_name.c_str();
                 }
-                if(sys_mode == "spline" || sys_mode == "spline_to_covariance" || sys_mode == "explicit_spline") {
+                if(sys_mode == "spline" || sys_mode == "spline_uniform" || sys_mode == "spline_to_covariance" || sys_mode == "explicit_spline") {
                     bool override_knobs = inconfig.m_mcgen_variation_knobval_override.find(sys_name) != inconfig.m_mcgen_variation_knobval_override.end();
                     if(!override_knobs && map_systematic_knob_vals.find(sys_name) == map_systematic_knob_vals.end()) {
                         log<LOG_WARNING>(L"%1% || Expected %2% to have knob vals associated with it, but couldn't find any. Will use -3 to +3 as default.") % __func__ % sys_name.c_str();
@@ -1256,7 +1256,7 @@ namespace PROfit {
             // map_iter; a missing weight name (branch typo, absent friend tree)
             // must fail loudly here instead of dereferencing the end iterator.
             const std::string &sys_mode = var_syst_objs.front()->mode;
-            const bool needs_weights = (sys_mode == "spline" || sys_mode == "spline_to_covariance" ||
+            const bool needs_weights = (sys_mode == "spline" || sys_mode == "spline_uniform" || sys_mode == "spline_to_covariance" ||
                                         sys_mode == "covariance" || sys_mode == "covariance_to_spline");
             if(needs_weights && map_iter == eventweight_map.end()){
                 log<LOG_ERROR>(L"%1% || ERROR: systematic '%2%' (mode %3%) has no entry in the event weight map. "
@@ -1267,7 +1267,7 @@ namespace PROfit {
             }
             int spline_bin = (var_syst_objs.front()->mode == "covariance") ? -1: var_bin_indices[var_syst_objs.front()->binning];
 
-            if(var_syst_objs.front()->mode == "spline" || var_syst_objs.front()->mode == "spline_to_covariance") {
+            if(var_syst_objs.front()->mode == "spline" || var_syst_objs.front()->mode == "spline_uniform" || var_syst_objs.front()->mode == "spline_to_covariance") {
                 if(spline_bin < 0) continue;
                 for(auto so: var_syst_objs)
                     so->FillCV(spline_bin, mc_weight);
