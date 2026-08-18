@@ -14,6 +14,7 @@
 #
 # Environment overrides:
 #   PROFIT_BIN         PROfit executable      (default: <repo>/build/bin/PROfit)
+#   PROFIT_XML         Reference XML config   (default: <repo>/docs/tutorials/fake_sbn_v2.xml)
 #   PROFIT_TEST_MCDIR  Directory holding fake_sbn_mc_{ND,FD}.root
 #                      (default: directory containing the XML; the XML's
 #                      hardcoded /exp/... path is rewritten to it)
@@ -32,9 +33,11 @@ set -uo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
-XML_IN="$REPO/working_dir/Neutrino2026/fake_sbn_v2.xml"
+XML_IN="${PROFIT_XML:-$REPO/docs/tutorials/fake_sbn_v2.xml}"
 BIN="${PROFIT_BIN:-$REPO/build/bin/PROfit}"
-MCDIR="${PROFIT_TEST_MCDIR:-$(cd "$(dirname "$XML_IN")" && pwd)}"
+# realpath: absolutize before the cd into RUNDIR below, so relative
+# PROFIT_TEST_MCDIR values resolve from the invocation directory.
+MCDIR="$(realpath "${PROFIT_TEST_MCDIR:-$(dirname "$XML_IN")}")"
 RUNDIR="${TUTORIAL_OUTDIR:-$REPO/docs/tutorials/tutorial_run}"
 NTHREADS="${NTHREADS:-8}"
 SEED="${SEED:-405}"
@@ -47,9 +50,9 @@ TAG="TUT"
 mkdir -p "$RUNDIR/logs"
 cd "$RUNDIR"
 
-# Localize the XML: the reference config points its MCFile entries at a fixed
-# /exp/... path; rewrite that directory to wherever the fake MC actually lives.
-sed "s|/exp/uboone/data/users/markross|$MCDIR|g" "$XML_IN" > tutorial.xml
+# Localize the XML: point every MCFile entry at $MCDIR, regardless of what
+# path (bare filename, /exp/..., etc.) the source XML uses.
+sed -E "s|filename=\"[^\"]*(fake_sbn_mc_[NF]D\.root)\"|filename=\"$MCDIR/\1\"|g" "$XML_IN" > tutorial.xml
 
 for f in "$MCDIR/fake_sbn_mc_ND.root" "$MCDIR/fake_sbn_mc_FD.root"; do
     [ -f "$f" ] || { echo "ERROR: fake MC file missing: $f (set PROFIT_TEST_MCDIR)"; exit 99; }
@@ -116,7 +119,7 @@ run_step surf1    surface -g 30 "${AXES[@]}"
 run_step surfstat --statonly surface -g 30 "${AXES[@]}"
 run_step surfamr  surface "${AXES[@]}" --surface-amr --amr-initial 10 --amr-levels 3 \
                   --amr-levels-chi2 2.30 5.99
-run_step curve1   surface "${AXES[@]}" -g 20 --curve-mode -3 -1 -1 1
+run_step curve1   surface "${AXES[@]}" -g 20 --curve-mode -1 -3 1 -1
 if [ "$RUN_EXPENSIVE" = "1" ]; then
     run_step surfnoflux --exclude-systs Flux1 Flux2 Flux3 surface -g 30 "${AXES[@]}"
     run_step surfbrz    surface "${AXES[@]}" --surface-amr --amr-initial 10 --amr-levels 2 \

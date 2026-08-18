@@ -204,6 +204,23 @@ namespace PROfit {
         }
     };
 
+    // This target distribution uses a prior which is uniform in linear space for models
+    // where the parameters are in log space.
+    struct unilin_prior_target {
+        PROmetric &metric;
+
+        // Returns log-target (-0.5*chi^2). Metropolis::step does exp(target(p) - target(current))
+        // so the exp argument stays in safe float32 range even when chi^2 is large.
+        float operator()(Eigen::VectorXf &value) {
+            Eigen::VectorXf empty = value;
+            Eigen::VectorXf corr = value;
+            //corr.segment(0,2) = corr.segment(0,2).array().log10();
+            //return -0.5f*metric(value, empty, false)+value.segment(0,2).array().sum() - std::log(100-0.01);
+            return -0.5f*metric(corr, empty, false)+corr.segment(0,2).array().sum();
+            //return -0.5f*metric(corr, empty, false)-corr(0)-corr(1);
+        }
+    };
+
     struct prior_only_target {
         PROmetric &metric;
 
@@ -349,7 +366,7 @@ namespace PROfit {
         std::vector<int> active;
         std::mt19937 rng;
         static constexpr bool has_tune = true;
-        std::vector<Eigen::VectorXf> proposed;
+        //std::vector<Eigen::VectorXf> proposed;
         Eigen::VectorXf last_proposed;
         Eigen::VectorXf last_accepted;
         Eigen::VectorXf mean;
@@ -428,6 +445,7 @@ namespace PROfit {
                 if(std::find(fixed.begin(), fixed.end(), i) != std::end(fixed)) continue;
                 if(i < nparams) {
                     if(value(i) > metric.GetModel().ub(i) || value(i) < std::max(metric.GetModel().lb(i),-5.0f))
+                    //if(value(i) > std::pow(10, metric.GetModel().ub(i)) || value(i) < std::max(std::pow(10, metric.GetModel().lb(i)),1e-5))
                         return false;
                 } else {
                     size_t si = i - nparams;
@@ -489,6 +507,226 @@ namespace PROfit {
         }
 
     };
+
+class HMC {
+    public:
+        float epsilon, L;
+        std::vector<Eigen::VectorXf> chain;
+
+        void leapfrog(Eigen::VectorXf &theta, Eigen::VectorXf &r, PROmetric &metric) {
+            Eigen::VectorXf g = theta;
+            metric(theta, g, true);
+            r += epsilon/2 * g;
+            theta += epsilon * r;
+            metric(theta, g, true);
+            r += epsilon/2 * g;
+        }
+
+        void operator()(Eigen::VectorXf theta0, PROmetric &metric, size_t M, uint32_t seed) {
+            std::mt19937 rng(seed);
+            std::normal_distribution<float> normal(0, 1);
+            std::uniform_real_distribution<float> uniform(0, 1);
+            Eigen::VectorXf empty;
+            chain.push_back(theta0);
+            Eigen::VectorXf r0 = theta0, r = r0; // Just set the size, we'll set the values with rng in the loop
+            for(size_t m = 0; m < M; ++m) {
+                Eigen::VectorXf theta = chain.back();
+                for(long i = 0; i < r.size(); ++i) r(i) = normal(rng);
+                r0 = r;
+                for(size_t i = 0; i < L; ++i) leapfrog(theta, r, metric);
+                float alpha = std::min(1.0f, expf(metric(theta, empty, false) - 0.5 * r.dot(r) - metric(chain.back(), empty, false) + 0.5 * r0.dot(r0)));
+                if(alpha < uniform(rng)) {
+                    chain.push_back(theta);
+                } else {
+                    chain.push_back(theta0);
+                }
+            }
+        }
+};
+
+class NUTS {
+        std::mt19937 rng;
+    public:
+        float M, Madapt;
+        // These are the values recommended in the NUTS papaer, but they are tunable
+        float delta = 0.6, DeltaMax = 1000;
+        std::vector<Eigen::VectorXf> chain;
+
+        void normalize_theta(Eigen::VectorXf &theta) {
+            while(theta(0) > 2 || theta(0) < -2) {
+                if(theta(0) > 2) {
+                    theta(0) -= 2;
+                    theta(0) *= -1;
+                    theta(0) += 2;
+                }
+                if(theta(0) < -2) {
+                    theta(0) += 2;
+                    theta(0) *= -1;
+                    theta(0) -= 2;
+                }
+            }
+            while(theta(1) > 0 || theta(1) < -3) {
+                if(theta(1) > 0) {
+                    theta(1) *= -1;
+                }
+                if(theta(1) < -3) {
+                    theta(1) += 3;
+                    theta(1) *= -1;
+                    theta(1) -= 3;
+                }
+            }
+        }
+
+        float eval(PROmetric &metric, const Eigen::VectorXf &theta, Eigen::VectorXf &grad, bool run_grad) {
+            float v = -0.5 * metric(theta, grad, run_grad) + theta(0) + theta(1);
+            if(run_grad) {
+                grad(0) += 1;
+                grad(1) += 1;
+            }
+            return v;
+        }
+
+        void leapfrog(Eigen::VectorXf &theta, Eigen::VectorXf &r, float epsilon, PROmetric &metric) {
+            Eigen::VectorXf g = theta;
+            eval(metric, theta, g, true);
+            r -= epsilon/4 * g;
+            theta += epsilon * r;
+            normalize_theta(theta);
+            eval(metric, theta, g, true);
+            r -= epsilon/4 * g;
+        }
+
+        float find_reasonable_epsilon(const Eigen::VectorXf &theta, PROmetric &metric) {
+            float epsilon = 1;
+            Eigen::VectorXf empty;
+            Eigen::VectorXf r = theta;
+            std::normal_distribution<float> normal(0, 1);
+            for(long i = 0; i < r.size(); ++i) r(i) = normal(rng);
+            Eigen::VectorXf thetap = theta;
+            Eigen::VectorXf rp = r;
+            leapfrog(thetap, rp, epsilon, metric);
+            float a = 2*(expf(eval(metric, thetap, empty, false) - eval(metric, theta, empty, false) + 0.5 * (r.dot(r) - rp.dot(rp)) ) > 0.5) - 1;
+            while(powf(expf(eval(metric, thetap, empty, false) -  eval(metric, theta, empty, false) + 0.5 * (r.dot(r) - rp.dot(rp))), a) > powf(2, -a)) {
+                epsilon *= powf(2, a);
+                thetap = theta;
+                rp = r;
+                leapfrog(thetap, rp, epsilon, metric);
+            }
+            return epsilon;
+        }
+
+        struct BTR {
+            Eigen::VectorXf theta_minus, theta_plus, theta_prime,
+                            r_minus, r_plus;
+            float n, s, alpha, nalpha;
+        };
+
+        BTR BuildTree(const Eigen::VectorXf &theta, const Eigen::VectorXf &r, float u, int v, 
+                      int j, float epsilon, const Eigen::VectorXf &theta0, const Eigen::VectorXf &r0, PROmetric &metric) {
+            BTR ret;
+            if(j == 0) {
+                ret.theta_minus = theta;
+                ret.r_minus = r;
+                leapfrog(ret.theta_minus, ret.r_minus, v*epsilon, metric);
+                ret.theta_plus = ret.theta_minus;
+                ret.theta_prime = ret.theta_minus;
+                ret.r_plus = ret.r_minus;
+                Eigen::VectorXf empty;
+                ret.n = (u <= std::exp(eval(metric, ret.theta_prime, empty, false) - 0.5 * ret.r_minus.dot(ret.r_minus)));
+                ret.s = (u < std::exp(DeltaMax + eval(metric, ret.theta_prime, empty, false) - 0.5 * ret.r_minus.dot(ret.r_minus)));
+                ret.alpha = std::min(1.0f, std::exp(eval(metric, ret.theta_prime, empty, false) - 0.5f * ret.r_minus.dot(ret.r_minus)
+                                                  - eval(metric, theta0, empty, false) + 0.5f * r0.dot(r0)));
+                ret.nalpha = 1;
+                return ret;
+            }
+            ret = BuildTree(theta, r, u, v, j-1, epsilon, theta0, r0, metric);
+            std::uniform_real_distribution<float> uniform(0, 1);
+            if(ret.s == 1) {
+                Eigen::VectorXf t,r, tp = ret.theta_prime;
+                float np = ret.n, alphap = ret.alpha, nalphap = ret.nalpha;
+                if(v == -1) {
+                    t = ret.theta_plus;
+                    r = ret.r_plus;
+                    ret = BuildTree(ret.theta_minus, ret.r_minus, u, v, j-1, epsilon, theta0, r0, metric);
+                    ret.theta_plus = t;
+                    ret.r_plus = r;
+                } else {
+                    t = ret.theta_minus;
+                    r = ret.r_minus;
+                    ret = BuildTree(ret.theta_plus, ret.r_plus, u, v, j-1, epsilon, theta0, r0, metric);
+                    ret.theta_minus = t;
+                    ret.r_minus = r;
+                }
+                if(uniform(rng) > std::min((ret.n/(ret.n+np)),1.0f))
+                    ret.theta_prime = tp;
+                ret.alpha += alphap;
+                ret.nalpha += nalphap;
+                ret.s = ret.s * ((ret.theta_plus - ret.theta_minus).dot(ret.r_minus) >= 0) 
+                              * ((ret.theta_plus - ret.theta_minus).dot(ret.r_plus) >= 0);
+                ret.n += np;
+            }
+            return ret;
+        }
+
+        void operator()(const Eigen::VectorXf &theta0, PROmetric &metric, uint32_t seed) {
+            rng.seed(seed);
+            std::normal_distribution<float> normal(0, 1);
+            std::uniform_real_distribution<float> uniform(0, 1);
+            Eigen::VectorXf theta = theta0, empty;
+            chain.push_back(theta0);
+            float epsilon = find_reasonable_epsilon(theta, metric),
+                  mu = std::log(10 * epsilon),
+                  epsilonbar = 1,
+                  Hbar = 0,
+                  gamma = 0.05,
+                  t0 = 10,
+                  kappa = 0.75;
+            Eigen::VectorXf r0 = theta;
+            for(size_t m = 0; m < M; ++m) {
+                for(long i = 0; i < r0.size(); ++i) r0(i) = normal(rng);
+                float u = std::uniform_real_distribution<float>(0, std::exp(eval(metric, theta, empty, false) - 0.5 * r0.dot(r0)))(rng);
+                BTR t{theta, theta, theta, r0, r0, 1, 1, 0, 0};
+                int j = 0;
+                while(t.s == 1) {
+                    int v = 2 * (uniform(rng) < 0.5) - 1;
+                    BTR tp;
+                    if(v == -1) {
+                        tp = BuildTree(t.theta_minus, t.r_minus, u, v, j, epsilon, chain.back(), r0, metric);
+                        t.theta_minus = tp.theta_minus;
+                        t.r_minus = tp.r_minus;
+                        t.alpha = tp.alpha;
+                        t.nalpha = tp.nalpha;
+                    } else {
+                        tp = BuildTree(t.theta_plus, t.r_plus, u, v, j, epsilon, chain.back(), r0, metric);
+                        t.theta_plus = tp.theta_plus;
+                        t.r_plus = tp.r_plus;
+                        t.alpha = tp.alpha;
+                        t.nalpha = tp.nalpha;
+                    }
+                    if(tp.s == 1) {
+                        if(uniform(rng) < std::min(1.0f, tp.n/t.n))
+                            theta = tp.theta_prime;
+                    }
+                    t.n += tp.n;
+                    t.s = tp.s * ((t.theta_plus - t.theta_minus).dot(t.r_minus) >= 0) * ((t.theta_plus - t.theta_minus).dot(t.r_plus) >= 0);
+                    j++;
+                    //log<LOG_ERROR>(L"%1% || Iteration %2%: %3%") % __func__ % j % theta;
+                    if(j >= 10) break;
+                }
+                if(m < Madapt) {
+                    Hbar = (1 - 1/(m + 1 + t0)) * Hbar + 1/(m + 1 + t0) * (delta - t.alpha/t.nalpha);
+                    epsilon = std::exp(mu - sqrt(m+1)/gamma * Hbar);
+                    epsilonbar = std::exp(std::pow(m+1, -kappa) * std::log(epsilon) + (1-std::pow(m+1, -kappa))*std::log(epsilonbar));
+                } else {
+                    epsilon = epsilonbar;
+                }
+                log<LOG_ERROR>(L"%1% || Adding %2% to chain of length %3%.") % __func__ % theta % chain.size();
+                chain.push_back(theta);
+            }
+        }
+};
+
+
 };
 
 #endif

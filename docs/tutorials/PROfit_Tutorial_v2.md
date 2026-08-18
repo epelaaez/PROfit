@@ -25,9 +25,10 @@ Useful contacts and links:
 
 ### Getting set up
 
-PROfit needs ROOT, Boost, HDF5, and CMake (on the FNAL gpvms set these up
-from cvmfs inside an SL7 container first; on your own machine apt-get or
-homebrew versions are fine). Then:
+PROfit needs ROOT, Boost, HDF5, and CMake (on the FNAL gpvms — AL9 since the
+2024/25 migration — set these up from cvmfs with `spack load`; on legacy SL7
+containers use UPS `setup`; on your own machine apt-get or homebrew versions
+are fine). Then:
 
 ```bash
 git clone https://github.com/markrosslonergan/Elephant_Vanishes.git
@@ -56,13 +57,14 @@ numbers should match.
 1. [PROfit conceptual introduction](#1-profit-conceptual-introduction)
 2. [The PROfit XML](#2-the-profit-xml)
 3. [General arguments and how stuff works](#3-general-arguments-and-how-stuff-works)
-4. [Subcommand `plot` — exploring your spectra](#4-subcommand-plot--exploring-your-spectra)
-5. [Subcommand `global` — fitting and fitter configuration](#5-subcommand-global--fitting-and-fitter-configuration)
-6. [Subcommand `profile` — 1D profiled Δχ²](#6-subcommand-profile--1d-profiled-χ²)
-7. [Subcommand `surface` — 2D Wilks surfaces and AMR](#7-subcommand-surface--2d-wilks-surfaces-and-amr)
-8. [Feldman-Cousins: `fc` and `fc-adaptive`](#8-feldman-cousins-fc-and-fc-adaptive)
-9. [PROjector — two-stage pre-fit / projected fits](#9-projector--two-stage-pre-fit--projected-fits)
-10. [PROletariat — grid submission: `proletariat`](#10-proletariat--grid-submission-proletariat)
+4. [Subcommand `process` — loading your files](#4-subcommand-process--loading-your-files)
+5. [Subcommand `plot` — exploring your spectra](#5-subcommand-plot--exploring-your-spectra)
+6. [Subcommand `global` — fitting and fitter configuration](#6-subcommand-global--fitting-and-fitter-configuration)
+7. [Subcommand `profile` — 1D profiled Δχ²](#7-subcommand-profile--1d-profiled-χ²)
+8. [Subcommand `surface` — 2D Wilks surfaces and AMR](#8-subcommand-surface--2d-wilks-surfaces-and-amr)
+9. [Feldman-Cousins: `fc` and `fc-adaptive`](#9-feldman-cousins-fc-and-fc-adaptive)
+10. [PROjector — two-stage pre-fit / projected fits](#10-projector--two-stage-pre-fit--projected-fits)
+11. [PROletariat — grid submission: `proletariat`](#11-proletariat--grid-submission-proletariat)
 
 Appendices:
 
@@ -430,7 +432,21 @@ MC event loop (quick tests only).
 
 ---
 
-# 4. Subcommand `plot` — exploring your spectra
+# 4. Subcommand `process` — loading your files
+
+```
+Usage: PROfit process [OPTIONS]
+
+Options:
+  -h,--help                   Print this help message and exit
+```
+
+The process command loops through events in the input data, prediction, and systematic files and processes them to efficiently store only the necessary information described in the xml. 
+The output is _prop.bin and _syst.bin files which are efficiently loaded by the remaining PROfit commands.
+
+---
+
+# 5. Subcommand `plot` — exploring your spectra
 
 ```
 Usage: PROfit plot [OPTIONS]
@@ -557,7 +573,7 @@ PDFs are directly comparable by eye.
 
 ---
 
-# 5. Subcommand `global` — fitting and fitter configuration
+# 6. Subcommand `global` — fitting and fitter configuration
 
 `global` performs one full global best fit of all physics + spline parameters
 and draws the post-fit results. It takes no subcommand options of its own —
@@ -700,7 +716,7 @@ is deliberately easy — they all implement the same `PROmetric` interface.
 
 ---
 
-# 6. Subcommand `profile` — 1D profiled Δχ²
+# 7. Subcommand `profile` — 1D profiled Δχ²
 
 ```
 Usage: PROfit profile [OPTIONS]
@@ -798,7 +814,7 @@ PROfit -x tutorial.xml -t TUT -o profso --seed 405 -n 8 --syst-only profile --pr
 
 ---
 
-# 7. Subcommand `surface` — 2D Wilks surfaces and AMR
+# 8. Subcommand `surface` — 2D Wilks surfaces and AMR
 
 `surface` maps Δχ² over a 2D grid of two physics parameters, profiling over
 everything else at each point. Contours at Wilks-theorem critical values
@@ -870,21 +886,21 @@ PROfit -x tutorial.xml -t TUT -o surfnoflux --seed 405 -n 8 --exclude-systs Flux
 
 ### PROcurve: watching the pulls along a 1D path
 
-`--curve-mode x1 y1 x2 y2` (values in the axes' native — here log10 — space)
+`--curve-mode param1start param2start param1end param2end` (values in the axes' native — here log10 — space)
 replaces the 2D scan with a 1D walk from point A to point B across the
-(x, y) plane, fitting the nuisances at each step and plotting how every pull
+(param1, param2) plane, fitting the nuisances at each step and plotting how every pull
 evolves along the path. It's the quickest way to see *which* systematics
 bend to absorb an oscillation signal as you approach it. `-g` sets the
 number of points on the path.
 
 ```bash
 PROfit -x tutorial.xml -t TUT -o curve1 --seed 405 -n 8 \
-    surface $AXES -g 20 --curve-mode -3 -1 -1 1
+    surface $AXES -g 20 --curve-mode -1 -3 1 -1
 ```
 
 <img src="figures/TUT_curve1_PROcurve.png" width="800"/>
 
-*`TUT_curve1_PROcurve.pdf` — path across the plane + every nuisance parameter's best-fit value along it, here from (sin²2θμe, Δm²) = (10⁻³, 0.1 eV²) to (10⁻¹, 10 eV²).*
+*`TUT_curve1_PROcurve.pdf` — path across the plane + every nuisance parameter's best-fit value along it, here from (Δm², sin²2θμe) = (0.1 eV², 10⁻³) to (10 eV², 10⁻¹).*
 
 ### Adaptive mesh refinement: `--surface-amr`
 
@@ -930,10 +946,8 @@ PROfit -x tutorial.xml -t TUT -o surfbrz --seed 405 -n 16 --log surfbrz.log \
     surface $AXES --surface-amr --amr-initial 10 --amr-levels 2 --brazil-band
 ```
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_surfbrz_surface.pdf`
-> (median sensitivity with ±1σ/±2σ Brazil bands — regenerate with
-> `RUN_EXPENSIVE=1 make_tutorial_plots.sh` + `make_tutorial_figures.sh`, then uncomment:)
-> <!-- <img src="figures/TUT_surfbrz_surface.png" width="600"/> -->
+This command does not make a Brazil band itself, but outputs information that could be used to make a Brazil band externally.
+
 
 ### A note on models: parameterize in the variable you plot
 
@@ -953,7 +967,7 @@ if the end goal is a contour in an effective angle, fit in that angle.
 
 ---
 
-# 8. Feldman-Cousins: `fc` and `fc-adaptive`
+# 9. Feldman-Cousins: `fc` and `fc-adaptive`
 
 Wilks' theorem (Δχ² cuts of 2.30/5.99/...) assumes Gaussian-land: no physical
 boundaries, no degenerate minima. Oscillation fits violate both, so for
@@ -983,7 +997,7 @@ PROfit -x tutorial.xml -t TUT -o fc1 --seed 405 -n 8 \
 ```
 
 Output is `TUT_fc1_FC.root` containing a TTree with, per universe, the two
-χ² values, Δχ², and the best-fit parameters — from which you extract the
+χ² values and the best-fit parameters — from which you extract the
 90%/95% quantiles and compare to the Wilks values. This is the honest but
 brute-force approach: to calibrate a whole *contour* you would repeat it at
 every grid point, which is exactly what `fc-adaptive` automates.
@@ -1152,44 +1166,38 @@ into unsampled territory, and the top-up is what makes it decidable.
 
 Outputs along the way:
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_afc_metamesh.pdf`
-> (the meta-mesh: cell refinement levels, concentrated where throws put the contour —
-> regenerate with `make_tutorial_plots.sh` + `make_tutorial_figures.sh`, then uncomment:)
-> <!-- <img src="figures/TUT_afc_metamesh.png" width="600"/> -->
+<img src="figures/TUT_afc_metamesh.png" width="600"/>
+*`TUT_afc_metamesh.pdf` — the meta-mesh: cell refinement levels, concentrated where throws put the contour.*
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_afc_throws.pdf`
-> (the Wilks-prepass throw contours that built the mesh)
-> <!-- <img src="figures/TUT_afc_throws.png" width="600"/> -->
+<img src="figures/TUT_afc_throws.png" width="600"/>
+*`TUT_afc_throws.pdf` — the Wilks-prepass throw contours that built the mesh.*
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_afc_bank_summary.pdf` (PE bank occupancy per level)
-> <!-- <img src="figures/TUT_afc_bank_summary.png" width="600"/> -->
+<img src="figures/TUT_afc_bank_summary.png" width="600"/>
+*`TUT_afc_bank_summary.pdf` — PE bank occupancy per level.*
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_afc_asimov_contour.pdf`
-> (FC-corrected contour vs the Wilks contour)
-> <!-- <img src="figures/TUT_afc_asimov_contour.png" width="600"/> -->
+<img src="figures/TUT_afc_asimov_contour.png" width="600"/>
+*`TUT_afc_asimov_contour.pdf` — FC-corrected contour vs the Wilks contour.*
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_afc_asimov_verdict.pdf`
-> (per-cell FC vs Wilks verdict map)
-> <!-- <img src="figures/TUT_afc_asimov_verdict.png" width="600"/> -->
+<img src="figures/TUT_afc_asimov_verdict.png" width="600"/>
+*`TUT_afc_asimov_verdict.pdf` — per-cell FC vs Wilks verdict map.*
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_afc_brazil_band.pdf`
-> (FC-corrected Brazil band from the bank)
-> <!-- <img src="figures/TUT_afc_brazil_band.png" width="600"/> -->
+<img src="figures/TUT_afc_brazil_band.png" width="600"/>
+*`TUT_afc_brazil_band.pdf` — FC-corrected Brazil band from the bank.*
 
 Determinism note: with `-n 1` and a fixed `--seed` the entire pipeline is
 bit-reproducible; multithreaded runs are statistically equivalent.
 
 ---
 
-# 9. PROjector — two-stage pre-fit / projected fits
+# 10. PROjector — two-stage pre-fit / projected fits
 
 PROjector answers "what does my near detector buy me?" properly. Instead of
 fitting ND and FD simultaneously every time, you (1) fit **only** the ND
 channels once and save the nuisance posterior, then (2) run any FD study with
 those channels masked out and the saved posterior installed as a correlated
-prior. Same statistical content as the joint fit (to the Gaussian
-approximation), at a fraction of the per-fit cost — which matters enormously
-for FC studies.
+prior. Same statistical content as the joint fit (with a Gaussian
+approximation and a no-near-detector-oscillation approximation), at a fraction 
+of the per-fit cost — which matters enormously for FC studies.
 
 ### Stage 1: the pre-fit
 
@@ -1237,14 +1245,13 @@ the constraint file), masks the pre-fit channels OUT of the χ² (active-bins
 mask + zeroed data), and installs (θ̂, Σ) as a fully correlated Gaussian prior
 on the promoted spline parameters.
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_pjprof_PROfile_1sigma.pdf`
-> (projected nuisance constraints — compare against the joint-fit `TUT_prof1_PROfile_1sigma.pdf` —
-> regenerate with `make_tutorial_plots.sh` + `make_tutorial_figures.sh`, then uncomment:)
-> <!-- <img src="figures/TUT_pjprof_PROfile_1sigma.png" width="800"/> -->
+<img src="figures/TUT_pjprof_PROfile_1sigma.png" width="800"/>
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_pjsurf_surface.pdf`
-> (projected FD-only sensitivity with the ND constraint as prior, vs the joint surface `TUT_surfamr_surface.pdf`)
-> <!-- <img src="figures/TUT_pjsurf_surface.png" width="600"/> -->
+*`TUT_pjprof_PROfile_1sigma.pdf` — projected nuisance constraints — compare against the joint-fit `TUT_prof1_PROfile_1sigma.pdf`.*
+
+<img src="figures/TUT_pjsurf_surface.png" width="800"/>
+
+*`TUT_pjsurf_surface.pdf` — projected FD-only sensitivity with the ND constraint as prior, vs the joint surface `TUT_surfamr_surface.pdf`.*
 
 ### Rules and closure checks
 
@@ -1261,9 +1268,11 @@ on the promoted spline parameters.
   constraint only — correlations enter the pull term, not the throws (PROfit
   prints a runtime warning to remind you).
 
+Note that autocorrelation and harmonic scan plots will not be filled properly with the projector option.
+
 ---
 
-# 10. PROletariat — grid submission: `proletariat`
+# 11. PROletariat — grid submission: `proletariat`
 
 Everything above runs on one machine. For the artifacts that are genuinely
 expensive at scale — FC PE banks above all — the workflow is: ship PROfit and
@@ -1295,7 +1304,7 @@ it runs in seconds even for heavy configurations.
 ```bash
 # from the directory holding your XML and TUT_prop.bin / TUT_syst.bin:
 PROfit -x tutorial.xml -t TUT proletariat \
-    -N 500 --script ../../grid/runFC_v2.4_v2.sh \
+    -N 500 --script ../../grid/runFC_v2.4_v4_AL9.sh \
     --lifetime 2d --memory 4000 --disk 10000 \
     --dry-run          # drop this to actually submit
 ```
@@ -1305,6 +1314,25 @@ PROfit -x tutorial.xml -t TUT proletariat \
 useful for checking the tarball contents on a dev box that has no jobsub
 client. The staging directory is always cleaned up; the tarball is left
 behind on purpose.
+
+### The container: AL9 by default, `--sl7` for legacy
+
+Grid jobs run inside an Apptainer/Singularity container, and the OS inside
+it decides how the worker script sets up its environment:
+
+* **AL9 (default)** — the `fnal-wn-el9` image; software comes from the CVMFS
+  **Spack** distribution (`spack load root@6.28.12` etc.). This matches the
+  migrated FermiGrid worker nodes and gpvms.
+* **SL7 (legacy)** — pass `--sl7` to submit with the old `fnal-wn-sl7` image
+  instead; software comes from CVMFS **UPS** (`setup root v6_28_12 -q ...`).
+  Use this only if you need to reproduce an old campaign or your worker
+  script predates the migration.
+
+An explicit `--singularity-image <path>` overrides the choice entirely and
+is mutually exclusive with `--sl7` (passing both is a parse error). The
+reference worker script (below) detects the OS at runtime from
+`/etc/os-release` and picks Spack or UPS itself, so the same script works
+under either image — the submitter's flag is the only switch you touch.
 
 ### What gets bundled
 
@@ -1330,14 +1358,17 @@ silently clobbering each other.
 
 ### The worker script
 
-The payload is still a shell script you own — `grid/runFC_v2.4_v2.sh` is the
-reference implementation and worth reading in full. Its contract:
+The payload is still a shell script you own — `grid/runFC_v2.4_v4_AL9.sh` is
+the reference implementation and worth reading in full (the older
+`runFC_v2.4_v2.sh` is its UPS/SL7-only predecessor). Its contract:
 
 * inputs appear at `$INPUT_TAR_DIR_LOCAL/grid_dir/`; copy them into
   `$_CONDOR_SCRATCH_DIR` and run there;
 * the binary is `./PROfit`; the script sets up ROOT/Boost/etc. from CVMFS
-  (UPS) before touching it, and sanity-checks with `ldd` and `./PROfit
-  --help` so "missing library" and "bad physics" fail distinguishably;
+  before touching it — Spack on AL9, UPS on SL7, chosen at runtime from the
+  container's `/etc/os-release` — and sanity-checks with `ldd` and
+  `./PROfit --help` so "missing library" and "bad physics" fail
+  distinguishably;
 * `$PROCESS` (0..N-1) is the job's identity, but it **restarts at 0 in every
   submission** — a seed or `-o` tag built from it alone collides across
   batches. Fold in `$CLUSTER` (unique per `jobsub_submit`), e.g.
@@ -1365,7 +1396,8 @@ reference implementation and worth reading in full. Its contract:
 | `--backend` | `jobsub` | Scheduler backend: `jobsub` or `slurm` (SLURM is a stub for now and errors out). |
 | `--group` | `sbnd` | Experiment group (`jobsub_submit -G`). |
 | `--role` | `Analysis` | `--role`. |
-| `--singularity-image` | `fnal-wn-sl7:latest` (CVMFS path) | Apptainer/Singularity image the jobs run in. |
+| `--singularity-image` | `fnal-wn-el9:latest` (CVMFS path) | Apptainer/Singularity image the jobs run in. Excludes `--sl7`. |
+| `--sl7` | off | Use the legacy `fnal-wn-sl7:latest` image instead of AL9. Excludes `--singularity-image`. |
 | `--resource-provides` | `usage_model=DEDICATED,OPPORTUNISTIC,OFFSITE` | Usage model. |
 | `--lines` | the three `+FERMIHTC_*` classads | Condor classad `--lines` entries. **Replaces** the defaults when given — to *append*, use `--jobsub-arg` instead. |
 | `--jobsub-arg` | — | Raw argument passed to `jobsub_submit` verbatim (repeatable) — the escape hatch for anything not covered above. |
@@ -1385,7 +1417,7 @@ PROfit -x tutorial.xml -t TUT -o grid --seed 405 -n 8 $AFC --mode build-mesh
 # 2. ship it: TUT_prop.bin, TUT_syst.bin and TUT_grid_mesh.bin are picked up
 #    automatically from the cwd; check first with --dry-run
 PROfit -x tutorial.xml -t TUT -o grid proletariat \
-    -N 500 --script runFC.sh --lifetime 2d
+    -N 500 --script runFC_v2.4_v4_AL9.sh --lifetime 2d
 
 # 3. ...wait; fetch outputs from /pnfs to a local dir...
 
@@ -1408,6 +1440,11 @@ PROfit -x tutorial.xml -t TUT -o merged $AFC --mode merge-bank --merge-input 'TU
   worker script must diversify `--seed`/`-o` from `$PROCESS` **and**
   `$CLUSTER` — `$PROCESS` alone repeats across submissions. Identical
   seeds silently dedupe at merge-bank time (section 8).
+* **Match the image to the script.** A worker script that only knows UPS
+  (`setup <prod>`) dies during environment setup under the default AL9
+  image, and a Spack-only script dies under `--sl7`. The reference script
+  detects the OS and handles both; if you maintain your own, either make it
+  do the same or submit with the image it expects.
 * The old `grid/maketar_submit_v2.4.sh` is kept for reference but
   deprecated; it had a latent bug (the `file://` script URL broke unless the
   script sat in the submission directory) that the subcommand fixes.
