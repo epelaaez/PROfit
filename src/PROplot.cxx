@@ -794,47 +794,47 @@ namespace PROfit{
              y_max = bounds.getBound("ymax");
         }
         
-if(cv_hist) {
+    if(cv_hist) {
 
-    cv_hist->SetLineColor(cvcol);
-    cv_hist->SetLineStyle(kDashed);
+        cv_hist->SetLineColor(cvcol);
+        cv_hist->SetLineStyle(kDashed);
 
-    if(bool(opt&PlotOptions::CVasStack)) {
-        log<LOG_DEBUG>(L"%1% || Using CVStack %2%") % __func__ % hist_titles.c_str();
+        if(bool(opt&PlotOptions::CVasStack)) {
+            log<LOG_DEBUG>(L"%1% || Using CVStack %2%") % __func__ % hist_titles.c_str();
 
-        cvstack->Draw("hist");
-        cvstack->SetTitle(hist_titles.c_str());
-        cv_hist->Draw("same hist");
+            cvstack->Draw("hist");
+            cvstack->SetTitle(hist_titles.c_str());
+            cv_hist->Draw("same hist");
 
-        cvstack->SetMaximum(y_max);
+            cvstack->SetMaximum(y_max);
 
-        TList* hist_list = cvstack->GetHists();
-        TIter next(hist_list);
-        TObject* obj;
-        size_t sc = 0;
-        while ((obj = next())) {
+            TList* hist_list = cvstack->GetHists();
+            TIter next(hist_list);
+            TObject* obj;
+            size_t sc = 0;
+            while ((obj = next())) {
 
-            TH1D* hist = dynamic_cast<TH1D*>(obj);
-            if (hist) {
-                double integral = hist->Integral();
+                TH1D* hist = dynamic_cast<TH1D*>(obj);
+                if (hist) {
+                    double integral = hist->Integral();
 
-                std::string label_with_integral = subplots->at(sc).second;
-                char buf[32];
-                snprintf(buf, sizeof(buf), " (%.1f)", integral);
-                label_with_integral += buf;
+                    std::string label_with_integral = subplots->at(sc).second;
+                    char buf[32];
+                    snprintf(buf, sizeof(buf), " (%.1f)", integral);
+                    label_with_integral += buf;
 
-                leg->AddEntry(hist, label_with_integral.c_str(), "f");
+                    leg->AddEntry(hist, label_with_integral.c_str(), "f");
+                }
+                sc = sc + 1;
             }
-            sc = sc + 1;
+
+
         }
-
-
-    }
-    else{
-        cv_hist->SetMaximum(y_max);
-        cv_hist->SetMinimum(0.000001); // to avoid including a zero label, which can overlap the ratio plot
-        cv_hist->Draw("hist");
-    }
+        else{
+            cv_hist->SetMaximum(y_max);
+            cv_hist->SetMinimum(0.000001); // to avoid including a zero label, which can overlap the ratio plot
+            cv_hist->Draw("hist");
+        }
 
             TH1 *leg_hack = (TH1*)cv_hist->Clone((std::string(cv_hist->GetTitle())+"leg_hack").c_str());
             if(errband){
