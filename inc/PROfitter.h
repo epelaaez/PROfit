@@ -22,9 +22,12 @@
 #include <Eigen/Eigen>
 #include "LBFGSB.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cstdint>
 #include <random>
+#include <string>
+#include <vector>
 
 namespace PROfit {
 
@@ -63,6 +66,106 @@ namespace PROfit {
     bool& GetScanTimingEnabled();
 
     /**
+     * @brief One entry of the exploratory analytic-gradient preset sweep ("sw-*").
+     * @details Table-driven variants of the grad-lhs recipe used to map the
+     * speed-vs-depth Pareto frontier: LHS pool size vs diversity weighting vs
+     * PSO budget (which only contributes ONE start, the swarm best) vs
+     * multistart count vs triage depth/champions vs L-BFGS-B iteration cap.
+     * All share grad-lhs's solver parameters (see PROfitterConfig) and default
+     * to the analytic gradient. Consumed by PROfitterConfig and by the
+     * scale-test gradmodes benchmark grid.
+     */
+    struct GradSweepSpec {
+        const char *name;
+        int   latin;          ///< n_latin_points
+        int   particles;      ///< n_swarm_particles (also sizes the diverse-best start pool; >= localfit)
+        int   swarm_iters;    ///< n_swarm_iterations (1 = no real PSO)
+        int   localfit;       ///< n_localfit (multistart descents incl. the PSO best)
+        int   max_iter;       ///< L-BFGS-B max_iterations per descent
+        int   triage_iters;   ///< localfit_triage_iterations (0 = full-depth descents, no triage)
+        int   champions;      ///< n_localfit_champions (triage only)
+        float diversity;      ///< latin_diversity_factor (0 = best chi2 only, 1 = maximally spread)
+        bool  phys_div;       ///< latin_diversity_phys_only (measure diversity in physics space only)
+        bool  phys_lhs;       ///< latin_phys_only (LHS in the physics subspace, nuisances nominal)
+        bool  warm;           ///< localfit_warm_nuisance
+        int   patience;       ///< n_localfit_patience (0 = off)
+        float explore_eps;    ///< localfit_explore_epsilon (0 = off)
+    };
+
+    /// The sweep table. Names are stable identifiers used in benchmark CSVs.
+    inline const std::vector<GradSweepSpec>& grad_sweep_presets() {
+        static const std::vector<GradSweepSpec> t = {
+            //  name                     latin part  it  lf  mxit tri  ch  div   physdiv plhs  warm  pat  eps
+            // (A) pure multistart, 2000-pt LHS, no PSO — vary the number of starts
+            {"sw-s8",                    2000,   8,   1,   8, 200,   0,  0, 0.5f, false, false, false,   0, 0.f},
+            {"sw-s16",                   2000,  16,   1,  16, 200,   0,  0, 0.5f, false, false, false,   0, 0.f},
+            {"sw-s50",                   2000,  50,   1,  50, 200,   0,  0, 0.5f, false, false, false,   0, 0.f},
+            {"sw-s200",                  2000, 200,   1, 200, 200,   0,  0, 0.5f, false, false, false,   0, 0.f},
+            // (B) 32 starts — vary the LHS pool feeding them
+            {"sw-s32-L500",               500,  32,   1,  32, 200,   0,  0, 0.5f, false, false, false,   0, 0.f},
+            {"sw-s32-L8000",             8000,  32,   1,  32, 200,   0,  0, 0.5f, false, false, false,   0, 0.f},
+            // (C) start-selection diversity measured in PHYSICS space only.
+            //     (Full-space diversity is a no-op in 17-D: sw-s32 with factor
+            //     0 and 1 gave bit-identical fits to grad-lhs-lite.)
+            {"sw-s32-pdiv1",             2000,  32,   1,  32, 200,   0,  0, 1.0f, true, false, false,   0, 0.f},
+            {"sw-s32-pdiv2",             2000,  32,   1,  32, 200,   0,  0, 2.0f, true, false, false,   0, 0.f},
+            {"sw-s100-pdiv1",            2000, 100,   1, 100, 200,   0,  0, 1.0f, true, false, false,   0, 0.f},
+            {"sw-s100-pdiv2",            2000, 100,   1, 100, 200,   0,  0, 2.0f, true, false, false,   0, 0.f},
+            // (D) triage: truncated descents from many starts, polish champions
+            {"sw-tri10c4-s100",          2000, 100,   1, 100, 200,  10,  4, 0.5f, false, false, false,   0, 0.f},
+            {"sw-tri20c4-s100",          2000, 100,   1, 100, 200,  20,  4, 0.5f, false, false, false,   0, 0.f},
+            {"sw-tri40c8-s100",          2000, 100,   1, 100, 200,  40,  8, 0.5f, false, false, false,   0, 0.f},
+            {"sw-tri10c8-s200",          2000, 200,   1, 200, 200,  10,  8, 0.5f, false, false, false,   0, 0.f},
+            {"sw-tri15c3-s50",           2000,  50,   1,  50, 200,  15,  3, 0.5f, false, false, false,   0, 0.f},
+            // (E) PSO budget (one refined start) vs number of LHS multistarts
+            {"sw-pso32x10-s32",          2000,  32,  10,  32, 200,   0,  0, 0.5f, false, false, false,   0, 0.f},
+            {"sw-pso50x50-s16",          2000,  50,  50,  16, 200,   0,  0, 0.5f, false, false, false,   0, 0.f},
+            {"sw-pso100x30-s32",         2000, 100,  30,  32, 200,   0,  0, 0.5f, false, false, false,   0, 0.f},
+            // (F) descent depth: 100 starts, cap every descent (no polish)
+            {"sw-s100-i50",              2000, 100,   1, 100,  50,   0,  0, 0.5f, false, false, false,   0, 0.f},
+            {"sw-s100-i100",             2000, 100,   1, 100, 100,   0,  0, 0.5f, false, false, false,   0, 0.f},
+            // (G) cheap and deep ends of the frontier
+            {"sw-s8-L300",                300,   8,   1,   8, 200,   0,  0, 0.5f, false, false, false,   0, 0.f},
+            {"sw-s300-L8000",            8000, 300,   1, 300, 200,   0,  0, 0.5f, false, false, false,   0, 0.f},
+            {"sw-tri20c16-s300-L8000",   8000, 300,   1, 300, 200,  20, 16, 0.5f, false, false, false,   0, 0.f},
+            // (H) new mechanisms: physics-only LHS, warm nuisance starts,
+            //     patience-based stopping, two-tier precision, and combos
+            //  name                          latin part  it  lf  mxit tri ch  div   pdiv   plhs  warm  pat  eps
+            {"sw-s8-plhs300",                  300,   8,  1,   8, 200,  0, 0, 0.5f, false, true,  false,  0, 0.f},
+            {"sw-s16-plhs300",                 300,  16,  1,  16, 200,  0, 0, 0.5f, false, true,  false,  0, 0.f},
+            {"sw-s16-plhs1000",               1000,  16,  1,  16, 200,  0, 0, 0.5f, false, true,  false,  0, 0.f},
+            {"sw-s50-plhs300",                 300,  50,  1,  50, 200,  0, 0, 0.5f, false, true,  false,  0, 0.f},
+            {"sw-s50-plhs1000",               1000,  50,  1,  50, 200,  0, 0, 0.5f, false, true,  false,  0, 0.f},
+            {"sw-s16-warm",                   2000,  16,  1,  16, 200,  0, 0, 0.5f, false, false, true,   0, 0.f},
+            {"sw-s50-warm",                   2000,  50,  1,  50, 200,  0, 0, 0.5f, false, false, true,   0, 0.f},
+            {"sw-s50-pat10",                  2000,  50,  1,  50, 200,  0, 0, 0.5f, false, false, false, 10, 0.f},
+            {"sw-s100-pat10",                 2000, 100,  1, 100, 200,  0, 0, 0.5f, false, false, false, 10, 0.f},
+            {"sw-s200-pat15",                 2000, 200,  1, 200, 200,  0, 0, 0.5f, false, false, false, 15, 0.f},
+            {"sw-s50-eps3",                   2000,  50,  1,  50, 200,  0, 0, 0.5f, false, false, false,  0, 1e-3f},
+            {"sw-s16-plhs300-warm",            300,  16,  1,  16, 200,  0, 0, 0.5f, false, true,  true,   0, 0.f},
+            {"sw-s50-plhs300-warm",            300,  50,  1,  50, 200,  0, 0, 0.5f, false, true,  true,   0, 0.f},
+            {"sw-s50-plhs300-warm-pat10",      300,  50,  1,  50, 200,  0, 0, 0.5f, false, true,  true,  10, 0.f},
+            {"sw-s100-plhs300-warm-pat10",     300, 100,  1, 100, 200,  0, 0, 0.5f, false, true,  true,  10, 0.f},
+            {"sw-s200-plhs1000-warm-pat15",   1000, 200,  1, 200, 200,  0, 0, 0.5f, false, true,  true,  15, 0.f},
+            // (I) round 3: physics-only LHS + warm nuisances across the mid
+            //     range, pool size scaled with the number of starts
+            {"sw-s8-plhs1000",                1000,   8,  1,   8, 200,  0, 0, 0.5f, false, true,  false,  0, 0.f},
+            {"sw-s16-plhs2000-warm",          2000,  16,  1,  16, 200,  0, 0, 0.5f, false, true,  true,   0, 0.f},
+            {"sw-s24-plhs1000-warm",          1000,  24,  1,  24, 200,  0, 0, 0.5f, false, true,  true,   0, 0.f},
+            {"sw-s32-plhs1000",               1000,  32,  1,  32, 200,  0, 0, 0.5f, false, true,  false,  0, 0.f},
+            {"sw-s32-plhs1000-warm",          1000,  32,  1,  32, 200,  0, 0, 0.5f, false, true,  true,   0, 0.f},
+            {"sw-s32-plhs2000-warm",          2000,  32,  1,  32, 200,  0, 0, 0.5f, false, true,  true,   0, 0.f},
+            {"sw-s50-plhs1000-warm",          1000,  50,  1,  50, 200,  0, 0, 0.5f, false, true,  true,   0, 0.f},
+            {"sw-s50-plhs2000-warm",          2000,  50,  1,  50, 200,  0, 0, 0.5f, false, true,  true,   0, 0.f},
+            {"sw-s100-plhs2000-warm",         2000, 100,  1, 100, 200,  0, 0, 0.5f, false, true,  true,   0, 0.f},
+            {"sw-s100-plhs4000-warm",         4000, 100,  1, 100, 200,  0, 0, 0.5f, false, true,  true,   0, 0.f},
+            {"sw-s200-plhs4000-warm",         4000, 200,  1, 200, 200,  0, 0, 0.5f, false, true,  true,   0, 0.f},
+            {"sw-s200-plhs2000-warm-pat30",   2000, 200,  1, 200, 200,  0, 0, 0.5f, false, true,  true,  30, 0.f},
+        };
+        return t;
+    }
+
+    /**
      * @brief Configuration parameters for the PROfitter multi-start optimisation pipeline.
      * @details Collects all tuning knobs for the three-stage optimiser:
      * Latin hypercube sampling, Particle Swarm Optimisation, and L-BFGS-B local refinement.
@@ -81,6 +184,35 @@ namespace PROfit {
 
         int n_latin_points = 1500;         ///< Number of Latin hypercube points sampled across all parameters.
         float latin_diversity_factor = 0.5; ///< Distance-weighting factor for LHS: 0 = no weighting, 1 = maximally diverse.
+        /// Measure LHS start diversity in the physics-parameter subspace only.
+        /// The default full-space distance is dominated by the (many) nuisance
+        /// dimensions: in a 17-D space two random LHS points are ~1.7 apart in
+        /// normalised distance while the threshold is at most 1/sqrt(17)=0.24, so
+        /// the diversity criterion never rejects anything and "diverse-best"
+        /// degenerates to "best chi2". Physics-only distance is what actually
+        /// spreads starts across oscillation basins.
+        bool latin_diversity_phys_only = false;
+        /// Sample the LHS in the physics subspace only (nuisance parameters at
+        /// their nominal 0). A 17-D LHS ranks starts by a chi2 that is dominated
+        /// by random spline pulls (each pull costs pull^2 plus its spectral
+        /// effect), so the ranking of oscillation basins is noisy and most of
+        /// the LHS budget is wasted; a physics-only LHS maps the oscillation
+        /// landscape at nominal nuisances instead.
+        bool latin_phys_only = false;
+        /// Warm-start the nuisance block of every multistart descent from the
+        /// best fit found so far (physics still from the LHS point). Nuisance
+        /// minima are nearly common across oscillation basins, so descents
+        /// converge in fewer iterations.
+        bool localfit_warm_nuisance = false;
+        /// Adaptive stopping of the multistart loop: stop launching further
+        /// descents once this many consecutive descents failed to improve the
+        /// best chi2 by more than localfit_patience_tol. 0 = disabled.
+        int n_localfit_patience = 0;
+        float localfit_patience_tol = 1e-3f;
+        /// Two-tier precision: >0 runs the multistart descents with this
+        /// (looser) L-BFGS-B epsilon / epsilon_rel and then polishes the best
+        /// endpoint once with the full-precision solver. 0 = disabled.
+        float localfit_explore_epsilon = 0.0f;
 
         int n_swarm_particles = 1;                   ///< Number of PSO particles initialised from the best LHS points.
         int n_swarm_iterations = 1;                  ///< Maximum number of PSO iterations.
@@ -155,6 +287,18 @@ namespace PROfit {
          * @param isScan             If true, apply reduced settings appropriate for a parameter scan.
          */
         PROfitterConfig(std::map<std::string, float> input_fit_options, std::string fit_preset, bool isScan){
+
+            // "<preset>-nopso": the named preset with the particle-swarm stage
+            // skipped (n_swarm_iterations = 1 → the swarm degenerates to a single
+            // velocity step, so the L-BFGS-B starts are the diverse-best LHS
+            // points themselves). Everything else — LHS pool, number of
+            // descents, solver and harmonic settings — is unchanged. Used to
+            // isolate what the PSO stage contributes.
+            bool skip_pso = false;
+            if(fit_preset.size() > 6 && fit_preset.compare(fit_preset.size() - 6, 6, "-nopso") == 0){
+                skip_pso = true;
+                fit_preset = fit_preset.substr(0, fit_preset.size() - 6);
+            }
 
             if(fit_preset == "good"){
                 param.epsilon = 1e-5;
@@ -430,9 +574,53 @@ namespace PROfit {
 
                 gradient_mode = PROmetric::GradientAnalytic;
             }
+            else if(fit_preset.rfind("sw-", 0) == 0){
+                // Exploratory sweep presets: grad-lhs solver parameters with the
+                // search-stage knobs taken from the grad_sweep_presets() table.
+                const auto &tab = grad_sweep_presets();
+                auto it = std::find_if(tab.begin(), tab.end(),
+                    [&](const GradSweepSpec &s){ return fit_preset == s.name; });
+                if(it == tab.end()){
+                    log<LOG_ERROR>(L"%1% || Unknown sweep preset '%2%'; falling back to PROfitterConfig defaults.") % __func__ % fit_preset.c_str();
+                } else {
+                    param.epsilon = 1e-5;
+                    param.epsilon_rel = 1e-6;
+                    param.max_iterations = it->max_iter;
+                    param.max_linesearch = 25;
+                    param.delta = 1e-6;  // keep default past=1: see grad-good note
+                    param.wolfe = 0.90;
+                    param.ftol = 1e-4;
+                    param.m = 10;
+                    param.max_submin =10;
+                    param.min_step = std::numeric_limits<float>::epsilon();
+
+                    n_latin_points = it->latin;
+                    n_swarm_particles = it->particles;
+                    n_swarm_iterations = it->swarm_iters;
+                    n_localfit = it->localfit;
+                    latin_diversity_factor = it->diversity;
+                    latin_diversity_phys_only = it->phys_div;
+                    latin_phys_only = it->phys_lhs;
+                    localfit_warm_nuisance = it->warm;
+                    n_localfit_patience = it->patience;
+                    localfit_explore_epsilon = it->explore_eps;
+                    if(it->triage_iters > 0){
+                        localfit_triage_iterations = it->triage_iters;
+                        localfit_triage_margin = 5.0;
+                        n_localfit_champions = it->champions;
+                    }
+
+                    gradient_mode = PROmetric::GradientAnalytic;
+                }
+            }
 
 
 
+
+            if(skip_pso){
+                n_swarm_iterations = 1;
+                fit_preset += "-nopso";
+            }
 
             std::string whichFit = ( isScan? "Simplier Scan" : "Detailed Global");
             log<LOG_INFO>(L"%1% ||Fit and  L-BFGS-B parameters for the %2% minimia finder.  ") % __func__ % whichFit.c_str();
@@ -497,6 +685,18 @@ namespace PROfit {
                         exit(EXIT_FAILURE);
                     }
 
+                } else if(param_name == "latin_diversity_phys_only") {
+                    latin_diversity_phys_only = (value != 0);
+                } else if(param_name == "latin_phys_only") {
+                    latin_phys_only = (value != 0);
+                } else if(param_name == "localfit_warm_nuisance") {
+                    localfit_warm_nuisance = (value != 0);
+                } else if(param_name == "n_localfit_patience") {
+                    n_localfit_patience = (int)value;
+                } else if(param_name == "localfit_patience_tol") {
+                    localfit_patience_tol = value;
+                } else if(param_name == "localfit_explore_epsilon") {
+                    localfit_explore_epsilon = value;
                 } else if(param_name == "n_localfit") {
                     n_localfit = value;
                     if(n_localfit < 1) {

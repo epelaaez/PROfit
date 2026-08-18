@@ -81,8 +81,12 @@ std::vector<int> sorted_indices(const std::vector<float>& vec) {
 
 
 static inline
+// ndim_use: number of leading dimensions the diversity distance is measured
+// over (0 = all). Physics parameters lead the vector, so passing nphys
+// measures diversity in oscillation-parameter space only.
 std::vector<int> select_diverse_best(const std::vector<float>& chi2s, const std::vector<std::vector<float>>& points,size_t n_select,
-                                     const Eigen::VectorXf& ub,const Eigen::VectorXf& lb,float diversity_factor = 0.3f) {
+                                     const Eigen::VectorXf& ub,const Eigen::VectorXf& lb,float diversity_factor = 0.3f,
+                                     size_t ndim_use = 0) {
     
     if(n_select >= chi2s.size()) {
         return sorted_indices(chi2s);
@@ -98,6 +102,7 @@ std::vector<int> select_diverse_best(const std::vector<float>& chi2s, const std:
     
     // Use diversity_factor * average normalized dimension range
     size_t ndim = points[0].size();
+    if (ndim_use > 0 && ndim_use < ndim) ndim = ndim_use;
     float threshold = diversity_factor / std::sqrt(static_cast<float>(ndim));
     
     for(size_t i = 1; i < sorted_idx.size() && selected.size() < n_select; ++i) {
@@ -170,6 +175,17 @@ float PROfitter::Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed
     //cube and then mapped onto the full [lb, ub] fit box.
     std::vector<std::vector<float>> latin_samples = latin_hypercube_sampling(fitconfig.n_latin_points, ub.size(), d_uni,rng);
     recenter_latin_samples(latin_samples, ub, lb);
+    const size_t n_phys_dims = (size_t)metric.GetModel().nparams;
+    if(fitconfig.latin_phys_only){
+        // Physics-only LHS: nuisance parameters at nominal (0, clamped into
+        // the box) so the LHS chi2 ranks oscillation basins rather than
+        // random spline pulls. The unit-cube sampling of the nuisance dims is
+        // simply discarded (rng stream unchanged → same physics samples as
+        // the full-space LHS with the same seed).
+        for(auto &pt : latin_samples)
+            for(size_t i = n_phys_dims; i < pt.size(); ++i)
+                pt[i] = std::min(std::max(0.0f, lb((Eigen::Index)i)), ub((Eigen::Index)i));
+    }
     if(seed_points.size()>0 && seed_points.front().size()>0){
         log<LOG_INFO>(L"%1% || Seed point passed in. Being included.") % __func__  ;
         for(auto & pt: seed_points){
@@ -203,7 +219,8 @@ float PROfitter::Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed
     }
     //Sort so we can take the best N_localfits for further zoning with a PSO
     //std::vector<int> best_multistart = sorted_indices(chi2s_multistart);    
-    std::vector<int> best_multistart = select_diverse_best(chi2s_multistart, latin_samples, fitconfig.n_swarm_particles, ub, lb, fitconfig.latin_diversity_factor); 
+    std::vector<int> best_multistart = select_diverse_best(chi2s_multistart, latin_samples, fitconfig.n_swarm_particles, ub, lb, fitconfig.latin_diversity_factor,
+                                                           fitconfig.latin_diversity_phys_only ? (size_t)metric.GetModel().nparams : 0); 
 
     log<LOG_INFO>(L"%1% || Best Point after latin hypercube has chi^2 %2% with pts  : %3% ") % __func__ % chi2s_multistart[best_multistart[0]] % latin_samples[best_multistart[0]];
 
@@ -532,22 +549,44 @@ float PROfitter::Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed
             % __func__ % (int)triage_ends.size() % fitconfig.localfit_triage_iterations
             % n_polished % fitconfig.localfit_triage_margin
             % fitconfig.n_localfit_champions % chimin;
-    } else
+    } else {
+    // Two-tier precision: exploratory descents may run with a looser
+    // epsilon; the best endpoint is polished with the full solver afterwards.
+    const bool explore = fitconfig.localfit_explore_epsilon > 0;
+    LBFGSpp::LBFGSBParam<float> explore_param = fitconfig.param;
+    if (explore) {
+        explore_param.epsilon = fitconfig.localfit_explore_epsilon;
+        explore_param.epsilon_rel = fitconfig.localfit_explore_epsilon;
+    }
+    LBFGSpp::LBFGSBSolver<float> explore_solver(explore_param);
+    LBFGSpp::LBFGSBSolver<float> &latin_solver = explore ? explore_solver : solver;
+    int since_improve = 0;   // patience counter (consecutive non-improving descents)
     for(int i=0; i< fitconfig.n_localfit-1-fudge && (size_t)(i+1) < best_multistart.size(); i++){
+        if (fitconfig.n_localfit_patience > 0 && since_improve >= fitconfig.n_localfit_patience) {
+            log<LOG_INFO>(L"%1% || Patience: %2% consecutive descents without improvement > %3%; stopping multistart after %4% latin starts (best chi2 %5%)")
+                % __func__ % since_improve % fitconfig.localfit_patience_tol % (int)n_latin_starts % chimin;
+            break;
+        }
         ++n_latin_starts;
         success = false;
 
         //After the best best fit, do you want to do more of the latin ones?
         x = Eigen::Map<Eigen::VectorXf>(latin_samples[best_multistart[i+1]].data(), latin_samples[best_multistart[i+1]].size());
+        if (fitconfig.localfit_warm_nuisance && std::isfinite(chimin) && best_fit.size() == x.size()
+            && x.size() > (Eigen::Index)n_phys_dims) {
+            // Physics from the LHS point, nuisances from the best fit so far.
+            x.tail(x.size() - (Eigen::Index)n_phys_dims) = best_fit.tail(x.size() - (Eigen::Index)n_phys_dims);
+        }
         log<LOG_INFO>(L"%1% || Starting n_localfit local fit number %2%/%3% ") % __func__ % i  % fitconfig.n_localfit;
 
         if(run_progress)progress->increment_bar(2);
 
+        const float chimin_before = chimin;
         for (size_t attempt = 1; attempt <= fitconfig.n_max_local_retries; ++attempt) {
             try {
                 log<LOG_INFO>(L"%1% || Starting local minimization attempt %2%/%3%") % __func__ % attempt % fitconfig.n_max_local_retries;
 
-                niter = solver.minimize(metric, x, fx, lb, ub);
+                niter = latin_solver.minimize(metric, x, fx, lb, ub);
                 total_lbfgs_iterations += (size_t)std::max(niter, 0);
 
                 chi2s_localfits.push_back(fx);
@@ -577,7 +616,23 @@ float PROfitter::Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed
             ++n_fail_latin;
             log<LOG_DEBUG>(L"%1% || All minimization attempts failed for this start point, keeping current best (chi %2%).") % __func__ % chimin;
         }
+        if (chimin < chimin_before - fitconfig.localfit_patience_tol) since_improve = 0;
+        else ++since_improve;
     }
+    if (explore && std::isfinite(chimin) && best_fit.size() > 0) {
+        // Polish the exploratory best with the full-precision solver.
+        try {
+            x = best_fit;
+            niter = solver.minimize(metric, x, fx, lb, ub);
+            total_lbfgs_iterations += (size_t)std::max(niter, 0);
+            if (std::isfinite(fx) && fx < chimin) { best_fit = x; chimin = fx; }
+        } catch (const std::exception &except) {
+            exception_string_map[std::string(except.what())]++;
+            fit_exception_counts[std::string(except.what())]++;
+            log<LOG_DEBUG>(L"%1% || Final polish failed (benign, exploratory best kept): %2%") % __func__ % except.what();
+        }
+    }
+    }  // end multistart (non-triage) branch
 
     const size_t n_fail_total = n_fail_pso + n_fail_seed + n_fail_latin;
     if (n_fail_total > 0) {

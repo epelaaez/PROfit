@@ -635,6 +635,13 @@ int main(int argc, char* argv[])
     bench_command->add_option("-N,--n", bench_N, "Base call count: FillSpectra=N, metric=N/10, fit=N/100.")->default_val(1000);
     bench_command->add_option("--tests", bench_tests_str, "Comma-separated subset of {a..p} or {fillspectra,metric,metricgrad,fit,pseudo,collapse,mcmc,all,gradcheck,gradmodes,grad}. Default 'all'. gradcheck (o) validates every gradient mode vs central-full FD; gradmodes (p) runs N/100 full fits per (fit preset x gradient mode) with matched seeds and emits [GRADBENCH] lines. Neither is in 'all'.")->default_val("all");
     bench_command->add_option("--grad-presets", bench_grad_presets, "Comma-separated preset names restricting the gradmodes (p) benchmark grid, e.g. 'grad-fast,grad-good'. Empty = all presets. Universes/seeds depend only on the fixed rng seed, so a filtered run's CSV rows can be concatenated with an earlier full run's.")->default_val("");
+    bool bench_throw_systs = false, bench_throw_phys = false, bench_harmonic = false;
+    bool bench_no_poisson = false, bench_no_covariance = false;
+    bench_command->add_flag("--no-poisson", bench_no_poisson, "gradmodes (p) benchmark: skip the Poisson fluctuation of the universes (data = exact syst-shifted expectation). Debug mode isolating systematic from statistical variations. CSV name gains a _nostat suffix.");
+    bench_command->add_flag("--no-covariance", bench_no_covariance, "gradmodes (p) benchmark: with --throw-systs, throw only the spline pulls and skip the covariance bin shift, keeping the data exactly representable by the model (closure debug; combine with --no-poisson). CSV name gains a _nocov suffix.");
+    bench_command->add_flag("--throw-systs", bench_throw_systs, "gradmodes (p) benchmark: generate universes as FC-style pseudo-experiments (thrown spline pulls + covariance shift + Poisson) instead of Poisson-only fluctuations. CSV name gains a _syst suffix.");
+    bench_command->add_flag("--throw-phys", bench_throw_phys, "gradmodes (p) benchmark: draw each universe's truth physics point uniformly within the fit bounds (per-universe truth columns added to the CSV). CSV name gains a _phys/_systphys suffix.");
+    bench_command->add_flag("--harmonic-refit", bench_harmonic, "gradmodes (p) benchmark: after each fit, run the harmonic frequency-seed scan and adopt any better minimum, as the global-fit chain does. Recommended with --throw-phys.");
 
     //PROletariat, stage+tar+submit grid jobs (replaces grid/maketar_submit_v2.4.sh)
     PROletariatOptions grid_opts;
@@ -3166,8 +3173,18 @@ int main(int argc, char* argv[])
         bopts.binned   = !eventbyevent;
         bopts.nthreads = (int)nthread;
         bopts.truth_params = fakeDataParams;
-        bopts.grad_csv = analysis_tag + "_gradbench_fits.csv";
+        std::string bench_suffix;
+        if (bench_throw_phys)       bench_suffix = bench_throw_systs ? "_systphys" : "_phys";
+        else if (bench_throw_systs) bench_suffix = "_syst";
+        if (bench_no_covariance)    bench_suffix += "_nocov";
+        if (bench_no_poisson)       bench_suffix += "_nostat";
+        bopts.grad_csv = analysis_tag + "_gradbench_fits" + bench_suffix + ".csv";
         bopts.grad_presets = bench_grad_presets;
+        bopts.throw_systs = bench_throw_systs;
+        bopts.throw_phys  = bench_throw_phys;
+        bopts.harmonic_refit = bench_harmonic;
+        bopts.no_poisson  = bench_no_poisson;
+        bopts.no_covariance = bench_no_covariance;
 
         PROfit::PRObench::run_scale_test(config, prop, *metric, data, fitConfig, bopts);
     }

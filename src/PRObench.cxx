@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <ctime>
 #include <cmath>
 #include <fstream>
 #include <random>
@@ -483,6 +484,13 @@ void run_grad_check(PROmetric &metric, const std::vector<Eigen::VectorXf> &param
 //     the same PROfitter seed. LHS/PSO evaluate chi² only, so L-BFGS-B starts
 //     from identical points across modes — differences in iterations / calls /
 //     wall time / recovered parameters are due to the gradient alone.
+//   - With throw_systs, universes are FC-style pseudo-experiments instead:
+//     thrown spline pulls + Cholesky covariance shift + Poisson (same recipe
+//     as the --pseudo-experiment path in bin/PROfit.cxx). With throw_phys the
+//     truth physics point is additionally drawn uniformly within the fit
+//     bounds per universe (per-universe truth columns are added to the CSV).
+//     harmonic_refit sweeps calcFreqSeedPoints after every fit and adopts any
+//     better minimum, like the global-fit chain does.
 //   - Fits run in parallel over universes (opts.nthreads workers); results are
 //     logged after each cell completes so [GRADBENCH] lines never interleave.
 //   - Fitted physics parameters are logged per fit for parameter-recovery
@@ -495,7 +503,9 @@ void run_grad_mode_fits(const PROconfig &config, const PROpeller &prop,
                         int n_universes, uint32_t base_seed, int nthreads,
                         const Eigen::VectorXf &truth_params,
                         const std::string &csv_path,
-                        const std::string &preset_filter)
+                        const std::string &preset_filter,
+                        bool throw_systs, bool throw_phys, bool harmonic_refit,
+                        bool no_poisson, bool no_covariance)
 {
     const PROmodel &model = base_metric.GetModel();
     const PROsyst  &syst  = base_metric.GetSysts();
@@ -504,13 +514,83 @@ void run_grad_mode_fits(const PROconfig &config, const PROpeller &prop,
     const Eigen::VectorXf bench_ub = base_metric.UpperBound();
     const Eigen::VectorXf bench_lb = base_metric.LowerBound();
 
-    // ---- Shared universes: Poisson fluctuations of the base data spectrum ----
+    // ---- Shared universes ----
     std::vector<PROdata> universes;
     universes.reserve(n_universes);
-    for (int u = 0; u < n_universes; ++u) {
-        PROspec fluc = PROspec::PoissonVariation(
-            PROspec(base_data.Spec(), base_data.Error()), base_seed + (uint32_t)u);
-        universes.emplace_back(fluc.Spec(), fluc.Error());
+    std::vector<Eigen::VectorXf> universe_truth;   // filled iff throw_phys
+    // Full injected parameter vector (physics + spline pulls) per universe —
+    // the start point for the "cheat" reference cell's descents.
+    std::vector<Eigen::VectorXf> universe_inject(n_universes);
+    const size_t nspline = syst.GetNSplines();
+    Eigen::VectorXf nominal = Eigen::VectorXf::Zero(nphys + nspline);
+    nominal.head(std::min(truth_params.size(), nominal.size())) =
+        truth_params.head(std::min(truth_params.size(), nominal.size()));
+    if (throw_systs || throw_phys) {
+        const size_t io = config.i_prime;
+        std::mt19937 rng(base_seed ^ 0x715c0deu);
+        std::normal_distribution<float> nd;
+        // Cholesky factor of the covariance at the CV point (splines at
+        // nominal); recomputed per universe when the physics point is thrown.
+        Eigen::MatrixXf L;
+        if (throw_systs && !no_covariance && !throw_phys) {
+            PROspec cv = FillSpectra(config, prop, syst, model, nominal, true, io);
+            L = syst.DecomposeFractionalCovariance(config, cv.Spec());
+        }
+        for (int u = 0; u < n_universes; ++u) {
+            Eigen::VectorXf tp = nominal;
+            if (throw_phys) {
+                // Rejection-sample against the model's physical-region
+                // constraint (e.g. 3+1 unitarity Ue4^2+Um4^2 < 1): the metric
+                // returns its invalid sentinel outside it, so a truth thrown
+                // there is unreachable by any fitter and only measures how
+                // fitters cope with the sentinel wall — not what we test here.
+                for (int attempt = 0; attempt < 10000; ++attempt) {
+                    for (size_t j = 0; j < nphys; ++j) {
+                        float lo = bench_lb((Eigen::Index)j), hi = bench_ub((Eigen::Index)j);
+                        if (!std::isfinite(lo)) lo = std::isfinite(model.lb((Eigen::Index)j)) ? model.lb((Eigen::Index)j) : -2.0f;
+                        if (!std::isfinite(hi)) hi = std::isfinite(model.ub((Eigen::Index)j)) ? model.ub((Eigen::Index)j) :  2.0f;
+                        tp((Eigen::Index)j) = std::uniform_real_distribution<float>(lo, hi)(rng);
+                    }
+                    if (!model.model_constraint || model.model_constraint(tp.head(nphys))) break;
+                }
+                if (throw_systs && !no_covariance) {
+                    PROspec cv = FillSpectra(config, prop, syst, model, tp, true, io);
+                    L = syst.DecomposeFractionalCovariance(config, cv.Spec());
+                }
+            }
+            if (throw_systs)
+                for (size_t i = 0; i < nspline; ++i)
+                    tp((Eigen::Index)(nphys + i)) = ThrowRestrictedSplinePull(syst, i, rng, nd);
+            PROspec shifted = FillSpectra(config, prop, syst, model, tp, true, io);
+            Eigen::VectorXf coll  = CollapseMatrix(config, shifted.Spec(), io);
+            Eigen::VectorXf collE = CollapseMatrix(config, shifted.Error(), io);
+            if (throw_systs && !no_covariance && L.size() > 0) {
+                Eigen::VectorXf throwC(coll.size());
+                for (Eigen::Index i = 0; i < throwC.size(); ++i) throwC(i) = nd(rng);
+                // Clamp: PoissonVariation zeroes negative bins with a warning
+                // per bin; do it silently here instead.
+                coll = (coll + L * throwC).cwiseMax(0.0f);
+            }
+            PROspec pe = no_poisson
+                ? PROspec(coll, collE)
+                : PROspec::PoissonVariation(PROspec(coll, collE),
+                                            base_seed + (uint32_t)u);
+            universes.emplace_back(pe.Spec(), pe.Error());
+            if (throw_phys) universe_truth.push_back(tp.head(nphys));
+            universe_inject[u] = tp;
+        }
+    } else {
+        // Poisson fluctuations of the base data spectrum (identical
+        // universes when no_poisson — only useful as a solver check).
+        for (int u = 0; u < n_universes; ++u) {
+            PROspec fluc = no_poisson
+                ? PROspec(base_data.Spec(), base_data.Error())
+                : PROspec::PoissonVariation(
+                      PROspec(base_data.Spec(), base_data.Error()),
+                      base_seed + (uint32_t)u);
+            universes.emplace_back(fluc.Spec(), fluc.Error());
+            universe_inject[u] = nominal;
+        }
     }
 
     // Per-fit records go to a CSV: PROlog suppresses repeated-format lines
@@ -530,10 +610,23 @@ void run_grad_mode_fits(const PROconfig &config, const PROpeller &prop,
             % n_universes % tstr.c_str();
         csv << "# truth " << tstr << "\n";
     }
-    csv << "preset,mode,fit,wall_s,lbfgs_iters,metric_calls,chi2";
+    csv << "preset,mode,fit,wall_s,cpu_s,lbfgs_iters,metric_calls,chi2";
     for (size_t i = 0; i < nphys; ++i) csv << ",phys" << i;
+    if (throw_phys)
+        for (size_t i = 0; i < nphys; ++i) csv << ",truth" << i;
+    if (harmonic_refit)
+        csv << ",wall_pre_s,cpu_pre_s,chi2_pre";
     csv << "\n";
     log<LOG_INFO>(L"[GRADBENCH] per-fit records -> %1%") % csv_path.c_str();
+    {
+        std::string umode = no_poisson ? "NO poisson (exact expectation)" : "poisson";
+        if (throw_systs) umode += no_covariance
+            ? " + spline-pull throws (NO covariance shift)"
+            : " + FC-style syst throws";
+        if (throw_phys)  umode += " + thrown truth physics (uniform in fit bounds, inside the model's physical region)";
+        if (harmonic_refit) umode += "; fits followed by harmonic seed refit";
+        log<LOG_INFO>(L"[GRADBENCH] universe generation: %1%") % umode.c_str();
+    }
 
     // Standard presets are compared across every gradient mode; the grad-*
     // presets are designed around GradientAnalytic (their PSO budget is cut in
@@ -551,21 +644,37 @@ void run_grad_mode_fits(const PROconfig &config, const PROpeller &prop,
     };
     struct GradCell { std::string preset; const std::vector<PROmetric::GradientMode> *modes; };
     std::vector<GradCell> cells = {
+        // "cheat" is a reference cell, not a real preset: a single L-BFGS-B
+        // descent started at the actual injected parameters (physics + thrown
+        // spline pulls) — the depth a fitter would reach if the global stage
+        // always found the truth basin.
+        {"cheat", &all_modes},
         {"sensitivity", &all_modes}, {"fast", &all_modes},
         {"good", &all_modes}, {"overkill", &all_modes},
         {"grad-fast", &analytic_only}, {"grad-good", &analytic_only},
         {"grad-lhs", &analytic_only}, {"grad-lhs-lite", &analytic_only},
         {"grad-lhs-wide", &analytic_only}, {"grad-lhs-all", &analytic_only},
         {"grad-triage", &analytic_only}, {"grad-deep", &analytic_only},
+        // Standard presets with the PSO stage skipped (identical otherwise):
+        // isolates what the swarm contributes once the gradient is exact.
+        {"sensitivity-nopso", &analytic_only}, {"fast-nopso", &analytic_only},
+        {"good-nopso", &analytic_only}, {"overkill-nopso", &analytic_only},
     };
+    // Exploratory sw-* sweep (table in PROfitter.h), analytic-only like the
+    // grad-* presets it varies. --grad-presets can name individual sw-*
+    // entries or the pseudo-name "sweep" for all of them.
+    for (const auto &s : grad_sweep_presets())
+        cells.push_back({s.name, &analytic_only});
     if (!preset_filter.empty()) {
         std::set<std::string> keep;
         std::stringstream ss(preset_filter);
         for (std::string tok; std::getline(ss, tok, ',');)
             if (!tok.empty()) keep.insert(tok);
         std::vector<GradCell> filtered;
+        const bool keep_sweep = keep.count("sweep") > 0;
         for (auto &c : cells)
-            if (keep.count(c.preset)) filtered.push_back(c);
+            if (keep.count(c.preset) || (keep_sweep && c.preset.rfind("sw-", 0) == 0))
+                filtered.push_back(c);
         if (filtered.empty()) {
             log<LOG_ERROR>(L"[GRADBENCH] --grad-presets '%1%' matches no known preset; aborting fit benchmark.")
                 % preset_filter.c_str();
@@ -576,16 +685,30 @@ void run_grad_mode_fits(const PROconfig &config, const PROpeller &prop,
 
     struct FitRec {
         double wall_s = 0;
+        // Per-thread CPU time (CLOCK_THREAD_CPUTIME_ID): immune to other load
+        // on the node, unlike wall time. This is the cost metric to compare.
+        double cpu_s = 0;
         size_t iters = 0, calls = 0;
         float  chi2 = 0;
+        // Pre-harmonic-refit snapshot (== final values when harmonic_refit is
+        // off or for the cheat cell, which never runs the harmonic sweep).
+        double wall_pre_s = 0, cpu_pre_s = 0;
+        float  chi2_pre = 0;
         Eigen::VectorXf phys;
+    };
+    auto thread_cpu_s = []() {
+        timespec ts;
+        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts);
+        return (double)ts.tv_sec + 1e-9 * (double)ts.tv_nsec;
     };
 
     for (const auto &cell : cells) {
         const std::string &preset = cell.preset;
+        const bool is_cheat = (preset == "cheat");
         // Preset defaults only — CLI --fit-options are deliberately NOT applied
-        // here so the presets are compared as-shipped.
-        PROfitterConfig pcfg({}, preset, /*isScan=*/false);
+        // here so the presets are compared as-shipped. The cheat cell borrows
+        // the "good" preset's L-BFGS-B parameters for its single descent.
+        PROfitterConfig pcfg({}, is_cheat ? "good" : preset, /*isScan=*/false);
         for (auto mode : *cell.modes) {
             pcfg.gradient_mode = mode;
 
@@ -596,18 +719,71 @@ void run_grad_mode_fits(const PROconfig &config, const PROpeller &prop,
                     PROchi m("", config, prop, &syst, model, universes[u],
                              PROmetric::BinnedChi2, /*shape_only=*/false);
                     m.setBounds(bench_lb, bench_ub);
+                    if (is_cheat) {
+                        // Reference: one descent from the injected truth (no
+                        // LHS/PSO/multistart, no harmonic refit).
+                        m.setGradientMode(mode);
+                        Eigen::VectorXf x = universe_inject[u]
+                            .cwiseMax(bench_lb).cwiseMin(bench_ub);
+                        LBFGSpp::LBFGSBSolver<float> solver(pcfg.param);
+                        float fx = 0; size_t nit = 0;
+                        auto ct0 = std::chrono::high_resolution_clock::now();
+                        const double cc0 = thread_cpu_s();
+                        try {
+                            nit = solver.minimize(m, x, fx, bench_lb, bench_ub);
+                        } catch (const std::exception &) {
+                            // Thrown line search leaves fx/x unspecified;
+                            // fall back to the chi2 at the truth point itself.
+                            x = universe_inject[u].cwiseMax(bench_lb).cwiseMin(bench_ub);
+                            Eigen::VectorXf g;
+                            fx = m(x, g, false);
+                        }
+                        auto ct1 = std::chrono::high_resolution_clock::now();
+                        FitRec &r = recs[u];
+                        r.wall_s = std::chrono::duration_cast<std::chrono::microseconds>(ct1 - ct0).count() * 1e-6;
+                        r.cpu_s = thread_cpu_s() - cc0;
+                        r.wall_pre_s = r.wall_s;
+                        r.cpu_pre_s = r.cpu_s;
+                        r.iters  = nit;
+                        r.calls  = m.getCallCount();
+                        r.chi2   = fx;
+                        r.chi2_pre = fx;
+                        r.phys   = x.head(nphys);
+                        continue;
+                    }
                     // Same fitter seed per universe across all (preset, mode)
                     // cells → identical LHS/PSO trajectories per universe.
                     PROfitter fitter(bench_ub, bench_lb, pcfg,
                                      base_seed ^ 0x5eedu ^ (uint32_t)u);
                     auto t0 = std::chrono::high_resolution_clock::now();
+                    const double c0 = thread_cpu_s();
                     float chi2 = fitter.Fit(m);
+                    auto t_pre = std::chrono::high_resolution_clock::now();
+                    const double c_pre = thread_cpu_s();
+                    const float chi2_pre = chi2;
+                    if (harmonic_refit) {
+                        // Same sweep as the global-fit chain: scan the
+                        // frequency-domain harmonic seeds of the first-pass
+                        // best fit and adopt any that reaches a lower chi2.
+                        fitter.calcFreqSeedPoints(m);
+                        for (size_t i = 0; i < fitter.freq_seed_points.size(); ++i) {
+                            if (fitter.freq_seed_values[i] < chi2) {
+                                chi2 = fitter.freq_seed_values[i];
+                                fitter.best_fit = fitter.freq_seed_points[i];
+                            }
+                        }
+                    }
                     auto t1 = std::chrono::high_resolution_clock::now();
+                    const double c1 = thread_cpu_s();
                     FitRec &r = recs[u];
                     r.wall_s = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count() * 1e-6;
+                    r.cpu_s = c1 - c0;
+                    r.wall_pre_s = std::chrono::duration_cast<std::chrono::microseconds>(t_pre - t0).count() * 1e-6;
+                    r.cpu_pre_s = c_pre - c0;
                     r.iters  = fitter.total_lbfgs_iterations;
                     r.calls  = m.getCallCount();
                     r.chi2   = chi2;
+                    r.chi2_pre = chi2_pre;
                     r.phys   = fitter.best_fit.head(nphys);
                 }
             };
@@ -621,9 +797,14 @@ void run_grad_mode_fits(const PROconfig &config, const PROpeller &prop,
             for (int u = 0; u < n_universes; ++u) {
                 const FitRec &r = recs[u];
                 csv << preset << ',' << PROmetric::gradientModeName(mode) << ','
-                    << u << ',' << r.wall_s << ',' << r.iters << ','
+                    << u << ',' << r.wall_s << ',' << r.cpu_s << ',' << r.iters << ','
                     << r.calls << ',' << r.chi2;
                 for (size_t i = 0; i < nphys; ++i) csv << ',' << r.phys(i);
+                if (throw_phys)
+                    for (size_t i = 0; i < nphys; ++i)
+                        csv << ',' << universe_truth[u]((Eigen::Index)i);
+                if (harmonic_refit)
+                    csv << ',' << r.wall_pre_s << ',' << r.cpu_pre_s << ',' << r.chi2_pre;
                 csv << "\n";
                 sum_s += r.wall_s; sum_iters += (double)r.iters;
                 sum_calls += (double)r.calls; sum_chi += (double)r.chi2;
@@ -781,7 +962,9 @@ std::vector<BenchResult> run_scale_test(
     if (opts.tests & Bench_GradModeFit) {
         run_grad_mode_fits(config, prop, metric, data, N_fit,
                            opts.rng_seed ^ 0x80u, opts.nthreads, opts.truth_params,
-                           opts.grad_csv, opts.grad_presets);
+                           opts.grad_csv, opts.grad_presets,
+                           opts.throw_systs, opts.throw_phys, opts.harmonic_refit,
+                           opts.no_poisson, opts.no_covariance);
     }
 
     log<LOG_INFO>(L"%1% || ===== PRObench scale-test complete: %2% tests =====")

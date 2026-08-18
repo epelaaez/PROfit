@@ -101,6 +101,30 @@ namespace PRObench {
         /// per-universe fitter seeds depend only on rng_seed, so a filtered run's
         /// CSV rows can be concatenated with an earlier full run's.
         std::string grad_presets;
+        /// (p) benchmark: generate universes as FC-style pseudo-experiments
+        /// (thrown spline pulls + Cholesky covariance shift + Poisson) instead
+        /// of Poisson-only fluctuations of the base data spectrum.
+        bool throw_systs = false;
+        /// (p) benchmark: draw each universe's truth physics point uniformly
+        /// within the fit bounds; per-universe truth columns are added to the
+        /// CSV for parameter-recovery plots.
+        bool throw_phys = false;
+        /// (p) benchmark: with throw_systs, skip the covariance bin-shift part
+        /// of the throw (spline pulls only). The universe data then stays
+        /// exactly representable by the model at the injected point (closure
+        /// debug mode, typically combined with no_poisson).
+        bool no_covariance = false;
+        /// (p) benchmark: skip the Poisson fluctuation when generating
+        /// universes — data is the exact (syst-shifted) expectation. With
+        /// throw_systs this isolates systematic from statistical variations
+        /// (debug mode: the injected point should then be ~the global
+        /// minimum's basin, so the cheat cell should match the best fitters).
+        bool no_poisson = false;
+        /// (p) benchmark: after each fit, run the harmonic frequency-seed scan
+        /// (PROfitter::calcFreqSeedPoints) and adopt any better minimum, like
+        /// the global-fit chain does. Recommended with throw_phys, where the
+        /// truth frequency varies per universe.
+        bool harmonic_refit = false;
     };
 
     /**
