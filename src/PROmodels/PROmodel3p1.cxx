@@ -914,102 +914,102 @@ float PRO3p1_decay_invis::Pmue(float dmsq, float Ue4sq, float Um4sq, float g2, f
 }
 
 float PRO3p1_decay_invis::Pmumu(float dmsq, [[maybe_unused]]float Ue4sq, float Um4sq, float g2, float le) const{
-	dmsq = maybe_convert_log("dmsq", dmsq);
-	Um4sq = maybe_convert_log("Um4^2", Um4sq);
-	g2 = maybe_convert_log("g2", g2);
+    dmsq = maybe_convert_log("dmsq", dmsq);
+    Um4sq = maybe_convert_log("Um4^2", Um4sq);
+    g2 = maybe_convert_log("g2", g2);
 
-	if (Um4sq > 1 || Um4sq < 0 || g2 < 0) {
-		log<LOG_ERROR>(L"%1% || Parameter(s) out of bounds. Setting to limits. Values: Um4sq=%2%, g2=%3%, dmsq=%4%, le=%5%")
-			% __func__ % Um4sq % g2 % dmsq % le;
-		if (Um4sq > 1) Um4sq = 1;
-		if (Um4sq < 0) Um4sq = 0;
-		if (g2 < 0) g2 = 0;
-		exit(EXIT_FAILURE);
-	}
+    if (Um4sq > 1 || Um4sq < 0 || g2 < 0) {
+        log<LOG_ERROR>(L"%1% || Parameter(s) out of bounds. Setting to limits. Values: Um4sq=%2%, g2=%3%, dmsq=%4%, le=%5%")
+            % __func__ % Um4sq % g2 % dmsq % le;
+        if (Um4sq > 1) Um4sq = 1;
+        if (Um4sq < 0) Um4sq = 0;
+        if (g2 < 0) g2 = 0;
+        exit(EXIT_FAILURE);
+    }
 
-	float delta = 1.266932679f*dmsq*le;
-	float costerm = std::cos(2.0f*delta);
-	float expterm = std::exp(-g2*delta/(8.0f*3.14159f));
-	float prob    = 1.0f - 2.0f*Um4sq*(1.0f-expterm*costerm) + Um4sq*Um4sq*(1.0f-2.0f*expterm*costerm + expterm*expterm);
+    float delta = 1.266932679f*dmsq*le;
+    float costerm = std::cos(2.0f*delta);
+    float expterm = std::exp(-g2*delta/(8.0f*3.14159f));
+    float prob    = 1.0f - 2.0f*Um4sq*(1.0f-expterm*costerm) + Um4sq*Um4sq*(1.0f-2.0f*expterm*costerm + expterm*expterm);
 
-	// numerical precision issues can cause small negative probabilities
-	if(-1e-6f < prob && prob<0.0f){
-		prob = 0.0f;
-	}
+    // numerical precision issues can cause small negative probabilities
+    if(-1e-6f < prob && prob<0.0f){
+        prob = 0.0f;
+    }
 
-	if(prob<0.0 || prob >1.0 || std::isnan(prob)){
-		log<LOG_ERROR>(L"%1% || Your probability %2% is the 0-1 range. dmsq = %3%, Um4sq = %4%, g2 = %5%, L/E = %6%") % __func__ % prob % dmsq % Um4sq % g2 % le;
-		log<LOG_ERROR>(L"delta = %1%, costerm = %2%, expterm = %3%") % delta % costerm % expterm;
-		log<LOG_ERROR>(L"%1% || Terminating.") % __func__;
-		exit(EXIT_FAILURE);
-	}
+    if(prob<0.0 || prob >1.0 || std::isnan(prob)){
+        log<LOG_ERROR>(L"%1% || Your probability %2% is the 0-1 range. dmsq = %3%, Um4sq = %4%, g2 = %5%, L/E = %6%") % __func__ % prob % dmsq % Um4sq % g2 % le;
+        log<LOG_ERROR>(L"delta = %1%, costerm = %2%, expterm = %3%") % delta % costerm % expterm;
+        log<LOG_ERROR>(L"%1% || Terminating.") % __func__;
+        exit(EXIT_FAILURE);
+    }
 
-	return prob;
+    return prob;
 }
 
 float PRO3p1_decay_invis::Pee(float dmsq, float Ue4sq, [[maybe_unused]]float Um4sq, float g2, float le) const{
-	dmsq = maybe_convert_log("dmsq", dmsq);
-	Ue4sq = maybe_convert_log("Ue4^2", Ue4sq);
-	g2 = maybe_convert_log("g2", g2);
+    dmsq = maybe_convert_log("dmsq", dmsq);
+    Ue4sq = maybe_convert_log("Ue4^2", Ue4sq);
+    g2 = maybe_convert_log("g2", g2);
 
-	if (Ue4sq > 1 || Ue4sq < 0 || g2 < 0) {
-		log<LOG_ERROR>(L"%1% || Parameter(s) out of bounds. Setting to limits. Values: Ue4sq=%2%, g2=%3%, dmsq=%4%, le=%5%")
-			% __func__ % Ue4sq % g2 % dmsq % le;
-		if (Ue4sq > 1) Ue4sq = 1;
-		if (Ue4sq < 0) Ue4sq = 0;
-		if (g2 < 0) g2 = 0;
-		exit(EXIT_FAILURE);
-	}
+    if (Ue4sq > 1 || Ue4sq < 0 || g2 < 0) {
+        log<LOG_ERROR>(L"%1% || Parameter(s) out of bounds. Setting to limits. Values: Ue4sq=%2%, g2=%3%, dmsq=%4%, le=%5%")
+            % __func__ % Ue4sq % g2 % dmsq % le;
+        if (Ue4sq > 1) Ue4sq = 1;
+        if (Ue4sq < 0) Ue4sq = 0;
+        if (g2 < 0) g2 = 0;
+        exit(EXIT_FAILURE);
+    }
 
-	float delta = 1.266932679f*dmsq*le;
-	float costerm = std::cos(2.0f*delta);
-	float expterm = std::exp(-g2*delta/(8.0f*3.14159f));
-	float prob    = 1.0f - 2.0f*Ue4sq*(1.0f-expterm*costerm) + Ue4sq*Ue4sq*(1.0f-2.0f*expterm*costerm + expterm*expterm);
+    float delta = 1.266932679f*dmsq*le;
+    float costerm = std::cos(2.0f*delta);
+    float expterm = std::exp(-g2*delta/(8.0f*3.14159f));
+    float prob    = 1.0f - 2.0f*Ue4sq*(1.0f-expterm*costerm) + Ue4sq*Ue4sq*(1.0f-2.0f*expterm*costerm + expterm*expterm);
 
-	// numerical precision issues can cause small negative probabilities
-	if(-1e-6f < prob && prob<0.0f){
-		prob = 0.0f;
-	}
+    // numerical precision issues can cause small negative probabilities
+    if(-1e-6f < prob && prob<0.0f){
+        prob = 0.0f;
+    }
 
-	if(prob<0.0 || prob >1.0 || std::isnan(prob)){
-		log<LOG_ERROR>(L"%1% || Your probability %2% is outside the 0-1 range. dmsq = %3%, Ue4sq = %4%, g2 = %5%, L/E = %6%") % __func__ % prob % dmsq % Ue4sq % g2 % le;
-		log<LOG_ERROR>(L"delta = %1%, costerm = %2%, expterm = %3%") % delta % costerm % expterm;
-		log<LOG_ERROR>(L"term1 = %1%, term2 = %2%, term3 = %3%") % 1.0f % (-2.0f*Ue4sq*(1.0f-expterm*costerm)) % (Ue4sq*Ue4sq*(1.0f-2.0f*expterm*costerm + expterm*expterm));
-		log<LOG_ERROR>(L"%1% || Terminating.") % __func__;
-		exit(EXIT_FAILURE);
-	}
+    if(prob<0.0 || prob >1.0 || std::isnan(prob)){
+        log<LOG_ERROR>(L"%1% || Your probability %2% is outside the 0-1 range. dmsq = %3%, Ue4sq = %4%, g2 = %5%, L/E = %6%") % __func__ % prob % dmsq % Ue4sq % g2 % le;
+        log<LOG_ERROR>(L"delta = %1%, costerm = %2%, expterm = %3%") % delta % costerm % expterm;
+        log<LOG_ERROR>(L"term1 = %1%, term2 = %2%, term3 = %3%") % 1.0f % (-2.0f*Ue4sq*(1.0f-expterm*costerm)) % (Ue4sq*Ue4sq*(1.0f-2.0f*expterm*costerm + expterm*expterm));
+        log<LOG_ERROR>(L"%1% || Terminating.") % __func__;
+        exit(EXIT_FAILURE);
+    }
 
-	return prob;
+    return prob;
 }
 
 Eigen::MatrixXf PRO3p1_decay_invis::get_probs(const Eigen::VectorXf &phys, const std::vector<std::vector<float>> &var_arrs) const {
-	const auto &le_arr = var_arrs[0];
-	//log<LOG_ERROR>(L"%1% || Using unified, optimized get_probs function for model") % __func__;
+    const auto &le_arr = var_arrs[0];
+    //log<LOG_ERROR>(L"%1% || Using unified, optimized get_probs function for model") % __func__;
 
-	// Precompute physics parameters once
-	float dmsq = maybe_convert_log("dmsq", phys(0));
-	float Ue4sq = maybe_convert_log("Ue4^2", phys(1));
-	float Um4sq = maybe_convert_log("Um4^2", phys(2));
-	float g2 = maybe_convert_log("g2", phys(3));
+    // Precompute physics parameters once
+    float dmsq = maybe_convert_log("dmsq", phys(0));
+    float Ue4sq = maybe_convert_log("Ue4^2", phys(1));
+    float Um4sq = maybe_convert_log("Um4^2", phys(2));
+    float g2 = maybe_convert_log("g2", phys(3));
 
-	//log<LOG_ERROR>(L"%1% || dmsq = %2%, Ue4sq = %3%, Um4sq = %4%, g2 = %5%") % __func__ % dmsq % Ue4sq % Um4sq % g2;
+    //log<LOG_ERROR>(L"%1% || dmsq = %2%, Ue4sq = %3%, Um4sq = %4%, g2 = %5%") % __func__ % dmsq % Ue4sq % Um4sq % g2;
 
-	float freq = 1.266932679f * dmsq;
+    float freq = 1.266932679f * dmsq;
 
-	Eigen::MatrixXf probs(le_arr.size(), model_functions.size());
+    Eigen::MatrixXf probs(le_arr.size(), model_functions.size());
 
-	for(size_t i = 0; i < le_arr.size(); ++i) {
+    for(size_t i = 0; i < le_arr.size(); ++i) {
 
-		// no oscillation
-		probs(i, 0) = 1.0f;
+        // no oscillation
+        probs(i, 0) = 1.0f;
 
-		float delta = freq*le_arr[i];
-		float costerm = std::cos(2.0f*delta);
-		float expterm = std::exp(-g2*delta/(8.0f*3.14159f));
-		float cos_mult_exp_term = costerm*expterm;
-		float osc_term =(1.0f-2.0f*cos_mult_exp_term + expterm*expterm);
+        float delta = freq*le_arr[i];
+        float costerm = std::cos(2.0f*delta);
+        float expterm = std::exp(-g2*delta/(8.0f*3.14159f));
+        float cos_mult_exp_term = costerm*expterm;
+        float osc_term =(1.0f-2.0f*cos_mult_exp_term + expterm*expterm);
 
-		// P_mumu
+        // P_mumu
         probs(i, 1) = 1.0f - 2.0f*Um4sq*(1.0f-cos_mult_exp_term) + Um4sq*Um4sq*osc_term;
 
         // P_mue
