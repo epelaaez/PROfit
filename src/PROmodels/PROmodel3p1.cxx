@@ -291,7 +291,7 @@ float PRO3p1_angles::Pmumu(float dmsq, float sinsq2th14, float sinsqth24, float 
     float c14 = (1.0+sqrt(1.0-s214))/2.0f;
 
     float sinterm = std::sin(1.266932679f*dmsq*(le));
-    float prob    = 1.0f - (c14*s24*(1.0f-c14*s24))*sinterm*sinterm;
+    float prob    = 1.0f - 4.0f*(c14*s24*(1.0f-c14*s24))*sinterm*sinterm;
 
 
     if(prob<0.0 || prob >1.0){
@@ -341,7 +341,7 @@ Eigen::MatrixXf PRO3p1_angles::get_probs(const Eigen::VectorXf &phys, const std:
         probs(i, 0) = 1.0f;
 
         // P_mumu
-        probs(i, 1) = 1.0f - c14*s24*(1.0f-c14*s24)*sinterm*sinterm;
+        probs(i, 1) = 1.0f - 4.0f*c14*s24*(1.0f-c14*s24)*sinterm*sinterm;
 
         // P_mue
         probs(i, 2) = s214*s24*sinterm*sinterm;
@@ -359,7 +359,8 @@ std::vector<Eigen::MatrixXf> PRO3p1_angles::get_probs_grad(const Eigen::VectorXf
     //   c14 = cos²θ₁₄ = (1 + √(1 − s214)) / 2     ⇒  dc14/ds214 = −1 / (4 √(1 − s214))
     //   A   = c14 · s24  (= |Um4|²)                ⇒  ∂A/∂s214 = s24 · dc14/ds214,  ∂A/∂s24 = c14
     // the probabilities are (x = k · Δm² · L/E)
-    //   P_mumu = 1 − A (1 − A) sin²x     ⇒  ∂P_mumu/∂A = −(1 − 2A) sin²x, chained through ∂A/∂s214, ∂A/∂s24
+    //   P_mumu = 1 − 4 A (1 − A) sin²x   ⇒  ∂P_mumu/∂A = −4 (1 − 2A) sin²x, chained through ∂A/∂s214, ∂A/∂s24
+    //   (the factor 4 is explicit here because sin²2θ_μμ = 4A(1−A) is not itself a parameter)
     //   P_mue  = s214 · s24 · sin²x
     //   P_ee   = 1 − s214 · sin²x
     // Δm² enters only through sin²x: d(sin²x)/dΔm² = sin(2x) · k · L/E.
@@ -388,10 +389,10 @@ std::vector<Eigen::MatrixXf> PRO3p1_angles::get_probs_grad(const Eigen::VectorXf
         float s2 = sinterm * sinterm;
         float dsin2_ddm = std::sin(2.0f*x) * k * le_arr[i] * ddm;
 
-        // col 1: P_mumu = 1 - A(1-A) sin^2
-        grads[0](i, 1) = -A * (1.0f - A) * dsin2_ddm;
-        grads[1](i, 1) = -(1.0f - 2.0f*A) * s2 * dA_ds214;
-        grads[2](i, 1) = -(1.0f - 2.0f*A) * s2 * dA_ds24;
+        // col 1: P_mumu = 1 - 4 A(1-A) sin^2
+        grads[0](i, 1) = -4.0f * A * (1.0f - A) * dsin2_ddm;
+        grads[1](i, 1) = -4.0f * (1.0f - 2.0f*A) * s2 * dA_ds214;
+        grads[2](i, 1) = -4.0f * (1.0f - 2.0f*A) * s2 * dA_ds24;
         // col 2: P_mue = s214 s24 sin^2
         grads[0](i, 2) = s214 * s24 * dsin2_ddm;
         grads[1](i, 2) = s24 * s2 * ds214;
