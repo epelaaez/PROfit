@@ -124,8 +124,23 @@ public:
      * (i.e. the log10 chain factor is included for is_log10 parameters). The
      * base-class default computes a central finite difference on get_probs —
      * well-conditioned since probabilities are O(1) — so every model supports
-     * the analytic-gradient chi² mode; models with closed-form derivatives
-     * (2-flavour family, PRO3p1) override for exactness.
+     * the analytic-gradient chi² mode. All sterile-family models (2-flavour,
+     * 3+1 and its reparametrisations, 3+1 invisible decay, 3+2) and the
+     * template model override with closed-form derivatives; PROLBL (external
+     * matter-effect solver) keeps the finite-difference default.
+     *
+     * Conventions shared by all closed-form overrides:
+     *  - Parameters arrive in the fitter's internal space θ. For a log10
+     *    parameter the physical value is p = 10^θ, so d p/dθ = ln10 · p; for a
+     *    linear parameter d p/dθ = 1. Each override computes d(prob)/d(physical
+     *    p) and multiplies by this "chain factor" (named ddm, dss, dUe, ... in
+     *    the code) to return d(prob)/dθ.
+     *  - The oscillation phase is x = k · Δm² · (L/E) with k = 1.266932679
+     *    (eV², km, GeV). Every probability is built from sin²x, and
+     *    d(sin²x)/dx = 2 sin x cos x = sin 2x, so
+     *    d(sin²x)/dΔm² = sin(2x) · k · (L/E); times the chain factor for Δm².
+     *  - Where get_probs clamps a parameter (e.g. sin²2θ to [0,1]) the clamped
+     *    value is locally constant, so its derivative is set to zero there.
      * @param phys      Physics parameter vector in the fitter's internal space.
      * @param var_arrs  Same flat-grid layout as get_probs.
      * @return One matrix per physics parameter.

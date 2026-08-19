@@ -22,12 +22,9 @@
 #include <Eigen/Eigen>
 #include "LBFGSB.h"
 
-#include <algorithm>
 #include <atomic>
 #include <cstdint>
 #include <random>
-#include <string>
-#include <vector>
 
 namespace PROfit {
 
@@ -66,114 +63,14 @@ namespace PROfit {
     bool& GetScanTimingEnabled();
 
     /**
-     * @brief One entry of the exploratory analytic-gradient preset sweep ("sw-*").
-     * @details Table-driven variants of the grad-lhs recipe used to map the
-     * speed-vs-depth Pareto frontier: LHS pool size vs diversity weighting vs
-     * PSO budget (which only contributes ONE start, the swarm best) vs
-     * multistart count vs triage depth/champions vs L-BFGS-B iteration cap.
-     * All share grad-lhs's solver parameters (see PROfitterConfig) and default
-     * to the analytic gradient. Consumed by PROfitterConfig and by the
-     * scale-test gradmodes benchmark grid.
-     */
-    struct GradSweepSpec {
-        const char *name;
-        int   latin;          ///< n_latin_points
-        int   particles;      ///< n_swarm_particles (also sizes the diverse-best start pool; >= localfit)
-        int   swarm_iters;    ///< n_swarm_iterations (1 = no real PSO)
-        int   localfit;       ///< n_localfit (multistart descents incl. the PSO best)
-        int   max_iter;       ///< L-BFGS-B max_iterations per descent
-        int   triage_iters;   ///< localfit_triage_iterations (0 = full-depth descents, no triage)
-        int   champions;      ///< n_localfit_champions (triage only)
-        float diversity;      ///< latin_diversity_factor (0 = best chi2 only, 1 = maximally spread)
-        bool  phys_div;       ///< latin_diversity_phys_only (measure diversity in physics space only)
-        bool  phys_lhs;       ///< latin_phys_only (LHS in the physics subspace, nuisances nominal)
-        bool  warm;           ///< localfit_warm_nuisance
-        int   patience;       ///< n_localfit_patience (0 = off)
-        float explore_eps;    ///< localfit_explore_epsilon (0 = off)
-    };
-
-    /// The sweep table. Names are stable identifiers used in benchmark CSVs.
-    inline const std::vector<GradSweepSpec>& grad_sweep_presets() {
-        static const std::vector<GradSweepSpec> t = {
-            //  name                     latin part  it  lf  mxit tri  ch  div   physdiv plhs  warm  pat  eps
-            // (A) pure multistart, 2000-pt LHS, no PSO — vary the number of starts
-            {"sw-s8",                    2000,   8,   1,   8, 200,   0,  0, 0.5f, false, false, false,   0, 0.f},
-            {"sw-s16",                   2000,  16,   1,  16, 200,   0,  0, 0.5f, false, false, false,   0, 0.f},
-            {"sw-s50",                   2000,  50,   1,  50, 200,   0,  0, 0.5f, false, false, false,   0, 0.f},
-            {"sw-s200",                  2000, 200,   1, 200, 200,   0,  0, 0.5f, false, false, false,   0, 0.f},
-            // (B) 32 starts — vary the LHS pool feeding them
-            {"sw-s32-L500",               500,  32,   1,  32, 200,   0,  0, 0.5f, false, false, false,   0, 0.f},
-            {"sw-s32-L8000",             8000,  32,   1,  32, 200,   0,  0, 0.5f, false, false, false,   0, 0.f},
-            // (C) start-selection diversity measured in PHYSICS space only.
-            //     (Full-space diversity is a no-op in 17-D: sw-s32 with factor
-            //     0 and 1 gave bit-identical fits to grad-lhs-lite.)
-            {"sw-s32-pdiv1",             2000,  32,   1,  32, 200,   0,  0, 1.0f, true, false, false,   0, 0.f},
-            {"sw-s32-pdiv2",             2000,  32,   1,  32, 200,   0,  0, 2.0f, true, false, false,   0, 0.f},
-            {"sw-s100-pdiv1",            2000, 100,   1, 100, 200,   0,  0, 1.0f, true, false, false,   0, 0.f},
-            {"sw-s100-pdiv2",            2000, 100,   1, 100, 200,   0,  0, 2.0f, true, false, false,   0, 0.f},
-            // (D) triage: truncated descents from many starts, polish champions
-            {"sw-tri10c4-s100",          2000, 100,   1, 100, 200,  10,  4, 0.5f, false, false, false,   0, 0.f},
-            {"sw-tri20c4-s100",          2000, 100,   1, 100, 200,  20,  4, 0.5f, false, false, false,   0, 0.f},
-            {"sw-tri40c8-s100",          2000, 100,   1, 100, 200,  40,  8, 0.5f, false, false, false,   0, 0.f},
-            {"sw-tri10c8-s200",          2000, 200,   1, 200, 200,  10,  8, 0.5f, false, false, false,   0, 0.f},
-            {"sw-tri15c3-s50",           2000,  50,   1,  50, 200,  15,  3, 0.5f, false, false, false,   0, 0.f},
-            // (E) PSO budget (one refined start) vs number of LHS multistarts
-            {"sw-pso32x10-s32",          2000,  32,  10,  32, 200,   0,  0, 0.5f, false, false, false,   0, 0.f},
-            {"sw-pso50x50-s16",          2000,  50,  50,  16, 200,   0,  0, 0.5f, false, false, false,   0, 0.f},
-            {"sw-pso100x30-s32",         2000, 100,  30,  32, 200,   0,  0, 0.5f, false, false, false,   0, 0.f},
-            // (F) descent depth: 100 starts, cap every descent (no polish)
-            {"sw-s100-i50",              2000, 100,   1, 100,  50,   0,  0, 0.5f, false, false, false,   0, 0.f},
-            {"sw-s100-i100",             2000, 100,   1, 100, 100,   0,  0, 0.5f, false, false, false,   0, 0.f},
-            // (G) cheap and deep ends of the frontier
-            {"sw-s8-L300",                300,   8,   1,   8, 200,   0,  0, 0.5f, false, false, false,   0, 0.f},
-            {"sw-s300-L8000",            8000, 300,   1, 300, 200,   0,  0, 0.5f, false, false, false,   0, 0.f},
-            {"sw-tri20c16-s300-L8000",   8000, 300,   1, 300, 200,  20, 16, 0.5f, false, false, false,   0, 0.f},
-            // (H) new mechanisms: physics-only LHS, warm nuisance starts,
-            //     patience-based stopping, two-tier precision, and combos
-            //  name                          latin part  it  lf  mxit tri ch  div   pdiv   plhs  warm  pat  eps
-            {"sw-s8-plhs300",                  300,   8,  1,   8, 200,  0, 0, 0.5f, false, true,  false,  0, 0.f},
-            {"sw-s16-plhs300",                 300,  16,  1,  16, 200,  0, 0, 0.5f, false, true,  false,  0, 0.f},
-            {"sw-s16-plhs1000",               1000,  16,  1,  16, 200,  0, 0, 0.5f, false, true,  false,  0, 0.f},
-            {"sw-s50-plhs300",                 300,  50,  1,  50, 200,  0, 0, 0.5f, false, true,  false,  0, 0.f},
-            {"sw-s50-plhs1000",               1000,  50,  1,  50, 200,  0, 0, 0.5f, false, true,  false,  0, 0.f},
-            {"sw-s16-warm",                   2000,  16,  1,  16, 200,  0, 0, 0.5f, false, false, true,   0, 0.f},
-            {"sw-s50-warm",                   2000,  50,  1,  50, 200,  0, 0, 0.5f, false, false, true,   0, 0.f},
-            {"sw-s50-pat10",                  2000,  50,  1,  50, 200,  0, 0, 0.5f, false, false, false, 10, 0.f},
-            {"sw-s100-pat10",                 2000, 100,  1, 100, 200,  0, 0, 0.5f, false, false, false, 10, 0.f},
-            {"sw-s200-pat15",                 2000, 200,  1, 200, 200,  0, 0, 0.5f, false, false, false, 15, 0.f},
-            {"sw-s50-eps3",                   2000,  50,  1,  50, 200,  0, 0, 0.5f, false, false, false,  0, 1e-3f},
-            {"sw-s16-plhs300-warm",            300,  16,  1,  16, 200,  0, 0, 0.5f, false, true,  true,   0, 0.f},
-            {"sw-s50-plhs300-warm",            300,  50,  1,  50, 200,  0, 0, 0.5f, false, true,  true,   0, 0.f},
-            {"sw-s50-plhs300-warm-pat10",      300,  50,  1,  50, 200,  0, 0, 0.5f, false, true,  true,  10, 0.f},
-            {"sw-s100-plhs300-warm-pat10",     300, 100,  1, 100, 200,  0, 0, 0.5f, false, true,  true,  10, 0.f},
-            {"sw-s200-plhs1000-warm-pat15",   1000, 200,  1, 200, 200,  0, 0, 0.5f, false, true,  true,  15, 0.f},
-            // (I) round 3: physics-only LHS + warm nuisances across the mid
-            //     range, pool size scaled with the number of starts
-            {"sw-s8-plhs1000",                1000,   8,  1,   8, 200,  0, 0, 0.5f, false, true,  false,  0, 0.f},
-            {"sw-s16-plhs2000-warm",          2000,  16,  1,  16, 200,  0, 0, 0.5f, false, true,  true,   0, 0.f},
-            {"sw-s24-plhs1000-warm",          1000,  24,  1,  24, 200,  0, 0, 0.5f, false, true,  true,   0, 0.f},
-            {"sw-s32-plhs1000",               1000,  32,  1,  32, 200,  0, 0, 0.5f, false, true,  false,  0, 0.f},
-            {"sw-s32-plhs1000-warm",          1000,  32,  1,  32, 200,  0, 0, 0.5f, false, true,  true,   0, 0.f},
-            {"sw-s32-plhs2000-warm",          2000,  32,  1,  32, 200,  0, 0, 0.5f, false, true,  true,   0, 0.f},
-            {"sw-s50-plhs1000-warm",          1000,  50,  1,  50, 200,  0, 0, 0.5f, false, true,  true,   0, 0.f},
-            {"sw-s50-plhs2000-warm",          2000,  50,  1,  50, 200,  0, 0, 0.5f, false, true,  true,   0, 0.f},
-            {"sw-s100-plhs2000-warm",         2000, 100,  1, 100, 200,  0, 0, 0.5f, false, true,  true,   0, 0.f},
-            {"sw-s100-plhs4000-warm",         4000, 100,  1, 100, 200,  0, 0, 0.5f, false, true,  true,   0, 0.f},
-            {"sw-s200-plhs4000-warm",         4000, 200,  1, 200, 200,  0, 0, 0.5f, false, true,  true,   0, 0.f},
-            {"sw-s200-plhs2000-warm-pat30",   2000, 200,  1, 200, 200,  0, 0, 0.5f, false, true,  true,  30, 0.f},
-        };
-        return t;
-    }
-
-    /**
      * @brief Configuration parameters for the PROfitter multi-start optimisation pipeline.
      * @details Collects all tuning knobs for the three-stage optimiser:
      * Latin hypercube sampling, Particle Swarm Optimisation, and L-BFGS-B local refinement.
      * Also includes MCMC and harmonic seed-search parameters.  Parameters can be set via
      * a named map (e.g. from command-line options) or by selecting a named preset
-     * ("fast", "good", "overkill", "sensitivity", or the analytic-gradient
-     * variants "grad-fast", "grad-good", "grad-lhs", "grad-triage", "grad-deep" which trade PSO iterations
-     * for extra exact-gradient L-BFGS-B multistarts).
+     * ("fast", "good", "overkill", "sensitivity", or the multistart presets
+     * "grad-fast", "grad-good", "grad-deep", "grad-overkill": physics-only LHS,
+     * no PSO, many L-BFGS-B multistarts — designed around the analytic gradient).
      */
     struct PROfitterConfig {
 
@@ -184,35 +81,6 @@ namespace PROfit {
 
         int n_latin_points = 1500;         ///< Number of Latin hypercube points sampled across all parameters.
         float latin_diversity_factor = 0.5; ///< Distance-weighting factor for LHS: 0 = no weighting, 1 = maximally diverse.
-        /// Measure LHS start diversity in the physics-parameter subspace only.
-        /// The default full-space distance is dominated by the (many) nuisance
-        /// dimensions: in a 17-D space two random LHS points are ~1.7 apart in
-        /// normalised distance while the threshold is at most 1/sqrt(17)=0.24, so
-        /// the diversity criterion never rejects anything and "diverse-best"
-        /// degenerates to "best chi2". Physics-only distance is what actually
-        /// spreads starts across oscillation basins.
-        bool latin_diversity_phys_only = false;
-        /// Sample the LHS in the physics subspace only (nuisance parameters at
-        /// their nominal 0). A 17-D LHS ranks starts by a chi2 that is dominated
-        /// by random spline pulls (each pull costs pull^2 plus its spectral
-        /// effect), so the ranking of oscillation basins is noisy and most of
-        /// the LHS budget is wasted; a physics-only LHS maps the oscillation
-        /// landscape at nominal nuisances instead.
-        bool latin_phys_only = false;
-        /// Warm-start the nuisance block of every multistart descent from the
-        /// best fit found so far (physics still from the LHS point). Nuisance
-        /// minima are nearly common across oscillation basins, so descents
-        /// converge in fewer iterations.
-        bool localfit_warm_nuisance = false;
-        /// Adaptive stopping of the multistart loop: stop launching further
-        /// descents once this many consecutive descents failed to improve the
-        /// best chi2 by more than localfit_patience_tol. 0 = disabled.
-        int n_localfit_patience = 0;
-        float localfit_patience_tol = 1e-3f;
-        /// Two-tier precision: >0 runs the multistart descents with this
-        /// (looser) L-BFGS-B epsilon / epsilon_rel and then polishes the best
-        /// endpoint once with the full-precision solver. 0 = disabled.
-        float localfit_explore_epsilon = 0.0f;
 
         int n_swarm_particles = 1;                   ///< Number of PSO particles initialised from the best LHS points.
         int n_swarm_iterations = 1;                  ///< Maximum number of PSO iterations.
@@ -224,18 +92,15 @@ namespace PROfit {
         float swarm_convergence_theshold = 1e-4;     ///< PSO convergence threshold: stop if improvement < this value.
 
         int n_localfit = 10;                         ///< Number of L-BFGS-B local refinement fits run after PSO.
+        /// Sample the LHS in the physics subspace only (nuisance parameters at nominal 0).
+        /// A full-space LHS ranks start points by a chi2 dominated by random nuisance
+        /// pulls; a physics-only LHS ranks them by the oscillation landscape instead.
+        bool latin_phys_only = false;
+        /// Start the nuisance block of every LHS multistart descent from the best fit so
+        /// far (physics from the LHS point). Nuisance minima are nearly common across
+        /// oscillation basins, so descents converge in fewer iterations.
+        bool localfit_warm_nuisance = false;
         size_t n_max_local_retries = 1;              ///< Maximum retries if an L-BFGS-B fit throws an exception.
-
-        /// Successive-halving multistart ("triage"). 0 disables (default): every latin
-        /// start gets a full-depth L-BFGS-B descent. >0: every latin start first runs a
-        /// descent truncated at this many iterations, then only the champions — triage
-        /// endpoints within localfit_triage_margin chi2 of the best endpoint, at most
-        /// n_localfit_champions of them — continue to full depth. Uncompetitive starts
-        /// are abandoned before their convergence tail is paid for; every triage
-        /// endpoint still counts as a best-fit candidate.
-        int localfit_triage_iterations = 0;
-        float localfit_triage_margin = 5.0;          ///< Champion cut: triage endpoints within this many chi2 units of the best triage endpoint.
-        int n_localfit_champions = 8;                ///< Cap on the number of triage champions polished to full depth.
 
         size_t MCMCiter = 20'000;  ///< Number of MCMC iterations (after burn-in) for posterior sampling.
         size_t MCMCburn = 25'000;  ///< Number of MCMC burn-in iterations discarded before sampling.
@@ -274,7 +139,7 @@ namespace PROfit {
         /// GradientOneSidedFull for ~2× speedup, or to one of the *Lin variants for
         /// the Gauss-Newton-style linearised gradient (5–20× speedup, exact at minimum).
         /// See PROmetric::GradientMode for the full mode matrix.
-        PROmetric::GradientMode gradient_mode = PROmetric::GradientCentralLin;
+        PROmetric::GradientMode gradient_mode = PROmetric::GradientAnalytic; ///< Gradient mode PROfitter::Fit sets on the metric (default: exact analytic; see PROmetric::GradientMode for the fallback).
 
         /** @brief Default constructor — leaves all parameters at their default values. */
         PROfitterConfig(){};
@@ -282,23 +147,11 @@ namespace PROfit {
         /**
          * @brief Construct from a named preset and an optional map of overrides.
          * @param input_fit_options  Map of parameter-name to value overrides applied after the preset.
-         * @param fit_preset         Preset name: "fast", "good", "overkill", "sensitivity",
-         *                           or the analytic-gradient variants "grad-fast", "grad-good", "grad-lhs", "grad-triage", "grad-deep".
+         * @param fit_preset         Preset name: "fast", "good", "overkill", "sensitivity", or the
+         *                           multistart presets "grad-fast", "grad-good", "grad-deep", "grad-overkill".
          * @param isScan             If true, apply reduced settings appropriate for a parameter scan.
          */
         PROfitterConfig(std::map<std::string, float> input_fit_options, std::string fit_preset, bool isScan){
-
-            // "<preset>-nopso": the named preset with the particle-swarm stage
-            // skipped (n_swarm_iterations = 1 → the swarm degenerates to a single
-            // velocity step, so the L-BFGS-B starts are the diverse-best LHS
-            // points themselves). Everything else — LHS pool, number of
-            // descents, solver and harmonic settings — is unchanged. Used to
-            // isolate what the PSO stage contributes.
-            bool skip_pso = false;
-            if(fit_preset.size() > 6 && fit_preset.compare(fit_preset.size() - 6, 6, "-nopso") == 0){
-                skip_pso = true;
-                fit_preset = fit_preset.substr(0, fit_preset.size() - 6);
-            }
 
             if(fit_preset == "good"){
                 param.epsilon = 1e-5;
@@ -359,7 +212,7 @@ namespace PROfit {
             }
 
             else if(fit_preset == "sensitivity"){
-
+                
                 param.epsilon = 1e-5;
                 param.epsilon_rel = 1e-5;
                 param.max_iterations = 100;
@@ -377,44 +230,32 @@ namespace PROfit {
                 n_localfit=2;
             }
 
-            // ---- Analytic-gradient-optimized presets ----
-            // With GradientAnalytic an L-BFGS-B start costs about as much as a
-            // one-sided-lin FD start but follows the exact gradient, so these
-            // presets shift budget from PSO iterations (derivative-free, the
-            // dominant cost of the standard presets) to more diverse L-BFGS-B
-            // multistarts. Note n_swarm_particles also sizes the diverse-LHS
-            // multistart pool, so it must be >= n_localfit.
-            else if(fit_preset == "grad-fast"){
-                param.epsilon = 1e-5;
-                param.epsilon_rel = 1e-5;
-                param.max_iterations = 150;
-                param.max_linesearch = 20;
-                param.delta = 1e-6;
-                param.wolfe = 0.90;
-                param.ftol = 1e-4;
-                param.m = 8;
-                param.max_submin =10;
-                param.min_step = std::numeric_limits<float>::epsilon();
 
-                n_latin_points = 500;
-                n_swarm_particles = 8;
-                n_swarm_iterations = 15;
-                n_localfit=6;
 
-                gradient_mode = PROmetric::GradientAnalytic;
-            }
-            else if(fit_preset == "grad-good"){
+
+            // ---- grad-* presets ----
+            // Same L-BFGS-B pipeline and (default analytic) gradient, but: LHS sampled in
+            // physics space only, no PSO stage (n_swarm_iterations = 1 degenerates the
+            // swarm to its start points, so the descents start from the best-ranked
+            // LHS points themselves), and the budget spent on many multistart descents
+            // instead. Benchmarked on pseudo-experiments with thrown systematics,
+            // thrown oscillation parameters and Poisson fluctuations (nueapp and 3+1):
+            // each tier reaches deeper minima than the same-cost standard preset, and
+            // grad-deep beats "overkill" in every dchi2 quantile at ~1/3 the time.
+            // n_swarm_particles also sizes the ranked-LHS start pool, so it equals
+            // n_localfit here.
+            else if(fit_preset == "grad-fast" || fit_preset == "grad-good" ||
+                    fit_preset == "grad-deep" || fit_preset == "grad-overkill"){
                 param.epsilon = 1e-5;
                 param.epsilon_rel = 1e-6;
                 param.max_iterations = 200;
                 param.max_linesearch = 25;
-                // NOTE: LBFGSpp's default past=1 keeps the relative-stagnation
-                // test (delta) active; it is how descents terminate cleanly
-                // once float noise stalls the line search. Do NOT set past=0
-                // or delta below ~1e-6 (the float ulp scale of a typical
-                // chi2): the test then never fires, every descent grinds until
-                // the More-Thuente line search throws, and thrown descents are
-                // DISCARDED entirely by the fitter.
+                // NOTE: LBFGSpp's default past=1 keeps the relative-stagnation test
+                // (delta) active; it is how descents terminate cleanly once float noise
+                // stalls the line search. Do NOT set past=0 or delta below ~1e-6 (the
+                // float ulp scale of a typical chi2): the test then never fires, every
+                // descent grinds until the More-Thuente line search throws, and thrown
+                // descents are discarded by the fitter.
                 param.delta = 1e-6;
                 param.wolfe = 0.90;
                 param.ftol = 1e-4;
@@ -422,204 +263,20 @@ namespace PROfit {
                 param.max_submin =10;
                 param.min_step = std::numeric_limits<float>::epsilon();
 
-                n_latin_points = 2000;
-                n_swarm_particles = 20;
-                n_swarm_iterations = 25;
-                n_localfit=14;
-
-                gradient_mode = PROmetric::GradientAnalytic;
-            }
-            else if(fit_preset == "grad-lhs"){
-                // Pure multistart gradient descent: no real PSO stage. With
-                // n_swarm_iterations = 1 the swarm degenerates to a single
-                // velocity step, so the L-BFGS-B starts are (essentially) the
-                // n_swarm_particles diverse-best LHS samples themselves. An
-                // analytic-gradient descent costs ~10-30 L-BFGS iterations, so
-                // 100 basin-distinct starts cost about what a mid-size PSO
-                // does; the diversity selection is what keeps the 100 starts
-                // from piling into the same few basins.
-                param.epsilon = 1e-5;
-                param.epsilon_rel = 1e-6;
-                param.max_iterations = 200;
-                param.max_linesearch = 25;
-                param.delta = 1e-6;  // keep default past=1: see grad-good note
-                param.wolfe = 0.90;
-                param.ftol = 1e-4;
-                param.m = 10;
-                param.max_submin =10;
-                param.min_step = std::numeric_limits<float>::epsilon();
-
-                n_latin_points = 2000;
-                n_swarm_particles = 100;
                 n_swarm_iterations = 1;
-                n_localfit=100;
+                latin_phys_only = true;
 
-                gradient_mode = PROmetric::GradientAnalytic;
-            }
-            else if(fit_preset == "grad-lhs-lite"){
-                // grad-lhs at a third of the descent budget: 32 diverse-best
-                // starts from the same 2000-point LHS. Probes where the
-                // depth-vs-starts knee sits.
-                param.epsilon = 1e-5;
-                param.epsilon_rel = 1e-6;
-                param.max_iterations = 200;
-                param.max_linesearch = 25;
-                param.delta = 1e-6;  // keep default past=1: see grad-good note
-                param.wolfe = 0.90;
-                param.ftol = 1e-4;
-                param.m = 10;
-                param.max_submin =10;
-                param.min_step = std::numeric_limits<float>::epsilon();
-
-                n_latin_points = 2000;
-                n_swarm_particles = 32;
-                n_swarm_iterations = 1;
-                n_localfit=32;
-
-                gradient_mode = PROmetric::GradientAnalytic;
-            }
-            else if(fit_preset == "grad-lhs-wide"){
-                // grad-lhs with a 4x denser LHS pool feeding the same 100
-                // descents. LHS samples cost ~0.1 ms vs ~30+ ms per descent,
-                // so if start ranking matters this is nearly free depth.
-                param.epsilon = 1e-5;
-                param.epsilon_rel = 1e-6;
-                param.max_iterations = 200;
-                param.max_linesearch = 25;
-                param.delta = 1e-6;  // keep default past=1: see grad-good note
-                param.wolfe = 0.90;
-                param.ftol = 1e-4;
-                param.m = 10;
-                param.max_submin =10;
-                param.min_step = std::numeric_limits<float>::epsilon();
-
-                n_latin_points = 8000;
-                n_swarm_particles = 100;
-                n_swarm_iterations = 1;
-                n_localfit=100;
-
-                gradient_mode = PROmetric::GradientAnalytic;
-            }
-            else if(fit_preset == "grad-lhs-all"){
-                // Blind multistart: descend EVERY sample of a small LHS, no
-                // chi2 ranking or diversity selection (n_swarm_particles =
-                // n_latin_points makes select_diverse_best return the whole
-                // sorted list). Control test for whether the selection
-                // machinery earns its keep vs raw coverage.
-                param.epsilon = 1e-5;
-                param.epsilon_rel = 1e-6;
-                param.max_iterations = 200;
-                param.max_linesearch = 25;
-                param.delta = 1e-6;  // keep default past=1: see grad-good note
-                param.wolfe = 0.90;
-                param.ftol = 1e-4;
-                param.m = 10;
-                param.max_submin =10;
-                param.min_step = std::numeric_limits<float>::epsilon();
-
-                n_latin_points = 300;
-                n_swarm_particles = 300;
-                n_swarm_iterations = 1;
-                n_localfit=300;
-
-                gradient_mode = PROmetric::GradientAnalytic;
-            }
-            else if(fit_preset == "grad-triage"){
-                // grad-lhs plus successive halving: 100 diverse-LHS starts,
-                // each descended for only 20 iterations; only endpoints
-                // within 5 chi2 of the best (max 8) are polished to full
-                // depth. Buys grad-lhs's basin coverage at a fraction of its
-                // descent cost.
-                param.epsilon = 1e-5;
-                param.epsilon_rel = 1e-6;
-                param.max_iterations = 200;
-                param.max_linesearch = 25;
-                param.delta = 1e-6;  // keep default past=1: see grad-good note
-                param.wolfe = 0.90;
-                param.ftol = 1e-4;
-                param.m = 10;
-                param.max_submin =10;
-                param.min_step = std::numeric_limits<float>::epsilon();
-
-                n_latin_points = 2000;
-                n_swarm_particles = 100;
-                n_swarm_iterations = 1;
-                n_localfit=100;
-                localfit_triage_iterations = 20;
-                localfit_triage_margin = 5.0;
-                n_localfit_champions = 8;
-
-                gradient_mode = PROmetric::GradientAnalytic;
-            }
-            else if(fit_preset == "grad-deep"){
-                param.epsilon = 1e-5;
-                param.epsilon_rel = 1e-6;
-                param.max_iterations = 300;
-                param.max_linesearch = 30;
-                // past=2 grinds one stalled iteration deeper than the default
-                // before the stagnation test fires; delta stays at the float
-                // ulp scale (see grad-good note — never lower it below that).
-                param.past = 2;
-                param.delta = 1e-6;
-                param.wolfe = 0.90;
-                param.ftol = 1e-4;
-                param.m = 10;
-                param.max_submin =10;
-                param.min_step = std::numeric_limits<float>::epsilon();
-
-                n_latin_points = 4000;
-                n_swarm_particles = 40;
-                n_swarm_iterations = 50;
-                n_localfit=30;
-
-                gradient_mode = PROmetric::GradientAnalytic;
-            }
-            else if(fit_preset.rfind("sw-", 0) == 0){
-                // Exploratory sweep presets: grad-lhs solver parameters with the
-                // search-stage knobs taken from the grad_sweep_presets() table.
-                const auto &tab = grad_sweep_presets();
-                auto it = std::find_if(tab.begin(), tab.end(),
-                    [&](const GradSweepSpec &s){ return fit_preset == s.name; });
-                if(it == tab.end()){
-                    log<LOG_ERROR>(L"%1% || Unknown sweep preset '%2%'; falling back to PROfitterConfig defaults.") % __func__ % fit_preset.c_str();
-                } else {
-                    param.epsilon = 1e-5;
-                    param.epsilon_rel = 1e-6;
-                    param.max_iterations = it->max_iter;
-                    param.max_linesearch = 25;
-                    param.delta = 1e-6;  // keep default past=1: see grad-good note
-                    param.wolfe = 0.90;
-                    param.ftol = 1e-4;
-                    param.m = 10;
-                    param.max_submin =10;
-                    param.min_step = std::numeric_limits<float>::epsilon();
-
-                    n_latin_points = it->latin;
-                    n_swarm_particles = it->particles;
-                    n_swarm_iterations = it->swarm_iters;
-                    n_localfit = it->localfit;
-                    latin_diversity_factor = it->diversity;
-                    latin_diversity_phys_only = it->phys_div;
-                    latin_phys_only = it->phys_lhs;
-                    localfit_warm_nuisance = it->warm;
-                    n_localfit_patience = it->patience;
-                    localfit_explore_epsilon = it->explore_eps;
-                    if(it->triage_iters > 0){
-                        localfit_triage_iterations = it->triage_iters;
-                        localfit_triage_margin = 5.0;
-                        n_localfit_champions = it->champions;
-                    }
-
-                    gradient_mode = PROmetric::GradientAnalytic;
+                if(fit_preset == "grad-fast"){          //  ~0.8 s (3+1) / 0.2 s (nueapp) per fit
+                    n_latin_points = 300;   n_swarm_particles = 8;   n_localfit = 8;
+                } else if(fit_preset == "grad-good"){   //  ~1.5 s / 0.5 s
+                    n_latin_points = 1000;  n_swarm_particles = 16;  n_localfit = 16;
+                } else if(fit_preset == "grad-deep"){   //  ~4 s / 1 s
+                    n_latin_points = 2000;  n_swarm_particles = 50;  n_localfit = 50;
+                    localfit_warm_nuisance = true;
+                } else {                                //  grad-overkill: ~9 s / 2.3 s
+                    n_latin_points = 4000;  n_swarm_particles = 100; n_localfit = 100;
+                    localfit_warm_nuisance = true;
                 }
-            }
-
-
-
-
-            if(skip_pso){
-                n_swarm_iterations = 1;
-                fit_preset += "-nopso";
             }
 
             std::string whichFit = ( isScan? "Simplier Scan" : "Detailed Global");
@@ -685,18 +342,10 @@ namespace PROfit {
                         exit(EXIT_FAILURE);
                     }
 
-                } else if(param_name == "latin_diversity_phys_only") {
-                    latin_diversity_phys_only = (value != 0);
                 } else if(param_name == "latin_phys_only") {
                     latin_phys_only = (value != 0);
                 } else if(param_name == "localfit_warm_nuisance") {
                     localfit_warm_nuisance = (value != 0);
-                } else if(param_name == "n_localfit_patience") {
-                    n_localfit_patience = (int)value;
-                } else if(param_name == "localfit_patience_tol") {
-                    localfit_patience_tol = value;
-                } else if(param_name == "localfit_explore_epsilon") {
-                    localfit_explore_epsilon = value;
                 } else if(param_name == "n_localfit") {
                     n_localfit = value;
                     if(n_localfit < 1) {
@@ -706,22 +355,6 @@ namespace PROfit {
                     }
                 } else if(param_name == "n_max_local_retries") {
                     n_max_local_retries = value;
-                } else if(param_name == "localfit_triage_iterations") {
-                    localfit_triage_iterations = value;
-                    if(localfit_triage_iterations < 0) {
-                        log<LOG_WARNING>(L"%1% || localfit_triage_iterations must be >= 0 (0 disables triage); got %2%. Disabling.")
-                            % __func__ % value;
-                        localfit_triage_iterations = 0;
-                    }
-                } else if(param_name == "localfit_triage_margin") {
-                    localfit_triage_margin = value;
-                } else if(param_name == "n_localfit_champions") {
-                    n_localfit_champions = value;
-                    if(n_localfit_champions < 1) {
-                        log<LOG_ERROR>(L"%1% || Expected at least 1 triage champion. Provided value is %2%.")
-                            % __func__ % value;
-                        exit(EXIT_FAILURE);
-                    }
                 } else if(param_name == "use_bkg_seed") {
                     use_bkg_seed = (value != 0);
 
@@ -833,11 +466,10 @@ namespace PROfit {
             log<LOG_INFO>(L"%1% || ------------ PROfitter specific -------------- ") % __func__ ;
             log<LOG_INFO>(L"%1% || n_latin_points: %2%  ") % __func__ % n_latin_points;
             log<LOG_INFO>(L"%1% || latin_diversity_factor: %2%  ") % __func__ % latin_diversity_factor;
+            log<LOG_INFO>(L"%1% || latin_phys_only: %2%  ") % __func__ % latin_phys_only;
+            log<LOG_INFO>(L"%1% || localfit_warm_nuisance: %2%  ") % __func__ % localfit_warm_nuisance;
             log<LOG_INFO>(L"%1% || n_localfit: %2%  ") % __func__ % n_localfit;
             log<LOG_INFO>(L"%1% || n_max_local_retries: %2%  ") % __func__ % n_max_local_retries;
-            log<LOG_INFO>(L"%1% || localfit_triage_iterations: %2% (0 = triage off) ") % __func__ % localfit_triage_iterations;
-            log<LOG_INFO>(L"%1% || localfit_triage_margin: %2%  ") % __func__ % localfit_triage_margin;
-            log<LOG_INFO>(L"%1% || n_localfit_champions: %2%  ") % __func__ % n_localfit_champions;
             log<LOG_INFO>(L"%1% || use_bkg_seed: %2%  ") % __func__ % use_bkg_seed;
             
             log<LOG_INFO>(L"%1% || ------------ Particle Swarm Optimization -------------- ") % __func__ ;
@@ -900,11 +532,10 @@ namespace PROfit {
             log<LOG_INFO>(L"------ PROfitter Specific Parameters ------");
             log<LOG_INFO>(L"  n_latin_points                       : Number of Latin hypercube points to sample across all parameters");
             log<LOG_INFO>(L"  latin_diversity_factor               : Diversity of latin points, 0: no distance weighting, 1: select most diverse far away points");
+            log<LOG_INFO>(L"  latin_phys_only                      : 1 = sample the latin hypercube in physics-parameter space only (nuisances at nominal); 0 = all parameters");
+            log<LOG_INFO>(L"  localfit_warm_nuisance               : 1 = start each latin multistart descent's nuisance parameters at the best fit so far; 0 = at the latin point");
             log<LOG_INFO>(L"  n_localfit                           : Total number of L-BFGS-B fits to do after PSO");
             log<LOG_INFO>(L"  n_max_local_retries                  : Maximum retries if L-BFGS-B throws an exception");
-            log<LOG_INFO>(L"  localfit_triage_iterations           : 0 (default) = full-depth descent from every latin start. >0 = successive-halving: truncate each latin descent at this many iterations, fully polish only the champions");
-            log<LOG_INFO>(L"  localfit_triage_margin               : Champion cut: triage endpoints within this many chi2 units of the best triage endpoint (default 5)");
-            log<LOG_INFO>(L"  n_localfit_champions                 : Cap on the number of triage champions polished to full depth (default 8)");
             log<LOG_INFO>(L"  use_bkg_seed                         : 1 (default) fits the background-only fixed seed (physics pinned at model defaults) as a candidate; 0 disables");
             
             log<LOG_INFO>(L"");
@@ -1004,12 +635,8 @@ namespace PROfit {
             MultiPROgressBar * progress;           ///< Pointer to progress bar (non-owning); null when not used.
             bool run_progress;                     ///< True if a progress bar should be updated during fitting.
 
-            /// Total L-BFGS-B iterations summed over every local refinement in the most
-            /// recent Fit() call (reset at Fit() entry). Diagnostic for gradient-mode
-            /// benchmarking: pairs with PROmetric::getCallCount() to characterise cost.
-            size_t total_lbfgs_iterations = 0;
-
             std::vector<Eigen::VectorXf> freq_seed_points; ///< Seed points found by the harmonic frequency scan.
+            size_t total_lbfgs_iterations = 0; ///< L-BFGS-B iterations summed over all local refinements of the most recent Fit() (benchmark diagnostic).
             std::vector<float> freq_seed_values;           ///< Chi-squared values at the harmonic seed points.
             std::vector<float> harmonic_scan_pos;          ///< Diagnostic: frequency positions of the last harmonic scan curve (sorted, finite points only).
             std::vector<float> harmonic_scan_chi;          ///< Diagnostic: chi-squared values of the last harmonic scan curve, parallel to harmonic_scan_pos.

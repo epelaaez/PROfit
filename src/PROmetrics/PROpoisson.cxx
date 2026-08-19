@@ -154,8 +154,8 @@ float PROpoisson::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &grad
         if (mode == GradientAnalytic) {
             static std::atomic<bool> warned_analytic{false};
             if(!warned_analytic.exchange(true))
-                log<LOG_WARNING>(L"%1% || Analytic gradient not implemented for PROpoisson; using central-linearised.") % __func__;
-            mode = GradientCentralLin;
+                log<LOG_WARNING>(L"%1% || Analytic gradient not implemented for PROpoisson; falling back to %2%.") % __func__ % gradientModeName(GradientFallback);
+            mode = GradientFallback;
         }
         const bool linearised = (mode == GradientCentralLin) || (mode == GradientOneSidedLin);
         const bool one_sided  = (mode == GradientOneSidedFull) || (mode == GradientOneSidedLin);

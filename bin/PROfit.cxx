@@ -301,7 +301,7 @@ int main(int argc, char* argv[])
     int global_seed = -1;
     std::string log_file = "";
     std::vector<std::string> fit_preset = {"good","fast"};
-    static const std::unordered_set<std::string> allowed_preset = {"good","fast","overkill","sensitivity","grad-fast","grad-good","grad-lhs","grad-lhs-lite","grad-lhs-wide","grad-lhs-all","grad-triage","grad-deep"};
+    static const std::unordered_set<std::string> allowed_preset = {"good","fast","overkill","sensitivity","grad-fast","grad-good","grad-deep","grad-overkill"};
     bool with_splines = false, binwidth_scale = false, area_normalized = false, data_mc_ratio = false;
     std::map<std::string, float> fake_data_osc_params;
     std::map<std::string, float> cv_osc_params;
@@ -392,7 +392,7 @@ int main(int argc, char* argv[])
     app.add_option("--inject-cv", cv_osc_params, "Physics parameters to inject as CV. Example: dmsq 3 sinsq2thmm 0.25")->expected(-1);
     app.add_option("--fix", fixed_params, "Fix Certain Physics or Systematics parameters. Fixed to CV.");
     app.add_option("-s, --seed", global_seed, "A global seed for PROseed rng. Default to -1 for hardware rng seed.")->default_val(-1);
-    app.add_option("-p,--preset", fit_preset, "Preset fitting params. Available `fast`, `good`, `overkill`, `sensitivity`, plus analytic-gradient variants `grad-fast`, `grad-good`, `grad-lhs` (+`-lite`/`-wide`/`-all`), `grad-triage`, `grad-deep`. Takes up to a vector of 2, first for global. 2nd for scan.");
+    app.add_option("-p,--preset", fit_preset, "Preset fitting params. Available `fast`, `good`, `overkill`, `sensitivity`, plus the analytic-gradient presets `grad-fast`, `grad-good`, `grad-deep`, `grad-overkill`. Takes up to a vector of 2, first for global. 2nd for scan.");
     app.add_option("--fit-options", global_fit_options, "Parameters for single, detailed global best fit LBFGSB. See PROfitter.h or run --fit-help for available settings.");
     app.add_option("--scan-fit-options", scan_fit_options, "Parameters for simpier, multiple best fits in PROfile/surface LBFGSB.");
     app.add_flag("--fit-help", show_fit_help, "Show detailed help for all fitting parameters (L-BFGS-B, PSO, MCMC, etc.)");
@@ -403,10 +403,10 @@ int main(int argc, char* argv[])
                    "one-sided-full (forward FD on full chi^2; ~2x faster, O(h)), "
                    "central-lin (central FD on delta only, M frozen at base; Gauss-Newton, ~5-10x), "
                    "one-sided-lin (forward FD on delta only, M frozen at base; ~10-20x), "
-                   "analytic (exact closed-form gradient incl. the dM/dtheta term; no FD truncation, "
-                   "no extra spectrum fills; PROchi binned strategies only, others fall back). "
-                   "Default: the preset's choice — central-lin for the standard presets, "
-                   "analytic for the grad-* presets.")
+                   "analytic (DEFAULT; exact closed-form gradient incl. the dM/dtheta term; no FD truncation, "
+                   "no extra spectrum fills; PROchi binned strategies only — PROCNP, PROpoisson and the "
+                   "event-by-event strategy fall back to central-lin with a warning). "
+                   "Applies to every fit (global, scan, FC).")
         ->default_str("");
 
     app.add_option("--inject-systs", injected_systs, "Systematic shifts to inject. Map of name and shift value in sigmas. Only spline systs are supported right now.");
@@ -635,13 +635,9 @@ int main(int argc, char* argv[])
     bench_command->add_option("-N,--n", bench_N, "Base call count: FillSpectra=N, metric=N/10, fit=N/100.")->default_val(1000);
     bench_command->add_option("--tests", bench_tests_str, "Comma-separated subset of {a..p} or {fillspectra,metric,metricgrad,fit,pseudo,collapse,mcmc,all,gradcheck,gradmodes,grad}. Default 'all'. gradcheck (o) validates every gradient mode vs central-full FD; gradmodes (p) runs N/100 full fits per (fit preset x gradient mode) with matched seeds and emits [GRADBENCH] lines. Neither is in 'all'.")->default_val("all");
     bench_command->add_option("--grad-presets", bench_grad_presets, "Comma-separated preset names restricting the gradmodes (p) benchmark grid, e.g. 'grad-fast,grad-good'. Empty = all presets. Universes/seeds depend only on the fixed rng seed, so a filtered run's CSV rows can be concatenated with an earlier full run's.")->default_val("");
-    bool bench_throw_systs = false, bench_throw_phys = false, bench_harmonic = false;
-    bool bench_no_poisson = false, bench_no_covariance = false;
-    bench_command->add_flag("--no-poisson", bench_no_poisson, "gradmodes (p) benchmark: skip the Poisson fluctuation of the universes (data = exact syst-shifted expectation). Debug mode isolating systematic from statistical variations. CSV name gains a _nostat suffix.");
-    bench_command->add_flag("--no-covariance", bench_no_covariance, "gradmodes (p) benchmark: with --throw-systs, throw only the spline pulls and skip the covariance bin shift, keeping the data exactly representable by the model (closure debug; combine with --no-poisson). CSV name gains a _nocov suffix.");
+    bool bench_throw_systs = false, bench_throw_phys = false;
     bench_command->add_flag("--throw-systs", bench_throw_systs, "gradmodes (p) benchmark: generate universes as FC-style pseudo-experiments (thrown spline pulls + covariance shift + Poisson) instead of Poisson-only fluctuations. CSV name gains a _syst suffix.");
     bench_command->add_flag("--throw-phys", bench_throw_phys, "gradmodes (p) benchmark: draw each universe's truth physics point uniformly within the fit bounds (per-universe truth columns added to the CSV). CSV name gains a _phys/_systphys suffix.");
-    bench_command->add_flag("--harmonic-refit", bench_harmonic, "gradmodes (p) benchmark: after each fit, run the harmonic frequency-seed scan and adopt any better minimum, as the global-fit chain does. Recommended with --throw-phys.");
 
     //PROletariat, stage+tar+submit grid jobs (replaces grid/maketar_submit_v2.4.sh)
     PROletariatOptions grid_opts;
@@ -1387,7 +1383,7 @@ int main(int argc, char* argv[])
     log<LOG_INFO>(L"%1% || Starting from fit preset :  %2%.")% __func__ % fit_preset;
     for(auto &fit_pre: fit_preset){
         if (allowed_preset.find(fit_pre) == allowed_preset.end()) {
-            log<LOG_ERROR>(L"%1% || ERROR allowed fit_presets are good, fast, sensitivity, overkill, grad-fast, grad-good, grad-lhs, grad-lhs-lite, grad-lhs-wide, grad-lhs-all, grad-triage or grad-deep. You entred : %2%.")% __func__ % fit_pre.c_str();
+            log<LOG_ERROR>(L"%1% || ERROR allowed fit_presets are good, fast, sensitivity, overkill, grad-fast, grad-good, grad-deep or grad-overkill. You entred : %2%.")% __func__ % fit_pre.c_str();
             return 1;
         }
     }
@@ -1404,19 +1400,18 @@ int main(int argc, char* argv[])
     // Apply --grad-mode to BOTH fit configurations. PROfitter::Fit calls
     // metric.setGradientMode(...) at the start of every fit, so the same flag
     // controls global fits, profile fits, surface fits, and FC fits uniformly.
-    // An empty string (the default) keeps each preset's own choice, so the
-    // grad-* presets run analytic without needing an explicit flag.
+    // An empty string (the default) keeps the PROfitterConfig default (analytic).
     // The double-parse here detects an unrecognised token: the parser returns
     // the fallback for unknown input, so calling it with two different
     // sentinels and comparing flags any input that wasn't matched against
     // either of them.
     if (!gradient_mode_str.empty()) {
         const PROmetric::GradientMode gmode_a =
-            PROmetric::parseGradientMode(gradient_mode_str, PROmetric::GradientCentralLin);
+            PROmetric::parseGradientMode(gradient_mode_str, PROmetric::GradientAnalytic);
         const PROmetric::GradientMode gmode_b =
             PROmetric::parseGradientMode(gradient_mode_str, PROmetric::GradientOneSidedFull);
         if (gmode_a != gmode_b) {
-            log<LOG_WARNING>(L"%1% || Unknown --grad-mode '%2%'; falling back to central-lin.")
+            log<LOG_WARNING>(L"%1% || Unknown --grad-mode '%2%'; using the default (analytic).")
                 % __func__ % gradient_mode_str.c_str();
         }
         fitConfig.gradient_mode     = gmode_a;
@@ -3176,15 +3171,10 @@ int main(int argc, char* argv[])
         std::string bench_suffix;
         if (bench_throw_phys)       bench_suffix = bench_throw_systs ? "_systphys" : "_phys";
         else if (bench_throw_systs) bench_suffix = "_syst";
-        if (bench_no_covariance)    bench_suffix += "_nocov";
-        if (bench_no_poisson)       bench_suffix += "_nostat";
         bopts.grad_csv = analysis_tag + "_gradbench_fits" + bench_suffix + ".csv";
         bopts.grad_presets = bench_grad_presets;
         bopts.throw_systs = bench_throw_systs;
         bopts.throw_phys  = bench_throw_phys;
-        bopts.harmonic_refit = bench_harmonic;
-        bopts.no_poisson  = bench_no_poisson;
-        bopts.no_covariance = bench_no_covariance;
 
         PROfit::PRObench::run_scale_test(config, prop, *metric, data, fitConfig, bopts);
     }
