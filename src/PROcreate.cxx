@@ -18,6 +18,7 @@
 #include <iterator>
 #include <set>
 #include <string>
+#include <fnmatch.h>
 namespace PROfit {
 
 
@@ -608,7 +609,8 @@ namespace PROfit {
                     log<LOG_INFO>(L"%1% || Wildcard %2% (and percent %3%) which matches: ") % __func__  % wild.c_str() % flat_percent;
                     std::vector<std::string> flatnames;
                     for(auto & name: inconfig.m_fullnames){
-                        if(name.find(wild)!=std::string::npos){
+                        // Use fnmatch for standard Linux shell-style wildcard matching (*, ?, etc.)
+                        if(fnmatch(wild.c_str(), name.c_str(), 0) == 0){
                             flatnames.push_back(name);
                         }
                     }
