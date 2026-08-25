@@ -18,7 +18,7 @@
 #include <iterator>
 #include <set>
 #include <string>
-#include <fnmatch.h>
+#include <regex>
 namespace PROfit {
 
 
@@ -606,14 +606,20 @@ namespace PROfit {
                     sv.back().knobval = sv.back().knob_index;
                     std::sort(sv.back().knobval.begin(), sv.back().knobval.end());
 
-                    log<LOG_INFO>(L"%1% || Wildcard %2% (and percent %3%) which matches: ") % __func__  % wild.c_str() % flat_percent;
+                    log<LOG_INFO>(L"%1% || Regex pattern %2% (and percent %3%) which matches: ") % __func__ % wild.c_str() % flat_percent;
                     std::vector<std::string> flatnames;
-                    for(auto & name: inconfig.m_fullnames){
-                        // Use fnmatch for standard Linux shell-style wildcard matching (*, ?, etc.)
-                        if(fnmatch(wild.c_str(), name.c_str(), 0) == 0){
+                    
+                    // Compile the regex pattern once outside the loop for better performance
+                    // (Assuming 'wild' holds your pattern string)
+                    std::regex subchannel_regex(wild);
+                
+                    for(auto & name : inconfig.m_fullnames){
+                        // Use std::regex_match for full-string matching (equivalent to fnmatch behavior)
+                        if(std::regex_match(name, subchannel_regex)){
                             flatnames.push_back(name);
                         }
                     }
+                    
                     log<LOG_INFO>(L"%1% || %2% . ") % __func__  % flatnames;
 
                     std::vector<int> flatbins;
