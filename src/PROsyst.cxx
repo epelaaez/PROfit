@@ -447,7 +447,9 @@ namespace PROfit {
         Eigen::MatrixXf fracM = Eigen::MatrixXf::Zero(nbins, nbins);
         Eigen::MatrixXf corrM = Eigen::MatrixXf::Identity(nbins, nbins);
 
-        size_t colonPos = sysname.find(':');
+        // Split on the LAST colon: the percent never contains one, and the
+        // pattern may (regex constructs like (?:...) or [[:alpha:]]).
+        size_t colonPos = sysname.rfind(':');
         if (colonPos == std::string::npos) {
             log<LOG_ERROR>(L"%1% || ERROR, you asked for a flat systematic but its not in NAME:percentate format %2%") % __func__  % sysname.c_str();
             exit(EXIT_FAILURE);
@@ -459,11 +461,11 @@ namespace PROfit {
 
 
         log<LOG_INFO>(L"%1% || Wildcard %2% (and percent %3%) which matches: ") % __func__  % wild.c_str() % flat_percent;
-        std::vector<std::string> flatnames;
-        for(auto & name: config.m_fullnames){
-            if(name.find(wild)!=std::string::npos){
-                flatnames.push_back(name); 
-            }
+        // Unanchored regex (plain substrings behave as before); see PROconfig.h.
+        std::vector<std::string> flatnames = MatchNames(config.m_fullnames, wild, "flat systematic '" + sysname + "'");
+        if(flatnames.empty()) {
+            log<LOG_ERROR>(L"%1% || ERROR: flat systematic '%2%' pattern '%3%' matches NO subchannel fullname. Fullnames are <mode>_<detector>_<channel>_<subchannel>; matching is an unanchored regex (plain substrings work).") % __func__ % sysname.c_str() % wild.c_str();
+            exit(EXIT_FAILURE);
         }
         log<LOG_INFO>(L"%1% || %2% . ") % __func__  % flatnames;
 

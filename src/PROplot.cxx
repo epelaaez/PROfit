@@ -41,12 +41,14 @@ namespace PROfit{
                                                     const std::string &pattern) {
         std::vector<size_t> matched;
         if (pattern.empty()) return matched;
-        // Substring match, matching PROsyst's wildcard convention used in
-        // CreateFlatMatrix (src/PROsyst.cxx ~L397). m_fullnames is the canonical
-        // list of "<mode>_<detector>_<channel>_<subchannel>" names indexed by
-        // global subchannel index.
+        // Unanchored regex (plain substrings behave as before; see PROconfig.h),
+        // matching PROsyst's wildcard convention used in CreateFlatMatrix.
+        // m_fullnames is the canonical list of
+        // "<mode>_<detector>_<channel>_<subchannel>" names indexed by global
+        // subchannel index.
+        std::regex re = CompilePattern(pattern, "subchannel pattern");
         for (size_t i = 0; i < config.m_fullnames.size(); ++i) {
-            if (config.m_fullnames[i].find(pattern) != std::string::npos) {
+            if (PatternMatches(config.m_fullnames[i], re)) {
                 matched.push_back(i);
             }
         }

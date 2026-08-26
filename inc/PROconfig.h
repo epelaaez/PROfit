@@ -32,6 +32,7 @@
 #include <cstdlib>
 #include <numeric>
 #include <stdexcept>
+#include <regex>
 
 // TINYXML2
 #include "tinyxml2.h"
@@ -503,7 +504,7 @@ namespace PROfit{
             std::map<std::string, float> m_mcgen_variation_inflate; //map of systematics with inflate factor: spline shifts are scaled about 1 (ratio -> 1 + inflate*(ratio-1)) before interpolation; covariance matrices are scaled by inflate^2
             std::map<std::string, int> m_mcgen_variation_num_decomp_knobs; //map of covariance_to_spline systematics to the number of eigenpairs to keep (-1 or missing = keep all)
             std::map<std::string, bool> m_mcgen_variation_include_resid_cov; //map of covariance_to_spline systematics to whether the un-kept eigenpairs are retained as a residual covariance (missing = true)
-            std::map<std::string, std::string> m_mcgen_variation_apply_to_subchannel; //map of systematics with apply_to_subchannel="<wildcard>" (plain substring match against subchannel fullnames): the systematic is only applied to matching subchannels, and its weight branch is only required in MCFiles that fill a matching subchannel
+            std::map<std::string, std::string> m_mcgen_variation_apply_to_subchannel; //map of systematics with apply_to_subchannel="<wildcard>" (unanchored regex against subchannel fullnames; plain substrings work as-is): the systematic is only applied to matching subchannels, and its weight branch is only required in MCFiles that fill a matching subchannel
       
             //FIX skepic
             std::vector<std::string> systematic_name;
@@ -681,5 +682,18 @@ namespace PROfit{
 
 
     };
+
+    /* User-supplied pattern matching (subchannel fullnames, systematic names).
+     * Patterns are ECMAScript regexes matched UNANCHORED via std::regex_search,
+     * so a plain substring behaves exactly like the historical
+     * std::string::find convention; anchor with ^...$ for a full-name match.
+     * CompilePattern is fatal (logged exit) on an invalid pattern; `context`
+     * names the caller/feature in that error message. */
+    std::regex CompilePattern(const std::string &pattern, const std::string &context);
+    inline bool PatternMatches(const std::string &name, const std::regex &re) {
+        return std::regex_search(name, re);
+    }
+    /* All names matching pattern (compiled once); input order preserved. */
+    std::vector<std::string> MatchNames(const std::vector<std::string> &names, const std::string &pattern, const std::string &context);
 }
 #endif

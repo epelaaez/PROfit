@@ -44,7 +44,7 @@ PROpt::PROpt(int argc, char **argv) {
             "the pseudo-experiment already includes its own Poisson step — passing both is redundant.");
         app.add_flag("--scale-by-width", binwidth_scale, "Scale histgrams by 1/(bin width).");
         app.add_flag("--data-mc-ratio", data_mc_ratio, "For ratio plots, use data/pre-fit mc instead of data/best-fit mc.");
-        app.add_option("--scale", scale_arg, "Scale detector POT by a given value.");
+        app.add_option("--scale", scale_arg, "Scale detector POT by a given value: <pattern> <factor> pairs, pattern matched against subchannel fullnames as an unanchored regex (plain substrings work).");
         app.add_option("--plot-bounds", bound_list, "Plot bounds, set by  string float pairs. Available strings are ymax,ratmin,ratmax."); 
         app.add_flag("--plot-ratios", plot_channel_ratios,
             "Also draw channel-to-channel ratio spectra within each detector (plot, "
@@ -61,7 +61,7 @@ PROpt::PROpt(int argc, char **argv) {
 
         // PROjector: two-stage pre-fit / projected fit (see inc/PROjector.h for the scheme).
         CLI::Option *projector_prefit_opt = app.add_option("--projector-prefit", projector_config.prefit_pattern,
-            "PROjector stage 1: wildcard (substring) matching the subchannels to PRE-FIT (whole "
+            "PROjector stage 1: wildcard (unanchored regex; plain substrings work, quote it in the shell) matching the subchannels to PRE-FIT (whole "
             "channels only, e.g. a detector name). Covariance systematics are promoted to "
             "eigenmode splines, the data is masked to the matched channels, physics parameters "
             "are fixed at CV, and running the 'global' subcommand writes the nuisance posterior "
@@ -131,7 +131,7 @@ PROpt::PROpt(int argc, char **argv) {
         proplot_command = app.add_subcommand("plot", "Make plots of CV, or injected point with error bars and covariance.");
         proplot_command->add_flag("--with-splines", with_splines, "Include graphs of splines in output.");
         proplot_command->add_option("--bkg-subtract", bkg_subtract_pattern,
-            "Wildcard (substring) matching one or more subchannel names; that "
+            "Wildcard (unanchored regex; plain substrings work, quote it in the shell) matching one or more subchannel names; that "
             "background's central-value prediction is subtracted from data and CV "
             "at plot time (publication convention). The error band shows "
             "signal-only systematics: each systematic throw's own background is "

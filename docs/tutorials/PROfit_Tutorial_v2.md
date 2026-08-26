@@ -129,10 +129,18 @@ subchannel has a *fullname* of the form
 ```
 
 Everywhere PROfit accepts a "pattern" (background subtraction, POT scaling,
-PROjector channel selection, flat systematics) it does **plain substring
-matching** against these fullnames — no regex. `"_ND_"` matches everything in
-the near detector; `background` matches every background subchannel in every
-channel and detector.
+PROjector channel selection, flat/norm systematics, `apply_to_subchannel=`)
+it matches it against these fullnames as an **unanchored regex**
+(`std::regex_search`, ECMAScript). A plain substring is a valid regex and
+behaves exactly as before: `"_ND_"` matches everything in the near detector;
+`background` matches every background subchannel in every channel and
+detector. Regex gives you more when you need it — `"nu_(ND|FD)_numu"`,
+`"^nu_ND_numu_signal$"` (anchored full match). Two caveats: in XML, `&` and
+`<` must be written `&amp;`/`&lt;` (standard XML escaping — all other regex
+metacharacters pass through untouched), and on the command line quote the
+pattern so the shell doesn't expand `*`, `(`, `|`, etc. A pattern that is an
+invalid regex, or that matches nothing (flat/norm/`apply_to_subchannel`), is
+a fatal, clearly-logged error.
 
 **Variables.** Each channel can carry several binnings (`<bins>` entries):
 reconstructed energy, true L/E, true energy, and so on. Exactly one of them is
@@ -200,7 +208,7 @@ Three things to keep in mind:
   dummy detector instead (e.g. `sbndnumu` + `icarusnumu`) — at the cost of
   handling the relative POT scaling yourself in the branch weights.
 * **Never put underscores inside a name.** The fullname is built by joining
-  the four levels with `_`; an underscore inside a name breaks the substring
+  the four levels with `_`; an underscore inside a name breaks the pattern
   bookkeeping.
 
 ### Channels, binnings, and subchannels
@@ -358,9 +366,10 @@ The `<allowlist>` attributes:
   uses — see section 9). `restrict` bounds a spline's allowed range.
 * `apply_to_subchannel="pattern"` — restrict a weight-based systematic
   (`spline`, `covariance`, `covariance_to_spline`, `hist1d/2d`, ...) to the
-  subchannels whose fullname contains the pattern (same plain substring
-  matching as `norm`/`flat`, e.g. `apply_to_subchannel="nu_SBND"` or
-  `"_ND_"`). Non-matching subchannels get exactly no response (flat spline
+  subchannels whose fullname matches the pattern (same unanchored-regex
+  matching as `norm`/`flat` — plain substrings work as-is, e.g.
+  `apply_to_subchannel="nu_SBND"` or `"_ND_"`, and regex like
+  `"nu_(ND|FD)"` too). Non-matching subchannels get exactly no response (flat spline
   at 1 / zero covariance block), and the systematic's weight branch is only
   required — or even looked for — in MCFiles that fill a matching
   subchannel. This is how per-detector systematics work in multi-detector
@@ -1243,7 +1252,7 @@ PROfit -x tutorial.xml -t TUT -o pj --seed 405 -n 8 \
 # → TUT_pj_PROjector_constraint.bin
 ```
 
-What happens: every subchannel matching `_ND_` (substring, and matches must
+What happens: every subchannel matching `_ND_` (unanchored regex — substrings work — and matches must
 cover **whole channels** — χ² lives in collapsed space) is selected; all
 covariance-type systematics are *promoted* to their eigenmode splines so the
 fit has explicit parameters for them (`--projector-knobs N` limits to the top
