@@ -1252,7 +1252,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 }
 
                 //check for known attributes
-                const std::vector<std::string> expected_attrs = {"name", "type", "plotname", "binning", "knobvals", "tag", "prior", "center", "force_0_cv", "include_only_weights", "scale","filename", "xvar", "yvar", "restrict", "mirror", "num_decomp_knobs", "include_resid_cov", "inflate", "weights"};
+                const std::vector<std::string> expected_attrs = {"name", "type", "plotname", "binning", "knobvals", "tag", "prior", "center", "force_0_cv", "include_only_weights", "scale","filename", "xvar", "yvar", "restrict", "mirror", "num_decomp_knobs", "include_resid_cov", "inflate", "weights", "apply_to_subchannel"};
                 for (const tinyxml2::XMLAttribute* attr = pAllowList->FirstAttribute(); attr; attr = attr->Next()) {
                     std::string name = attr->Name();
                     if (std::find(expected_attrs.begin(), expected_attrs.end(), name) == expected_attrs.end()) {
@@ -1281,6 +1281,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 const char *num_decomp_knobs = pAllowList->Attribute("num_decomp_knobs");
                 const char *include_resid_cov = pAllowList->Attribute("include_resid_cov");
                 const char *weights = pAllowList->Attribute("weights");
+                const char *apply_to_subchannel = pAllowList->Attribute("apply_to_subchannel");
 
 
                 m_mcgen_variation_type.push_back(variation_type);
@@ -1456,6 +1457,19 @@ int PROconfig::LoadFromXML(const std::string &filename){
                     bool keep_resid = !(strcmp(include_resid_cov, "false") == 0 || strcmp(include_resid_cov, "no") == 0 || strcmp(include_resid_cov, "0") == 0);
                     m_mcgen_variation_include_resid_cov[wt] = keep_resid;
                     log<LOG_INFO>(L"%1% || Parsed include_resid_cov=%2% for systematic %3%") % __func__ % keep_resid % wt.c_str();
+                }
+                if(apply_to_subchannel) {
+                    std::string pattern = apply_to_subchannel;
+                    // trim leading/trailing whitespace so apply_to_subchannel="nu_SBND " behaves
+                    size_t b = pattern.find_first_not_of(" \t");
+                    size_t e = pattern.find_last_not_of(" \t");
+                    pattern = (b == std::string::npos) ? "" : pattern.substr(b, e - b + 1);
+                    if(pattern.empty()) {
+                        log<LOG_ERROR>(L"%1% || ERROR! apply_to_subchannel attribute for systematic %2% is empty.") % __func__ % wt.c_str();
+                        throw std::invalid_argument(std::string("apply_to_subchannel attribute for systematic '") + wt + "' is empty");
+                    }
+                    m_mcgen_variation_apply_to_subchannel[wt] = pattern;
+                    log<LOG_INFO>(L"%1% || Parsed apply_to_subchannel='%2%' for systematic %3% (substring match against subchannel fullnames)") % __func__ % pattern.c_str() % wt.c_str();
                 }
                 log<LOG_DEBUG>(L"%1% || Allowlisting variations: %2%") % __func__ % wt.c_str() ;
                 tinyxml2::XMLElement *pNext = pAllowList->NextSiblingElement("allowlist");
@@ -2470,6 +2484,11 @@ uint32_t PROconfig::CalcHash() const{
         unique_string << vecToString(vec);
 
     unique_string << vecToString(m_mcgen_variation_allowlist);
+
+    // apply_to_subchannel wildcards change which bins a systematic populates in the
+    // cached SystStructs; empty map appends nothing so pre-existing hashes are unchanged.
+    for (const auto& [sysname, pattern] : m_mcgen_variation_apply_to_subchannel)
+        unique_string << sysname << "->" << pattern;
 
     for(const auto& vec: m_branch_variables){
         for(const auto& br: vec){
