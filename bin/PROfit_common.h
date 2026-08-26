@@ -125,6 +125,7 @@ struct PROpt {
     bool eventbyevent=false;
     bool shapeonly = false;
     bool rateonly = false;
+    int fit_variable = -1; // -1 => take the fitting variable from the XML (fit="true", else var0)
     bool force = false;
     bool noxrootd = false;
     bool poisson_throw = false;

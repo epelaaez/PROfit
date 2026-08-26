@@ -206,7 +206,10 @@ void run_surface(float &global_fit_chi2, Eigen::VectorXf &global_fit_result, con
             for(size_t i = 0; i < config.m_num_variable_bins_total_collapsed[config.i_prime]; i++)
                 throwC(i) = d(PROseed::global_rng);
             bool binned = (options.eventbyevent ? PROmetric::EventByEvent : PROmetric::BinnedChi2) != 0;
-            PROspec shifted = FillSpectra(config, prop, metric.GetSysts(), metric.GetModel(), throwp, binned);
+            // Fill the fitting variable explicitly: the CollapseMatrix below uses the
+            // i_prime collapsing matrix, so letting var_index default to 0 would mix
+            // variables whenever i_prime != 0 (same fix as src/PROfc.cxx).
+            PROspec shifted = FillSpectra(config, prop, metric.GetSysts(), metric.GetModel(), throwp, binned, config.i_prime);
             PROspec newSpec = options.statonly_brazil ? PROspec::PoissonVariation(collapsed_cv, dseed(myseed.global_rng)) :
                 PROspec::PoissonVariation(PROspec(CollapseMatrix(config, shifted.Spec()) + L * throwC, CollapseMatrix(config, shifted.Error())), dseed(myseed.global_rng));
             PROdata data(newSpec.Spec(), newSpec.Error());

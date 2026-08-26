@@ -29,7 +29,8 @@ int main(int argc, char* argv[])
     log<LOG_WARNING>(L"%1% || PROfit commandline input arguments. xml: %2%, tag: %3%, output %4%, nthread: %5% ") % __func__ % options.xmlname.c_str() % options.analysis_tag.c_str() % options.output_tag.c_str() % options.nthread ;
 
     //Initilize configuration from the XML;
-    PROconfig config(options.xmlname, options.rateonly);
+    // fit_variable (-1 unless --fit-variable was given) overrides the XML's fit="true" binning.
+    PROconfig config(options.xmlname, options.rateonly, options.fit_variable);
 
     // Process input files, save in prop and systsstructs
     PROpeller prop;

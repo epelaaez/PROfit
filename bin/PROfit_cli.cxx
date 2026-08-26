@@ -85,7 +85,9 @@ PROpt::PROpt(int argc, char **argv) {
 
         auto* shape_flag = app.add_flag("--shapeonly", shapeonly, "Run a shape only analysis");
         auto* rate_flag = app.add_flag("--rateonly", rateonly, "Run a rate only analysis");
-        shape_flag->excludes(rate_flag);   
+        app.add_option("--fit-variable", fit_variable,
+                "Index of the variable to fit, overriding the XML's fit=\"true\" binning. Variables are numbered from 0 within a channel, <bins2D> first then <bins>. No re-`process` is needed: all variables are already in the cached binaries.");
+        shape_flag->excludes(rate_flag);
 
         //PROcess, into binary data [Do this once first!]
         process_command = app.add_subcommand("process", "PROcess the MC and systematics in root files into binary data for future rapid loading.");

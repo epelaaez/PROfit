@@ -6,8 +6,10 @@ PROdata construct_data(std::vector<PROdata> &variable_data, bool use_real_data, 
     if(use_real_data){
         PROconfig dataconfig;
         if(!options.data_xml.empty()){
-            // Explicit --data flag takes precedence
-            dataconfig = PROconfig(options.data_xml);
+            // Explicit --data flag takes precedence. Force the data config onto the same
+            // fitting variable as the MC config — the two must agree bin-for-bin, and a
+            // hand-written data XML will not carry a fit="true" of its own.
+            dataconfig = PROconfig(options.data_xml, options.rateonly, (int)config.i_prime);
         } else {
             // Use embedded <data> section from the unified XML
             log<LOG_INFO>(L"%1% || Using embedded <data> section from XML for data config") % __func__;
@@ -77,7 +79,10 @@ PROdata construct_data(std::vector<PROdata> &variable_data, bool use_real_data, 
     else{
         log<LOG_INFO>(L"%1% || Going to get fake data set up for each variable.") % __func__ ;
         for(size_t io = 0; io < config.m_num_variables; ++io) {
-            if (options.pseudo_experiment && io == config.i_prime && config.m_channel_variable_plot_bool.at(io)) {
+            // plot="false" only suppresses drawing; the fitting variable always needs real
+            // fake-data, so i_prime bypasses the flag here and in the Asimov branch below
+            // (matching the variable_systs build, which also special-cases i_prime).
+            if (options.pseudo_experiment && io == config.i_prime) {
                 // True FC-style pseudo-experiment for the i_prime variable.
                 // Pattern lifted verbatim from src/PROfc.cxx::fc_worker's per-PE body:
                 //   1. CV spectrum + Cholesky of the bin-bin covariance once.
@@ -131,7 +136,8 @@ PROdata construct_data(std::vector<PROdata> &variable_data, bool use_real_data, 
                 continue;
             }
 
-            PROspec data_spec = config.m_channel_variable_plot_bool.at(io) ?  FillSpectra(config, prop, variable_systs[io], model, fakedataparams, !options.eventbyevent, io) : PROspec(config.m_num_variable_bins_total[io]) ;
+            const bool fill_this_variable = config.m_channel_variable_plot_bool.at(io) || io == config.i_prime;
+            PROspec data_spec = fill_this_variable ?  FillSpectra(config, prop, variable_systs[io], model, fakedataparams, !options.eventbyevent, io) : PROspec(config.m_num_variable_bins_total[io]) ;
             if(options.poisson_throw) data_spec = PROspec::PoissonVariation(data_spec, dseed(PROseed::global_rng));
             Eigen::VectorXf data_vec = CollapseMatrix(config, data_spec.Spec(), io);
             variable_data.push_back(PROdata(data_vec, data_vec.array().sqrt()));
