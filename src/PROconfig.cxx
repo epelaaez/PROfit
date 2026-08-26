@@ -1357,7 +1357,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 }
 
                 //check for known attributes
-                const std::vector<std::string> expected_attrs = {"name", "type", "plotname", "binning", "knobvals", "tag", "prior", "center", "force_0_cv", "include_only_weights", "scale","filename", "xvar", "yvar", "restrict", "mirror", "num_decomp_knobs", "include_resid_cov", "inflate", "weights", "apply_to_subchannel"};
+                const std::vector<std::string> expected_attrs = {"name", "type", "plotname", "binning", "knobvals", "tag", "prior", "center", "prior_type", "force_0_cv", "include_only_weights", "scale","filename", "xvar", "yvar", "restrict", "mirror", "num_decomp_knobs", "include_resid_cov", "inflate", "weights", "apply_to_subchannel"};
                 for (const tinyxml2::XMLAttribute* attr = pAllowList->FirstAttribute(); attr; attr = attr->Next()) {
                     std::string name = attr->Name();
                     if (std::find(expected_attrs.begin(), expected_attrs.end(), name) == expected_attrs.end()) {
@@ -1374,6 +1374,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 const char *tags = pAllowList->Attribute("tag");
                 const char *prior = pAllowList->Attribute("prior");
                 const char *center = pAllowList->Attribute("center");
+                const char *prior_type = pAllowList->Attribute("prior_type");
                 const char *force_0_cv = pAllowList->Attribute("force_0_cv");
                 const char *include_only_weights_str = pAllowList->Attribute("include_only_weights");
                 const char *restrict_str = pAllowList->Attribute("restrict");
@@ -1391,6 +1392,42 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
                 m_mcgen_variation_type.push_back(variation_type);
                 m_mcgen_variation_type_map[wt] = variation_type;
+                if(prior_type) {
+                    const std::string parsed_prior_type(prior_type);
+                    static const std::map<std::string, SplinePriorType> supported_prior_types = {
+                        {"gaussian", SplinePriorType::Gaussian},
+                        {"uniform", SplinePriorType::Uniform}
+                    };
+                    auto parsed = supported_prior_types.find(parsed_prior_type);
+                    if(parsed == supported_prior_types.end()) {
+                        throw std::invalid_argument(
+                            std::string("Systematic '") + wt +
+                            "' has unsupported prior_type='" + parsed_prior_type +
+                            "' (expected 'gaussian' or 'uniform')"
+                        );
+                    }
+                    if(!variation_type || std::string(variation_type) != "spline") {
+                        throw std::invalid_argument(
+                            std::string("prior_type is only supported for type='spline' systematics; got '") +
+                            (variation_type ? variation_type : "unspecified") + "' for '" + wt + "'"
+                        );
+                    }
+                    if(parsed->second == SplinePriorType::Uniform) {
+                        if(!restrict_str) {
+                            throw std::invalid_argument(
+                                std::string("Uniform-prior spline '") + wt +
+                                "' requires a finite restrict='lo, hi' range"
+                            );
+                        }
+                        if(prior || center) {
+                            throw std::invalid_argument(
+                                std::string("Uniform-prior spline '") + wt +
+                                "' cannot also specify Gaussian prior= or center= attributes"
+                            );
+                        }
+                    }
+                    m_mcgen_variation_prior_types[wt] = parsed->second;
+                }
                 // mcstat's covariance is registered in PROsyst under the systematic's name; remember
                 // that name here so the covariance key matches the tag/plotname maps (both keyed by wt).
                 if(variation_type && std::string(variation_type) == "mcstat") m_mcstat_systname = wt;
@@ -1606,6 +1643,15 @@ int PROconfig::LoadFromXML(const std::string &filename){
             throw std::invalid_argument(std::string("Correlations should be formed as <Systematic A> <Systematic B> <Correlation>. Could not parse: ") + std::string(pCorrelations->GetText()));
         }
 
+        const auto is_uniform = [this](const std::string &name) {
+            return GetSplinePriorType(name) == SplinePriorType::Uniform;
+        };
+        if(is_uniform(split[0]) || is_uniform(split[1])) {
+            throw std::invalid_argument(
+                std::string("Uniform-prior splines cannot appear in Gaussian <correlation> entries: ") +
+                split[0] + " " + split[1]
+            );
+        }
         m_mcgen_correlations.push_back(std::make_tuple(split[0], split[1], std::stof(split[2])));
 
         pCorrelations = pCorrelations->NextSiblingElement("correlation");
