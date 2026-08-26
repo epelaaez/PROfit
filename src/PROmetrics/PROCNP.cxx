@@ -68,7 +68,7 @@ Eigen::VectorXf PROCNP::cachedNoshiftCollapsedCV(const Eigen::VectorXf &phys, Ei
         return cnp_cached_collapsed_cv;
     Eigen::VectorXf noshiftvec = Eigen::VectorXf::Zero(param_size);
     noshiftvec.head(model.nparams) = phys;
-    cnp_cached_collapsed_cv = CollapseMatrix(config, FillSpectra(config, peller, *syst, model, noshiftvec, strat != EventByEvent).Spec());
+    cnp_cached_collapsed_cv = CollapseMatrix(config, FillSpectra(config, peller, *syst, model, noshiftvec, strat != EventByEvent, config.i_prime).Spec());
     cnp_cached_phys = phys;
     cnp_cv_cache_valid = true;
     return cnp_cached_collapsed_cv;
@@ -407,11 +407,11 @@ void PROCNP::print(const Eigen::VectorXf &param){
     noshiftvec.head(model.nparams) = subvector1;
     Eigen::VectorXf subvector2 = param.segment(model.nparams, syst->GetNSplines());
 
-    PROspec result = FillSpectra(config, peller, *syst, model, param, strat == BinnedChi2);
+    PROspec result = FillSpectra(config, peller, *syst, model, param, strat == BinnedChi2, config.i_prime);
     log<LOG_INFO>(L"%1% || Result Spectra: ") % __func__ ;
     result.Print();
 
-    PROspec cv = FillSpectra(config, peller, *syst, model, noshiftvec, strat != EventByEvent);
+    PROspec cv = FillSpectra(config, peller, *syst, model, noshiftvec, strat != EventByEvent, config.i_prime);
     log<LOG_INFO>(L"%1% || CV is : \n ") % __func__ ;
     cv.Print();
     Eigen::MatrixXf collapsed_data_stat_covariance = data.Spec().array().matrix().asDiagonal();
@@ -480,11 +480,11 @@ void PROCNP::print(const Eigen::VectorXf &param){
             }
         }
 
-        PROspec result = FillSpectra(config, peller, *syst, model, tmpParams, strat != EventByEvent);
+        PROspec result = FillSpectra(config, peller, *syst, model, tmpParams, strat != EventByEvent, config.i_prime);
 
         Eigen::MatrixXf new_collapsed_stat_covariance = collapsed_stat_covariance;
         if(i < model.nparams) {
-            PROspec cv = FillSpectra(config, peller, *syst, model, subvector1, strat != EventByEvent);
+            PROspec cv = FillSpectra(config, peller, *syst, model, subvector1, strat != EventByEvent, config.i_prime);
             Eigen::MatrixXf collapsed_data_stat_covariance = data.Spec().array().matrix().asDiagonal();
             Eigen::MatrixXf mc_stat_covariance = cv.Spec().array().matrix().asDiagonal();
             Eigen::MatrixXf collapsed_mc_stat_covariance = CollapseMatrix(config, mc_stat_covariance);
