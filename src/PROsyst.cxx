@@ -765,6 +765,26 @@ namespace PROfit {
         return c[0] + x*(c[1] + x*(c[2] + x*c[3]));
     }
 
+    float PROsyst::GetSplineShiftDeriv(int spline_num, float shift, int bin) const {
+        const Spline& spline = splines[spline_num];
+        if (bin < 0 || bin >= spline.bins) return 0;
+
+        // Same segment lookup as GetSplineShift so value and derivative always
+        // come from the same cubic.
+        int offset = bin * spline.segments_per_bin;
+        const SplineSegment* segs = &spline.segments[offset];
+        const SplineSegment* end = segs + spline.segments_per_bin;
+        const SplineSegment* seg = std::upper_bound(segs, end, shift, [](float x, const SplineSegment& s) { return x < s.knot; });
+        if (seg != segs) --seg;
+
+        float hi = seg + 1 < end ? seg[1].knot : spline_hi[spline_num];
+        float width = hi - seg->knot;
+        float x = (shift - seg->knot) / width;
+        const auto& c = seg->coeffs;
+        // d/dshift of c0 + x(c1 + x(c2 + x c3)) with x = (shift-knot)/width
+        return (c[1] + x*(2.0f*c[2] + 3.0f*x*c[3])) / width;
+    }
+
     void PROsyst::FillSpline(const SystStruct& syst, bool unmirrored) {
         std::vector<PROspec> ratios;
         ratios.reserve(syst.p_multi_spec.size());

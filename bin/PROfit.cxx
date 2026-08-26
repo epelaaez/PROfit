@@ -94,7 +94,7 @@ int main(int argc, char* argv[])
     log<LOG_INFO>(L"%1% || Starting from fit preset :  %2%.")% __func__ % options.fit_preset;
     for(auto &fit_pre: options.fit_preset){
         if (options.allowed_preset.find(fit_pre) == options.allowed_preset.end()) {
-            log<LOG_ERROR>(L"%1% || ERROR allowed fit_presets are good, fast, sensitivity or overkill. You entred : %2%.")% __func__ % fit_pre.c_str();
+            log<LOG_ERROR>(L"%1% || ERROR allowed fit_presets are good, fast, sensitivity, overkill, grad-fast, grad-good, grad-deep or grad-overkill. You entred : %2%.")% __func__ % fit_pre.c_str();
             exit(1);
         }
     }
@@ -111,23 +111,26 @@ int main(int argc, char* argv[])
     // Apply --grad-mode to BOTH fit configurations. PROfitter::Fit calls
     // metric.setGradientMode(...) at the start of every fit, so the same flag
     // controls global fits, profile fits, surface fits, and FC fits uniformly.
+    // An empty string (the default) keeps the PROfitterConfig default (analytic).
     // The double-parse here detects an unrecognised token: the parser returns
     // the fallback for unknown input, so calling it with two different
     // sentinels and comparing flags any input that wasn't matched against
     // either of them.
-    {
+    if (!options.gradient_mode_str.empty()) {
         const PROmetric::GradientMode gmode_a =
-            PROmetric::parseGradientMode(options.gradient_mode_str, PROmetric::GradientCentralLin);
+            PROmetric::parseGradientMode(options.gradient_mode_str, PROmetric::GradientAnalytic);
         const PROmetric::GradientMode gmode_b =
             PROmetric::parseGradientMode(options.gradient_mode_str, PROmetric::GradientOneSidedFull);
         if (gmode_a != gmode_b) {
-            log<LOG_WARNING>(L"%1% || Unknown --grad-mode '%2%'; falling back to central-lin.")
+            log<LOG_WARNING>(L"%1% || Unknown --grad-mode '%2%'; using the default (analytic).")
                 % __func__ % options.gradient_mode_str.c_str();
         }
         fitConfig.gradient_mode     = gmode_a;
         scanFitConfig.gradient_mode = gmode_a;
-        log<LOG_INFO>(L"%1% || Gradient mode: %2%") % __func__ % PROmetric::gradientModeName(gmode_a);
     }
+    log<LOG_INFO>(L"%1% || Gradient mode: %2% (global) / %3% (scan)") % __func__
+        % PROmetric::gradientModeName(fitConfig.gradient_mode)
+        % PROmetric::gradientModeName(scanFitConfig.gradient_mode);
 
     size_t N_params = model->nparams+variable_systs[config.i_prime].GetNSplines();
     Eigen::VectorXf global_lb = Eigen::VectorXf::Constant(N_params, -3.0);
@@ -183,7 +186,7 @@ int main(int argc, char* argv[])
         run_mcmc(config, *metric, global_lb, global_ub, fitConfig, options, myseed);
     }
     if(*options.bench_command) {
-        run_bench(config, prop, *metric, fitConfig, options);
+        run_bench(config, prop, *metric, data, fakeDataParams, fitConfig, options);
     }
     if(*options.protest_command){
         run_test(config, prop, *metric, data, CVParams);

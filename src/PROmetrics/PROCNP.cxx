@@ -15,7 +15,6 @@ using namespace PROfit;
 PROCNP::PROCNP(const std::string tag, const PROconfig &conin, const PROpeller &pin, const PROsyst *systin, const PROmodel &modelin, const PROdata &datain, EvalStrategy strat, bool shape_only, std::vector<float> physics_param_fixed) : PROmetric(), model_tag(tag), config(conin), peller(pin), syst(systin), model(modelin), data(datain), strat(strat), shape_only(shape_only), physics_param_fixed(physics_param_fixed), correlated_systematics(false) {
     last_value = 0.0; last_param = Eigen::VectorXf::Zero(model.nparams+syst->GetNSplines());
     fixed_index = -999;
-    gradient_mode = GradientOneSidedFull; ///< Default for PROCNP: one-sided forward FD on full chi² (~2× faster).
 
     // Snapshot the config's fit-region mask (if any). Unlike PROchi, CNP keeps
     // zero-data bins (mu/2 substitution), so the mask is the ONLY exclusion
@@ -179,7 +178,16 @@ float PROCNP::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
         // Linearised modes intentionally freeze M (including M_stat) at the
         // base point — this is the Gauss-Newton approximation, dropping the
         // (M⁻¹δ)^T (dM/dθ) (M⁻¹δ) term that's second-order in δ.
-        const GradientMode mode = gradient_mode;
+        GradientMode mode = gradient_mode;
+        // Analytic gradient is implemented in PROchi only so far; the CNP stat
+        // covariance adds a μ-dependent term that is not yet wired up. Use the
+        // FD fallback mode (Gauss-Newton linearised, exact at the minimum).
+        if (mode == GradientAnalytic) {
+            static std::atomic<bool> warned_analytic{false};
+            if(!warned_analytic.exchange(true))
+                log<LOG_WARNING>(L"%1% || Analytic gradient not implemented for PROCNP; falling back to %2%.") % __func__ % gradientModeName(GradientFallback);
+            mode = GradientFallback;
+        }
         const bool linearised = (mode == GradientCentralLin) || (mode == GradientOneSidedLin);
         const bool one_sided  = (mode == GradientOneSidedFull) || (mode == GradientOneSidedLin);
         const size_t nsyst = syst->GetNSplines();

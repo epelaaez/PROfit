@@ -139,8 +139,8 @@ struct PROpt {
     size_t maxevents;
     int global_seed = -1;
     std::string log_file = "";
-    std::vector<std::string> fit_preset = {"good","fast"};
-    inline static const std::unordered_set<std::string> allowed_preset = {"good","fast","overkill","sensitivity"};
+    std::vector<std::string> fit_preset = {"grad-good","grad-fast"};
+    inline static const std::unordered_set<std::string> allowed_preset = {"good","fast","overkill","sensitivity","grad-fast","grad-good","grad-deep","grad-overkill"};
     bool with_splines = false, binwidth_scale = false, area_normalized = false, data_mc_ratio = false;
     std::map<std::string, float> fake_data_osc_params;
     std::map<std::string, float> cv_osc_params;
@@ -215,12 +215,14 @@ struct PROpt {
     int afc_cleanup_halo = 1;
     bool hmc = false;
 
-    std::string gradient_mode_str = "central-lin";
+    std::string gradient_mode_str = "";
     bool plot_channel_ratios = false;
     std::string bkg_subtract_pattern = "";
 
     int    bench_N           = 1000;
     std::string bench_tests_str = "all";
+    std::string bench_grad_presets = "";
+    bool bench_throw_systs = false, bench_throw_phys = false;
 
     PROletariatOptions grid_opts;
     std::string grid_backend_str = "jobsub";
@@ -256,7 +258,7 @@ void run_surface(float &global_fit_chi2, Eigen::VectorXf &global_fit_result, con
 void run_fc(const PROconfig &config, const PROpeller &prop, PROmetric &metric, const PROdata &data, const Eigen::VectorXf &CVParams, const Eigen::VectorXf &fakeDataParams, const Eigen::VectorXf &lb, const Eigen::VectorXf &ub, const std::vector<int> &fixed, const PROfitterConfig &fitConfig, const PROfitterConfig &scanFitConfig, const PROpt &options, PROseed &myseed);
 void run_afc(const PROconfig &config, const PROpeller &prop, PROmetric &metric, const PROdata &data, const Eigen::VectorXf &fakeDataParams, const PROfitterConfig &scanFitConfig, const PROpt &options, PROseed &myseed);
 void run_mcmc(const PROconfig &config, PROmetric &metric, const Eigen::VectorXf &lb, const Eigen::VectorXf &ub, const PROfitterConfig fitConfig, const PROpt &options, PROseed &myseed);
-void run_bench(const PROconfig &config, const PROpeller &prop, PROmetric &metric, const PROfitterConfig &fitConfig, const PROpt &options);
+void run_bench(const PROconfig &config, const PROpeller &prop, PROmetric &metric, const PROdata &data, const Eigen::VectorXf &fakeDataParams, const PROfitterConfig &fitConfig, const PROpt &options);
 void run_test(const PROconfig &config, const PROpeller &prop, PROmetric &metric, const PROdata &data, const Eigen::VectorXf &CVParams);
 int run_proletariat(PROpt &options);
 

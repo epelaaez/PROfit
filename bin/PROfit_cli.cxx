@@ -17,17 +17,21 @@ PROpt::PROpt(int argc, char **argv) {
         app.add_option("--inject-cv", cv_osc_params, "Physics parameters to inject as CV. Example: dmsq 3 sinsq2thmm 0.25")->expected(-1);
         app.add_option("--fix", fixed_params, "Fix Certain Physics or Systematics parameters. Fixed to CV.");
         app.add_option("-s, --seed", global_seed, "A global seed for PROseed rng. Default to -1 for hardware rng seed.")->default_val(-1);
-        app.add_option("-p,--preset", fit_preset, "Preset fitting params. Available `fast`, `good` and `overkill` Takes up to a vector of 2, first for global. 2nd for scan.");
+        app.add_option("-p,--preset", fit_preset, "Preset fitting params. Available `fast`, `good`, `overkill`, `sensitivity`, plus the analytic-gradient presets `grad-fast`, `grad-good`, `grad-deep`, `grad-overkill`. Takes up to a vector of 2, first for global. 2nd for scan. Defaults to `grad-good` `grad-fast`.");
         app.add_option("--fit-options", global_fit_options, "Parameters for single, detailed global best fit LBFGSB. See PROfitter.h or run --fit-help for available settings.");
         app.add_option("--scan-fit-options", scan_fit_options, "Parameters for simpier, multiple best fits in PROfile/surface LBFGSB.");
         app.add_flag("--fit-help", show_fit_help, "Show detailed help for all fitting parameters (L-BFGS-B, PSO, MCMC, etc.)");
         app.add_option("--grad-mode", gradient_mode_str,
                        "Gradient evaluation strategy passed to the metric. One of: "
-                       "central-full (central FD on full chi^2; most accurate, slowest), "
+                       "central-full (central FD on full chi^2; most accurate FD, slowest), "
                        "one-sided-full (forward FD on full chi^2; ~2x faster, O(h)), "
-                       "central-lin (default; central FD on delta only, M frozen at base; Gauss-Newton, ~5-10x), "
-                       "one-sided-lin (forward FD on delta only, M frozen at base; ~10-20x).")
-            ->default_str("central-lin");
+                       "central-lin (central FD on delta only, M frozen at base; Gauss-Newton, ~5-10x), "
+                       "one-sided-lin (forward FD on delta only, M frozen at base; ~10-20x), "
+                       "analytic (DEFAULT; exact closed-form gradient incl. the dM/dtheta term; no FD truncation, "
+                       "no extra spectrum fills; PROchi binned strategies only — PROCNP, PROpoisson and the "
+                       "event-by-event strategy fall back to central-lin with a warning). "
+                       "Applies to every fit (global, scan, FC).")
+            ->default_str("");
 
         app.add_option("--inject-systs", injected_systs, "Systematic shifts to inject. Map of name and shift value in sigmas. Only spline systs are supported right now.");
         app.add_option("--inject-systs-cv", cv_injected_systs, "Systematic shifts to inject.  as CV Map of name and shift value in sigmas. Only spline systs are supported right now.");
@@ -249,7 +253,10 @@ PROpt::PROpt(int argc, char **argv) {
         // — no separate metric-class flag needed here.
         bench_command = app.add_subcommand("scale-test", "Run timing benchmarks for FillSpectra / metric / fit hot paths and emit greppable [SCALETEST] LOG lines.");
         bench_command->add_option("-N,--n", bench_N, "Base call count: FillSpectra=N, metric=N/10, fit=N/100.")->default_val(1000);
-        bench_command->add_option("--tests", bench_tests_str, "Comma-separated subset of {a..n} or {fillspectra,metric,metricgrad,fit,pseudo,collapse,mcmc,all}. Default 'all'.")->default_val("all");
+        bench_command->add_option("--tests", bench_tests_str, "Comma-separated subset of {a..p} or {fillspectra,metric,metricgrad,fit,pseudo,collapse,mcmc,all,gradcheck,gradmodes,grad}. Default 'all'. gradcheck (o) validates every gradient mode vs central-full FD; gradmodes (p) runs N/100 full fits per (fit preset x gradient mode) with matched seeds and emits [GRADBENCH] lines. Neither is in 'all'.")->default_val("all");
+        bench_command->add_option("--grad-presets", bench_grad_presets, "Comma-separated preset names restricting the gradmodes (p) benchmark grid, e.g. 'grad-fast,grad-good'. Empty = all presets. Universes/seeds depend only on the fixed rng seed, so a filtered run's CSV rows can be concatenated with an earlier full run's.")->default_val("");
+        bench_command->add_flag("--throw-systs", bench_throw_systs, "gradmodes (p) benchmark: generate universes as FC-style pseudo-experiments (thrown spline pulls + covariance shift + Poisson) instead of Poisson-only fluctuations. CSV name gains a _syst suffix.");
+        bench_command->add_flag("--throw-phys", bench_throw_phys, "gradmodes (p) benchmark: draw each universe's truth physics point uniformly within the fit bounds (per-universe truth columns added to the CSV). CSV name gains a _phys/_systphys suffix.");
 
         //PROletariat, stage+tar+submit grid jobs (replaces grid/maketar_submit_v2.4.sh)
         proletariat_command = app.add_subcommand("proletariat",
