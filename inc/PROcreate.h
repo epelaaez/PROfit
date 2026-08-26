@@ -57,7 +57,7 @@ namespace PROfit{
      *
      * Supported modes (stored in the `mode` field): "multisim", "minmax", "covar", "spline",
      * "external", "flat", "norm", "norm_to_covariance", "hist1d", "hist2d",
-     * "spline_to_covariance".
+     * and "spline_to_covariance".
      */
     struct SystStruct {
 

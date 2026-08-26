@@ -60,6 +60,12 @@ typedef double eweight_type;
 
 namespace PROfit{
 
+    /** @brief Prior model applied to a spline nuisance parameter. */
+    enum class SplinePriorType {
+        Gaussian, ///< Gaussian pull term using the configured center and width.
+        Uniform   ///< No pull term; the allowed interval is set by restrict.
+    };
+
     /**
      * @brief Typedef for the event-weight map used by MicroBooNE-style (uboonestyle) systematics.
      * @details Each entry maps a systematic name to a vector of per-universe event weights.
@@ -317,6 +323,12 @@ namespace PROfit{
             /*
              * Function: Use TinyXML2 to load XML */
             int LoadFromXML(const std::string & filename);
+            SplinePriorType GetSplinePriorType(const std::string &systematic) const {
+                auto it = m_mcgen_variation_prior_types.find(systematic);
+                return it == m_mcgen_variation_prior_types.end()
+                    ? SplinePriorType::Gaussian
+                    : it->second;
+            }
             uint32_t hash;
             uint32_t detvar_hash;
 
@@ -496,6 +508,7 @@ namespace PROfit{
             std::vector<std::tuple<std::string, std::string, float>> m_mcgen_correlations;
             std::map<std::string, float> m_mcgen_variation_prior;
             std::map<std::string, float> m_mcgen_variation_prior_centers;
+            std::map<std::string, SplinePriorType> m_mcgen_variation_prior_types; ///< Explicit per-spline prior models; absent means Gaussian.
             std::map<std::string, bool> m_mcgen_variation_force_0_cv; //map of systematics with force_0_cv=true (normalize shifts by shift at knob=0)
             std::map<std::string, std::vector<int>> m_mcgen_variation_include_only_weights; //map of systematics with include_only_weights (1-based indices of which weights to include in spline universes)
             std::map<std::string, std::pair<float,float>> m_mcgen_variation_restrict; //map of systematics with restrict="lo, hi" (clamp knob value during evaluation and fitting)
