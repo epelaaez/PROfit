@@ -691,7 +691,7 @@ namespace PROfit{
                 leg->AddEntry(data_ratio, "Data", "pe");
                 leg->AddEntry(cv_ratio, "CV Prediction", "l");
                 if(has_bf && bf_ratio) {
-                    leg->AddEntry(bf_ratio, "Best-Fit", "l");
+                    leg->AddEntry(bf_ratio, posterrband ? "Constrained Best-Fit" : "Best-Fit", "l");
                 }
 
                 std::string canvas_name = "ratio_" + channel_short_labels[idx_num] + "_over_" + channel_short_labels[idx_den];
@@ -894,7 +894,7 @@ namespace PROfit{
                 leg_hack->SetFillColor(bfcol);
                 leg_hack->SetLineColor(bfcol);
                 leg_hack->SetLineWidth(2);
-                leg->AddEntry(leg_hack,"Best Fit #pm 1#sigma (post-fit)" ,"fl");
+                leg->AddEntry(leg_hack,"Constrained Best-Fit #pm 1#sigma (post-fit)" ,"fl");
             }else{
                 leg->AddEntry(leg_hack, "Best Fit #pm 1#sigma (post-fit)", "l");
             }
@@ -1620,13 +1620,24 @@ namespace PROfit{
 
                         TH2D* bf_hist = NULL;
                         if(best_fit){
-                            std::string bf_hist_title = config.m_detector_plotnames[det]  + " "+ config.m_channel_plotnames[channel]+" Best-Fit;"+xtitle2d+";"+ytitle2d;
+                            std::string bf_hist_title = config.m_detector_plotnames[det]  + " "+ config.m_channel_plotnames[channel]+(posterrband ? " Constrained Best-Fit;" : " Best-Fit;")+xtitle2d+";"+ytitle2d;
                             bf_hist = new TH2D(bf_hist_title.c_str(),bf_hist_title.c_str(), channel_nbins_x, edges_x.data(), channel_nbins_y, edges_y.data());
 
                             Eigen::VectorXf tmp_bf = CollapseMatrix(config, best_fit->Spec(), other_index);
                             for(size_t xbin = 0; xbin < channel_nbins_x; xbin++){
                                 for(size_t ybin = 0; ybin < channel_nbins_y; ybin++) {
-                                    bf_hist->SetBinContent(xbin+1, ybin+1, tmp_bf(xbin*channel_nbins_y+ybin + tot_offset));
+                                    const size_t flat_bin = xbin*channel_nbins_y+ybin + tot_offset;
+                                    float val = tmp_bf(flat_bin);
+                                    // Fold the posterior covariance pull in: the 2D map,
+                                    // and every slice/projection taken from it below,
+                                    // shows the CONSTRAINED best fit.
+                                    if(posterrband) {
+                                        float denom = posterrband->error_point(flat_bin);
+                                        float f = (denom != 0 && std::isfinite(denom)) ? val/denom : 1.0f;
+                                        if(!std::isfinite(f)) f = 1.0f;
+                                        val += f*posterrband->center_shift(flat_bin);
+                                    }
+                                    bf_hist->SetBinContent(xbin+1, ybin+1, val);
                                 }
                             }
 
@@ -1677,9 +1688,9 @@ namespace PROfit{
                                 post_channel_errband = new TGraphAsymmErrors(bf_hist->ProjectionX("xslc_bf", ybin, ybin));
                                 for(size_t xbin = 0; xbin < channel_nbins_x; ++xbin) {
                                     const size_t flat_bin = xbin * channel_nbins_y + (ybin - 1) + tot_offset;
+                                    // Anchored via the shifted bf_hist projection above.
                                     post_channel_errband->SetPointEYhigh(xbin, scale*posterrband->error_up(flat_bin));
                                     post_channel_errband->SetPointEYlow(xbin, scale*posterrband->error_down(flat_bin));
-                                    post_channel_errband->SetPointY(xbin, post_channel_errband->GetPointY(xbin) + scale*posterrband->center_shift(flat_bin));
                                 }
                                 objs[mdc+"_posterrband_slice_ybin"+std::to_string(ybin)] = post_channel_errband->Clone();
                             }
@@ -1739,9 +1750,9 @@ namespace PROfit{
                                 post_channel_errband = new TGraphAsymmErrors(bf_hist->ProjectionY("yslc_bf", xbin, xbin));
                                 for(size_t ybin = 0; ybin < channel_nbins_y; ++ybin) {
                                     const size_t flat_bin = (xbin-1)*channel_nbins_y+ybin+tot_offset;
+                                    // Anchored via the shifted bf_hist projection above.
                                     post_channel_errband->SetPointEYhigh(ybin, scale*posterrband->error_up(flat_bin));
                                     post_channel_errband->SetPointEYlow(ybin, scale*posterrband->error_down(flat_bin));
-                                    post_channel_errband->SetPointY(ybin, post_channel_errband->GetPointY(ybin) + scale*posterrband->center_shift(flat_bin));
                                 }
                                 objs[mdc+"_posterrband_slice_xbin"+std::to_string(xbin)] = post_channel_errband->Clone();
                             }
@@ -1855,29 +1866,29 @@ namespace PROfit{
                         }
 
                         auto make_y_errorband = [&](const PROerrorbar &band, TH1D *central) {
+                            // The central hist is projected from the (already shifted)
+                            // bf_hist for the post band, so the graph is born anchored
+                            // at the constrained best fit; only widths are set here.
                             TGraphAsymmErrors *graph = new TGraphAsymmErrors(central);
                             for(size_t ybin = 0; ybin < channel_nbins_y; ++ybin) {
-                                double variance = 0.0, shift = 0.0;
-                                for(size_t x1 = 0; x1 < channel_nbins_x; ++x1) {
-                                    shift += band.center_shift(tot_offset+x1*channel_nbins_y+ybin);
+                                double variance = 0.0;
+                                for(size_t x1 = 0; x1 < channel_nbins_x; ++x1)
                                     for(size_t x2 = 0; x2 < channel_nbins_x; ++x2)
                                         variance += band.covariance(tot_offset+x1*channel_nbins_y+ybin,
                                                                     tot_offset+x2*channel_nbins_y+ybin);
-                                }
                                 double error = std::sqrt(std::max(0.0, variance));
                                 if(bool(opt&PlotOptions::AreaNormalized) || bool(opt&PlotOptions::BinWidthScaled)) {
+                                    // central is shifted, so the ebar-units reference is
+                                    // error_point + center_shift: keeps the conversion
+                                    // factor free of the pull.
                                     double point = 0.0;
                                     for(size_t xbin = 0; xbin < channel_nbins_x; ++xbin)
-                                        point += band.error_point(tot_offset+xbin*channel_nbins_y+ybin);
-                                    if(point != 0.0 && std::isfinite(point)) {
-                                        error *= central->GetBinContent(ybin+1)/point;
-                                        shift *= central->GetBinContent(ybin+1)/point;
-                                    }
+                                        point += band.error_point(tot_offset+xbin*channel_nbins_y+ybin)
+                                               + band.center_shift(tot_offset+xbin*channel_nbins_y+ybin);
+                                    if(point != 0.0 && std::isfinite(point)) error *= central->GetBinContent(ybin+1)/point;
                                 }
                                 graph->SetPointEYhigh(ybin, error);
                                 graph->SetPointEYlow(ybin, error);
-                                // Anchor at the posterior center (zero shift for prior bands).
-                                graph->SetPointY(ybin, graph->GetPointY(ybin) + shift);
                             }
                             return graph;
                         };
@@ -1966,6 +1977,9 @@ namespace PROfit{
                     }
 
                     TH1D* bf_hist = NULL;
+                    // ebar-units -> drawn-units conversion per bin, computed from the
+                    // UNSHIFTED curve (the shift below must not contaminate it).
+                    std::vector<float> post_conv;
                     if(best_fit) {
                         bf_hist = new TH1D(("bf"+std::to_string(global_channel_index)).c_str(), "", channel_nbins_x, edges.data());
                         for(size_t bin = 0; bin < channel_nbins_x; ++bin) {
@@ -1975,6 +1989,22 @@ namespace PROfit{
                             bf_hist->Scale(1, "width");
                         if(bool(opt&PlotOptions::AreaNormalized))
                             bf_hist->Scale(1.0/bf_hist->Integral());
+                        // Fold the posterior covariance pull into the drawn curve:
+                        // this is the CONSTRAINED best fit (spline best fit + data
+                        // constraint on the covariance systematics), the same center
+                        // the band is measured about. Zero shift for prior bands.
+                        if(posterrband) {
+                            post_conv.assign(channel_nbins_x, 1.0f);
+                            for(size_t bin = 0; bin < channel_nbins_x; ++bin) {
+                                if(bool(opt&PlotOptions::AreaNormalized) || bool(opt&PlotOptions::BinWidthScaled)) {
+                                    float denom = posterrband_1d->error_point(bin);
+                                    float f = (denom != 0 && std::isfinite(denom)) ? bf_hist->GetBinContent(bin+1)/denom : 1.0f;
+                                    if(!std::isfinite(f)) f = 1.0f;
+                                    post_conv[bin] = f;
+                                }
+                                bf_hist->SetBinContent(bin+1, bf_hist->GetBinContent(bin+1) + post_conv[bin]*posterrband_1d->center_shift(bin));
+                            }
+                        }
                         objs[mdc+"_bestfit"] = bf_hist->Clone();
                     }
 
@@ -2003,19 +2033,15 @@ namespace PROfit{
 
                     TGraphAsymmErrors *post_channel_errband = NULL;
                     if(posterrband) {
+                        // bf_hist already IS the constrained best fit (shift folded in
+                        // above), so the graph is born anchored at the band center;
+                        // only the widths need the unit conversion, taken from the
+                        // pre-shift factors so the shift does not contaminate them.
                         post_channel_errband = new TGraphAsymmErrors(bf_hist);
                         for(size_t bin = 0; bin < channel_nbins_x; ++bin) {
-                            float scale = 1.0;
-                            if(bool(opt&PlotOptions::AreaNormalized) || bool(opt&PlotOptions::BinWidthScaled)) {
-                                float denom = posterrband_1d->error_point(bin);
-                                scale = (denom != 0 && std::isfinite(denom)) ? post_channel_errband->GetPointY(bin) / denom : 1.0f;
-                                if(!std::isfinite(scale)) scale = 1.0f;
-                            }
+                            float scale = post_conv.empty() ? 1.0f : post_conv[bin];
                             post_channel_errband->SetPointEYhigh(bin, scale*(posterrband_1d->error_up(bin)));
                             post_channel_errband->SetPointEYlow(bin, scale*(posterrband_1d->error_down(bin)));
-                            // Anchor the band at the posterior center: best fit plus
-                            // the data-constraint pull (zero for unconstrained bands).
-                            post_channel_errband->SetPointY(bin, post_channel_errband->GetPointY(bin) + scale*(posterrband_1d->center_shift(bin)));
                         }
                         objs[mdc+"_posterrband"] = post_channel_errband->Clone();
                     }
