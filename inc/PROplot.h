@@ -428,6 +428,13 @@ namespace PROfit{
      * @param post_covar Output post-fit parameter covariance matrix (splines only).
      * @param scale      If true, divide error bars by bin width.
      * @param var_index  Variable index (default 0).
+     * @param data_spec  Optional collapsed data spectrum. When empty (default), the band
+     *                   includes prior throws of the covariance-type systematics. When given,
+     *                   each MCMC sample instead receives the data-constrained posterior pull
+     *                   of the covariance systematics (G. Putnam, "How to Obtain Pull Terms
+     *                   for Systematic Uncertainties Embedded in a Covariance Matrix", SBN
+     *                   note, May 2026), shrinking the post-fit band. Pass this only for
+     *                   post-fit bands; the pre-fit/prior band must stay unconstrained.
      * @return PROerrorbar with per-bin asymmetric uncertainties and the histogram covariance.
      */
     template<class T, class P>
@@ -461,7 +468,7 @@ namespace PROfit{
 
 	    std::function<void(const Eigen::VectorXf&)> action;
 	    
-            if (data_spec.rows() == 0){
+            if (data_spec.size() == 0){
 	        action = [&](const Eigen::VectorXf &value) {
                 nsteps += 1;
 		for(size_t i = 0; i < config.m_num_variable_bins_total_collapsed[var_index]; ++i)
@@ -495,35 +502,71 @@ namespace PROfit{
 
             post_covar /= nsteps;
             if (data_spec.size() != 0) {
-                // 1. Pre-compute static matrices ONCE outside the loop
-                Eigen::MatrixXf C_stat = cv_coll.asDiagonal();
-                Eigen::MatrixXf M = C_stat + L.transpose() * L;
-                auto M_solver = M.ldlt(); // Pre-factorize M once
+                // Constrained posterior pull for covariance-type systematics,
+               // the collapsed systematic covariance is
+                // Sigma = L*L^T (L = U*sqrt(S) from DecomposeFractionalCovariance)
+                // and the spectrum shift is L*alpha (matchs the note's R = L^T)
             
-                size_t k = L.cols();
-                Eigen::VectorXf C_inv_diag = cv_coll.cwiseInverse();
-                Eigen::MatrixXf inner_matrix = Eigen::MatrixXf::Identity(k, k) 
-                                             + L.transpose() * C_inv_diag.asDiagonal() * L;
-                Eigen::MatrixXf inner_inv = inner_matrix.ldlt().solve(Eigen::MatrixXf::Identity(k, k));
-                Eigen::LLT<Eigen::MatrixXf> llt(inner_inv);
-                Eigen::MatrixXf C_chol = llt.matrixL();
+                // Mark Note: Restrict the constraint to the bins the fit metric actually
+                // used, aka the active bins PR from a while back with data > 0 (PROchi drops zero-data bins
+                // and its stat term is diag(max(data,1))). PROjector-masked or
+                // empty bins must not pull on alpha.
+                std::vector<int> contrib;
+                for(int i = 0; i < data_spec.size(); ++i)
+                    if(config.IsBinActive(var_index, i) && data_spec(i) > 0)
+                        contrib.push_back(i);
             
-                // 2. Fast loop over steps
-                for(int ai = 0; ai < nsteps; ai++) {
-                    for(size_t i = 0; i < throws.size(); ++i) {
-                        throws(i) = nd(PROseed::global_rng);
-                    }
-            
-                    // Uses pre-factorized solver: fast O(k^2) instead of O(k^3)
-                    Eigen::VectorXf residual = data_spec - specs.at(ai);
-                    Eigen::VectorXf alpha_min = L * M_solver.solve(residual);
-            
-                    Eigen::VectorXf alpha_hat = alpha_min + C_chol * throws;
-                    specs.at(ai) += L * alpha_hat;
-                    
-                    Eigen::VectorXf diff_hist = specs.at(ai) - cv_coll;
+                std::vector<int> modes;
+                for(int j = 0; j < L.cols(); ++j)
+                    if(L.col(j).squaredNorm() > 0) modes.push_back(j);
 
-                    post_hist_covar += diff_hist * diff_hist.transpose();
+                if(!contrib.empty() && !modes.empty()) {
+                    const size_t k = modes.size(), nb = contrib.size();
+                    Eigen::MatrixXd L_shift(L.rows(), k);
+                    for(size_t j = 0; j < k; ++j)
+                        L_shift.col(j) = L.col(modes[j]).cast<double>();
+                    Eigen::MatrixXd L_red(nb, k);
+                    Eigen::VectorXd C_inv_red(nb);
+                    for(size_t i = 0; i < nb; ++i) {
+                        L_red.row(i) = L_shift.row(contrib[i]);
+                        C_inv_red(i) = 1.0 / std::max<double>(data_spec(contrib[i]), 1.0);
+                    }
+                    Eigen::MatrixXd inner = Eigen::MatrixXd::Identity(k, k)
+                                          + L_red.transpose() * C_inv_red.asDiagonal() * L_red;
+                    Eigen::LLT<Eigen::MatrixXd> inner_llt(inner);
+                    if(inner_llt.info() != Eigen::Success) {
+                        // inner is PD by construction. any failures here are float math noise from L. Clamp eigenvalues and retry.
+                        log<LOG_WARNING>(L"%1% || LLT of posterior pull matrix failed; clamping eigenvalues.") % __func__;
+                        Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> es(inner);
+                        inner = es.eigenvectors()
+                              * es.eigenvalues().cwiseMax(1e-12).asDiagonal()
+                              * es.eigenvectors().transpose();
+                        inner_llt.compute(inner);
+                    }
+
+                    Eigen::VectorXd throws_k(k), residual(nb);
+                    for(size_t ai = 0; ai < nsteps; ++ai) {
+                        for(size_t i = 0; i < k; ++i)
+                            throws_k(i) = nd(PROseed::global_rng);
+                        for(size_t i = 0; i < nb; ++i)
+                            residual(i) = data_spec(contrib[i]) - specs.at(ai)(contrib[i]);
+                        Eigen::VectorXd alpha_min =
+                            inner_llt.solve(L_red.transpose() * (C_inv_red.asDiagonal() * residual));
+                        // delta = U^-1 v with inner = U^T U has cov(delta) = inner^-1.
+                        Eigen::VectorXd alpha_hat =
+                            alpha_min + inner_llt.matrixU().solve(throws_k);
+                        specs.at(ai) += (L_shift * alpha_hat).cast<float>();
+
+                        Eigen::VectorXf diff_hist = specs.at(ai) - cv_coll;
+                        post_hist_covar += diff_hist * diff_hist.transpose();
+                    }
+                } else {
+                    // Nothing to constrain , but still accumulate the band covariance
+                    // the constraint loop would otherwise have provided.
+                    for(size_t ai = 0; ai < nsteps; ++ai) {
+                        Eigen::VectorXf diff_hist = specs.at(ai) - cv_coll;
+                        post_hist_covar += diff_hist * diff_hist.transpose();
+                    }
                 }
             }
 
