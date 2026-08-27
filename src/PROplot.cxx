@@ -894,7 +894,7 @@ namespace PROfit{
                 leg_hack->SetFillColor(bfcol);
                 leg_hack->SetLineColor(bfcol);
                 leg_hack->SetLineWidth(2);
-                leg->AddEntry(leg_hack,"Constrained Best-Fit #pm 1#sigma (post-fit)" ,"fl");
+                leg->AddEntry(leg_hack,"Best-Fit #pm 1#sigma (post-fit)" ,"fl");
             }else{
                 leg->AddEntry(leg_hack, "Best Fit #pm 1#sigma (post-fit)", "l");
             }
