@@ -458,6 +458,14 @@ namespace PROfit{
             }
 
             Eigen::VectorXf cv_coll = CollapseMatrix(config, cv);
+            // The data constraint only makes sense in this variable's collapsed
+            // space; a mismatched spectrum (e.g. from another variable) would
+            // index out of range below. Ignore it loudly rather than crash.
+            bool use_data = data_spec.size() != 0;
+            if(use_data && data_spec.size() != cv_coll.size()) {
+                log<LOG_ERROR>(L"%1% || data_spec has %2% bins but variable %3% has %4% collapsed bins; ignoring the data constraint.") % __func__ % data_spec.size() % var_index % cv_coll.size();
+                use_data = false;
+            }
             Eigen::MatrixXf L;
             if(metric.GetSysts().GetNCovar() > 0) L = metric.GetSysts().DecomposeFractionalCovariance(config, cv);
             else L = Eigen::MatrixXf::Zero(config.m_num_variable_bins_total_collapsed[var_index], config.m_num_variable_bins_total_collapsed[var_index]);
@@ -476,7 +484,7 @@ namespace PROfit{
 
 	    std::function<void(const Eigen::VectorXf&)> action;
 	    
-            if (data_spec.size() == 0){
+            if (!use_data){
 	        action = [&](const Eigen::VectorXf &value) {
                 nsteps += 1;
 		for(size_t i = 0; i < config.m_num_variable_bins_total_collapsed[var_index]; ++i)
@@ -510,7 +518,7 @@ namespace PROfit{
             met.run(burnin, iterations, action, pbar);
 
             post_covar /= nsteps;
-            if (data_spec.size() != 0) {
+            if (use_data) {
                 // Constrained posterior pull for covariance-type systematics,
                // the collapsed systematic covariance is
                 // Sigma = L*L^T (L = U*sqrt(S) from DecomposeFractionalCovariance)
@@ -647,6 +655,11 @@ namespace PROfit{
                 if (std::isnan(elo) || std::isinf(elo)) {
                     log<LOG_ERROR>(L"%1% || CRITICAL ERROR: error_down bin %2% is invalid (value: %3%)") % __func__ % i % elo;
                     throw std::runtime_error("PROerrorbar error_down contains NaN or Inf at bin " + std::to_string(i));
+                }
+                float shf = ebar.center_shift(i);
+                if (std::isnan(shf) || std::isinf(shf)) {
+                    log<LOG_ERROR>(L"%1% || CRITICAL ERROR: center_shift bin %2% is invalid (value: %3%)") % __func__ % i % shf;
+                    throw std::runtime_error("PROerrorbar center_shift contains NaN or Inf at bin " + std::to_string(i));
                 }
             }
 

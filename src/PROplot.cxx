@@ -319,7 +319,9 @@ namespace PROfit{
         // Sigma - Sigma(C+Sigma)^-1 Sigma. Exact here: with no free fit
         // parameters the Gaussian conditional is the whole posterior.
         Eigen::VectorXf shift = Eigen::VectorXf::Zero(cv_coll.size());
-        if(data_spec.size() != 0 && syst.GetNCovar() > 0) {
+        if(data_spec.size() != 0 && data_spec.size() != cv_coll.size()) {
+            log<LOG_ERROR>(L"%1% || data_spec has %2% bins but variable %3% has %4% collapsed bins; ignoring the data constraint.") % __func__ % data_spec.size() % var_index % cv_coll.size();
+        } else if(data_spec.size() != 0 && syst.GetNCovar() > 0) {
             std::vector<int> contrib;
             for(int i = 0; i < data_spec.size(); ++i)
                 if(config.IsBinActive(var_index, i) && data_spec(i) > 0)
@@ -444,8 +446,10 @@ namespace PROfit{
                     }
                 }
 
-                errband_1d->error_up(bx) = std::sqrt(err_sq);
-                errband_1d->error_down(bx) = std::sqrt(err_sq);
+                // Clamp: the central covariance can make a fully-constrained
+                // block sum slightly negative in float.
+                errband_1d->error_up(bx) = std::sqrt(std::max(0.0, err_sq));
+                errband_1d->error_down(bx) = std::sqrt(std::max(0.0, err_sq));
             }
             else{
                 errband_1d->error_point(bx) = errband.error_point(bx+offset);
