@@ -1675,6 +1675,7 @@ namespace PROfit{
                                     const size_t flat_bin = xbin * channel_nbins_y + (ybin - 1) + tot_offset;
                                     post_channel_errband->SetPointEYhigh(xbin, scale*posterrband->error_up(flat_bin));
                                     post_channel_errband->SetPointEYlow(xbin, scale*posterrband->error_down(flat_bin));
+                                    post_channel_errband->SetPointY(xbin, post_channel_errband->GetPointY(xbin) + scale*posterrband->center_shift(flat_bin));
                                 }
                                 objs[mdc+"_posterrband_slice_ybin"+std::to_string(ybin)] = post_channel_errband->Clone();
                             }
@@ -1736,6 +1737,7 @@ namespace PROfit{
                                     const size_t flat_bin = (xbin-1)*channel_nbins_y+ybin+tot_offset;
                                     post_channel_errband->SetPointEYhigh(ybin, scale*posterrband->error_up(flat_bin));
                                     post_channel_errband->SetPointEYlow(ybin, scale*posterrband->error_down(flat_bin));
+                                    post_channel_errband->SetPointY(ybin, post_channel_errband->GetPointY(ybin) + scale*posterrband->center_shift(flat_bin));
                                 }
                                 objs[mdc+"_posterrband_slice_xbin"+std::to_string(xbin)] = post_channel_errband->Clone();
                             }
@@ -1851,20 +1853,27 @@ namespace PROfit{
                         auto make_y_errorband = [&](const PROerrorbar &band, TH1D *central) {
                             TGraphAsymmErrors *graph = new TGraphAsymmErrors(central);
                             for(size_t ybin = 0; ybin < channel_nbins_y; ++ybin) {
-                                double variance = 0.0;
-                                for(size_t x1 = 0; x1 < channel_nbins_x; ++x1)
+                                double variance = 0.0, shift = 0.0;
+                                for(size_t x1 = 0; x1 < channel_nbins_x; ++x1) {
+                                    shift += band.center_shift(tot_offset+x1*channel_nbins_y+ybin);
                                     for(size_t x2 = 0; x2 < channel_nbins_x; ++x2)
                                         variance += band.covariance(tot_offset+x1*channel_nbins_y+ybin,
                                                                     tot_offset+x2*channel_nbins_y+ybin);
+                                }
                                 double error = std::sqrt(std::max(0.0, variance));
                                 if(bool(opt&PlotOptions::AreaNormalized) || bool(opt&PlotOptions::BinWidthScaled)) {
                                     double point = 0.0;
                                     for(size_t xbin = 0; xbin < channel_nbins_x; ++xbin)
                                         point += band.error_point(tot_offset+xbin*channel_nbins_y+ybin);
-                                    if(point != 0.0 && std::isfinite(point)) error *= central->GetBinContent(ybin+1)/point;
+                                    if(point != 0.0 && std::isfinite(point)) {
+                                        error *= central->GetBinContent(ybin+1)/point;
+                                        shift *= central->GetBinContent(ybin+1)/point;
+                                    }
                                 }
                                 graph->SetPointEYhigh(ybin, error);
                                 graph->SetPointEYlow(ybin, error);
+                                // Anchor at the posterior center (zero shift for prior bands).
+                                graph->SetPointY(ybin, graph->GetPointY(ybin) + shift);
                             }
                             return graph;
                         };

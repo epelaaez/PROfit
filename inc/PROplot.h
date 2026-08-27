@@ -469,6 +469,7 @@ namespace PROfit{
             Eigen::VectorXf splines_bf = best_fit.segment(nphys, nspline);
             post_covar = Eigen::MatrixXf::Constant(nspline, nspline, 0);
             Eigen::MatrixXf post_hist_covar = Eigen::MatrixXf::Constant(cv_coll.size(), cv_coll.size(), 0);
+            Eigen::VectorXf hist_diff_sum = Eigen::VectorXf::Zero(cv_coll.size());
             size_t nsteps = 0;
             std::vector<Eigen::VectorXf> specs;
             std::vector<std::vector<float>> param_samples(nspline);
@@ -489,6 +490,7 @@ namespace PROfit{
                 Eigen::VectorXf diff = splines-splines_bf;
                 post_covar += diff * diff.transpose();
 		Eigen::VectorXf diff_hist = specs.back() - cv_coll;
+                hist_diff_sum += diff_hist;
                 post_hist_covar += diff_hist * diff_hist.transpose();
                 };
             }
@@ -565,6 +567,7 @@ namespace PROfit{
                         specs.at(ai) += (L_shift * alpha_hat).cast<float>();
 
                         Eigen::VectorXf diff_hist = specs.at(ai) - cv_coll;
+                        hist_diff_sum += diff_hist;
                         post_hist_covar += diff_hist * diff_hist.transpose();
                     }
                 } else {
@@ -572,12 +575,19 @@ namespace PROfit{
                     // the constraint loop would otherwise have provided.
                     for(size_t ai = 0; ai < nsteps; ++ai) {
                         Eigen::VectorXf diff_hist = specs.at(ai) - cv_coll;
+                        hist_diff_sum += diff_hist;
                         post_hist_covar += diff_hist * diff_hist.transpose();
                     }
                 }
             }
 
             post_hist_covar /= nsteps;
+            // Make the covariance CENTRAL (about the sample mean, not the
+            // best-fit CV): the data-pull displacement lives in center_shift,
+            // and projected band widths built from this covariance must not
+            // absorb it. Matches the analytic getCovarianceOnlyErrorBand.
+            hist_diff_sum /= nsteps;
+            post_hist_covar -= hist_diff_sum * hist_diff_sum.transpose();
             param_err_lo = Eigen::VectorXf::Zero(nspline);
             param_err_hi = Eigen::VectorXf::Zero(nspline);
             for(int i = 0; i < nspline; ++i) {
