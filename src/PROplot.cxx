@@ -300,7 +300,7 @@ namespace PROfit{
         return ebar;
     }
 
-    PROerrorbar getCovarianceOnlyErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const Eigen::VectorXf &params, bool scale, int var_index) {
+    PROerrorbar getCovarianceOnlyErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const Eigen::VectorXf &params, bool scale, int var_index, const Eigen::VectorXf &data_spec) {
         Eigen::VectorXf cv = FillSpectra(config, prop, syst, model, params, true, var_index).Spec();
         Eigen::VectorXf cv_coll = CollapseMatrix(config, cv, var_index);
 
@@ -312,6 +312,36 @@ namespace PROfit{
             cov = Eigen::MatrixXf::Zero(cv_coll.size(), cv_coll.size());
         }
 
+        // Data-constrained posterior of the covariance systematics (Putnam SBN
+        // note Eqs. 7-8): with u = d - cv on the contributing bins (active and
+        // data > 0, PROchi convention, C = diag(max(data,1))), the prediction
+        // shifts by Sigma(C+Sigma)^-1 u and the band covariance becomes
+        // Sigma - Sigma(C+Sigma)^-1 Sigma. Exact here: with no free fit
+        // parameters the Gaussian conditional is the whole posterior.
+        Eigen::VectorXf shift = Eigen::VectorXf::Zero(cv_coll.size());
+        if(data_spec.size() != 0 && syst.GetNCovar() > 0) {
+            std::vector<int> contrib;
+            for(int i = 0; i < data_spec.size(); ++i)
+                if(config.IsBinActive(var_index, i) && data_spec(i) > 0)
+                    contrib.push_back(i);
+            if(!contrib.empty()) {
+                const size_t nb = contrib.size();
+                Eigen::MatrixXd Sig_full = cov.cast<double>();
+                Eigen::MatrixXd K(cv_coll.size(), nb);      // Sigma[:, contrib]
+                Eigen::MatrixXd M(nb, nb);                  // C + Sigma on contrib bins
+                Eigen::VectorXd u(nb);
+                for(size_t a = 0; a < nb; ++a) {
+                    K.col(a) = Sig_full.col(contrib[a]);
+                    for(size_t b = 0; b < nb; ++b) M(a, b) = Sig_full(contrib[a], contrib[b]);
+                    M(a, a) += std::max<double>(data_spec(contrib[a]), 1.0);
+                    u(a) = data_spec(contrib[a]) - cv_coll(contrib[a]);
+                }
+                Eigen::LDLT<Eigen::MatrixXd> M_ldlt(M);
+                shift = (K * M_ldlt.solve(u)).cast<float>();
+                cov = (Sig_full - K * M_ldlt.solve(K.transpose())).cast<float>();
+            }
+        }
+
         PROerrorbar ebar(cv_coll.size());
         for(int i = 0; i < cv_coll.size(); ++i) {
             float scale_factor = scale ? 1.0/config.collapsed_bin_widths.at(var_index)(i) : 1.0;
@@ -320,6 +350,7 @@ namespace PROfit{
             ebar.error_up(i) = err;
             ebar.error_down(i) = err;
             ebar.error_point(i) = cv_coll(i)*scale_factor;
+            ebar.center_shift(i) = shift(i)*scale_factor;
         }
         ebar.covariance = cov;
         return ebar;
@@ -407,6 +438,7 @@ namespace PROfit{
                 double err_sq = 0;
                 for(int by1 = (int)(nbinsy*bx)+offset; by1 < (int)(nbinsy*(bx+1))+offset; by1++){
                     errband_1d->error_point(bx) += errband.error_point(by1);
+                    errband_1d->center_shift(bx) += errband.center_shift(by1);
                     for(int by2 = (int)(nbinsy*bx)+offset; by2 < (int)(nbinsy*(bx+1))+offset; by2++){
                         err_sq += errband.covariance(by1, by2);
                     }
@@ -417,6 +449,7 @@ namespace PROfit{
             }
             else{
                 errband_1d->error_point(bx) = errband.error_point(bx+offset);
+                errband_1d->center_shift(bx) = errband.center_shift(bx+offset);
                 errband_1d->error_up(bx) = errband.error_up(bx+offset);
                 errband_1d->error_down(bx) = errband.error_down(bx+offset);
             }
@@ -1967,6 +2000,9 @@ namespace PROfit{
                             }
                             post_channel_errband->SetPointEYhigh(bin, scale*(posterrband_1d->error_up(bin)));
                             post_channel_errband->SetPointEYlow(bin, scale*(posterrband_1d->error_down(bin)));
+                            // Anchor the band at the posterior center: best fit plus
+                            // the data-constraint pull (zero for unconstrained bands).
+                            post_channel_errband->SetPointY(bin, post_channel_errband->GetPointY(bin) + scale*(posterrband_1d->center_shift(bin)));
                         }
                         objs[mdc+"_posterrband"] = post_channel_errband->Clone();
                     }

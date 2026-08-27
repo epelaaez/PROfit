@@ -325,7 +325,14 @@ namespace PROfit{
      * @param var_index Variable index.
      * @return PROerrorbar with symmetric per-bin uncertainties and the bin covariance.
      */
-    PROerrorbar getCovarianceOnlyErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const Eigen::VectorXf &params, bool scale=false, int var_index=0);
+    /** @brief Analytic error band from the summed covariance (no MCMC). With an empty
+     *  @p data_spec this is the prior band sqrt(diag(Sigma)) about the prediction. When a
+     *  collapsed data spectrum is given, the band is the data-constrained posterior of the
+     *  covariance systematics (Putnam SBN note Eqs. 7-8): center shifted by
+     *  Sigma(C+Sigma)^-1 u and covariance Sigma - Sigma(C+Sigma)^-1 Sigma, restricted to
+     *  active bins with data>0 (PROchi convention, C = diag(max(data,1))). Exact when the
+     *  covariance systs are the only free parameters (the post-fit degenerate-chain path). */
+    PROerrorbar getCovarianceOnlyErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const Eigen::VectorXf &params, bool scale=false, int var_index=0, const Eigen::VectorXf &data_spec = Eigen::VectorXf());
 
     /**
      * @brief Result of getErrorBandBkgSubtracted: a signal-only error band plus the
@@ -592,12 +599,20 @@ namespace PROfit{
                 float scale_factor = scale ? 1.0/config.collapsed_bin_widths.at(var_index)(i) :  1.0;
                 if(std::isnan(scale_factor)) scale_factor = 1;
                 std::sort(binconts.begin(), binconts.end());
-                float ehi = std::abs((binconts[int(0.840*specs.size())] - cv(i))*scale_factor);
-                float elo = std::abs((cv(i) - binconts[int(0.160*specs.size())])*scale_factor);
+                // Percentile widths about the sample MEDIAN, not cv: for the
+                // data-constrained band the sample cloud is pulled toward the
+                // data, and |quantile - cv| would fold a thin displaced band
+                // into a fat one straddling the best fit. The displacement is
+                // reported separately in center_shift; error_point stays the
+                // best-fit spectrum (plot code uses it for unit conversion).
+                float med = binconts[int(0.500*specs.size())];
+                float ehi = (binconts[int(0.840*specs.size())] - med)*scale_factor;
+                float elo = (med - binconts[int(0.160*specs.size())])*scale_factor;
                 ebar.error_up(i) =  ehi;
                 ebar.error_down(i) =  elo;
                 ebar.error_point(i) = cv(i)*scale_factor;
-                log<LOG_INFO>(L"%1% || ErrorBand bin %2% %3% %4% %5% %6% ") % __func__ % i % cv(i) % ehi % elo % scale_factor ;
+                ebar.center_shift(i) = (med - cv(i))*scale_factor;
+                log<LOG_INFO>(L"%1% || ErrorBand bin %2% %3% %4% %5% %6% shift %7%") % __func__ % i % cv(i) % ehi % elo % scale_factor % ebar.center_shift(i);
             }
             ebar.covariance = post_hist_covar;
 
