@@ -134,6 +134,17 @@ PROpt::PROpt(int argc, char **argv) {
         //PROplot, plot things
         proplot_command = app.add_subcommand("plot", "Make plots of CV, or injected point with error bars and covariance.");
         proplot_command->add_flag("--with-splines", with_splines, "Include graphs of splines in output.");
+        proplot_command->add_flag("--with-covar", with_covar,
+            "Generate the covariance/correlation matrix plots (<tag>_PROplot_Covar.pdf and the "
+            "Covariance directory in the ROOT output). Off by default: with many "
+            "bins/systematics these are slow to build and produce very large PDFs.");
+        proplot_command->add_flag("--no-frac-syst", no_frac_syst,
+            "Skip the fractional-systematics breakdown/ratio PDFs. When combined with the "
+            "absence of --with-covar this also skips the slow spline->covariance conversion "
+            "entirely, and the chi2/ndf labels on the error-band plots are dropped.");
+        proplot_command->add_option("--band-throws", band_throws,
+            "Number of random systematic throws used to build the error band (default 2500).")
+            ->check(CLI::PositiveNumber);
         proplot_command->add_option("--bkg-subtract", bkg_subtract_pattern,
             "Wildcard (unanchored regex; plain substrings work, quote it in the shell) matching one or more subchannel names; that "
             "background's central-value prediction is subtracted from data and CV "

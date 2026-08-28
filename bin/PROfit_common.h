@@ -142,6 +142,8 @@ struct PROpt {
     std::vector<std::string> fit_preset = {"grad-good","grad-fast"};
     inline static const std::unordered_set<std::string> allowed_preset = {"good","fast","overkill","sensitivity","grad-fast","grad-good","grad-deep","grad-overkill"};
     bool with_splines = false, binwidth_scale = false, area_normalized = false, data_mc_ratio = false;
+    bool with_covar = false, no_frac_syst = false;
+    int band_throws = 2500;
     std::map<std::string, float> fake_data_osc_params;
     std::map<std::string, float> cv_osc_params;
     std::map<std::string, float> injected_systs;

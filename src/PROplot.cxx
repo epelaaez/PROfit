@@ -247,7 +247,7 @@ namespace PROfit{
 
             return spline_graphs;
         }
-    PROerrorbar getErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const PROspec &cv_spec, const Eigen::VectorXf &cvparams,bool scale, int other_index) {
+    PROerrorbar getErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const PROspec &cv_spec, const Eigen::VectorXf &cvparams,bool scale, int other_index, size_t nthrows) {
 
         Eigen::VectorXf cv = CollapseMatrix(config, cv_spec.Spec(), other_index);
 
@@ -268,7 +268,12 @@ namespace PROfit{
             }
         }
 
-        size_t nerrorsample = 2500;
+        size_t nerrorsample = nthrows;
+        // +/-1 sigma quantile indices: 0.84/0.16 of the sorted throws. At the
+        // default nthrows=2500 these are 2100/400, matching the historic
+        // hard-coded binconts[2.5*840] / binconts[2.5*160].
+        const size_t qhi = std::min((size_t)(0.84*nerrorsample), nerrorsample - 1);
+        const size_t qlo = (size_t)(0.16*nerrorsample);
 
         std::vector<Eigen::VectorXf> specs;
         std::uniform_int_distribution<uint32_t> dseed(0, std::numeric_limits<uint32_t>::max());
@@ -292,8 +297,8 @@ namespace PROfit{
             float scale_factor = scale ? 1.0/config.collapsed_bin_widths.at(other_index)(i) :  1.0;
             if(std::isnan(scale_factor)) scale_factor = 1;
             std::sort(binconts.begin(), binconts.end());
-            float ehi = std::abs((binconts[2.5*840] - cv(i))*scale_factor);
-            float elo = std::abs((cv(i) - binconts[2.5*160])*scale_factor);
+            float ehi = std::abs((binconts[qhi] - cv(i))*scale_factor);
+            float elo = std::abs((cv(i) - binconts[qlo])*scale_factor);
             ebar.error_up(i) =  ehi;
             ebar.error_down(i) =  elo;
             ebar.error_point(i) = cv(i)*scale_factor;
@@ -360,14 +365,19 @@ namespace PROfit{
         return ebar;
     }
 
-    PROsubtractedErrorBand getErrorBandBkgSubtracted(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const PROspec &cv_spec, const Eigen::VectorXf &cvparams, const std::vector<size_t> &bkg_subchannels, bool scale, int other_index) {
+    PROsubtractedErrorBand getErrorBandBkgSubtracted(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const PROspec &cv_spec, const Eigen::VectorXf &cvparams, const std::vector<size_t> &bkg_subchannels, bool scale, int other_index, size_t nthrows) {
 
         Eigen::VectorXf mask        = build_subchannel_bin_mask(config, bkg_subchannels, other_index);
         Eigen::VectorXf bkg_cv_full = cv_spec.Spec().cwiseProduct(mask);
         Eigen::VectorXf cv_sig      = CollapseMatrix(config, Eigen::VectorXf(cv_spec.Spec() - bkg_cv_full), other_index);
         Eigen::VectorXf bkg_cv_coll = CollapseMatrix(config, bkg_cv_full, other_index);
 
-        size_t nerrorsample = 2500;
+        size_t nerrorsample = nthrows;
+        // +/-1 sigma quantile indices: 0.84/0.16 of the sorted throws. At the
+        // default nthrows=2500 these are 2100/400, matching the historic
+        // hard-coded binconts[2.5*840] / binconts[2.5*160].
+        const size_t qhi = std::min((size_t)(0.84*nerrorsample), nerrorsample - 1);
+        const size_t qlo = (size_t)(0.16*nerrorsample);
 
         std::vector<Eigen::VectorXf> sig_specs;
         std::uniform_int_distribution<uint32_t> dseed(0, std::numeric_limits<uint32_t>::max());
@@ -394,8 +404,8 @@ namespace PROfit{
             float scale_factor = scale ? 1.0/config.collapsed_bin_widths.at(other_index)(i) :  1.0;
             if(std::isnan(scale_factor)) scale_factor = 1;
             std::sort(binconts.begin(), binconts.end());
-            float ehi = std::abs((binconts[2.5*840] - cv_sig(i))*scale_factor);
-            float elo = std::abs((cv_sig(i) - binconts[2.5*160])*scale_factor);
+            float ehi = std::abs((binconts[qhi] - cv_sig(i))*scale_factor);
+            float elo = std::abs((cv_sig(i) - binconts[qlo])*scale_factor);
             result.band.error_up(i) =  ehi;
             result.band.error_down(i) =  elo;
             result.band.error_point(i) = cv_sig(i)*scale_factor;
