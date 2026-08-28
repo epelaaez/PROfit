@@ -495,7 +495,12 @@ namespace PROfit {
         if(inconfig.m_num_variation_type_hist1d>0 || inconfig.m_num_variation_type_hist2d>0){
             for(auto& allow_sys : inconfig.m_mcgen_variation_type_map){
                 if(allow_sys.second=="hist1d" || allow_sys.second=="hist2d"){
-                    map_systematic_num_universe[allow_sys.first] = 1;
+                    // A name matching a <HistVarSection> carries as many universes as
+                    // it declared <variation> children (asymmetric case); otherwise the
+                    // usual single measured universe (symmetric case).
+                    auto hv_it = inconfig.m_histvar_knobvals_map.find(allow_sys.first);
+                    map_systematic_num_universe[allow_sys.first] =
+                        (hv_it != inconfig.m_histvar_knobvals_map.end()) ? hv_it->second.size() : 1;
                 }
             }
         }
@@ -639,7 +644,12 @@ namespace PROfit {
                     log<LOG_INFO>(L"%1% || External filename:  %2%, External Matrix :%3% . Use for variable number %4%") % __func__ % sv.back().external_filename.c_str() % sys_name.c_str() % sv.back().binning;
                 }
                 if(sys_mode == "hist1d" || sys_mode == "hist2d") {
-                    map_systematic_knob_vals[sys_name] = {1.0f};
+                    auto hv_it = inconfig.m_histvar_knobvals_map.find(sys_name);
+                    if(hv_it != inconfig.m_histvar_knobvals_map.end()) {
+                        map_systematic_knob_vals[sys_name].assign(hv_it->second.begin(), hv_it->second.end());
+                    } else {
+                        map_systematic_knob_vals[sys_name] = {1.0f};
+                    }
                     sv.back().knob_index = map_systematic_knob_vals[sys_name];
                     sv.back().knobval = sv.back().knob_index;
                     sv.back().binning = binningindex;
@@ -1512,35 +1522,66 @@ namespace PROfit {
                 if(spline_bin < 0) continue;
                 int var_num = inconfig.m_mcgen_variation_histaxisvars_map.at(var_syst_objs.front()->systname)[0];
                 float val = vars[var_num].first();
-                TH1 *h = inconfig.m_mcgen_variation_hist1d_map.at(var_syst_objs.front()->systname);
-                int bin = h->FindBin(val);
-                float wgt = h->GetBinContent(bin);
-                if(std::isnan(val) || std::isinf(val)) wgt = 1;
-                if(val < h->GetXaxis()->GetXmin() || val > h->GetXaxis()->GetXmax()) wgt = 1;
+                const auto &hists = inconfig.m_mcgen_variation_hist1d_map.at(var_syst_objs.front()->systname);
 
-                // Only filling 1 sigma, so just combine CV and Universe filling
-                for(auto so: var_syst_objs) {
-                    so->FillCV(spline_bin, mc_weight);
-                    so->FillUniverse(0, spline_bin, wgt*mc_weight);
+                for(auto so: var_syst_objs) so->FillCV(spline_bin, mc_weight);
+
+                // A HistVarSection may optionally restrict which subchannels this
+                // systematic's ratio-histogram lookup applies to (mirrors DetVarSection's
+                // <subchannel> list). Events outside that restriction get an inert
+                // (weight=1) fill below rather than skipping the loop
+                bool in_scope = true;
+                auto hv_restrict_it = inconfig.m_histvar_subchannels_map.find(var_syst_objs.front()->systname);
+                if(hv_restrict_it != inconfig.m_histvar_subchannels_map.end() && !hv_restrict_it->second.empty()) {
+                    in_scope = hv_restrict_it->second.count(inconfig.GetSubchannelName(subchannel_index)) > 0;
                 }
-                
+
+                // One measured universe (symmetric, hists.size()==1) or several
+                // (asymmetric, via HistVarSection)
+                for(int is = 0; is < var_syst_objs.front()->GetNUniverse(); ++is) {
+                    float wgt = 1;
+                    if(in_scope) {
+                        TH1 *h = hists[is];
+                        int bin = h->FindBin(val);
+                        wgt = h->GetBinContent(bin);
+                        if(std::isnan(val) || std::isinf(val)) wgt = 1;
+                        if(val < h->GetXaxis()->GetXmin() || val > h->GetXaxis()->GetXmax()) wgt = 1;
+                    }
+
+                    for(auto so: var_syst_objs)
+                        so->FillUniverse(is, spline_bin, wgt*mc_weight);
+                }
+
             } else if(var_syst_objs.front()->mode == "hist2d") {
                 if(spline_bin < 0) continue;
                 int xvar_num = inconfig.m_mcgen_variation_histaxisvars_map.at(var_syst_objs.front()->systname)[0];
                 int yvar_num = inconfig.m_mcgen_variation_histaxisvars_map.at(var_syst_objs.front()->systname)[1];
                 float xval = vars[xvar_num].first();
                 float yval = vars[yvar_num].first();
-                TH2 *h = inconfig.m_mcgen_variation_hist2d_map.at(var_syst_objs.front()->systname);
-                int bin = h->FindBin(xval, yval);
-                float wgt = h->GetBinContent(bin);
-                if(std::isnan(xval) || std::isnan(yval) || std::isinf(xval) || std::isinf(yval)) wgt = 1;
-                if(xval < h->GetXaxis()->GetXmin() || xval > h->GetXaxis()->GetXmax()
-                    || yval < h->GetYaxis()->GetXmin() || yval > h->GetYaxis()->GetXmax()) wgt = 1;
+                const auto &hists = inconfig.m_mcgen_variation_hist2d_map.at(var_syst_objs.front()->systname);
 
-                // Only filling 1 sigma, so just combine CV and Universe filling
-                for(auto so: var_syst_objs) {
-                    so->FillCV(spline_bin, mc_weight);
-                    so->FillUniverse(0, spline_bin, wgt*mc_weight);
+                for(auto so: var_syst_objs) so->FillCV(spline_bin, mc_weight);
+
+                // See the hist1d branch above for the rationale.
+                bool in_scope = true;
+                auto hv_restrict_it = inconfig.m_histvar_subchannels_map.find(var_syst_objs.front()->systname);
+                if(hv_restrict_it != inconfig.m_histvar_subchannels_map.end() && !hv_restrict_it->second.empty()) {
+                    in_scope = hv_restrict_it->second.count(inconfig.GetSubchannelName(subchannel_index)) > 0;
+                }
+
+                for(int is = 0; is < var_syst_objs.front()->GetNUniverse(); ++is) {
+                    float wgt = 1;
+                    if(in_scope) {
+                        TH2 *h = hists[is];
+                        int bin = h->FindBin(xval, yval);
+                        wgt = h->GetBinContent(bin);
+                        if(std::isnan(xval) || std::isnan(yval) || std::isinf(xval) || std::isinf(yval)) wgt = 1;
+                        if(xval < h->GetXaxis()->GetXmin() || xval > h->GetXaxis()->GetXmax()
+                            || yval < h->GetYaxis()->GetXmin() || yval > h->GetYaxis()->GetXmax()) wgt = 1;
+                    }
+
+                    for(auto so: var_syst_objs)
+                        so->FillUniverse(is, spline_bin, wgt*mc_weight);
                 }
             } else if(var_syst_objs.front()->mode == "explicit_spline") {
                 if(spline_bin < 0) continue;

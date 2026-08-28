@@ -337,7 +337,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
             % __func__ % i_prime;
     }
 
-    std::vector<std::string> allowed_elements ={"mode", "detector", "channel", "MCFile","WeightMaps","model","variation_list","systematics","correlation","varied_spectrum", "ShapeOnlyUncertainty", "data", "plotpot", "DetVarFiles"   };
+    std::vector<std::string> allowed_elements = {"mode", "detector", "channel", "MCFile","WeightMaps","model","variation_list","systematics","correlation","varied_spectrum", "ShapeOnlyUncertainty", "data", "plotpot", "DetVarFiles", "HistVarFiles"   };
     for (tinyxml2::XMLElement* elem = doc.FirstChildElement(); elem; elem = elem->NextSiblingElement()) {
         std::string name = elem->Name();
         if (std::find(allowed_elements.begin(), allowed_elements.end(), name) == allowed_elements.end()) {
@@ -1337,6 +1337,69 @@ int PROconfig::LoadFromXML(const std::string &filename){
         // when a variation name matches an allowlist entry
     }
 
+    // Parse HistVarFiles section (container of one or more HistVarSection blocks),
+    tinyxml2::XMLElement *pHistVarContainer = doc.FirstChildElement("HistVarFiles");
+    // <HistVarFiles> may be included from a snippet nested inside <variation_list>
+    // (rather than living as a top-level sibling like <DetVarFiles>), so fall back to
+    // looking inside pList (the <variation_list>/<systematics> element) if not found
+    // at document scope.
+    if(!pHistVarContainer && pList) pHistVarContainer = pList->FirstChildElement("HistVarFiles");
+    if(pHistVarContainer) {
+        log<LOG_INFO>(L"%1% || Found <HistVarFiles> section in XML, parsing hist1d/hist2d variation files...") % __func__;
+
+        tinyxml2::XMLElement *pHistVarSection = pHistVarContainer->FirstChildElement("HistVarSection");
+        if(!pHistVarSection) {
+            log<LOG_ERROR>(L"%1% || ERROR: <HistVarFiles> must contain at least one <HistVarSection> element") % __func__;
+            exit(EXIT_FAILURE);
+        }
+
+        while(pHistVarSection) {
+            const char* section_name = pHistVarSection->Attribute("name");
+            if(!section_name) {
+                log<LOG_ERROR>(L"%1% || ERROR: <HistVarSection> must have a name attribute") % __func__;
+                exit(EXIT_FAILURE);
+            }
+
+            tinyxml2::XMLElement *pHistVar = pHistVarSection->FirstChildElement("variation");
+            if(!pHistVar) {
+                log<LOG_ERROR>(L"%1% || ERROR: <HistVarSection> '%2%' must contain at least one <variation> element") % __func__ % section_name;
+                exit(EXIT_FAILURE);
+            }
+            while(pHistVar) {
+                const char* hv_filename = pHistVar->Attribute("filename");
+                const char* hv_histname = pHistVar->Attribute("histname");
+                const char* hv_knobval = pHistVar->Attribute("knobval");
+                if(!hv_filename || !hv_histname || !hv_knobval) {
+                    log<LOG_ERROR>(L"%1% || ERROR: <variation> under <HistVarSection> '%2%' must have filename, histname, and knobval attributes")
+                        % __func__ % section_name;
+                    exit(EXIT_FAILURE);
+                }
+                m_histvar_files_map[section_name].emplace_back(hv_filename, hv_histname);
+                m_histvar_knobvals_map[section_name].push_back(strtod(hv_knobval, &end));
+                log<LOG_INFO>(L"%1% || HistVarSection '%2%': variation filename=%3% histname=%4% knobval=%5%")
+                    % __func__ % section_name % hv_filename % hv_histname % m_histvar_knobvals_map[section_name].back();
+                pHistVar = pHistVar->NextSiblingElement("variation");
+            }
+
+            // Optional <subchannel> restriction list, mirroring DetVarSection's mechanism:
+            // if given, this systematic's hist1d/hist2d lookup only applies to events in
+            // one of these subchannels (matched by PROconfig::GetSubchannelName's fullname
+            // string in PROcreate.cxx's fill loop); absent means unrestricted, same as before.
+            tinyxml2::XMLElement *pHistVarSubchannel = pHistVarSection->FirstChildElement("subchannel");
+            while(pHistVarSubchannel) {
+                const char* sc_text = pHistVarSubchannel->GetText();
+                if(sc_text) {
+                    m_histvar_subchannels_map[section_name].insert(sc_text);
+                    log<LOG_INFO>(L"%1% || HistVarSection '%2%': restricted to subchannel %3%")
+                        % __func__ % section_name % sc_text;
+                }
+                pHistVarSubchannel = pHistVarSubchannel->NextSiblingElement("subchannel");
+            }
+
+            pHistVarSection = pHistVarSection->NextSiblingElement("HistVarSection");
+        }
+    }
+
     if(!pList){
         log<LOG_DEBUG>(L"%1% || No Allowlist or Denylist set, including ALL variations by default.") % __func__  ;
     }else{
@@ -1452,13 +1515,46 @@ int PROconfig::LoadFromXML(const std::string &filename){
                     }
                     int v = atoi(xvar+3);
                     m_mcgen_variation_histaxisvars_map[wt][0] = v;
-                    TFile fin(filename);
-                    if(strcmp(variation_type, "hist1d") == 0) {
-                        m_mcgen_variation_hist1d_map[wt] = (TH1*)fin.Get<TH1>(wt.c_str())->Clone();
-                        m_mcgen_variation_hist1d_map[wt]->SetDirectory(0);
-                    } else { 
-                        m_mcgen_variation_hist2d_map[wt] = (TH2*)fin.Get<TH2>(wt.c_str())->Clone();
-                        m_mcgen_variation_hist2d_map[wt]->SetDirectory(0);
+
+                    auto hv_it = m_histvar_files_map.find(wt);
+                    if(hv_it != m_histvar_files_map.end()) {
+                        // Multi-universe (asymmetric) case: this name matches a
+                        // <HistVarSection>, so read every declared <variation> instead
+                        // of the single filename attribute below.
+                        if(hv_it->second.size() > 1 &&
+                           !(mirrored && (strcmp(mirrored, "false") == 0 || strcmp(mirrored, "no") == 0 || strcmp(mirrored, "0") == 0))) {
+                            log<LOG_ERROR>(L"%1% || Systematic '%2%' resolves against a HistVarSection with %3% independently measured "
+                                           L"universes; mirror=\"false\" must be set explicitly (mirroring a multi-universe input is "
+                                           L"contradictory - each universe is already an independent measurement, not one to be reflected).")
+                                % __func__ % wt.c_str() % hv_it->second.size();
+                            exit(EXIT_FAILURE);
+                        }
+                        for(const auto& file_hist : hv_it->second) {
+                            TFile hv_fin(file_hist.first.c_str());
+                            if(strcmp(variation_type, "hist1d") == 0) {
+                                TH1* h = (TH1*)hv_fin.Get<TH1>(file_hist.second.c_str())->Clone();
+                                h->SetDirectory(0);
+                                m_mcgen_variation_hist1d_map[wt].push_back(h);
+                            } else {
+                                TH2* h = (TH2*)hv_fin.Get<TH2>(file_hist.second.c_str())->Clone();
+                                h->SetDirectory(0);
+                                m_mcgen_variation_hist2d_map[wt].push_back(h);
+                            }
+                        }
+                        log<LOG_INFO>(L"%1% || Systematic '%2%' resolved against HistVarSection: %3% universes")
+                            % __func__ % wt.c_str() % hv_it->second.size();
+                    } else {
+                        // Single-universe (symmetric) case: unchanged from before.
+                        TFile fin(filename);
+                        if(strcmp(variation_type, "hist1d") == 0) {
+                            TH1* h = (TH1*)fin.Get<TH1>(wt.c_str())->Clone();
+                            h->SetDirectory(0);
+                            m_mcgen_variation_hist1d_map[wt].push_back(h);
+                        } else {
+                            TH2* h = (TH2*)fin.Get<TH2>(wt.c_str())->Clone();
+                            h->SetDirectory(0);
+                            m_mcgen_variation_hist2d_map[wt].push_back(h);
+                        }
                     }
                 }
                 if(variation_type && strcmp(variation_type, "hist2d") == 0) {
