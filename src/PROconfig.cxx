@@ -1707,7 +1707,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                         throw std::invalid_argument(std::string("apply_to_subchannel attribute for systematic '") + wt + "' is empty");
                     }
                     m_mcgen_variation_apply_to_subchannel[wt] = pattern;
-                    log<LOG_INFO>(L"%1% || Parsed apply_to_subchannel='%2%' for systematic %3% (substring match against subchannel fullnames)") % __func__ % pattern.c_str() % wt.c_str();
+                    log<LOG_INFO>(L"%1% || Parsed apply_to_subchannel='%2%' for systematic %3% (unanchored regex against subchannel fullnames; plain substrings work as-is)") % __func__ % pattern.c_str() % wt.c_str();
                 }
                 log<LOG_DEBUG>(L"%1% || Allowlisting variations: %2%") % __func__ % wt.c_str() ;
                 tinyxml2::XMLElement *pNext = pAllowList->NextSiblingElement("allowlist");
@@ -3135,4 +3135,22 @@ std::vector<float> PROconfig::Binning::Widths(unsigned dim) const {
     std::vector<float> ret;
     for (int i = 0; i < (int)bin_edges[dim].size() - 1; i++) ret.push_back(bin_edges[dim][i+1] - bin_edges[dim][i]);
     return ret;
+}
+
+std::regex PROfit::CompilePattern(const std::string &pattern, const std::string &context) {
+    try {
+        return std::regex(pattern);
+    } catch(const std::regex_error &e) {
+        log<LOG_ERROR>(L"%1% || Invalid pattern '%2%' for %3%: %4%. Patterns are unanchored ECMAScript regexes matched against full names; a plain substring is valid as-is, anchor with ^...$ for a full match.") % __func__ % pattern.c_str() % context.c_str() % e.what();
+        log<LOG_ERROR>(L"Terminating.");
+        exit(EXIT_FAILURE);
+    }
+}
+
+std::vector<std::string> PROfit::MatchNames(const std::vector<std::string> &names, const std::string &pattern, const std::string &context) {
+    std::regex re = CompilePattern(pattern, context);
+    std::vector<std::string> out;
+    for(const auto &name : names)
+        if(PatternMatches(name, re)) out.push_back(name);
+    return out;
 }

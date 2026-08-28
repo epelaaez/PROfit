@@ -41,12 +41,14 @@ namespace PROfit{
                                                     const std::string &pattern) {
         std::vector<size_t> matched;
         if (pattern.empty()) return matched;
-        // Substring match, matching PROsyst's wildcard convention used in
-        // CreateFlatMatrix (src/PROsyst.cxx ~L397). m_fullnames is the canonical
-        // list of "<mode>_<detector>_<channel>_<subchannel>" names indexed by
-        // global subchannel index.
+        // Unanchored regex (plain substrings behave as before; see PROconfig.h),
+        // matching PROsyst's wildcard convention used in CreateFlatMatrix.
+        // m_fullnames is the canonical list of
+        // "<mode>_<detector>_<channel>_<subchannel>" names indexed by global
+        // subchannel index.
+        std::regex re = CompilePattern(pattern, "subchannel pattern");
         for (size_t i = 0; i < config.m_fullnames.size(); ++i) {
-            if (config.m_fullnames[i].find(pattern) != std::string::npos) {
+            if (PatternMatches(config.m_fullnames[i], re)) {
                 matched.push_back(i);
             }
         }
@@ -781,7 +783,7 @@ namespace PROfit{
         log<LOG_DEBUG>(L"%1% || Finished plot_detector_ratios") % __func__;
     }                                                                              
 
-    void plot_hist1ds(TCanvas* c, TH1D* cv_hist, TGraphAsymmErrors* errband, THStack* cvstack, std::vector<std::pair<std::string, const char*>>* subplots, TH1D* bf_hist, TGraphAsymmErrors* posterrband, TH1D* data_hist, std::string* dat_str, PlotOptions opt, std::string hist_titles, std::string ratio_titles, const std::string &filename, PlotBounds &bounds, const std::string &text){
+    void plot_hist1ds(TCanvas* c, TH1D* cv_hist, TGraphAsymmErrors* errband, THStack* cvstack, std::vector<std::pair<std::string, const char*>>* subplots, TH1D* bf_hist, TGraphAsymmErrors* posterrband, TH1D* data_hist, std::string* dat_str, PlotOptions opt, std::string hist_titles, std::string ratio_titles, const std::string &filename, const PlotBounds &bounds, const std::string &text){
 
         log<LOG_DEBUG>(L"%1% || Plotting 1D Histogram %2%") % __func__ % hist_titles.c_str();
         std::unique_ptr<TLegend> leg = std::make_unique<TLegend>(0.38,0.74,0.89,0.91);
@@ -1418,7 +1420,7 @@ namespace PROfit{
         }}}}
     }
     
-    std::map<std::string, TObject *> plot_channels(const std::string &filename, const PROconfig &config, std::optional<PROspec> cv, std::optional<PROspec> best_fit, std::optional<PROdata> data, std::optional<PROerrorbar> errband, std::optional<PROerrorbar> posterrband, std::vector<TPaveText> &texts, PlotBounds &bounds, PlotOptions opt, int other_index, bool ratio_bool, bool plot_channel_ratios, const std::vector<size_t> *skip_stack_subchannels, PROmetric *chi_metric, const PROspec *chi_spec) {
+    std::map<std::string, TObject *> plot_channels(const std::string &filename, const PROconfig &config, std::optional<PROspec> cv, std::optional<PROspec> best_fit, std::optional<PROdata> data, std::optional<PROerrorbar> errband, std::optional<PROerrorbar> posterrband, std::vector<TPaveText> &texts, const PlotBounds &bounds, PlotOptions opt, int other_index, bool ratio_bool, bool plot_channel_ratios, const std::vector<size_t> *skip_stack_subchannels, PROmetric *chi_metric, const PROspec *chi_spec) {
 
         log<LOG_DEBUG>(L"%1% || Starting plot_channels") % __func__;
         std::string rat_y_title = bool(opt&PlotOptions::DataMCRatio) ? "Data/MC" : "Data/Best-Fit";

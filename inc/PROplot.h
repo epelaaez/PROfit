@@ -86,7 +86,7 @@ namespace PROfit{
             }
         return 1;
         };
-        bool hasBound(std::string bound_name){
+        bool hasBound(std::string bound_name) const {
                 if(bound_name == "xmin") {
                     return xmin!=-9999? true : false;
                 }else if(bound_name == "xmax") {
@@ -105,7 +105,7 @@ namespace PROfit{
                 }
         return false;
         };
-        float getBound(std::string bound_name){
+        float getBound(std::string bound_name) const {
                 if(bound_name == "xmin") {
                     return xmin;
                 }else if(bound_name == "xmax") {
@@ -211,7 +211,7 @@ namespace PROfit{
      *        CV stack and legend (used by --bkg-subtract; their contents are expected to
      *        already be zero in `cv`).
      */
-    std::map<std::string, TObject *> plot_channels(const std::string &filename, const PROconfig &config, std::optional<PROspec> cv, std::optional<PROspec> best_fit, std::optional<PROdata> data, std::optional<PROerrorbar> errband, std::optional<PROerrorbar> posterrband, std::vector<TPaveText> &texts, PlotBounds &bounds, PlotOptions opt = PlotOptions::Default, int var_index = 0, bool ratio_bool = false, bool plot_channel_ratios = false, const std::vector<size_t> *skip_stack_subchannels = nullptr, PROmetric *chi_metric = nullptr, const PROspec *chi_spec = nullptr);
+    std::map<std::string, TObject *> plot_channels(const std::string &filename, const PROconfig &config, std::optional<PROspec> cv, std::optional<PROspec> best_fit, std::optional<PROdata> data, std::optional<PROerrorbar> errband, std::optional<PROerrorbar> posterrband, std::vector<TPaveText> &texts, const PlotBounds &bounds, PlotOptions opt = PlotOptions::Default, int var_index = 0, bool ratio_bool = false, bool plot_channel_ratios = false, const std::vector<size_t> *skip_stack_subchannels = nullptr, PROmetric *chi_metric = nullptr, const PROspec *chi_spec = nullptr);
 
     /**
      * @brief Return global subchannel indices whose `m_fullnames[i]` contains `pattern` as a substring.
@@ -440,8 +440,10 @@ namespace PROfit{
      *                   each MCMC sample instead receives the data-constrained posterior pull
      *                   of the covariance systematics (G. Putnam, "How to Obtain Pull Terms
      *                   for Systematic Uncertainties Embedded in a Covariance Matrix", SBN
-     *                   note, May 2026), shrinking the post-fit band. Pass this only for
-     *                   post-fit bands; the pre-fit/prior band must stay unconstrained.
+     *                   note, May 2026), shrinking the post-fit band. center_shift then
+     *                   reports the ANALYTIC pull Sigma(C+Sigma)^-1 (d - cv) at the best
+     *                   fit (exactly 0 for Asimov), not the sample median. Pass this only
+     *                   for post-fit bands; the pre-fit/prior band must stay unconstrained.
      * @return PROerrorbar with per-bin asymmetric uncertainties and the histogram covariance.
      */
     template<class T, class P>
@@ -518,6 +520,11 @@ namespace PROfit{
             met.run(burnin, iterations, action, pbar);
 
             post_covar /= nsteps;
+            // MAP-consistent covariance pull: Sigma(C+Sigma)^-1 (d - cv_bf) at the
+            // best fit, matching the analytic getCovarianceOnlyErrorBand (exactly 0
+            // for Asimov). The sample median is NOT used for center_shift — it
+            // carries the posterior-median-vs-MAP offset plus MCMC noise.
+            Eigen::VectorXf analytic_shift = Eigen::VectorXf::Zero(cv_coll.size());
             if (use_data) {
                 // Constrained posterior pull for covariance-type systematics,
                // the collapsed systematic covariance is
@@ -560,6 +567,14 @@ namespace PROfit{
                               * es.eigenvectors().transpose();
                         inner_llt.compute(inner);
                     }
+
+                    // Conditional pull at the best fit: L*alpha_min(d - cv) equals
+                    // Sigma[:,contrib] (C+Sigma)^-1 (d - cv) by the push-through identity.
+                    Eigen::VectorXd u_bf(nb);
+                    for(size_t i = 0; i < nb; ++i)
+                        u_bf(i) = data_spec(contrib[i]) - cv_coll(contrib[i]);
+                    analytic_shift = (L_shift * inner_llt.solve(
+                        L_red.transpose() * (C_inv_red.asDiagonal() * u_bf))).cast<float>();
 
                     Eigen::VectorXd throws_k(k), residual(nb);
                     for(size_t ai = 0; ai < nsteps; ++ai) {
@@ -629,7 +644,8 @@ namespace PROfit{
                 ebar.error_up(i) =  ehi;
                 ebar.error_down(i) =  elo;
                 ebar.error_point(i) = cv(i)*scale_factor;
-                ebar.center_shift(i) = (med - cv(i))*scale_factor;
+                ebar.center_shift(i) = use_data ? analytic_shift(i)*scale_factor
+                                                : (med - cv(i))*scale_factor;
                 log<LOG_INFO>(L"%1% || ErrorBand bin %2% %3% %4% %5% %6% shift %7%") % __func__ % i % cv(i) % ehi % elo % scale_factor % ebar.center_shift(i);
             }
             ebar.covariance = post_hist_covar;
