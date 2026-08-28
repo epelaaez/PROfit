@@ -651,7 +651,14 @@ namespace PROfit {
                         map_systematic_knob_vals[sys_name] = {1.0f};
                     }
                     sv.back().knob_index = map_systematic_knob_vals[sys_name];
+                    // knob_index stays in declaration order (parallel to the hist1d/hist2d
+                    // TH1/TH2 vector filled in the same order in PROconfig), but PROsyst
+                    // expects universes stored from smallest to greatest knob value
+                    // Without this, a HistVarSection  declaring its +1 variation before
+                    // its -1 (or any non-ascending knobval order) would store universes
+                    // out of order.
                     sv.back().knobval = sv.back().knob_index;
+                    std::sort(sv.back().knobval.begin(), sv.back().knobval.end());
                     sv.back().binning = binningindex;
                     // restrict= widens the single linear parameter beyond its default
                     // [0,1] knob range (the linear segments extrapolate; use with
@@ -687,11 +694,9 @@ namespace PROfit {
 
                     log<LOG_INFO>(L"%1% || Regex pattern %2% (and percent %3%) which matches: ") % __func__ % wild.c_str() % flat_percent;
                     std::vector<std::string> flatnames;
-                    
                     // Compile the regex pattern once outside the loop for better performance
                     // (Assuming 'wild' holds your pattern string)
                     std::regex subchannel_regex(wild);
-                
                     for(auto & name : inconfig.m_fullnames){
                         // Use std::regex_match for full-string matching (equivalent to fnmatch behavior)
                         if(std::regex_match(name, subchannel_regex)){
@@ -1537,8 +1542,17 @@ namespace PROfit {
                 }
 
                 // One measured universe (symmetric, hists.size()==1) or several
-                // (asymmetric, via HistVarSection)
+                // (asymmetric, via HistVarSection). hists[is] and knob_index[is] are both
+                // in XML declaration order, but PROsyst expects universes stored smallest-
+                // to-greatest knob value: look up is's sorted position u in knobval (same
+                // pattern the spline path above uses) and fill into that slot instead of is
+                // directly, so a HistVarSection isn't required to declare its <variation>s
+                // in ascending knobval order.
                 for(int is = 0; is < var_syst_objs.front()->GetNUniverse(); ++is) {
+                    size_t u = 0;
+                    for(; u < var_syst_objs.front()->knobval.size(); ++u)
+                        if(var_syst_objs.front()->knobval[u] == var_syst_objs.front()->knob_index[is]) break;
+
                     float wgt = 1;
                     if(in_scope) {
                         TH1 *h = hists[is];
@@ -1549,7 +1563,7 @@ namespace PROfit {
                     }
 
                     for(auto so: var_syst_objs)
-                        so->FillUniverse(is, spline_bin, wgt*mc_weight);
+                        so->FillUniverse(u, spline_bin, wgt*mc_weight);
                 }
 
             } else if(var_syst_objs.front()->mode == "hist2d") {
@@ -1569,7 +1583,12 @@ namespace PROfit {
                     in_scope = hv_restrict_it->second.count(inconfig.GetSubchannelName(subchannel_index)) > 0;
                 }
 
+                // See the hist1d branch above for why is is mapped to its sorted position u.
                 for(int is = 0; is < var_syst_objs.front()->GetNUniverse(); ++is) {
+                    size_t u = 0;
+                    for(; u < var_syst_objs.front()->knobval.size(); ++u)
+                        if(var_syst_objs.front()->knobval[u] == var_syst_objs.front()->knob_index[is]) break;
+
                     float wgt = 1;
                     if(in_scope) {
                         TH2 *h = hists[is];
@@ -1581,7 +1600,7 @@ namespace PROfit {
                     }
 
                     for(auto so: var_syst_objs)
-                        so->FillUniverse(is, spline_bin, wgt*mc_weight);
+                        so->FillUniverse(u, spline_bin, wgt*mc_weight);
                 }
             } else if(var_syst_objs.front()->mode == "explicit_spline") {
                 if(spline_bin < 0) continue;
