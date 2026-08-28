@@ -9,7 +9,7 @@ void run_global(float &global_fit_chi2, Eigen::VectorXf &global_fit_result, cons
     opt |= GlobalFitOptions::PostFitErrorBand;
     opt |= GlobalFitOptions::Correlations;
     PROspec cv = FillSpectra(config, prop, metric.GetSysts(), metric.GetModel(), CVParams , true , config.i_prime);
-    GlobalFitResult fitres = do_a_fit(config, prop, data, metric, ub, lb, fitConfig, CVParams, cv, fixed, opt); 
+    GlobalFitResult fitres = run_global_fit(config, prop, data, metric, ub, lb, fitConfig, CVParams, cv, fixed, opt); 
     global_fit_chi2 = fitres.chi2;
     global_fit_result = fitres.fitter.best_fit;
 

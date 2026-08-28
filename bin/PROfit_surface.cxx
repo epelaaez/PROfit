@@ -10,7 +10,7 @@ void run_surface(float &global_fit_chi2, Eigen::VectorXf &global_fit_result, con
         opt |= GlobalFitOptions::FreqSeedPts;
         PROspec cv = FillSpectra(config, prop, metric.GetSysts(), metric.GetModel(), CVParams , true ,config.i_prime);
         // Should we pass in global fixed here? This mostly gets used with syst_only which would not make sense for a surface.
-        GlobalFitResult fitres = do_a_fit(config, prop, data, metric, ub, lb, fitConfig, CVParams, cv, fixed, opt); 
+        GlobalFitResult fitres = run_global_fit(config, prop, data, metric, ub, lb, fitConfig, CVParams, cv, fixed, opt); 
         global_fit_chi2 = fitres.chi2;
         global_fit_result = fitres.fitter.best_fit;
     }
@@ -101,7 +101,7 @@ void run_surface(float &global_fit_chi2, Eigen::VectorXf &global_fit_result, con
             opts.dense_ny       = (int)surface.nbinsy;
             opts.produce_dense  = true;
             if (!options.amr_contour_levels.empty()) opts.contour_levels = options.amr_contour_levels;
-            // Use the global-fit best fit (from project-SBN-dev's do_a_fit
+            // Use the global-fit best fit (from project-SBN-dev's run_global_fit
             // pre-pass) as a warm-start seed for AMR's initial level-0 grid.
             // Subsequent level fits still get cell-corner best_fits from
             // PROmesh::run_amr.
@@ -228,7 +228,7 @@ void run_surface(float &global_fit_chi2, Eigen::VectorXf &global_fit_result, con
             if(options.progress_bar) opt |= GlobalFitOptions::Progress;
             opt |= GlobalFitOptions::FreqSeedPts;
             PROspec cv = FillSpectra(config, prop, brazil_metric->GetSysts(), brazil_metric->GetModel(), CVParams , true ,config.i_prime);
-            GlobalFitResult fitres = do_a_fit(config, prop, data, *brazil_metric, ub, lb, fitConfig, CVParams, cv, fixed, opt); 
+            GlobalFitResult fitres = run_global_fit(config, prop, data, *brazil_metric, ub, lb, fitConfig, CVParams, cv, fixed, opt); 
 
             brazil_band_surfaces.emplace_back(*brazil_metric, xaxis_idx, yaxis_idx, nbinsx, options.logx ? PROsurf::LogAxis : PROsurf::LinAxis, options.xlo, options.xhi,
                     nbinsy, options.logy ? PROsurf::LogAxis : PROsurf::LinAxis, options.ylo, options.yhi);

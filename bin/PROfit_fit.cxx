@@ -55,7 +55,7 @@ static void logLowPredictionBins(const PROconfig &config, const Eigen::VectorXf 
         % __func__ % n_low % (size_t)pred_collapsed.size() % threshold;
 }
 
-GlobalFitResult do_a_fit(const PROconfig &config, const PROpeller &prop, const PROdata &data, PROmetric &metric, const Eigen::VectorXf &ub, const Eigen::VectorXf &lb, const PROfitterConfig &fit_config, const Eigen::VectorXf &CVParams, const PROspec &cv, const std::vector<int> &global_fixed, GlobalFitOptions opt) {
+GlobalFitResult run_global_fit(const PROconfig &config, const PROpeller &prop, const PROdata &data, PROmetric &metric, const Eigen::VectorXf &ub, const Eigen::VectorXf &lb, const PROfitterConfig &fit_config, const Eigen::VectorXf &CVParams, const PROspec &cv, const std::vector<int> &global_fixed, GlobalFitOptions opt) {
     GlobalFitResult res(ub, lb, fit_config);
     metric.setBounds(lb, ub);
 

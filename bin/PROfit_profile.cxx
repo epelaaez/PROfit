@@ -9,7 +9,7 @@ void run_profile(float &global_fit_chi2, Eigen::VectorXf &global_fit_result, con
     opt |= GlobalFitOptions::PostFitErrorBand;
     opt |= GlobalFitOptions::Correlations;
     PROspec cv = FillSpectra(config, prop, metric.GetSysts(), metric.GetModel(), CVParams , true ,config.i_prime);
-    GlobalFitResult fitres = do_a_fit(config, prop, data, metric, ub, lb, fitConfig, CVParams, cv, fixed, opt); 
+    GlobalFitResult fitres = run_global_fit(config, prop, data, metric, ub, lb, fitConfig, CVParams, cv, fixed, opt); 
     global_fit_chi2 = fitres.chi2;
     global_fit_result = fitres.fitter.best_fit;
     log<LOG_INFO>(L"%1% || MCMC acceptance is  %2%. ") % __func__% ((double)fitres.mh->naccept /fitConfig.MCMCiter);
@@ -42,9 +42,9 @@ void run_profile(float &global_fit_chi2, Eigen::VectorXf &global_fit_result, con
             fakedataparams, options.use_probe, options.n_probe_chunks,
             buildBkgOnlyFixedSeeds(metric.GetModel(), CVParams));
     if (options.profile_timing) PROfit::GetScanTimingEnabled() = false;
-    // The scan can find a lower global minimum than do_a_fit (trapped in a
+    // The scan can find a lower global minimum than run_global_fit (trapped in a
     // local minimum); PROfile has already re-baselined its curves against
-    // it. Mirror the harmonic-seed adoption in do_a_fit: everything
+    // it. Mirror the harmonic-seed adoption in run_global_fit: everything
     // downstream (Plot's best-fit markers, global_fit_result, the
     // global_fit_result histogram written below) reads fitres, so update
     // it to the minimum the curves are actually baselined on. The spectra

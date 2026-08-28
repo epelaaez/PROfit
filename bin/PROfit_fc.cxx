@@ -8,7 +8,7 @@ void run_fc(const PROconfig &config, const PROpeller &prop, PROmetric &metric, c
         if(options.progress_bar) opt |= GlobalFitOptions::Progress;
         if(!fixed[0] || !options.systs_only) opt |= GlobalFitOptions::FreqSeedPts;
         PROspec cv = FillSpectra(config, prop, metric.GetSysts(), metric.GetModel(), CVParams , true ,config.i_prime);
-        GlobalFitResult fitres = do_a_fit(config, prop, data, metric, ub, lb, fitConfig, CVParams, cv, fixed, opt); 
+        GlobalFitResult fitres = run_global_fit(config, prop, data, metric, ub, lb, fitConfig, CVParams, cv, fixed, opt); 
         global_chi2 = fitres.chi2;
     }
     if(options.pvalue) {
@@ -26,7 +26,7 @@ void run_fc(const PROconfig &config, const PROpeller &prop, PROmetric &metric, c
         GlobalFitOptions opt = GlobalFitOptions::Default;
         if(options.progress_bar) opt |= GlobalFitOptions::Progress;
         PROspec cv = FillSpectra(config, prop, metric.GetSysts(), metric.GetModel(), CVParams , true ,config.i_prime);
-        GlobalFitResult fitres = do_a_fit(config, prop, data, metric, fub, flb, fitConfig, CVParams, cv, ffixed, opt); 
+        GlobalFitResult fitres = run_global_fit(config, prop, data, metric, fub, flb, fitConfig, CVParams, cv, ffixed, opt); 
         null_chi2 = fitres.chi2;
     }
 
