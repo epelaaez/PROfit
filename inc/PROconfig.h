@@ -498,8 +498,11 @@ namespace PROfit{
             std::map<std::string, std::vector<double>> m_mcgen_explicit_weights;
             std::map<std::string, std::string> m_mcgen_variation_external_filename_map;
             std::map<std::string, std::array<int, 2>> m_mcgen_variation_histaxisvars_map;
-            std::map<std::string, TH1*> m_mcgen_variation_hist1d_map;
-            std::map<std::string, TH2*> m_mcgen_variation_hist2d_map;
+            std::map<std::string, std::vector<TH1*>> m_mcgen_variation_hist1d_map;
+            std::map<std::string, std::vector<TH2*>> m_mcgen_variation_hist2d_map;
+            std::map<std::string, std::vector<std::pair<std::string, std::string>>> m_histvar_files_map; // map of histvar name to vector of (filename, histname) pairs
+            std::map<std::string, std::vector<double>> m_histvar_knobvals_map; // map of histvar name to vector of knob values
+            std::map<std::string, std::set<std::string>> m_histvar_subchannels_map; // map of histvar name to set of subchannels
             std::map<std::string, std::string> m_mcgen_variation_type_map;
             std::map<std::string, std::string> m_mcgen_variation_plotname_map;
             std::map<std::string, int> m_mcgen_variation_binning_map;
