@@ -1,6 +1,7 @@
 #include "PROconfig.h"
 #include "PROlog.h"
 #include <cctype>
+#include <cmath>
 #include <cstdlib>
 #include <ctype.h>
 #include <numeric>
@@ -1374,8 +1375,26 @@ int PROconfig::LoadFromXML(const std::string &filename){
                         % __func__ % section_name;
                     exit(EXIT_FAILURE);
                 }
+                char *kend = nullptr;
+                double kval = strtod(hv_knobval, &kend);
+                if(kend == hv_knobval || *kend != '\0' || !std::isfinite(kval)) {
+                    log<LOG_ERROR>(L"%1% || ERROR: <variation> under <HistVarSection> '%2%' has non-numeric knobval '%3%'")
+                        % __func__ % section_name % hv_knobval;
+                    exit(EXIT_FAILURE);
+                }
+                // Duplicate knob values would double-fill one universe slot and leave
+                // its twin all-zero (a ratio-0 knot plus a zero-width spline segment)
+                // downstream in PROcreate — refuse them here. The map accumulates
+                // across same-named sections, so this also catches that collision.
+                for(double prev: m_histvar_knobvals_map[section_name]) {
+                    if(prev == kval) {
+                        log<LOG_ERROR>(L"%1% || ERROR: <HistVarSection> '%2%' declares knobval %3% more than once — knob values must be unique")
+                            % __func__ % section_name % kval;
+                        exit(EXIT_FAILURE);
+                    }
+                }
                 m_histvar_files_map[section_name].emplace_back(hv_filename, hv_histname);
-                m_histvar_knobvals_map[section_name].push_back(strtod(hv_knobval, &end));
+                m_histvar_knobvals_map[section_name].push_back(kval);
                 log<LOG_INFO>(L"%1% || HistVarSection '%2%': variation filename=%3% histname=%4% knobval=%5%")
                     % __func__ % section_name % hv_filename % hv_histname % m_histvar_knobvals_map[section_name].back();
                 pHistVar = pHistVar->NextSiblingElement("variation");

@@ -1516,11 +1516,13 @@ namespace PROfit {
                 for(int is = 0; is < var_syst_objs.front()->GetNUniverse(); ++is){
                     size_t ivar=0;
                     for(auto so: var_syst_objs){
+                        // Each variable's SystStruct carries norm_bins in ITS OWN bin
+                        // space, so the event's bin must be tested per variable.
                         float norm_shift_percentage = 0.0;
-                        if( std::find(var_syst_objs.front()->norm_bins.begin(), var_syst_objs.front()->norm_bins.end(),var_bin_indices[ivar])!=var_syst_objs.front()->norm_bins.end()){
-                            norm_shift_percentage =  var_syst_objs.front()->norm_value;
+                        if( std::find(so->norm_bins.begin(), so->norm_bins.end(),var_bin_indices[ivar])!=so->norm_bins.end()){
+                            norm_shift_percentage =  so->norm_value;
                        }
-                       so->FillUniverse(is, spline_bin, mc_weight * additional_weight * (1+var_syst_objs.front()->knobval[is]*norm_shift_percentage) );
+                       so->FillUniverse(is, spline_bin, mc_weight * additional_weight * (1+so->knobval[is]*norm_shift_percentage) );
                        ivar++;
                     }
                 }

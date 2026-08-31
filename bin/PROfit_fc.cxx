@@ -273,7 +273,11 @@ void run_fc(const PROconfig &config, const PROpeller &prop, PROmetric &metric, c
         log<LOG_ERROR>(L"%1% || FC Corrected pval after throwing %2% universes is %3%") % __func__ % nuniv % pvalFC ;
     }
 
-    {
+    // Under --reuse the distribution came verbatim from <tag>_FC.root: rewriting
+    // it (and the CSV) can only lose information — a crash mid-RECREATE destroys
+    // the archive, and --gof --reuse would drop the stored best_systs_osc. Only
+    // freshly generated throws are persisted.
+    if(gen_null_dist) {
         TFile fout((options.final_output_tag+"_FC.root").c_str(), "RECREATE");
         fout.cd();
         float chi2_osc, chi2_syst;
@@ -309,7 +313,7 @@ void run_fc(const PROconfig &config, const PROpeller &prop, PROmetric &metric, c
 
         tree.Write();
     }
-    {
+    if(gen_null_dist) {
         ofstream fcout(options.final_output_tag+"_FC.csv");
         fcout << "chi2_osc,chi2_syst";
         for(const std::string &name: metric.GetModel().param_names)

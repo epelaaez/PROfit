@@ -2114,8 +2114,11 @@ namespace PROfit{
             log<LOG_DEBUG>(L"%1% || Converting covariance to correlation") % __func__;
 	    for(int i = 0; i < cov_coll.rows(); i++){
 	        for(int j = 0; j < cov_coll.rows(); j++){
-		    corr_coll->SetBinContent(i+1, j+1, cov_coll(i, j)/cov_coll(i, i)/cov_coll(j, j));
-		    post_corr_coll->SetBinContent(i+1, j+1, post_cov_coll(i, j)/post_cov_coll(i, i)/post_cov_coll(j, j));
+		    // correlation = cov(i,j)/sqrt(cov(i,i)*cov(j,j)); zero-variance bins get 0.
+		    float denom = std::sqrt(cov_coll(i, i) * cov_coll(j, j));
+		    float post_denom = std::sqrt(post_cov_coll(i, i) * post_cov_coll(j, j));
+		    corr_coll->SetBinContent(i+1, j+1, denom > 0 ? cov_coll(i, j)/denom : 0.0f);
+		    post_corr_coll->SetBinContent(i+1, j+1, post_denom > 0 ? post_cov_coll(i, j)/post_denom : 0.0f);
 		}
 	    }
 
