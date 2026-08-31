@@ -58,14 +58,25 @@ namespace PROfit {
              *     replacing M⁻¹δ — the linearised form is exact (modulo FD
              *     truncation in dδ/dθ).
              *
-             * Combined with the FD stencil this gives four configurations:
+             * Combined with the FD stencil this gives four FD configurations,
+             * plus a fully analytic fifth mode (no FD anywhere: dδ/dθ from
+             * FillSpectraGradient, the uᵀ(dM/dθ)u term in closed form via one
+             * GEMV, pull derivative analytic; PROchi binned strategies only):
              *
-             *  | Mode                  | δ FD       | M handling        | Pull deriv |
-             *  |-----------------------|------------|-------------------|------------|
-             *  | GradientCentralFull   | central    | rebuilt per FD    | via FD     |
-             *  | GradientOneSidedFull  | one-sided  | rebuilt per FD    | via FD     |
-             *  | GradientCentralLin    | central    | frozen at base    | analytic   |
-             *  | GradientOneSidedLin   | one-sided  | frozen at base    | analytic   |
+             *  | Mode                  | δ deriv       | M handling        | Pull deriv |
+             *  |-----------------------|---------------|-------------------|------------|
+             *  | GradientCentralFull   | central FD    | rebuilt per FD    | via FD     |
+             *  | GradientOneSidedFull  | one-sided FD  | rebuilt per FD    | via FD     |
+             *  | GradientCentralLin    | central FD    | frozen at base    | analytic   |
+             *  | GradientOneSidedLin   | one-sided FD  | frozen at base    | analytic   |
+             *  | GradientAnalytic      | exact         | exact dM/dθ term  | analytic   |
+             *
+             * GradientAnalytic is the default everywhere. It is implemented for
+             * PROchi with the binned strategies; where it is not available
+             * (PROCNP, PROpoisson, the EventByEvent strategy) the metric falls
+             * back to GradientFallback = GradientCentralLin — the previous
+             * default — and logs a one-time warning. --grad-mode overrides the
+             * default for every fit (global, scan, FC) uniformly.
              *
              * Boundary handling: any FD step that lands on a parameter bound is
              * downgraded to a one-sided stencil pointing into the interior,
@@ -74,11 +85,15 @@ namespace PROfit {
              * preserved across all modes — LBFGSB depends on it.
              */
             enum GradientMode {
-                GradientCentralFull,    ///< Default: central FD on full chi². Most accurate, slowest.
+                GradientCentralFull,    ///< Central FD on full chi². Most accurate FD mode, slowest (rebuilds covariance + Cholesky per FD step).
                 GradientOneSidedFull,   ///< One-sided forward FD on full chi². ~2× faster, O(h) vs O(h²).
-                GradientCentralLin,     ///< Central FD on δ only, M frozen at base (Gauss-Newton). 5–10× faster.
+                GradientCentralLin,     ///< Central FD on δ only, M frozen at base (Gauss-Newton). 5–10× faster than central-full; exact at the minimum. The fallback where the analytic gradient is not implemented.
                 GradientOneSidedLin,    ///< One-sided FD on δ only, M frozen at base. 10–20× faster.
+                GradientAnalytic,       ///< Default. Exact analytic gradient: dδ/dθ via FillSpectraGradient AND the (M⁻¹δ)ᵀ(dM/dθ)(M⁻¹δ) term in closed form. No FD truncation, no extra spectrum fills. PROchi binned strategies only.
             };
+            /// Mode used when GradientAnalytic is requested but not implemented for
+            /// the metric / strategy (PROCNP, PROpoisson, EventByEvent).
+            static constexpr GradientMode GradientFallback = GradientCentralLin;
 
             std::vector<bool> is_fixed; ///< Per-parameter flags: true if the parameter is held fixed during fitting.
             Eigen::VectorXf  lb;        ///< Lower bounds for all parameters.
@@ -117,7 +132,7 @@ namespace PROfit {
              * @param var_index      Variable index.
              * @return Chi-squared for that channel.
              */
-            virtual float getSingleChannelChi(size_t channel_index, const PROspec& cv, size_t var_index) = 0;
+            virtual float getSingleChannelChi(size_t channel_index, const PROspec& cv, size_t var_index, const Eigen::MatrixXf &projection = Eigen::MatrixXf()) = 0;
             PROmetric() = default;
             virtual ~PROmetric() {}
             /**
@@ -173,6 +188,14 @@ namespace PROfit {
                 return ub;
             }
 
+            /** @brief True if a fit-region (active-bin) mask was snapshotted from the config. */
+            bool hasActiveBinMask() const { return !active_bins.empty(); }
+
+            /** @brief True if collapsed bin @p i (fitting variable) is in the fit region. Always true without a mask. */
+            bool binActive(Eigen::Index i) const {
+                return active_bins.empty() || (i >= 0 && (size_t)i < active_bins.size() && active_bins[(size_t)i] != 0);
+            }
+
             /** @brief Return the total number of times operator() has been called since last reset. */
             size_t getCallCount() const { return call_count; }
             /** @brief Reset the call counter to zero. */
@@ -225,6 +248,7 @@ namespace PROfit {
                                             || s == "onesided-lin"
                                             || s == "onesided-linearised"
                                             || s == "one-sided-linearized")     return GradientOneSidedLin;
+                if (s == "analytic"         || s == "exact")                    return GradientAnalytic;
                 return fallback;
             }
 
@@ -235,17 +259,41 @@ namespace PROfit {
                     case GradientOneSidedFull: return "one-sided-full";
                     case GradientCentralLin:   return "central-linearised";
                     case GradientOneSidedLin:  return "one-sided-linearised";
+                    case GradientAnalytic:     return "analytic";
                 }
                 return "unknown";
             }
 
         protected:
             mutable std::atomic<size_t> call_count{0}; ///< Thread-safe counter of operator() invocations.
-            GradientMode gradient_mode = GradientCentralFull; ///< Default mirrors current behaviour.
+            GradientMode gradient_mode = GradientAnalytic; ///< Default: exact analytic gradient (falls back to GradientFallback where not implemented). Use --grad-mode central-lin/central-full for the finite-difference modes.
+
+            /** @brief Snapshot of PROconfig's fit-region mask for the fitting variable
+             *  (collapsed space); empty = no mask, all bins active. Taken at construction
+             *  in every concrete metric — Clone() re-runs the constructor with the same
+             *  config, and FC/AFC workers construct fresh metrics from the same config,
+             *  so the mask propagates everywhere without per-call-site plumbing.
+             *  NOTE: like lb/ub/is_fixed, this does NOT survive a raw copy-construction
+             *  (PROmetric's copy ctor is a no-op); always use Clone(). */
+            std::vector<char> active_bins;
+
+            /** @brief Fill active_bins from the config's mask for its primary fitting variable.
+             *  Call from every concrete metric constructor. */
+            void snapshotActiveBins(const PROconfig &c) {
+                active_bins.clear();
+                if(!c.HasActiveBins(c.i_prime)) return;
+                const size_t n = c.m_num_variable_bins_total_collapsed[c.i_prime];
+                active_bins.resize(n);
+                size_t n_active = 0;
+                for(size_t i = 0; i < n; ++i) {
+                    active_bins[i] = c.IsBinActive(c.i_prime, i) ? 1 : 0;
+                    n_active += active_bins[i];
+                }
+                log<LOG_INFO>(L"%1% || Metric fit region: %2% of %3% collapsed bins active.") % __func__ % n_active % n;
+            }
 
     };
 
 };
 
 #endif
-

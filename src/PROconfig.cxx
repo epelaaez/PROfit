@@ -53,11 +53,57 @@ namespace {
         label_out = s;
         unit_out = "";
     }
+
+    // The `use` attribute on <mode>/<detector>/<channel>/<subchannel> is
+    // deprecated: disabling entries via use="false" left the per-channel
+    // binning and per-detector POT arrays misaligned and is no longer
+    // supported. use="true" is tolerated (with a warning); anything else is a
+    // hard configuration error.
+    void RejectDeprecatedUseAttribute(const char* use_attr, const char* element) {
+        if(use_attr == nullptr) return;
+        if(std::string(use_attr) == "true") {
+            log<LOG_WARNING>(L"%1% || The 'use' attribute on <%2%> is deprecated and ignored; please remove it from your XML.")
+                % __func__ % element;
+            return;
+        }
+        log<LOG_ERROR>(L"%1% || ERROR: <%2% use=\"%3%\"> found. Disabling elements via use=\"false\" is deprecated and no longer supported: remove the whole element (or the 'use' attribute) from your XML.")
+            % __func__ % element % use_attr;
+        log<LOG_ERROR>(L"Terminating.");
+        exit(EXIT_FAILURE);
+    }
+
+    // Build uniform bin edges from min/max/nbins XML attributes with full
+    // validation. A partially-specified <bins> used to reach strtod(NULL) —
+    // undefined behavior — and nbins=0 divided by zero.
+    std::vector<float> BuildUniformEdges(const char* omin, const char* omax, const char* onbins, const char* element) {
+        if(omin == nullptr || omax == nullptr || onbins == nullptr) {
+            log<LOG_ERROR>(L"%1% || ERROR: <%2%> needs all of min, max and nbins when edges are not given (got min=%3%, max=%4%, nbins=%5%).")
+                % __func__ % element % (omin ? omin : "<missing>") % (omax ? omax : "<missing>") % (onbins ? onbins : "<missing>");
+            log<LOG_ERROR>(L"Terminating.");
+            exit(EXIT_FAILURE);
+        }
+        char* end = nullptr;
+        const float minp = strtod(omin, &end);
+        const float maxp = strtod(omax, &end);
+        const int nbinsp = (int)strtod(onbins, &end);
+        if(nbinsp < 1 || !(maxp > minp)) {
+            log<LOG_ERROR>(L"%1% || ERROR: <%2%> has invalid binning min=%3%, max=%4%, nbins=%5% (need max > min and nbins >= 1).")
+                % __func__ % element % minp % maxp % nbinsp;
+            log<LOG_ERROR>(L"Terminating.");
+            exit(EXIT_FAILURE);
+        }
+        std::vector<float> edges;
+        edges.reserve(nbinsp + 1);
+        const float step = (maxp - minp) / (float)nbinsp;
+        for(int i = 0; i < nbinsp; ++i) edges.push_back(minp + i * step);
+        edges.push_back(maxp);
+        return edges;
+    }
 }
 
 
-PROconfig::PROconfig(const std::string &xml, bool rate_only):
-    m_xmlname(xml), 
+PROconfig::PROconfig(const std::string &xml, bool rate_only, int fit_variable):
+    m_xmlname(xml),
     m_det_pot(),
     m_num_detectors(0),
     m_num_channels(0),
@@ -75,6 +121,8 @@ PROconfig::PROconfig(const std::string &xml, bool rate_only):
     m_num_mcgen_files(0),
     m_bool_rate_only(rate_only)
 {
+    // Must be set before LoadFromXML: it resolves i_prime as its very first action.
+    m_requested_fit_variable = fit_variable;
 
     LoadFromXML(m_xmlname);
 
@@ -151,6 +199,96 @@ bool PROconfig::SameChannels(const PROconfig &one, const PROconfig &two) {
 }
 
 
+int PROconfig::ResolveFitVariableFromXML(tinyxml2::XMLDocument &doc) const {
+
+    int resolved = -1;            //index marked fit="true", -1 until one is seen
+    std::string resolved_channel; //channel that set it, for a useful error message
+    size_t ichan = 0;
+    //__func__ inside the scan lambda below is "operator()", so name the function once here.
+    const char *fname = __func__;
+
+    for(tinyxml2::XMLElement *pChanF = doc.FirstChildElement("channel"); pChanF;
+            pChanF = pChanF->NextSiblingElement("channel"), ++ichan) {
+
+        const char *cname = pChanF->Attribute("name");
+        const std::string channel_name = cname ? cname : ("channel#" + std::to_string(ichan));
+
+        // Walk this channel's binnings in the same order LoadFromXML numbers them:
+        // every <bins2D> first, then every <bins>. `ivar` is shared across both passes.
+        int ivar = 0, marked = -1;
+        auto scan_bins = [&](const char *tag) {
+            for(tinyxml2::XMLElement *pB = pChanF->FirstChildElement(tag); pB;
+                    pB = pB->NextSiblingElement(tag), ++ivar) {
+                const char *fit = pB->Attribute("fit");
+                if(!fit) continue;
+                const std::string fitstr(fit);
+                if(fitstr == "false") continue;
+                if(fitstr != "true") {
+                    log<LOG_ERROR>(L"%1% || ERROR: <%2% fit=\"%3%\"> in channel %4% is not valid; fit must be \"true\" or \"false\".")
+                        % fname % tag % fitstr.c_str() % channel_name.c_str();
+                    throw std::invalid_argument(std::string("<") + tag + "> fit attribute must be true or false, got: " + fitstr);
+                }
+                if(marked >= 0) {
+                    log<LOG_ERROR>(L"%1% || ERROR: channel %2% marks both var%3% and var%4% with fit=\"true\". Exactly one variable is fitted.")
+                        % fname % channel_name.c_str() % marked % ivar;
+                    throw std::invalid_argument("More than one binning marked fit=\"true\" in channel " + channel_name);
+                }
+                marked = ivar;
+            }
+        };
+        scan_bins("bins2D");
+        scan_bins("bins");
+
+        if(marked < 0) continue;
+
+        if(resolved >= 0 && resolved != marked) {
+            log<LOG_ERROR>(L"%1% || ERROR: channel %2% marks var%3% as the fitting variable but channel %4% marks var%5%.")
+                % __func__ % channel_name.c_str() % marked % resolved_channel.c_str() % resolved;
+            log<LOG_ERROR>(L"%1% || -- Variables are numbered globally, so every channel must agree on which one is fitted.") % __func__;
+            throw std::invalid_argument("Channels disagree on which variable has fit=\"true\"");
+        }
+        resolved = marked;
+        resolved_channel = channel_name;
+    }
+
+    if(resolved < 0) {
+        log<LOG_DEBUG>(L"%1% || No binning marked fit=\"true\"; defaulting to the first variable (var0).") % __func__;
+        return 0;
+    }
+
+    log<LOG_DEBUG>(L"%1% || Channel %2% marks var%3% as the fitting variable.")
+        % __func__ % resolved_channel.c_str() % resolved;
+    return resolved;
+}
+
+void PROconfig::ValidateFitVariable() const {
+
+    if(i_prime >= m_num_variables) {
+        log<LOG_ERROR>(L"%1% || ERROR: fitting variable var%2% does not exist; this XML defines %3% variable(s) (var0..var%4%).")
+            % __func__ % i_prime % m_num_variables % (m_num_variables ? m_num_variables - 1 : 0);
+        throw std::invalid_argument("Fitting variable index out of range: " + std::to_string(i_prime));
+    }
+
+    // A model's kinematic variable (e.g. the truth L/E binning behind <parameter name="L/E"
+    // variable_index="N">) is a physics grid, not a reco observable. Fitting it is never
+    // intended and would silently produce nonsense, so reject it outright.
+    for(const auto &[pname, pindex] : m_model_parameter_map) {
+        if(pindex >= 0 && static_cast<size_t>(pindex) == i_prime) {
+            log<LOG_ERROR>(L"%1% || ERROR: var%2% is the kinematic variable of model parameter \"%3%\", it cannot also be the fitting variable.")
+                % __func__ % i_prime % pname.c_str();
+            log<LOG_ERROR>(L"%1% || -- Mark a reconstructed observable with fit=\"true\" instead.") % __func__;
+            throw std::invalid_argument("Fitting variable var" + std::to_string(i_prime) +
+                                        " is model parameter \"" + pname + "\"'s kinematic variable");
+        }
+    }
+
+    // Not fatal: PROfit builds the PROsyst and the data spectrum for i_prime regardless of
+    // plot=, but nothing will be drawn for it.
+    if(i_prime < m_channel_variable_plot_bool.size() && !m_channel_variable_plot_bool[i_prime])
+        log<LOG_WARNING>(L"%1% || Fitting variable var%2% has plot=\"false\"; it will be fitted but not plotted.")
+            % __func__ % i_prime;
+}
+
 int PROconfig::LoadFromXML(const std::string &filename){
 
 
@@ -181,9 +319,25 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
     tinyxml2::XMLElement *pMode, *pDet, *pChan;
 
-    //Temp usage
-    i_prime=0;
-    std::vector<std::string> allowed_elements = {"mode", "detector", "channel", "MCFile","WeightMaps","model","variation_list","systematics","correlation","varied_spectrum", "ShapeOnlyUncertainty", "data", "plotpot", "DetVarFiles"   };
+    //**** Fitting variable (i_prime) ****
+    // Resolved before ANYTHING else is parsed, because two later parse steps read it:
+    // the --rateonly rebinning of the fitting variable, and the default binning of a
+    // <systematic> (binning="reco" means "the fitting variable's binning").
+    {
+        const int xml_fit_variable = ResolveFitVariableFromXML(doc);
+        if(m_requested_fit_variable >= 0) {
+            if(m_requested_fit_variable != xml_fit_variable)
+                log<LOG_WARNING>(L"%1% || Fitting variable overridden to var%2%; the XML asks for var%3%.")
+                    % __func__ % m_requested_fit_variable % xml_fit_variable;
+            i_prime = static_cast<size_t>(m_requested_fit_variable);
+        } else {
+            i_prime = static_cast<size_t>(xml_fit_variable);
+        }
+        log<LOG_INFO>(L"%1% || Fitting variable is var%2% (i_prime=%2%). All other variables are carried along but not fitted.")
+            % __func__ % i_prime;
+    }
+
+    std::vector<std::string> allowed_elements = {"mode", "detector", "channel", "MCFile","WeightMaps","model","variation_list","systematics","correlation","varied_spectrum", "ShapeOnlyUncertainty", "data", "plotpot", "DetVarFiles", "HistVarFiles"   };
     for (tinyxml2::XMLElement* elem = doc.FirstChildElement(); elem; elem = elem->NextSiblingElement()) {
         std::string name = elem->Name();
         if (std::find(allowed_elements.begin(), allowed_elements.end(), name) == allowed_elements.end()) {
@@ -243,11 +397,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 m_mode_plotnames.push_back(mode_plotname);
             }
 
-            const char* mode_use = pMode->Attribute("use");
-            if(mode_use == NULL || std::string(mode_use) == "true")
-                m_mode_bool.push_back(true);
-            else
-                m_mode_bool.push_back(false);
+            RejectDeprecatedUseAttribute(pMode->Attribute("use"), "mode");
 
             pMode = pMode->NextSiblingElement("mode");
             log<LOG_DEBUG>(L"%1% || Loading Mode %2%  ") % __func__ % m_mode_names.back().c_str() ;
@@ -293,11 +443,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 m_detector_plotnames.push_back(detector_plotname);
             }
 
-            const char* detector_use = pDet->Attribute("use");
-            if(detector_use==NULL || std::string(detector_use) == "true")
-                m_detector_bool.push_back(true);
-            else
-                m_detector_bool.push_back(false);
+            RejectDeprecatedUseAttribute(pDet->Attribute("use"), "detector");
 
             const char* detector_pot= pDet->Attribute("pot");
             if (detector_pot == nullptr) {
@@ -354,11 +500,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
             }
 
 
-            const char* channel_use = pChan->Attribute("use");
-            if(channel_use==NULL || std::string(channel_use) == "true")
-                m_channel_bool.push_back(true);
-            else
-                m_channel_bool.push_back(false);
+            RejectDeprecatedUseAttribute(pChan->Attribute("use"), "channel");
 
 
             const char* channel_xaxislabel = pChan->Attribute("xaxislabel");
@@ -420,16 +562,8 @@ int PROconfig::LoadFromXML(const std::string &filename){
                         }
                         log<LOG_DEBUG>(L"%1% || This 2D variable has a Variable Binning in X with  %2% bins, Edges defined as %3%    ") % __func__ % binedge_x.size() % binedge_x;
                     }else{
-                        float minp = strtod(omin_x, &end);
-                        float maxp = strtod(omax_x, &end);
-                        int nbinsp = (int)strtod(onbins_x, &end);
-                        float step = (maxp-minp)/(float)nbinsp;
-                        for(int i=0; i<nbinsp; i++){
-                            binedge_x.push_back(minp+i*step);
-                        }
-                        binedge_x.push_back(maxp);
-                        log<LOG_DEBUG>(L"%1% || This 2D variable has a Variable Binning in X with min %2%, max %3% and nbins %4%   ") % __func__ % minp % maxp % nbinsp ;
-                        log<LOG_DEBUG>(L"%1% || Which corresponds to edges %2%   ") % __func__ % binedge_x ;
+                        binedge_x = BuildUniformEdges(omin_x, omax_x, onbins_x, "bins2D (x)");
+                        log<LOG_DEBUG>(L"%1% || This 2D variable has a Variable Binning in X with edges %2%   ") % __func__ % binedge_x ;
                     }
 
                     std::vector<float> binedge_y;
@@ -442,16 +576,8 @@ int PROconfig::LoadFromXML(const std::string &filename){
                         }
                         log<LOG_DEBUG>(L"%1% || This 2D variable has a Variable Binning in X with  %2% bins, Edges defined as %3%    ") % __func__ % binedge_y.size() % binedge_y;
                     }else{
-                        float minp = strtod(omin_y, &end);
-                        float maxp = strtod(omax_y, &end);
-                        int nbinsp = (int)strtod(onbins_y, &end);
-                        float step = (maxp-minp)/(float)nbinsp;
-                        for(int i=0; i<nbinsp; i++){
-                            binedge_y.push_back(minp+i*step);
-                        }
-                        binedge_y.push_back(maxp);
-                        log<LOG_DEBUG>(L"%1% || This 2D variable has a Variable Binning in X with min %2%, max %3% and nbins %4%   ") % __func__ % minp % maxp % nbinsp ;
-                        log<LOG_DEBUG>(L"%1% || Which corresponds to edges %2%   ") % __func__ % binedge_y ;
+                        binedge_y = BuildUniformEdges(omin_y, omax_y, onbins_y, "bins2D (y)");
+                        log<LOG_DEBUG>(L"%1% || This 2D variable has a Variable Binning in Y with edges %2%   ") % __func__ % binedge_y ;
                     }
 
                     m_channel_variable_bins.back().push_back(PROconfig::Binning(std::vector<std::vector<float>>({binedge_x, binedge_y})));
@@ -465,7 +591,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
             tinyxml2::XMLElement *pBinO = pChan->FirstChildElement("bins"); // 1D Bins
             while(pBinO){
-                expected_attrs = {"min","max","nbins","edges","unit","xaxislabel","plot"};
+                expected_attrs = {"min","max","nbins","edges","unit","xaxislabel","plot","fit"};
                 for (const tinyxml2::XMLAttribute* attr = pBinO->FirstAttribute(); attr; attr = attr->Next()) {
                     std::string name = attr->Name();
                     if (std::find(expected_attrs.begin(), expected_attrs.end(), name) == expected_attrs.end()) {
@@ -509,16 +635,8 @@ int PROconfig::LoadFromXML(const std::string &filename){
                         }
                         log<LOG_DEBUG>(L"%1% || This variable has a Variable Binning with  %2% bins, Edges defined as %3%    ") % __func__ % binedge.size() % binedge ;
                     }else{
-                        float minp = strtod(omin, &end);
-                        float maxp = strtod(omax, &end);
-                        int nbinsp = (int)strtod(onbins, &end);
-                        float step = (maxp-minp)/(float)nbinsp;
-                        for(int i=0; i<nbinsp; i++){
-                            binedge.push_back(minp+i*step);
-                        }
-                        binedge.push_back(maxp);
-                        log<LOG_DEBUG>(L"%1% || This variable has a Variable Binning with min %2%, max %3% and nbins %4%   ") % __func__ % minp % maxp % nbinsp ;
-                        log<LOG_DEBUG>(L"%1% || Which corresponds to edges %2%   ") % __func__ % binedge ;
+                        binedge = BuildUniformEdges(omin, omax, onbins, "bins");
+                        log<LOG_DEBUG>(L"%1% || This variable has a Variable Binning with edges %2%   ") % __func__ % binedge ;
                     }
 
                     m_channel_variable_bins.back().push_back({binedge});
@@ -540,7 +658,6 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
             // Now loop over all this channels subchanels. Not the names must be UNIQUE!!
             tinyxml2::XMLElement *pSubChan;
-            m_subchannel_bool.push_back({});
             pSubChan = pChan->FirstChildElement("subchannel");
             while(pSubChan){
 
@@ -581,11 +698,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                     m_subchannel_colors[nchan].push_back(subchannel_color);
                 }
 
-                const char* subchannel_use = pSubChan->Attribute("use");
-                if(subchannel_use==NULL || std::string(subchannel_use) == "true")
-                    m_subchannel_bool.back().push_back(true);
-                else
-                    m_subchannel_bool.back().push_back(false);
+                RejectDeprecatedUseAttribute(pSubChan->Attribute("use"), "subchannel");
 
                 const char* subchannel_data= pSubChan->Attribute("data");
                 if(subchannel_data==NULL){
@@ -597,27 +710,24 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 pSubChan = pSubChan->NextSiblingElement("subchannel");
             }
 
-            // Serialize bins XML for this channel (used to build data config if <data> section exists)
+            // Serialize bins XML for this channel (used to build the data and DetVar configs).
+            // Emit <bins2D> before <bins>, matching the order the parser above numbers variables
+            // in, so a child config built from this string gives every variable the same index
+            // as its parent. Attributes (including fit=) are copied verbatim.
             {
                 std::string channelBinsXml;
-                tinyxml2::XMLElement* pBinSer = pChan->FirstChildElement("bins");
-                while(pBinSer) {
-                    tinyxml2::XMLPrinter printer;
-                    pBinSer->Accept(&printer);
-                    channelBinsXml += "\t";
-                    channelBinsXml += printer.CStr();
-                    channelBinsXml += "\n";
-                    pBinSer = pBinSer->NextSiblingElement("bins");
-                }
-                pBinSer = pChan->FirstChildElement("bins2D");
-                while(pBinSer) {
-                    tinyxml2::XMLPrinter printer;
-                    pBinSer->Accept(&printer);
-                    channelBinsXml += "\t";
-                    channelBinsXml += printer.CStr();
-                    channelBinsXml += "\n";
-                    pBinSer = pBinSer->NextSiblingElement("bins2D");
-                }
+                auto serialize_bins = [&channelBinsXml, pChan](const char *tag) {
+                    for(tinyxml2::XMLElement* pBinSer = pChan->FirstChildElement(tag); pBinSer;
+                            pBinSer = pBinSer->NextSiblingElement(tag)) {
+                        tinyxml2::XMLPrinter printer;
+                        pBinSer->Accept(&printer);
+                        channelBinsXml += "\t";
+                        channelBinsXml += printer.CStr();
+                        channelBinsXml += "\n";
+                    }
+                };
+                serialize_bins("bins2D");
+                serialize_bins("bins");
                 m_channel_bins_xml_strings.push_back(channelBinsXml);
             }
 
@@ -697,7 +807,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
             const char* inpot = pMC->Attribute("pot");
             if(inpot==NULL){
-                m_mcgen_pot.push_back(-1.0);
+                m_mcgen_pot.push_back(1.0);
             }else{
                 m_mcgen_pot.push_back(strtod(inpot,&end) );
             }
@@ -1227,6 +1337,69 @@ int PROconfig::LoadFromXML(const std::string &filename){
         // when a variation name matches an allowlist entry
     }
 
+    // Parse HistVarFiles section (container of one or more HistVarSection blocks),
+    tinyxml2::XMLElement *pHistVarContainer = doc.FirstChildElement("HistVarFiles");
+    // <HistVarFiles> may be included from a snippet nested inside <variation_list>
+    // (rather than living as a top-level sibling like <DetVarFiles>), so fall back to
+    // looking inside pList (the <variation_list>/<systematics> element) if not found
+    // at document scope.
+    if(!pHistVarContainer && pList) pHistVarContainer = pList->FirstChildElement("HistVarFiles");
+    if(pHistVarContainer) {
+        log<LOG_INFO>(L"%1% || Found <HistVarFiles> section in XML, parsing hist1d/hist2d variation files...") % __func__;
+
+        tinyxml2::XMLElement *pHistVarSection = pHistVarContainer->FirstChildElement("HistVarSection");
+        if(!pHistVarSection) {
+            log<LOG_ERROR>(L"%1% || ERROR: <HistVarFiles> must contain at least one <HistVarSection> element") % __func__;
+            exit(EXIT_FAILURE);
+        }
+
+        while(pHistVarSection) {
+            const char* section_name = pHistVarSection->Attribute("name");
+            if(!section_name) {
+                log<LOG_ERROR>(L"%1% || ERROR: <HistVarSection> must have a name attribute") % __func__;
+                exit(EXIT_FAILURE);
+            }
+
+            tinyxml2::XMLElement *pHistVar = pHistVarSection->FirstChildElement("variation");
+            if(!pHistVar) {
+                log<LOG_ERROR>(L"%1% || ERROR: <HistVarSection> '%2%' must contain at least one <variation> element") % __func__ % section_name;
+                exit(EXIT_FAILURE);
+            }
+            while(pHistVar) {
+                const char* hv_filename = pHistVar->Attribute("filename");
+                const char* hv_histname = pHistVar->Attribute("histname");
+                const char* hv_knobval = pHistVar->Attribute("knobval");
+                if(!hv_filename || !hv_histname || !hv_knobval) {
+                    log<LOG_ERROR>(L"%1% || ERROR: <variation> under <HistVarSection> '%2%' must have filename, histname, and knobval attributes")
+                        % __func__ % section_name;
+                    exit(EXIT_FAILURE);
+                }
+                m_histvar_files_map[section_name].emplace_back(hv_filename, hv_histname);
+                m_histvar_knobvals_map[section_name].push_back(strtod(hv_knobval, &end));
+                log<LOG_INFO>(L"%1% || HistVarSection '%2%': variation filename=%3% histname=%4% knobval=%5%")
+                    % __func__ % section_name % hv_filename % hv_histname % m_histvar_knobvals_map[section_name].back();
+                pHistVar = pHistVar->NextSiblingElement("variation");
+            }
+
+            // Optional <subchannel> restriction list, mirroring DetVarSection's mechanism:
+            // if given, this systematic's hist1d/hist2d lookup only applies to events in
+            // one of these subchannels (matched by PROconfig::GetSubchannelName's fullname
+            // string in PROcreate.cxx's fill loop); absent means unrestricted, same as before.
+            tinyxml2::XMLElement *pHistVarSubchannel = pHistVarSection->FirstChildElement("subchannel");
+            while(pHistVarSubchannel) {
+                const char* sc_text = pHistVarSubchannel->GetText();
+                if(sc_text) {
+                    m_histvar_subchannels_map[section_name].insert(sc_text);
+                    log<LOG_INFO>(L"%1% || HistVarSection '%2%': restricted to subchannel %3%")
+                        % __func__ % section_name % sc_text;
+                }
+                pHistVarSubchannel = pHistVarSubchannel->NextSiblingElement("subchannel");
+            }
+
+            pHistVarSection = pHistVarSection->NextSiblingElement("HistVarSection");
+        }
+    }
+
     if(!pList){
         log<LOG_DEBUG>(L"%1% || No Allowlist or Denylist set, including ALL variations by default.") % __func__  ;
     }else{
@@ -1247,7 +1420,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 }
 
                 //check for known attributes
-                const std::vector<std::string> expected_attrs = {"name", "type", "plotname", "binning", "knobvals", "tag", "prior", "center", "force_0_cv", "include_only_weights", "scale","filename", "xvar", "yvar", "restrict", "mirror", "num_decomp_knobs", "include_resid_cov"};
+                const std::vector<std::string> expected_attrs = {"name", "type", "plotname", "binning", "knobvals", "tag", "prior", "center", "prior_type", "force_0_cv", "include_only_weights", "scale","filename", "xvar", "yvar", "restrict", "mirror", "num_decomp_knobs", "include_resid_cov", "inflate", "weights", "apply_to_subchannel"};
                 for (const tinyxml2::XMLAttribute* attr = pAllowList->FirstAttribute(); attr; attr = attr->Next()) {
                     std::string name = attr->Name();
                     if (std::find(expected_attrs.begin(), expected_attrs.end(), name) == expected_attrs.end()) {
@@ -1264,20 +1437,63 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 const char *tags = pAllowList->Attribute("tag");
                 const char *prior = pAllowList->Attribute("prior");
                 const char *center = pAllowList->Attribute("center");
+                const char *prior_type = pAllowList->Attribute("prior_type");
                 const char *force_0_cv = pAllowList->Attribute("force_0_cv");
                 const char *include_only_weights_str = pAllowList->Attribute("include_only_weights");
                 const char *restrict_str = pAllowList->Attribute("restrict");
                 const char *scale = pAllowList->Attribute("scale");
+                const char *inflate = pAllowList->Attribute("inflate");
                 const char *filename = pAllowList->Attribute("filename");
                 const char *xvar = pAllowList->Attribute("xvar");
                 const char *yvar = pAllowList->Attribute("yvar");
                 const char *mirrored = pAllowList->Attribute("mirror");
                 const char *num_decomp_knobs = pAllowList->Attribute("num_decomp_knobs");
                 const char *include_resid_cov = pAllowList->Attribute("include_resid_cov");
+                const char *weights = pAllowList->Attribute("weights");
+                const char *apply_to_subchannel = pAllowList->Attribute("apply_to_subchannel");
 
 
                 m_mcgen_variation_type.push_back(variation_type);
                 m_mcgen_variation_type_map[wt] = variation_type;
+                if(prior_type) {
+                    const std::string parsed_prior_type(prior_type);
+                    static const std::map<std::string, SplinePriorType> supported_prior_types = {
+                        {"gaussian", SplinePriorType::Gaussian},
+                        {"uniform", SplinePriorType::Uniform}
+                    };
+                    auto parsed = supported_prior_types.find(parsed_prior_type);
+                    if(parsed == supported_prior_types.end()) {
+                        throw std::invalid_argument(
+                            std::string("Systematic '") + wt +
+                            "' has unsupported prior_type='" + parsed_prior_type +
+                            "' (expected 'gaussian' or 'uniform')"
+                        );
+                    }
+                    if(!variation_type || std::string(variation_type) != "spline") {
+                        throw std::invalid_argument(
+                            std::string("prior_type is only supported for type='spline' systematics; got '") +
+                            (variation_type ? variation_type : "unspecified") + "' for '" + wt + "'"
+                        );
+                    }
+                    if(parsed->second == SplinePriorType::Uniform) {
+                        if(!restrict_str) {
+                            throw std::invalid_argument(
+                                std::string("Uniform-prior spline '") + wt +
+                                "' requires a finite restrict='lo, hi' range"
+                            );
+                        }
+                        if(prior || center) {
+                            throw std::invalid_argument(
+                                std::string("Uniform-prior spline '") + wt +
+                                "' cannot also specify Gaussian prior= or center= attributes"
+                            );
+                        }
+                    }
+                    m_mcgen_variation_prior_types[wt] = parsed->second;
+                }
+                // mcstat's covariance is registered in PROsyst under the systematic's name; remember
+                // that name here so the covariance key matches the tag/plotname maps (both keyed by wt).
+                if(variation_type && std::string(variation_type) == "mcstat") m_mcstat_systname = wt;
 
                 // DetVar variations are handled separately (not weight branches in MC files),
                 // so don't add them to the allowlist that PROcess_CAFAna uses.
@@ -1299,13 +1515,46 @@ int PROconfig::LoadFromXML(const std::string &filename){
                     }
                     int v = atoi(xvar+3);
                     m_mcgen_variation_histaxisvars_map[wt][0] = v;
-                    TFile fin(filename);
-                    if(strcmp(variation_type, "hist1d") == 0) {
-                        m_mcgen_variation_hist1d_map[wt] = (TH1*)fin.Get<TH1>(wt.c_str())->Clone();
-                        m_mcgen_variation_hist1d_map[wt]->SetDirectory(0);
-                    } else { 
-                        m_mcgen_variation_hist2d_map[wt] = (TH2*)fin.Get<TH2>(wt.c_str())->Clone();
-                        m_mcgen_variation_hist2d_map[wt]->SetDirectory(0);
+
+                    auto hv_it = m_histvar_files_map.find(wt);
+                    if(hv_it != m_histvar_files_map.end()) {
+                        // Multi-universe (asymmetric) case: this name matches a
+                        // <HistVarSection>, so read every declared <variation> instead
+                        // of the single filename attribute below.
+                        if(hv_it->second.size() > 1 &&
+                           !(mirrored && (strcmp(mirrored, "false") == 0 || strcmp(mirrored, "no") == 0 || strcmp(mirrored, "0") == 0))) {
+                            log<LOG_ERROR>(L"%1% || Systematic '%2%' resolves against a HistVarSection with %3% independently measured "
+                                           L"universes; mirror=\"false\" must be set explicitly (mirroring a multi-universe input is "
+                                           L"contradictory - each universe is already an independent measurement, not one to be reflected).")
+                                % __func__ % wt.c_str() % hv_it->second.size();
+                            exit(EXIT_FAILURE);
+                        }
+                        for(const auto& file_hist : hv_it->second) {
+                            TFile hv_fin(file_hist.first.c_str());
+                            if(strcmp(variation_type, "hist1d") == 0) {
+                                TH1* h = (TH1*)hv_fin.Get<TH1>(file_hist.second.c_str())->Clone();
+                                h->SetDirectory(0);
+                                m_mcgen_variation_hist1d_map[wt].push_back(h);
+                            } else {
+                                TH2* h = (TH2*)hv_fin.Get<TH2>(file_hist.second.c_str())->Clone();
+                                h->SetDirectory(0);
+                                m_mcgen_variation_hist2d_map[wt].push_back(h);
+                            }
+                        }
+                        log<LOG_INFO>(L"%1% || Systematic '%2%' resolved against HistVarSection: %3% universes")
+                            % __func__ % wt.c_str() % hv_it->second.size();
+                    } else {
+                        // Single-universe (symmetric) case: unchanged from before.
+                        TFile fin(filename);
+                        if(strcmp(variation_type, "hist1d") == 0) {
+                            TH1* h = (TH1*)fin.Get<TH1>(wt.c_str())->Clone();
+                            h->SetDirectory(0);
+                            m_mcgen_variation_hist1d_map[wt].push_back(h);
+                        } else {
+                            TH2* h = (TH2*)fin.Get<TH2>(wt.c_str())->Clone();
+                            h->SetDirectory(0);
+                            m_mcgen_variation_hist2d_map[wt].push_back(h);
+                        }
                     }
                 }
                 if(variation_type && strcmp(variation_type, "hist2d") == 0) {
@@ -1355,6 +1604,19 @@ int PROconfig::LoadFromXML(const std::string &filename){
                     knobs_vec.push_back(strtod(begin, NULL));
                     m_mcgen_variation_knobval_override[wt] = knobs_vec;
                 }
+                if(weights) {
+                    std::vector<double> weights_vec;
+                    const char *c = weights, *begin = NULL;
+                    while(*c) {
+                        if(begin && isspace(*c)) {
+                            weights_vec.push_back(strtod(begin, NULL));
+                            begin = NULL;
+                        } else if(!begin && !isspace(*c)) begin = c;
+                        ++c;
+                    }
+                    weights_vec.push_back(strtod(begin, NULL));
+                    m_mcgen_explicit_weights[wt] = weights_vec;
+                }
                 if(tags) {
                     std::vector<std::string> tags_vec;
                     const char *c = tags, *begin = NULL;
@@ -1393,12 +1655,33 @@ int PROconfig::LoadFromXML(const std::string &filename){
                         throw std::invalid_argument(std::string("restrict attribute for systematic '") + wt + "' must be two numbers, e.g. restrict=\"-1, 1\"");
                     while(*end == ' ' || *end == ',') ++end;
                     float rhi = std::strtof(end, nullptr);
+                    if(rlo > rhi) {
+                        log<LOG_WARNING>(L"%1% || restrict for systematic %2% given as [%3%, %4%] with lo>hi; swapping. "
+                                         L"An inverted range would otherwise hang rejection-sampling (pseudo-experiments).")
+                            % __func__ % wt.c_str() % rlo % rhi;
+                        const float t = rlo; rlo = rhi; rhi = t;
+                    }
                     m_mcgen_variation_restrict[wt] = {rlo, rhi};
                     log<LOG_INFO>(L"%1% || Parsed restrict=[%2%, %3%] for systematic %4%") % __func__ % rlo % rhi % wt.c_str();
                 }
                 if(scale) {
                     m_mcgen_variation_scale[wt] = std::strtof(scale, NULL);
                     log<LOG_INFO>(L"%1% || Parsed scale=%2% for systematic %3%") % __func__ % m_mcgen_variation_scale[wt] % wt.c_str();
+                }
+                if(inflate) {
+                    char *end;
+                    float inflate_val = std::strtof(inflate, &end);
+                    if(end == inflate || inflate_val <= 0) {
+                        log<LOG_ERROR>(L"%1% || ERROR! inflate attribute for systematic %2% must be a positive number, got '%3%'") % __func__ % wt.c_str() % inflate;
+                        throw std::invalid_argument(std::string("inflate attribute for systematic '") + wt + "' must be a positive number");
+                    }
+                    m_mcgen_variation_inflate[wt] = inflate_val;
+                    log<LOG_INFO>(L"%1% || Parsed inflate=%2% for systematic %3%") % __func__ % inflate_val % wt.c_str();
+                    const std::vector<std::string> inflatable_types = {"spline", "spline_to_covariance", "covariance", "external_covariance", "norm", "norm_to_covariance", "hist1d", "hist2d"};
+                    if(!variation_type || std::find(inflatable_types.begin(), inflatable_types.end(), variation_type) == inflatable_types.end()) {
+                        log<LOG_WARNING>(L"%1% || inflate is not supported for systematic %2% (type %3%); it will have no effect.")
+                            % __func__ % wt.c_str() % (variation_type ? variation_type : "unspecified");
+                    }
                 }
                 if(mirrored) {
                     if(strcmp(mirrored, "false") == 0 || strcmp(mirrored, "no") == 0 || strcmp(mirrored, "0") == 0)
@@ -1412,6 +1695,19 @@ int PROconfig::LoadFromXML(const std::string &filename){
                     bool keep_resid = !(strcmp(include_resid_cov, "false") == 0 || strcmp(include_resid_cov, "no") == 0 || strcmp(include_resid_cov, "0") == 0);
                     m_mcgen_variation_include_resid_cov[wt] = keep_resid;
                     log<LOG_INFO>(L"%1% || Parsed include_resid_cov=%2% for systematic %3%") % __func__ % keep_resid % wt.c_str();
+                }
+                if(apply_to_subchannel) {
+                    std::string pattern = apply_to_subchannel;
+                    // trim leading/trailing whitespace so apply_to_subchannel="nu_SBND " behaves
+                    size_t b = pattern.find_first_not_of(" \t");
+                    size_t e = pattern.find_last_not_of(" \t");
+                    pattern = (b == std::string::npos) ? "" : pattern.substr(b, e - b + 1);
+                    if(pattern.empty()) {
+                        log<LOG_ERROR>(L"%1% || ERROR! apply_to_subchannel attribute for systematic %2% is empty.") % __func__ % wt.c_str();
+                        throw std::invalid_argument(std::string("apply_to_subchannel attribute for systematic '") + wt + "' is empty");
+                    }
+                    m_mcgen_variation_apply_to_subchannel[wt] = pattern;
+                    log<LOG_INFO>(L"%1% || Parsed apply_to_subchannel='%2%' for systematic %3% (unanchored regex against subchannel fullnames; plain substrings work as-is)") % __func__ % pattern.c_str() % wt.c_str();
                 }
                 log<LOG_DEBUG>(L"%1% || Allowlisting variations: %2%") % __func__ % wt.c_str() ;
                 tinyxml2::XMLElement *pNext = pAllowList->NextSiblingElement("allowlist");
@@ -1443,6 +1739,15 @@ int PROconfig::LoadFromXML(const std::string &filename){
             throw std::invalid_argument(std::string("Correlations should be formed as <Systematic A> <Systematic B> <Correlation>. Could not parse: ") + std::string(pCorrelations->GetText()));
         }
 
+        const auto is_uniform = [this](const std::string &name) {
+            return GetSplinePriorType(name) == SplinePriorType::Uniform;
+        };
+        if(is_uniform(split[0]) || is_uniform(split[1])) {
+            throw std::invalid_argument(
+                std::string("Uniform-prior splines cannot appear in Gaussian <correlation> entries: ") +
+                split[0] + " " + split[1]
+            );
+        }
         m_mcgen_correlations.push_back(std::make_tuple(split[0], split[1], std::stof(split[2])));
 
         pCorrelations = pCorrelations->NextSiblingElement("correlation");
@@ -1667,16 +1972,25 @@ int PROconfig::LoadFromXML(const std::string &filename){
             }
 
 
+            // variable_index is optional: oscillation models require it (it maps the parameter
+            // to a kinematic PROpeller variable, e.g. "L/E"), but normalization models such as
+            // template_fit name a subchannel instead and carry no kinematic variable, so a
+            // missing variable_index defaults to -1 rather than being a hard error.
             const char* model_parameter_index= pModelParam->Attribute("variable_index");
             if(model_parameter_index==NULL){
-                log<LOG_ERROR>(L"%1% || ERROR: Model Params need a variable index in xml.@ line %2% in %3% ") % __func__ % __LINE__  % __FILE__;
-                log<LOG_ERROR>(L"Terminating.");
-                exit(EXIT_FAILURE);
+                m_model_parameter_index.push_back(-1);
             }else{
                 m_model_parameter_index.push_back(strtod(model_parameter_index, &end));
             }
 
-            log<LOG_DEBUG>(L"%1% || Model Param Name :  %2% and index %3% ") % __func__ % m_model_parameter_names.back().c_str() % m_model_parameter_index.back()  ;
+            // Optional scale bounds (used by template_fit-style normalization models). Default
+            // to [0, 10] when absent so a generic <parameter> tag without them is still valid.
+            const char* model_parameter_min = pModelParam->Attribute("min");
+            const char* model_parameter_max = pModelParam->Attribute("max");
+            m_model_parameter_min.push_back(model_parameter_min==NULL ? 0.0f  : (float)strtod(model_parameter_min, &end));
+            m_model_parameter_max.push_back(model_parameter_max==NULL ? 10.0f : (float)strtod(model_parameter_max, &end));
+
+            log<LOG_DEBUG>(L"%1% || Model Param Name :  %2% and index %3% (min %4%, max %5%) ") % __func__ % m_model_parameter_names.back().c_str() % m_model_parameter_index.back() % m_model_parameter_min.back() % m_model_parameter_max.back()  ;
             m_model_parameter_map[m_model_parameter_names.back()]=m_model_parameter_index.back();
             pModelParam = pModelParam->NextSiblingElement("parameter");
         }
@@ -1698,9 +2012,10 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
         else if(m_mcgen_variation_type[i] == "flat"){
             m_num_variation_type_flat+=1;
-        }
-        else if(m_mcgen_variation_type[i] == "norm"){
+        } else if(m_mcgen_variation_type[i] == "norm"){
             m_num_variation_type_norm+=1;
+        } else if (m_mcgen_variation_type[i] == "norm_to_covariance") {
+            m_num_variation_type_norm_to_covariance+=1;
         }else if(m_mcgen_variation_type[i] == "spline_to_covariance"){
             m_num_variation_type_spline_to_covariance+=1;
         }else if(m_mcgen_variation_type[i] == "mcstat"){
@@ -1709,10 +2024,16 @@ int PROconfig::LoadFromXML(const std::string &filename){
             m_use_mcstats = true;
         }else if(m_mcgen_variation_type[i] == "external_covariance"){
             m_num_variation_type_external_covariance+=1;
+        }else if(m_mcgen_variation_type[i] == "external_covariance_to_spline"){
+            m_num_variation_type_external_covariance_to_spline+=1;
         } else if(m_mcgen_variation_type[i] == "hist1d"){
             m_num_variation_type_hist1d+=1;
         } else if(m_mcgen_variation_type[i] == "hist2d"){
             m_num_variation_type_hist2d+=1;
+        } else if(m_mcgen_variation_type[i] == "explicit_spline"){
+            m_num_variation_type_explicit+=1;
+        } else {
+            log<LOG_ERROR>(L"%1% || Unrecognized variation type %2%") % __func__ % m_mcgen_variation_type[i].c_str();
         }
 
     }
@@ -1720,10 +2041,13 @@ int PROconfig::LoadFromXML(const std::string &filename){
     log<LOG_INFO>(L"%1% || num_variation_type_covariance: %2% ") % __func__ % m_num_variation_type_covariance;
     log<LOG_INFO>(L"%1% || num_variation_type_covariance_to_spline: %2% ") % __func__ % m_num_variation_type_covariance_to_spline;
     log<LOG_INFO>(L"%1% || num_variation_type_external_ovariance: %2% ") % __func__ % m_num_variation_type_external_covariance;
+    log<LOG_INFO>(L"%1% || num_variation_type_external_covariance_to_spline: %2% ") % __func__ % m_num_variation_type_external_covariance_to_spline;
     log<LOG_INFO>(L"%1% || num_variation_type_flat: %2% ") % __func__ % m_num_variation_type_flat;
     log<LOG_INFO>(L"%1% || num_variation_type_norm: %2% ") % __func__ % m_num_variation_type_norm;
+    log<LOG_INFO>(L"%1% || num_variation_type_norm_to_covariance: %2% ") % __func__ % m_num_variation_type_norm_to_covariance;
     log<LOG_INFO>(L"%1% || num_variation_type_spline: %2% ") % __func__ % m_num_variation_type_spline;
     log<LOG_INFO>(L"%1% || num_variation_type_spline_to_covariance: %2% ") % __func__ % m_num_variation_type_spline_to_covariance;
+    log<LOG_INFO>(L"%1% || num_variation_type_explicit_spline: %2% ") % __func__ % m_num_variation_type_explicit;
     if(m_use_mcstats){
         log<LOG_INFO>(L"%1% || Using MC intrinsic stat uncertainty. ") % __func__  ;
     }else{
@@ -1731,6 +2055,10 @@ int PROconfig::LoadFromXML(const std::string &filename){
     }
 
 
+
+    // i_prime was resolved at the top of this function; only now are m_num_variables and the
+    // model parameter map filled in, so this is the first point it can be checked.
+    this->ValidateFitVariable();
 
     this->CalcTotalBins();
 
@@ -1851,8 +2179,12 @@ void PROconfig::CalcTotalBins(){
                     tmp.insert(tmp.end(), widths.begin(), widths.end());
                 }
             }
-        m_variable_bin_to_edges.push_back(tmpe);
         }
+        // One entry per VARIABLE (consumers index this by variable index).
+        // This push used to sit inside the mode loop with a never-cleared
+        // accumulator: with >1 mode the vector held nvars*nmodes cumulatively
+        // growing entries and per-variable lookups read the wrong edges.
+        m_variable_bin_to_edges.push_back(tmpe);
         Eigen::VectorXf coll_bin_widths = Eigen::Map<Eigen::VectorXf>(tmp.data(),tmp.size());
         collapsed_bin_widths.push_back(coll_bin_widths);
         log<LOG_INFO>(L"%1% || On variable %2% bin widths are size %3% and  %4% ") % __func__ % io % coll_bin_widths.size() % coll_bin_widths;
@@ -1925,6 +2257,54 @@ const PROconfig::Binning& PROconfig::GetChannelVariableBins(size_t channel_index
     return m_channel_variable_bins[GetLocalChannelIndexFromGlobalChannelIndex(channel_index)][other_index];
 }
 
+void PROconfig::SetActiveBins(size_t var_index, const std::vector<char> &mask) {
+    if(var_index >= m_num_variables) {
+        log<LOG_ERROR>(L"%1% || Variable index %2% out of range (%3% variables).") % __func__ % var_index % m_num_variables;
+        log<LOG_ERROR>(L"Terminating.");
+        exit(EXIT_FAILURE);
+    }
+    if(mask.size() != m_num_variable_bins_total_collapsed[var_index]) {
+        log<LOG_ERROR>(L"%1% || Active-bin mask for variable %2% has %3% entries but the variable has %4% collapsed bins.")
+            % __func__ % var_index % mask.size() % m_num_variable_bins_total_collapsed[var_index];
+        log<LOG_ERROR>(L"Terminating.");
+        exit(EXIT_FAILURE);
+    }
+    size_t n_active = 0;
+    for(char m : mask) n_active += (m != 0);
+    if(n_active == 0) {
+        log<LOG_ERROR>(L"%1% || Active-bin mask for variable %2% has no active bins; refusing to install it.") % __func__ % var_index;
+        log<LOG_ERROR>(L"Terminating.");
+        exit(EXIT_FAILURE);
+    }
+    if(m_variable_active_bins_collapsed.size() < m_num_variables)
+        m_variable_active_bins_collapsed.resize(m_num_variables);
+    m_variable_active_bins_collapsed[var_index] = mask;
+    log<LOG_INFO>(L"%1% || Installed fit-region mask for variable %2%: %3% of %4% collapsed bins active.")
+        % __func__ % var_index % n_active % mask.size();
+}
+
+void PROconfig::ClearActiveBins() {
+    m_variable_active_bins_collapsed.clear();
+}
+
+bool PROconfig::HasActiveBins(size_t var_index) const {
+    return var_index < m_variable_active_bins_collapsed.size()
+        && !m_variable_active_bins_collapsed[var_index].empty();
+}
+
+bool PROconfig::IsBinActive(size_t var_index, size_t collapsed_bin) const {
+    if(!HasActiveBins(var_index)) return true;
+    const std::vector<char> &mask = m_variable_active_bins_collapsed[var_index];
+    return collapsed_bin < mask.size() && mask[collapsed_bin] != 0;
+}
+
+size_t PROconfig::NActiveBins(size_t var_index) const {
+    if(!HasActiveBins(var_index)) return m_num_variable_bins_total_collapsed[var_index];
+    size_t n = 0;
+    for(char m : m_variable_active_bins_collapsed[var_index]) n += (m != 0);
+    return n;
+}
+
 namespace {
     std::string FormatLabelUnit(const std::string &label, const std::string &unit) {
         if(label.empty() && unit.empty()) return "";
@@ -1952,6 +2332,20 @@ std::string PROconfig::GetChannelXAxisTitle(size_t channel_index, size_t other_i
                            m_channel_variable_units[channel_index][other_index]);
 }
 
+std::string PROconfig::GetChannelAxisTitle(size_t channel_index, size_t other_index, size_t dim) const {
+    const std::string title = GetChannelXAxisTitle(channel_index, other_index);
+    if(channel_index >= m_channel_variable_dims.size() ||
+       other_index >= m_channel_variable_dims[channel_index].size() ||
+       m_channel_variable_dims[channel_index][other_index] != 2) {
+        return dim == 0 ? title : "";
+    }
+
+    const size_t separator = title.find(';');
+    if(dim == 0) return title.substr(0, separator);
+    if(dim == 1 && separator != std::string::npos) return title.substr(separator + 1);
+    return "";
+}
+
 std::string PROconfig::GetChannelUnit(size_t channel_index, size_t other_index) const {
     // 2D variables keep the legacy combined "xtitle;ytitle" string in their
     // units slot, so it isn't a real unit -- skip straight to the channel-level.
@@ -1976,109 +2370,24 @@ std::string PROconfig::GetChannelUnit(size_t channel_index, size_t other_index) 
 
 void PROconfig::remove_unused_channel(){
 
-    log<LOG_INFO>(L"%1% || Remove any used channels and subchannels...") % __func__;
+    // The old `use="false"` disable mechanism is gone (it left the
+    // per-channel binning and per-detector POT arrays misaligned); every
+    // parsed mode/detector/channel/subchannel is in use, so the counts come
+    // straight from the parsed arrays.
+    m_num_modes = m_mode_names.size();
+    m_num_detectors = m_detector_names.size();
+    m_num_channels = m_channel_names.size();
 
-    m_num_modes = std::count(m_mode_bool.begin(), m_mode_bool.end(), true);
-    m_num_detectors = std::count(m_detector_bool.begin(), m_detector_bool.end(), true);
-    m_num_channels = std::count(m_channel_bool.begin(), m_channel_bool.end(), true);
+    // The subchannel arrays are over-allocated (to 100) before parsing; trim
+    // them to the real channel count so their size matches m_num_channels.
+    m_subchannel_names.resize(m_num_channels);
+    m_subchannel_plotnames.resize(m_num_channels);
+    m_subchannel_colors.resize(m_num_channels);
+    m_subchannel_datas.resize(m_num_channels);
 
-    //update mode-info
-    if(m_num_modes != m_mode_bool.size()){
-        log<LOG_DEBUG>(L"%1% || Found unused modes!! Clean it up...") % __func__;
-        std::vector<std::string> temp_mode_names(m_num_modes), temp_mode_plotnames(m_num_modes);
-        for(size_t i = 0, mode_index = 0; i != m_mode_bool.size(); ++i){
-            if(m_mode_bool[i]){
-                temp_mode_names[mode_index] = m_mode_names[i];
-                temp_mode_plotnames[mode_index] = m_mode_plotnames[i];
-
-                ++mode_index;
-            }    
-        }
-        m_mode_names = temp_mode_names;
-        m_mode_plotnames = temp_mode_plotnames;
-    }
-
-    ///update detector-info
-    if(m_num_detectors != m_detector_bool.size()){
-        log<LOG_DEBUG>(L"%1% || Found unused detectors!! Clean it up...") % __func__;
-        std::vector<std::string> temp_detector_names(m_num_detectors), temp_detector_plotnames(m_num_detectors);
-        for(size_t i = 0, det_index = 0; i != m_detector_bool.size(); ++i){
-            if(m_detector_bool[i]){
-                temp_detector_names[det_index] = m_detector_names[i];
-                temp_detector_plotnames[det_index] = m_detector_plotnames[i];
-
-                ++det_index;
-            }
-        }
-        m_detector_names = temp_detector_names;
-        m_detector_plotnames = temp_detector_plotnames;
-    }
-
-    if(m_num_channels != m_channel_bool.size()){
-        log<LOG_DEBUG>(L"%1% || Found unused channels!! Clean the messs up...") % __func__;
-
-        //update channel-related info
-        std::vector<std::vector<Binning>> temp_channel_other_bins(m_num_channels);
-
-        std::vector<std::string> temp_channel_names(m_num_channels);
-        std::vector<std::vector<int>> temp_variable_dims(m_num_channels);
-        std::vector<std::string> temp_channel_plotnames(m_num_channels);
-        std::vector<std::string> temp_channel_xaxis_labels(m_num_channels);
-        std::vector<std::string> temp_channel_units(m_num_channels);
-        std::vector<std::vector<std::string>> temp_channel_other_xaxis_labels(m_num_channels);
-        std::vector<std::vector<std::string>> temp_channel_other_units(m_num_channels);
-        for(size_t i=0, chan_index = 0; i< m_channel_bool.size(); ++i){
-            if(m_channel_bool[i]){
-                temp_channel_names[chan_index] = m_channel_names[i];
-                temp_channel_plotnames[chan_index] = m_channel_plotnames[i];
-                temp_channel_xaxis_labels[chan_index] = m_channel_xaxis_labels[i];
-                temp_channel_units[chan_index] = m_channel_units[i];
-
-                temp_channel_other_bins[chan_index] = m_channel_variable_bins[i];
-                temp_channel_other_xaxis_labels[chan_index] = m_channel_variable_xaxis_labels[i];
-                temp_channel_other_units[chan_index] = m_channel_variable_units[i];
-
-                ++chan_index;
-            }
-        }
-
-        m_channel_names = temp_channel_names;
-        m_channel_plotnames = temp_channel_plotnames;
-        m_channel_xaxis_labels = temp_channel_xaxis_labels;
-        m_channel_units = temp_channel_units;
-    }
-
-    {
-
-        //update subchannel-related info
-        m_num_subchannels.resize(m_num_channels);
-        std::vector<std::vector<std::string >> temp_subchannel_names(m_num_channels), temp_subchannel_plotnames(m_num_channels), temp_subchannel_colors(m_num_channels);
-        std::vector<std::vector<size_t >> temp_subchannel_datas(m_num_channels), temp_subchannel_model_rules(m_num_channels);
-        for(size_t i=0, chan_index = 0; i< m_channel_bool.size(); ++i){
-            if(m_channel_bool.at(i)){
-                m_num_subchannels[chan_index]= 0;
-                for(size_t j=0; j< m_subchannel_bool[i].size(); ++j){ 
-                    if(m_subchannel_bool[i][j]){
-                        ++m_num_subchannels[chan_index];
-                        temp_subchannel_names[chan_index].push_back(m_subchannel_names[i][j]);
-                        temp_subchannel_plotnames[chan_index].push_back(m_subchannel_plotnames[i][j]);	
-                        temp_subchannel_colors[chan_index].push_back(m_subchannel_colors[i][j]);	
-                        temp_subchannel_datas[chan_index].push_back(m_subchannel_datas[i][j]);
-
-                    }
-                }
-
-
-                ++chan_index;
-            }
-        }
-
-        m_subchannel_names = temp_subchannel_names;
-        m_subchannel_plotnames = temp_subchannel_plotnames;
-        m_subchannel_colors = temp_subchannel_colors;
-        m_subchannel_datas = temp_subchannel_datas;
-
-    }
+    m_num_subchannels.resize(m_num_channels);
+    for(size_t i = 0; i < m_num_channels; ++i)
+        m_num_subchannels[i] = m_subchannel_names[i].size();
 
     //grab list of fullnames used.
     log<LOG_DEBUG>(L"%1% || Sweet, now generating fullnames of all channels used...") % __func__;
@@ -2204,7 +2513,10 @@ void PROconfig::remove_unused_files(){
 size_t PROconfig::find_equal_index(const std::vector<size_t>& input_vec, size_t val) const{
     auto pos_iter = std::lower_bound(input_vec.begin(), input_vec.end(), val);
     if(pos_iter == input_vec.end() || (*pos_iter) != val){
-        log<LOG_ERROR>(L"%1% || Input value: %2% does not exist in the vector! Max element available: %3%") % __func__ % val % input_vec.back();
+        if(input_vec.empty())
+            log<LOG_ERROR>(L"%1% || Input value: %2% does not exist in the vector (vector is empty)!") % __func__ % val;
+        else
+            log<LOG_ERROR>(L"%1% || Input value: %2% does not exist in the vector! Max element available: %3%") % __func__ % val % input_vec.back();
         log<LOG_ERROR>(L"Terminating.");
         exit(EXIT_FAILURE);
     }
@@ -2377,16 +2689,19 @@ int PROconfig::HexToROOTColor(const std::string& hexColor) const{
     if (hexColor.length() != 7 || hexColor[0] != '#') {
         throw std::invalid_argument("Invalid hex color format. It should be in the format #RRGGBB.");
     }
-    int r, g, b;
+    int r = 0, g = 0, b = 0;
     std::stringstream ss;
-    ss << std::hex << hexColor.substr(1, 2); 
+    ss << std::hex << hexColor.substr(1, 2);
     ss >> r;
     ss.clear();
-    ss << std::hex << hexColor.substr(3, 2); 
+    ss << std::hex << hexColor.substr(3, 2);
     ss >> g;
     ss.clear();
     ss << std::hex << hexColor.substr(5, 2);
     ss >> b;
+    if(ss.fail()) {
+        throw std::invalid_argument("Invalid hex color '" + hexColor + "': components must be hexadecimal.");
+    }
     return TColor::GetColor(r, g, b);
 }
 
@@ -2420,6 +2735,11 @@ uint32_t PROconfig::CalcHash() const{
         unique_string << vecToString(vec);
 
     unique_string << vecToString(m_mcgen_variation_allowlist);
+
+    // apply_to_subchannel wildcards change which bins a systematic populates in the
+    // cached SystStructs; empty map appends nothing so pre-existing hashes are unchanged.
+    for (const auto& [sysname, pattern] : m_mcgen_variation_apply_to_subchannel)
+        unique_string << sysname << "->" << pattern;
 
     for(const auto& vec: m_branch_variables){
         for(const auto& br: vec){
@@ -2498,7 +2818,9 @@ PROconfig PROconfig::BuildDataConfig() const {
     }
 
     log<LOG_INFO>(L"%1% || Loading data config from temporary XML: %2%") % __func__ % tmpfile.c_str();
-    PROconfig dataconfig(tmpfile);
+    // Pass i_prime explicitly: the child must fit the same variable as this config even when
+    // that came from --fit-variable rather than from a fit="true" in the serialized bins.
+    PROconfig dataconfig(tmpfile, m_bool_rate_only, static_cast<int>(i_prime));
     std::filesystem::remove(tmpfile);
 
     return dataconfig;
@@ -2556,7 +2878,9 @@ PROconfig PROconfig::BuildDetVarConfig(size_t file_index) const {
     }
 
     log<LOG_INFO>(L"%1% || Loading DetVar config for '%2%' from temporary XML: %3%") % __func__ % dvfile.name.c_str() % tmpfile.c_str();
-    PROconfig dvconfig(tmpfile);
+    // Inherit the parent's fitting variable (see BuildDataConfig) — PROfit.cxx falls back to
+    // the parent's i_prime when the DetVar config's is out of range, so keep them identical.
+    PROconfig dvconfig(tmpfile, m_bool_rate_only, static_cast<int>(i_prime));
     std::filesystem::remove(tmpfile);
 
     // Propagate matching var branch names directly onto the mini-config so PROcess_CAFAna can read them.
@@ -2811,4 +3135,22 @@ std::vector<float> PROconfig::Binning::Widths(unsigned dim) const {
     std::vector<float> ret;
     for (int i = 0; i < (int)bin_edges[dim].size() - 1; i++) ret.push_back(bin_edges[dim][i+1] - bin_edges[dim][i]);
     return ret;
+}
+
+std::regex PROfit::CompilePattern(const std::string &pattern, const std::string &context) {
+    try {
+        return std::regex(pattern);
+    } catch(const std::regex_error &e) {
+        log<LOG_ERROR>(L"%1% || Invalid pattern '%2%' for %3%: %4%. Patterns are unanchored ECMAScript regexes matched against full names; a plain substring is valid as-is, anchor with ^...$ for a full match.") % __func__ % pattern.c_str() % context.c_str() % e.what();
+        log<LOG_ERROR>(L"Terminating.");
+        exit(EXIT_FAILURE);
+    }
+}
+
+std::vector<std::string> PROfit::MatchNames(const std::vector<std::string> &names, const std::string &pattern, const std::string &context) {
+    std::regex re = CompilePattern(pattern, context);
+    std::vector<std::string> out;
+    for(const auto &name : names)
+        if(PatternMatches(name, re)) out.push_back(name);
+    return out;
 }

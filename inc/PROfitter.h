@@ -22,9 +22,45 @@
 #include <Eigen/Eigen>
 #include "LBFGSB.h"
 
+#include <atomic>
+#include <cstdint>
 #include <random>
 
 namespace PROfit {
+
+    /**
+     * @brief Thread-safe accumulator for PROfile/PROsurf scan-mode timing diagnostics.
+     * @details PROfitter::Fit() reports per-phase microseconds (latin / PSO / LBFGS)
+     * and total fit count when GetScanTimingEnabled() is true. The dispatcher (PROfile
+     * constructor) resets these at the start of a scan and reads them at the end to
+     * print a parallelism / cost-breakdown report. When the flag is false, all the
+     * Fit() instrumentation collapses to a few inlined comparisons — zero allocation,
+     * negligible runtime impact.
+     */
+    struct ScanTimingStats {
+        std::atomic<uint64_t> n_fits{0};        ///< Number of Fit() calls completed since reset.
+        std::atomic<uint64_t> total_fit_us{0};  ///< Sum of wall time spent inside Fit() across all threads.
+        std::atomic<uint64_t> latin_us{0};      ///< Sum of wall time spent in the LHS evaluation loop.
+        std::atomic<uint64_t> pso_us{0};        ///< Sum of wall time spent in PSO.runSwarm().
+        std::atomic<uint64_t> lbfgs_us{0};      ///< Sum of wall time spent in all LBFGS local-fit phases.
+
+        /// Reset all counters to zero. Should be called from a single thread before dispatching workers.
+        void reset() {
+            n_fits.store(0);
+            total_fit_us.store(0);
+            latin_us.store(0);
+            pso_us.store(0);
+            lbfgs_us.store(0);
+        }
+    };
+
+    /// Global scan-timing accumulator. PROfitter::Fit reads-then-updates this when
+    /// GetScanTimingEnabled() returns true.
+    ScanTimingStats& GetScanTimingStats();
+
+    /// Global toggle gating the timing instrumentation in PROfitter::Fit.
+    /// Returns a reference so callers can flip it on/off (e.g. PROfile constructor).
+    bool& GetScanTimingEnabled();
 
     /**
      * @brief Configuration parameters for the PROfitter multi-start optimisation pipeline.
@@ -32,7 +68,9 @@ namespace PROfit {
      * Latin hypercube sampling, Particle Swarm Optimisation, and L-BFGS-B local refinement.
      * Also includes MCMC and harmonic seed-search parameters.  Parameters can be set via
      * a named map (e.g. from command-line options) or by selecting a named preset
-     * ("fast", "good", "overkill", "sensitivity").
+     * ("fast", "good", "overkill", "sensitivity", or the multistart presets
+     * "grad-fast", "grad-good", "grad-deep", "grad-overkill": physics-only LHS,
+     * no PSO, many L-BFGS-B multistarts — designed around the analytic gradient).
      */
     struct PROfitterConfig {
 
@@ -54,31 +92,54 @@ namespace PROfit {
         float swarm_convergence_theshold = 1e-4;     ///< PSO convergence threshold: stop if improvement < this value.
 
         int n_localfit = 10;                         ///< Number of L-BFGS-B local refinement fits run after PSO.
+        /// Sample the LHS in the physics subspace only (nuisance parameters at nominal 0).
+        /// A full-space LHS ranks start points by a chi2 dominated by random nuisance
+        /// pulls; a physics-only LHS ranks them by the oscillation landscape instead.
+        bool latin_phys_only = false;
+        /// Start the nuisance block of every LHS multistart descent from the best fit so
+        /// far (physics from the LHS point). Nuisance minima are nearly common across
+        /// oscillation basins, so descents converge in fewer iterations.
+        bool localfit_warm_nuisance = false;
         size_t n_max_local_retries = 1;              ///< Maximum retries if an L-BFGS-B fit throws an exception.
 
         size_t MCMCiter = 20'000;  ///< Number of MCMC iterations (after burn-in) for posterior sampling.
         size_t MCMCburn = 25'000;  ///< Number of MCMC burn-in iterations discarded before sampling.
 
-        size_t harmonic_min_num_seeds = 2;               ///< Minimum number of seed points from the harmonic frequency search.
-        size_t harmonic_max_num_seeds = 4;               ///< Maximum number of seed points from the harmonic frequency search.
-        size_t harmonic_num_test_points = 125;           ///< Number of test points in physics-parameter frequency space.
-        size_t harmonic_raw_max_tests = 60;              ///< Maximum iterations to find significant minima in the harmonic scan.
-        float harmonic_prominence_threshold = 0.5;       ///< Peak prominence threshold for peak selection in the harmonic scan.
-        float harmonic_prominence_threshold_shift = 0.2; ///< Shift applied to the prominence threshold between harmonic search rounds.
-        float harmonic_min_spacing_log = 0.025;          ///< Minimum log-space separation between selected harmonic seed peaks.
-        float harmonic_prominence_threshold_minimum = 1e-5; ///< Absolute minimum prominence threshold (floor).
+        size_t harmonic_min_num_seeds = 3;               ///< Minimum number of seed points from the harmonic frequency search.
+        size_t harmonic_max_num_seeds = 5;               ///< Maximum number of seed points from the harmonic frequency search.
+        size_t harmonic_num_test_points = 125;           ///< Number of test points in physics-parameter frequency space 125.
+        size_t harmonic_raw_max_tests = 65;              ///< Maximum iterations to find significant minima in the harmonic scan 65
+        float harmonic_prominence_threshold = 0.5;       ///< Absolute cap on the basin-persistence significance threshold (chi2 units).
+        float harmonic_persistence_rel = 0.15;           ///< Relative significance: a basin is significant if its persistence exceeds this fraction of the scan curve's full range.
+        float harmonic_persistence_floor = 1e-4;         ///< Noise floor on the persistence threshold (chi2 units); guards against pure float noise on flat curves.
+        float harmonic_prominence_threshold_shift = 0.2; ///< DEPRECATED: unused since the persistence-based minima finder (kept for option-file compatibility).
+        float harmonic_min_spacing_log = 0.0225;         ///< Minimum log-space separation between selected harmonic seed peaks 0.0225
+        float harmonic_prominence_threshold_minimum = 1e-5; ///< DEPRECATED: unused since the persistence-based minima finder (kept for option-file compatibility).
         float harmonic_seed_norm_tolerance = 1e-4;       ///< Tolerance for seed-point norm convergence in the harmonic search.
         float harmonic_seed_chi_tolerence = 1e-6;        ///< Tolerance for chi-squared convergence in the harmonic seed search.
-        bool harmonic_scan_fit = false;                  ///< If true, run a local fit at each harmonic scan point; if false, hold at best fit.
+        int harmonic_scan_mode = 1;                      ///< 0: single chi2 eval per scan point (slice at BF). 1: fit non-frequency physics, splines pinned at BF. 2: full profile, ALL params free except the pinned frequency.
+        size_t harmonic_phys_ladder = 4;                 ///< Trial values per non-frequency physics parameter evaluated at every scan point (min taken). Makes the scan amplitude-aware: a basin whose depth only appears away from the BF amplitude is invisible to the plain BF slice. 0/1 disables.
+        float harmonic_dense_lo = 0.0f;                  ///< Lower edge of the densely sampled log10(dm2) window (clamped into the model range at runtime).
+        float harmonic_dense_hi = 1.5f;                  ///< Upper edge of the densely sampled log10(dm2) window (clamped into the model range at runtime).
+        size_t harmonic_refine_rounds = 1;               ///< Adaptive refinement rounds: insert scan midpoints where adjacent chi2 values jump by more than harmonic_refine_dchi.
+        float harmonic_refine_dchi = 3.0f;               ///< Adjacent-point chi2 jump that triggers a refinement midpoint.
+        float harmonic_refit_window = 25.0f;             ///< Skip STEP-3 refits of scan minima more than this many chi2 units above the best scan point.
 
         bool progress_bar = false; ///< If true, display a progress bar during fitting.
+
+        /// If true (default), fixed seeds passed to Fit() are used — currently the
+        /// background-only seed (physics pinned at the model defaults, refined as a
+        /// nuisances-only fit and recorded as a candidate). Set to 0 via
+        /// `--fit-options use_bkg_seed 0` (global fit) or `--scan-fit-options
+        /// use_bkg_seed 0` (profile/surface scan fits) to disable at runtime.
+        bool use_bkg_seed = true;
 
         /// Gradient evaluation strategy applied to the PROmetric used by this fitter.
         /// Default mirrors the historical behaviour (central FD on full chi²); set to
         /// GradientOneSidedFull for ~2× speedup, or to one of the *Lin variants for
         /// the Gauss-Newton-style linearised gradient (5–20× speedup, exact at minimum).
         /// See PROmetric::GradientMode for the full mode matrix.
-        PROmetric::GradientMode gradient_mode = PROmetric::GradientCentralFull;
+        PROmetric::GradientMode gradient_mode = PROmetric::GradientAnalytic; ///< Gradient mode PROfitter::Fit sets on the metric (default: exact analytic; see PROmetric::GradientMode for the fallback).
 
         /** @brief Default constructor — leaves all parameters at their default values. */
         PROfitterConfig(){};
@@ -86,7 +147,8 @@ namespace PROfit {
         /**
          * @brief Construct from a named preset and an optional map of overrides.
          * @param input_fit_options  Map of parameter-name to value overrides applied after the preset.
-         * @param fit_preset         Preset name: "fast", "good", "overkill", or "sensitivity".
+         * @param fit_preset         Preset name: "fast", "good", "overkill", "sensitivity", or the
+         *                           multistart presets "grad-fast", "grad-good", "grad-deep", "grad-overkill".
          * @param isScan             If true, apply reduced settings appropriate for a parameter scan.
          */
         PROfitterConfig(std::map<std::string, float> input_fit_options, std::string fit_preset, bool isScan){
@@ -143,9 +205,10 @@ namespace PROfit {
                 n_swarm_iterations = 300;
                 n_localfit=15;
 
-                harmonic_min_num_seeds = 3;//4
-                harmonic_max_num_seeds = 8;
-                harmonic_num_test_points = 200;
+                harmonic_min_num_seeds = 10;//4
+                harmonic_max_num_seeds = 20;
+                harmonic_num_test_points = 250;
+                harmonic_scan_mode = 2;
             }
 
             else if(fit_preset == "sensitivity"){
@@ -169,6 +232,52 @@ namespace PROfit {
 
 
 
+
+            // ---- grad-* presets ----
+            // Same L-BFGS-B pipeline and (default analytic) gradient, but: LHS sampled in
+            // physics space only, no PSO stage (n_swarm_iterations = 1 degenerates the
+            // swarm to its start points, so the descents start from the best-ranked
+            // LHS points themselves), and the budget spent on many multistart descents
+            // instead. Benchmarked on pseudo-experiments with thrown systematics,
+            // thrown oscillation parameters and Poisson fluctuations (nueapp and 3+1):
+            // each tier reaches deeper minima than the same-cost standard preset, and
+            // grad-deep beats "overkill" in every dchi2 quantile at ~1/3 the time.
+            // n_swarm_particles also sizes the ranked-LHS start pool, so it equals
+            // n_localfit here.
+            else if(fit_preset == "grad-fast" || fit_preset == "grad-good" ||
+                    fit_preset == "grad-deep" || fit_preset == "grad-overkill"){
+                param.epsilon = 1e-5;
+                param.epsilon_rel = 1e-6;
+                param.max_iterations = 200;
+                param.max_linesearch = 25;
+                // NOTE: LBFGSpp's default past=1 keeps the relative-stagnation test
+                // (delta) active; it is how descents terminate cleanly once float noise
+                // stalls the line search. Do NOT set past=0 or delta below ~1e-6 (the
+                // float ulp scale of a typical chi2): the test then never fires, every
+                // descent grinds until the More-Thuente line search throws, and thrown
+                // descents are discarded by the fitter.
+                param.delta = 1e-6;
+                param.wolfe = 0.90;
+                param.ftol = 1e-4;
+                param.m = 10;
+                param.max_submin =10;
+                param.min_step = std::numeric_limits<float>::epsilon();
+
+                n_swarm_iterations = 1;
+                latin_phys_only = true;
+
+                if(fit_preset == "grad-fast"){          //  ~0.8 s (3+1) / 0.2 s (nueapp) per fit
+                    n_latin_points = 300;   n_swarm_particles = 8;   n_localfit = 8;
+                } else if(fit_preset == "grad-good"){   //  ~1.5 s / 0.5 s
+                    n_latin_points = 1000;  n_swarm_particles = 16;  n_localfit = 16;
+                } else if(fit_preset == "grad-deep"){   //  ~4 s / 1 s
+                    n_latin_points = 2000;  n_swarm_particles = 50;  n_localfit = 50;
+                    localfit_warm_nuisance = true;
+                } else {                                //  grad-overkill: ~9 s / 2.3 s
+                    n_latin_points = 4000;  n_swarm_particles = 100; n_localfit = 100;
+                    localfit_warm_nuisance = true;
+                }
+            }
 
             std::string whichFit = ( isScan? "Simplier Scan" : "Detailed Global");
             log<LOG_INFO>(L"%1% ||Fit and  L-BFGS-B parameters for the %2% minimia finder.  ") % __func__ % whichFit.c_str();
@@ -233,6 +342,10 @@ namespace PROfit {
                         exit(EXIT_FAILURE);
                     }
 
+                } else if(param_name == "latin_phys_only") {
+                    latin_phys_only = (value != 0);
+                } else if(param_name == "localfit_warm_nuisance") {
+                    localfit_warm_nuisance = (value != 0);
                 } else if(param_name == "n_localfit") {
                     n_localfit = value;
                     if(n_localfit < 1) {
@@ -242,7 +355,9 @@ namespace PROfit {
                     }
                 } else if(param_name == "n_max_local_retries") {
                     n_max_local_retries = value;
-                    
+                } else if(param_name == "use_bkg_seed") {
+                    use_bkg_seed = (value != 0);
+
                 // Particle Swarm Optimization parameters
                 } else if(param_name == "n_swarm_particles") {
                     n_swarm_particles = value;
@@ -294,8 +409,13 @@ namespace PROfit {
                     harmonic_raw_max_tests = value;
                 } else if(param_name == "harmonic_prominence_threshold") {
                     harmonic_prominence_threshold = value;
+                } else if(param_name == "harmonic_persistence_rel") {
+                    harmonic_persistence_rel = value;
+                } else if(param_name == "harmonic_persistence_floor") {
+                    harmonic_persistence_floor = value;
                 } else if(param_name == "harmonic_prominence_threshold_shift") {
                     harmonic_prominence_threshold_shift = value;
+                    log<LOG_WARNING>(L"%1% || harmonic_prominence_threshold_shift is deprecated and unused (persistence-based minima finder).") % __func__;
                 } else if(param_name == "harmonic_min_spacing_log") {
                     harmonic_min_spacing_log = value;
                 } else if(param_name == "harmonic_prominence_threshold_minimum") {
@@ -305,7 +425,26 @@ namespace PROfit {
                 } else if(param_name == "harmonic_seed_chi_tolerence") {
                     harmonic_seed_chi_tolerence = value;
                 } else if(param_name == "harmonic_scan_fit") {
-                    harmonic_scan_fit = bool(value);
+                    // Deprecated alias: maps onto harmonic_scan_mode 0/1.
+                    harmonic_scan_mode = value ? 1 : 0;
+                } else if(param_name == "harmonic_scan_mode") {
+                    harmonic_scan_mode = int(value);
+                    if(harmonic_scan_mode < 0 || harmonic_scan_mode > 2) {
+                        log<LOG_WARNING>(L"%1% || harmonic_scan_mode must be 0, 1 or 2; got %2%. Clamping.") % __func__ % harmonic_scan_mode;
+                        harmonic_scan_mode = std::min(std::max(harmonic_scan_mode, 0), 2);
+                    }
+                } else if(param_name == "harmonic_dense_lo") {
+                    harmonic_dense_lo = value;
+                } else if(param_name == "harmonic_dense_hi") {
+                    harmonic_dense_hi = value;
+                } else if(param_name == "harmonic_refine_rounds") {
+                    harmonic_refine_rounds = value;
+                } else if(param_name == "harmonic_refine_dchi") {
+                    harmonic_refine_dchi = value;
+                } else if(param_name == "harmonic_refit_window") {
+                    harmonic_refit_window = value;
+                } else if(param_name == "harmonic_phys_ladder") {
+                    harmonic_phys_ladder = value;
                 } else {
                     log<LOG_WARNING>(L"%1% || Unrecognized parameter %2%. Will ignore.") 
                         % __func__ % param_name.c_str();
@@ -327,8 +466,11 @@ namespace PROfit {
             log<LOG_INFO>(L"%1% || ------------ PROfitter specific -------------- ") % __func__ ;
             log<LOG_INFO>(L"%1% || n_latin_points: %2%  ") % __func__ % n_latin_points;
             log<LOG_INFO>(L"%1% || latin_diversity_factor: %2%  ") % __func__ % latin_diversity_factor;
+            log<LOG_INFO>(L"%1% || latin_phys_only: %2%  ") % __func__ % latin_phys_only;
+            log<LOG_INFO>(L"%1% || localfit_warm_nuisance: %2%  ") % __func__ % localfit_warm_nuisance;
             log<LOG_INFO>(L"%1% || n_localfit: %2%  ") % __func__ % n_localfit;
             log<LOG_INFO>(L"%1% || n_max_local_retries: %2%  ") % __func__ % n_max_local_retries;
+            log<LOG_INFO>(L"%1% || use_bkg_seed: %2%  ") % __func__ % use_bkg_seed;
             
             log<LOG_INFO>(L"%1% || ------------ Particle Swarm Optimization -------------- ") % __func__ ;
             log<LOG_INFO>(L"%1% || n_swarm_particles: %2%  ") % __func__ % n_swarm_particles;
@@ -350,12 +492,18 @@ namespace PROfit {
             log<LOG_INFO>(L"%1% || harmonic_num_test_points: %2%  ") % __func__ % harmonic_num_test_points;
             log<LOG_INFO>(L"%1% || harmonic_raw_max_tests: %2%  ") % __func__ % harmonic_raw_max_tests;
             log<LOG_INFO>(L"%1% || harmonic_prominence_threshold: %2%  ") % __func__ % harmonic_prominence_threshold;
-            log<LOG_INFO>(L"%1% || harmonic_prominence_threshold_shift: %2%  ") % __func__ % harmonic_prominence_threshold_shift;
+            log<LOG_INFO>(L"%1% || harmonic_persistence_rel: %2%  ") % __func__ % harmonic_persistence_rel;
+            log<LOG_INFO>(L"%1% || harmonic_persistence_floor: %2%  ") % __func__ % harmonic_persistence_floor;
             log<LOG_INFO>(L"%1% || harmonic_min_spacing_log: %2%  ") % __func__ % harmonic_min_spacing_log;
-            log<LOG_INFO>(L"%1% || harmonic_prominence_threshold_minimum: %2%  ") % __func__ % harmonic_prominence_threshold_minimum;
             log<LOG_INFO>(L"%1% || harmonic_seed_norm_tolerance: %2%  ") % __func__ % harmonic_seed_norm_tolerance;
             log<LOG_INFO>(L"%1% || harmonic_seed_chi_tolerence: %2%  ") % __func__ % harmonic_seed_chi_tolerence;
-            log<LOG_INFO>(L"%1% || harmonic_scan_fit: %2%  ") % __func__ % harmonic_scan_fit;
+            log<LOG_INFO>(L"%1% || harmonic_scan_mode: %2%  ") % __func__ % harmonic_scan_mode;
+            log<LOG_INFO>(L"%1% || harmonic_dense_lo: %2%  ") % __func__ % harmonic_dense_lo;
+            log<LOG_INFO>(L"%1% || harmonic_dense_hi: %2%  ") % __func__ % harmonic_dense_hi;
+            log<LOG_INFO>(L"%1% || harmonic_refine_rounds: %2%  ") % __func__ % harmonic_refine_rounds;
+            log<LOG_INFO>(L"%1% || harmonic_refine_dchi: %2%  ") % __func__ % harmonic_refine_dchi;
+            log<LOG_INFO>(L"%1% || harmonic_refit_window: %2%  ") % __func__ % harmonic_refit_window;
+            log<LOG_INFO>(L"%1% || harmonic_phys_ladder: %2%  ") % __func__ % harmonic_phys_ladder;
             
             log<LOG_INFO>(L"%1% || ------------ LBFGSBParam -------------- ") % __func__ ;
             log<LOG_INFO>(L"%1% || m: %2%   ") % __func__ % param.m ;
@@ -384,8 +532,11 @@ namespace PROfit {
             log<LOG_INFO>(L"------ PROfitter Specific Parameters ------");
             log<LOG_INFO>(L"  n_latin_points                       : Number of Latin hypercube points to sample across all parameters");
             log<LOG_INFO>(L"  latin_diversity_factor               : Diversity of latin points, 0: no distance weighting, 1: select most diverse far away points");
+            log<LOG_INFO>(L"  latin_phys_only                      : 1 = sample the latin hypercube in physics-parameter space only (nuisances at nominal); 0 = all parameters");
+            log<LOG_INFO>(L"  localfit_warm_nuisance               : 1 = start each latin multistart descent's nuisance parameters at the best fit so far; 0 = at the latin point");
             log<LOG_INFO>(L"  n_localfit                           : Total number of L-BFGS-B fits to do after PSO");
             log<LOG_INFO>(L"  n_max_local_retries                  : Maximum retries if L-BFGS-B throws an exception");
+            log<LOG_INFO>(L"  use_bkg_seed                         : 1 (default) fits the background-only fixed seed (physics pinned at model defaults) as a candidate; 0 disables");
             
             log<LOG_INFO>(L"");
             log<LOG_INFO>(L"------ Particle Swarm Optimization (PSO) Parameters ------");
@@ -409,13 +560,19 @@ namespace PROfit {
             log<LOG_INFO>(L"  harmonic_max_num_seeds               : Maximum number of seed points for harmonic search");
             log<LOG_INFO>(L"  harmonic_num_test_points             : Number of test points in frequency space");
             log<LOG_INFO>(L"  harmonic_raw_max_tests               : Max number of iterations to find significant minima.");
-            log<LOG_INFO>(L"  harmonic_prominence_threshold        : Threshold for peak prominence in harmonic search");
-            log<LOG_INFO>(L"  harmonic_prominence_threshold_shift  : Shift amount for adjusting prominence threshold");
-            log<LOG_INFO>(L"  harmonic_min_spacing_log             : Minimum spacing between peaks in log space");
-            log<LOG_INFO>(L"  harmonic_prominence_threshold_minimum: Absolute minimum for prominence threshold");
+            log<LOG_INFO>(L"  harmonic_prominence_threshold        : Absolute cap on the basin-persistence significance threshold (chi2)");
+            log<LOG_INFO>(L"  harmonic_persistence_rel             : Relative significance: persistence must exceed this fraction of the curve range");
+            log<LOG_INFO>(L"  harmonic_persistence_floor           : Noise floor on the persistence threshold (chi2)");
+            log<LOG_INFO>(L"  harmonic_min_spacing_log             : Minimum spacing between selected seeds in scan space");
             log<LOG_INFO>(L"  harmonic_seed_norm_tolerance         : Tolerance for seed point norm convergence");
             log<LOG_INFO>(L"  harmonic_seed_chi_tolerence          : Tolerance for chi-squared convergence in seed search");
-            log<LOG_INFO>(L"  harmonic_scan_fit                    : During harmonic scan, fit per point (true) or hold at BF (false/default)");
+            log<LOG_INFO>(L"  harmonic_scan_mode                   : 0: eval-only slice at BF (default). 1: fit non-freq physics per point. 2: full profile, all params free except pinned freq");
+            log<LOG_INFO>(L"  harmonic_scan_fit                    : Deprecated alias for harmonic_scan_mode 0/1");
+            log<LOG_INFO>(L"  harmonic_dense_lo / harmonic_dense_hi: Densely sampled log10(dm2) window (clamped into model bounds)");
+            log<LOG_INFO>(L"  harmonic_refine_rounds               : Adaptive midpoint-refinement rounds over the scan curve");
+            log<LOG_INFO>(L"  harmonic_refine_dchi                 : Adjacent-point chi2 jump that triggers a refinement midpoint");
+            log<LOG_INFO>(L"  harmonic_refit_window                : Skip refits of scan minima more than this chi2 above the best scan point");
+            log<LOG_INFO>(L"  harmonic_phys_ladder                 : Trial values per non-freq physics param evaluated at each scan point (min taken); 0/1 disables");
             
             log<LOG_INFO>(L"");
             log<LOG_INFO>(L"------ L-BFGS-B Parameters ------");
@@ -441,6 +598,24 @@ namespace PROfit {
     };
 
     /**
+     * @brief A seed point that carries per-parameter pins honored during its refinement.
+     * @details Unlike a plain seed (a start point from which ALL free parameters float),
+     * a FixedSeed holds every flagged parameter at its seed value during the L-BFGS-B
+     * refinement of THIS seed only (via zero-width solver bounds); the rest of the fit
+     * pipeline is untouched. The canonical use is the background-only seed: physics
+     * parameters pinned at the model defaults so the null hypothesis is always fit
+     * (nuisances only) and recorded as a candidate for the global minimum.
+     *
+     * Conflict rule: if any pinned value falls outside the fit's own [lb, ub] for that
+     * parameter — e.g. a --fix'd parameter, or a profile scan pinning the same axis at
+     * a different value — the whole seed is skipped (logged, not an error).
+     */
+    struct FixedSeed {
+        Eigen::VectorXf point;   ///< Full parameter vector (physics + splines) start point.
+        std::vector<int> fixed;  ///< Same length as point; 1 = hold point(i) fixed during this seed's refinement.
+    };
+
+    /**
      * @brief Multi-start global optimiser for PROfit chi-squared minimisation.
      * @details Implements the three-stage pipeline: Latin hypercube sampling,
      * Particle Swarm Optimisation, and L-BFGS-B local refinement.  The Fit() method
@@ -461,7 +636,10 @@ namespace PROfit {
             bool run_progress;                     ///< True if a progress bar should be updated during fitting.
 
             std::vector<Eigen::VectorXf> freq_seed_points; ///< Seed points found by the harmonic frequency scan.
+            size_t total_lbfgs_iterations = 0; ///< L-BFGS-B iterations summed over all local refinements of the most recent Fit() (benchmark diagnostic).
             std::vector<float> freq_seed_values;           ///< Chi-squared values at the harmonic seed points.
+            std::vector<float> harmonic_scan_pos;          ///< Diagnostic: frequency positions of the last harmonic scan curve (sorted, finite points only).
+            std::vector<float> harmonic_scan_chi;          ///< Diagnostic: chi-squared values of the last harmonic scan curve, parallel to harmonic_scan_pos.
 
             /**
              * @brief Construct a PROfitter with given bounds and configuration.
@@ -485,9 +663,12 @@ namespace PROfit {
              * @brief Run the optimisation pipeline from a provided list of seed points.
              * @param metric       The PROmetric to minimise.
              * @param seed_points  List of starting parameter vectors; augments or replaces LHS seeding.
+             * @param fixed_seeds  Optional seeds refined with their flagged parameters held fixed
+             *                     (see FixedSeed). A seed whose pinned values conflict with this
+             *                     fitter's [lb, ub] is skipped.
              * @return Minimum chi-squared value found.
              */
-            float Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed_points );
+            float Fit(PROmetric &metric, const std::vector<Eigen::VectorXf> &seed_points, const std::vector<FixedSeed> &fixed_seeds = {});
 
             /**
              * @brief Compute harmonic frequency-domain seed points for the physics parameter space.
@@ -538,7 +719,15 @@ namespace PROfit {
              * @param n_datapoint Number of data bins used in the fit.
              * @return Rescaled parameter covariance matrix.
              */
-            Eigen::MatrixXf ScaledCovariance(float chi2, int n_datapoint) const {return Covariance()*chi2/float(n_datapoint-best_fit.size());}
+            Eigen::MatrixXf ScaledCovariance(float chi2, int n_datapoint) const {
+                const long ndof = (long)n_datapoint - (long)best_fit.size();
+                if(ndof <= 0) {
+                    log<LOG_WARNING>(L"%1% || ScaledCovariance: n_datapoint (%2%) <= nparams (%3%); returning unscaled covariance.")
+                        % __func__ % n_datapoint % best_fit.size();
+                    return Covariance();
+                }
+                return Covariance()*chi2/float(ndof);
+            }
 
 
     };

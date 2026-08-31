@@ -32,6 +32,7 @@
 #include <cstdlib>
 #include <numeric>
 #include <stdexcept>
+#include <regex>
 
 // TINYXML2
 #include "tinyxml2.h"
@@ -59,6 +60,12 @@ typedef double eweight_type;
 #endif
 
 namespace PROfit{
+
+    /** @brief Prior model applied to a spline nuisance parameter. */
+    enum class SplinePriorType {
+        Gaussian, ///< Gaussian pull term using the configured center and width.
+        Uniform   ///< No pull term; the allowed interval is set by restrict.
+    };
 
     /**
      * @brief Typedef for the event-weight map used by MicroBooNE-style (uboonestyle) systematics.
@@ -237,13 +244,6 @@ namespace PROfit{
     class PROconfig {
         private:
 
-            //indicator of whether each channel/detector/subchannel is used
-            std::vector<bool> m_mode_bool;
-            std::vector<bool> m_detector_bool;
-            std::vector<bool> m_channel_bool;
-            std::vector<std::vector<bool>>  m_subchannel_bool;
-
-
             //map from subchannel name/index to global index and channel index
             std::unordered_map<std::string, size_t> m_map_fullname_subchannel_index;
             std::vector<size_t> m_vec_subchannel_index; //vector of global subchannel index, in increasing order
@@ -255,7 +255,8 @@ namespace PROfit{
             /* Function: construct a matrix T, which will be used to collapse matrix and vectors */
             void construct_variable_collapsing_matrices();
 
-            /* Function: remove any mode/detector/channel/subchannels in the configuration xml that are not used from consideration
+            /* Function: finalize mode/detector/channel/subchannel counts and build the list of
+             * subchannel fullnames. (The old `use="false"` disable mechanism has been removed.)
             */
             void remove_unused_channel();
 
@@ -282,17 +283,53 @@ namespace PROfit{
              */
             size_t find_global_subchannel_index_from_global_bin(size_t global_index, const std::vector<size_t>& num_subchannel_in_channel, const std::vector<size_t>& num_bins_in_channel, size_t num_channels, size_t num_bins_total) const;
 
+            /**
+             * @brief Find the variable index marked as the fitting variable in the XML.
+             * @details Scans every <channel> for a <bins>/<bins2D> element carrying `fit="true"`,
+             * walking that channel's binnings in the SAME order LoadFromXML assigns variable
+             * indices (all <bins2D> first, then all <bins>). At most one binning per channel may
+             * be marked, and every channel that marks one must agree on the resulting index —
+             * the variable list is global, so a disagreement is always a config error.
+             * @return The marked index, or 0 (the first variable) if no channel marks one, which
+             * reproduces the historical behaviour of XMLs written before `fit=` existed.
+             */
+            int ResolveFitVariableFromXML(tinyxml2::XMLDocument &doc) const;
+
+            /**
+             * @brief Sanity-check the resolved i_prime once the variable and model tables exist.
+             * @details Called at the end of LoadFromXML. Rejects an out-of-range index and an
+             * index that is a model parameter's kinematic variable (e.g. the truth L/E binning) —
+             * fitting the truth spectrum is never intended. Warns for a `plot="false"` variable.
+             */
+            void ValidateFitVariable() const;
+
 
         public:
 
             PROconfig() {}; //always have an empty constructor?
 
-            /* Constructor Function: Need a string passed which is the filename (with path) of the configuration xml */
-            PROconfig(const std::string &xmlname,bool rate_only=false);
+            /**
+             * @brief Load an analysis configuration from an XML file.
+             * @param xmlname      Filename (with path) of the configuration XML.
+             * @param rate_only    Collapse the fitting variable to a single bin (--rateonly).
+             * @param fit_variable Explicit override for the fitting variable index (`i_prime`).
+             *                     -1 (the default) means "take it from the XML" — the binning
+             *                     marked `fit="true"`, or variable 0 if none is marked.
+             *                     A value >= 0 wins over the XML; it is what --fit-variable
+             *                     passes, and what BuildDataConfig()/BuildDetVarConfig() pass so
+             *                     that child configs always fit the same variable as their parent.
+             */
+            PROconfig(const std::string &xmlname,bool rate_only=false,int fit_variable=-1);
 
             /*
              * Function: Use TinyXML2 to load XML */
             int LoadFromXML(const std::string & filename);
+            SplinePriorType GetSplinePriorType(const std::string &systematic) const {
+                auto it = m_mcgen_variation_prior_types.find(systematic);
+                return it == m_mcgen_variation_prior_types.end()
+                    ? SplinePriorType::Gaussian
+                    : it->second;
+            }
             uint32_t hash;
             uint32_t detvar_hash;
 
@@ -346,7 +383,22 @@ namespace PROfit{
 
             std::vector<size_t> m_num_subchannels; ///< Number of subchannels per channel.
 
-            size_t i_prime; ///< Index of the primary fitting variable (used by GetCollapsingMatrix() default overload).
+            /**
+             * @brief Index of the fitting variable — the one variable the analysis actually fits.
+             * @details Selects the default collapsing matrix (GetCollapsingMatrix()), the PROsyst
+             * and PROdata handed to the metric, and the spectrum every metric builds. Set once, at
+             * the top of LoadFromXML, from the binning marked `fit="true"` or from the
+             * constructor's `fit_variable` override; 0 when neither is given. Two later parse
+             * steps read it, which is why it must be resolved first: the `--rateonly` rebinning,
+             * and the default `binning="reco"` of a <systematic> (which resolves to this index).
+             * Not part of the config hash, so switching it does NOT invalidate the .bin caches:
+             * PROpeller stores bin indices for every variable and PROcreate builds a SystStruct
+             * vector per variable, so all variables are already in the cached binaries.
+             */
+            size_t i_prime = 0;
+
+            /// Constructor-supplied override for i_prime; -1 = "resolve from the XML". See PROconfig().
+            int m_requested_fit_variable = -1;
 
             // New
             std::vector<bool> m_channel_variable_plot_bool;
@@ -382,6 +434,16 @@ namespace PROfit{
 
             std::vector<std::vector<std::pair<float,float>>> m_variable_bin_to_edges;
 
+            /** @brief Runtime-only fit region in COLLAPSED bin space, one mask per variable.
+             *  @details Empty outer/inner vector = no mask = every bin active. Set via
+             *  SetActiveBins() BEFORE any PROmetric is constructed: metrics snapshot the
+             *  mask in their constructors, so later changes are not seen by existing
+             *  metrics (by design — the mask is read-only during fitting and may be read
+             *  concurrently by FC/MCMC worker threads). Deliberately NOT hashed and NOT
+             *  serialized: it is per-run analysis state (PROjector, future bin-off
+             *  studies), not part of the analysis definition. */
+            std::vector<std::vector<char>> m_variable_active_bins_collapsed;
+
             std::vector<Eigen::MatrixXf> variable_collapsing_matrices;
             // Sparse companions to variable_collapsing_matrices (one nonzero per row).
             // Used by CollapseMatrix in the chi^2 inner loop; built once in construct_variable_collapsing_matrices.
@@ -395,12 +457,15 @@ namespace PROfit{
             int m_num_variation_type_covariance = 0;
             int m_num_variation_type_covariance_to_spline = 0;
             int m_num_variation_type_external_covariance = 0;
+            int m_num_variation_type_external_covariance_to_spline = 0;
             int m_num_variation_type_spline = 0;
             int m_num_variation_type_spline_to_covariance = 0;
             int m_num_variation_type_flat = 0;
             int m_num_variation_type_norm = 0;
+            int m_num_variation_type_norm_to_covariance = 0;
             int m_num_variation_type_hist1d = 0;
             int m_num_variation_type_hist2d = 0;
+            int m_num_variation_type_explicit = 0;
 
             int m_num_mcgen_files;
             std::vector<std::string> m_mcgen_tree_name;	
@@ -421,6 +486,7 @@ namespace PROfit{
 
             //specific bits for covairiancegeneration
             bool m_use_mcstats = false;
+            std::string m_mcstat_systname = "mcstat";  ///< XML name of the mcstat systematic; the key its covariance is registered under (defaults to legacy "mcstat")
             std::vector<std::string> m_mcgen_weightmaps_formulas;
             std::vector<bool> m_mcgen_weightmaps_uses;
             std::vector<std::string> m_mcgen_weightmaps_patterns;
@@ -429,10 +495,14 @@ namespace PROfit{
             std::vector<std::string> m_mcgen_variation_denylist;
             std::vector<std::string> m_mcgen_variation_type;
             std::set<std::string> m_mcgen_variation_unmirrored;
+            std::map<std::string, std::vector<double>> m_mcgen_explicit_weights;
             std::map<std::string, std::string> m_mcgen_variation_external_filename_map;
             std::map<std::string, std::array<int, 2>> m_mcgen_variation_histaxisvars_map;
-            std::map<std::string, TH1*> m_mcgen_variation_hist1d_map;
-            std::map<std::string, TH2*> m_mcgen_variation_hist2d_map;
+            std::map<std::string, std::vector<TH1*>> m_mcgen_variation_hist1d_map;
+            std::map<std::string, std::vector<TH2*>> m_mcgen_variation_hist2d_map;
+            std::map<std::string, std::vector<std::pair<std::string, std::string>>> m_histvar_files_map; // map of histvar name to vector of (filename, histname) pairs
+            std::map<std::string, std::vector<double>> m_histvar_knobvals_map; // map of histvar name to vector of knob values
+            std::map<std::string, std::set<std::string>> m_histvar_subchannels_map; // map of histvar name to set of subchannels
             std::map<std::string, std::string> m_mcgen_variation_type_map;
             std::map<std::string, std::string> m_mcgen_variation_plotname_map;
             std::map<std::string, int> m_mcgen_variation_binning_map;
@@ -442,12 +512,15 @@ namespace PROfit{
             std::vector<std::tuple<std::string, std::string, float>> m_mcgen_correlations;
             std::map<std::string, float> m_mcgen_variation_prior;
             std::map<std::string, float> m_mcgen_variation_prior_centers;
+            std::map<std::string, SplinePriorType> m_mcgen_variation_prior_types; ///< Explicit per-spline prior models; absent means Gaussian.
             std::map<std::string, bool> m_mcgen_variation_force_0_cv; //map of systematics with force_0_cv=true (normalize shifts by shift at knob=0)
             std::map<std::string, std::vector<int>> m_mcgen_variation_include_only_weights; //map of systematics with include_only_weights (1-based indices of which weights to include in spline universes)
             std::map<std::string, std::pair<float,float>> m_mcgen_variation_restrict; //map of systematics with restrict="lo, hi" (clamp knob value during evaluation and fitting)
             std::map<std::string, float> m_mcgen_variation_scale; //map of systematics with scale factor to apply to weights (e.g., 0.001 for weights stored as x1000)
+            std::map<std::string, float> m_mcgen_variation_inflate; //map of systematics with inflate factor: spline shifts are scaled about 1 (ratio -> 1 + inflate*(ratio-1)) before interpolation; covariance matrices are scaled by inflate^2
             std::map<std::string, int> m_mcgen_variation_num_decomp_knobs; //map of covariance_to_spline systematics to the number of eigenpairs to keep (-1 or missing = keep all)
             std::map<std::string, bool> m_mcgen_variation_include_resid_cov; //map of covariance_to_spline systematics to whether the un-kept eigenpairs are retained as a residual covariance (missing = true)
+            std::map<std::string, std::string> m_mcgen_variation_apply_to_subchannel; //map of systematics with apply_to_subchannel="<wildcard>" (unanchored regex against subchannel fullnames; plain substrings work as-is): the systematic is only applied to matching subchannels, and its weight branch is only required in MCFiles that fill a matching subchannel
       
             //FIX skepic
             std::vector<std::string> systematic_name;
@@ -459,6 +532,11 @@ namespace PROfit{
             std::vector<int> m_model_parameter_index;
             std::vector<std::string> m_model_parameter_names;
             std::map<std::string,int> m_model_parameter_map;
+            /// Optional per-model-parameter min/max bounds, read from the <parameter> tag's
+            /// "min"/"max" attributes. Used by normalization-style models (e.g. template_fit)
+            /// where each <parameter> names a subchannel and min/max are its scale bounds.
+            std::vector<float> m_model_parameter_min;
+            std::vector<float> m_model_parameter_max;
 
             bool m_bool_rate_only;
             //----- PUBLIC FUNCTIONS ------
@@ -520,12 +598,34 @@ namespace PROfit{
             const Binning& GetChannelVariableBins(size_t channel_index, size_t other_index) const;
 
             /* Function: build the X-axis title for a channel as "label [unit]",
-             * omitting either part if empty. For 2D variables, the legacy
-             * combined "xtitle;ytitle" string in m_channel_variable_units is
-             * returned as-is.
-             */
+             * omitting either part if empty. For 2D variables, the combined
+             * "xtitle;ytitle" is split and the first part is returned.
+            */
             std::string GetChannelXAxisTitle(size_t channel_index) const;
             std::string GetChannelXAxisTitle(size_t channel_index, size_t other_index) const;
+            std::string GetChannelAxisTitle(size_t channel_index, size_t other_index, size_t dim) const;
+
+            /**
+             * @brief Install a runtime fit-region mask over the collapsed bins of one variable.
+             * @details Fatal error if the mask size does not match the variable's collapsed bin
+             * count or if every bin is inactive. Must be called before metric construction to
+             * take effect (metrics snapshot the mask in their constructors).
+             * @param var_index  Variable (binning) index.
+             * @param mask       One entry per collapsed bin; nonzero = active (included in fits).
+             */
+            void SetActiveBins(size_t var_index, const std::vector<char> &mask);
+
+            /** @brief Remove all runtime fit-region masks (every bin active again). */
+            void ClearActiveBins();
+
+            /** @brief True if a fit-region mask has been installed for this variable. */
+            bool HasActiveBins(size_t var_index) const;
+
+            /** @brief True if the collapsed bin is in the fit region (always true when no mask is set). */
+            bool IsBinActive(size_t var_index, size_t collapsed_bin) const;
+
+            /** @brief Number of active collapsed bins for this variable (= total bins when no mask is set). Use for dof counting. */
+            size_t NActiveBins(size_t var_index) const;
 
             /* Function: return the unit string for a channel's variable
              * (e.g. "MeV"), preferring the per-variable <bins unit="..."> entry
@@ -598,5 +698,18 @@ namespace PROfit{
 
 
     };
+
+    /* User-supplied pattern matching (subchannel fullnames, systematic names).
+     * Patterns are ECMAScript regexes matched UNANCHORED via std::regex_search,
+     * so a plain substring behaves exactly like the historical
+     * std::string::find convention; anchor with ^...$ for a full-name match.
+     * CompilePattern is fatal (logged exit) on an invalid pattern; `context`
+     * names the caller/feature in that error message. */
+    std::regex CompilePattern(const std::string &pattern, const std::string &context);
+    inline bool PatternMatches(const std::string &name, const std::regex &re) {
+        return std::regex_search(name, re);
+    }
+    /* All names matching pattern (compiled once); input order preserved. */
+    std::vector<std::string> MatchNames(const std::vector<std::string> &names, const std::string &pattern, const std::string &context);
 }
 #endif

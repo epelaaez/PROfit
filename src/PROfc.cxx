@@ -7,7 +7,6 @@ void fc_worker(fc_args args, MultiPROgressBar &progress) {
     std::mt19937 rng{args.seed};
     std::unique_ptr<PROmodel> model = get_model_from_string(args.config, args.prop);
 
-    PROchi::EvalStrategy strat = args.binned ? PROchi::BinnedChi2 : PROchi::EventByEvent;
     Eigen::VectorXf throws = Eigen::VectorXf::Constant(model->nparams + args.systs.GetNSplines(), 0);
     for(size_t i = 0; i < model->nparams; ++i) throws(i) = args.phy_params(i);
     size_t nparams = model->nparams + args.systs.GetNSplines();
@@ -41,16 +40,18 @@ void fc_worker(fc_args args, MultiPROgressBar &progress) {
         log<LOG_INFO>(L"%1% | Thread #%2% Throw #%3%") % __func__ % args.thread % u;
         std::normal_distribution<float> d;
         Eigen::VectorXf throwC = Eigen::VectorXf::Constant(args.config.m_num_variable_bins_total_collapsed[args.config.i_prime], 0);
+        // Bounded, OOB-safe truncated-Gaussian throws (shared helper; the old
+        // do/while here could spin forever on unreachable restrict bounds).
         for(size_t i = 0; i < args.systs.GetNSplines(); i++) {
-            float tlo = args.systs.spline_has_restrict[i] ? args.systs.spline_restrict_lo[i] : args.systs.spline_lo[i];
-            float thi = args.systs.spline_has_restrict[i] ? args.systs.spline_restrict_hi[i] : args.systs.spline_hi[i];
-            do {
-                throws(i+nphys) = d(rng);
-            } while(throws(i+nphys) < tlo || throws(i+nphys) > thi);
+            throws(i+nphys) = ThrowRestrictedSplinePull(args.systs, i, rng, d);
         }
         for(size_t i = 0; i < args.config.m_num_variable_bins_total_collapsed[args.config.i_prime]; i++)
             throwC(i) = d(rng);
-        PROspec shifted = FillSpectra(args.config, args.prop, args.systs, *model, throws, strat);
+        // Fill the i_prime variable explicitly: the previous call passed an
+        // EvalStrategy enum where FillSpectra takes `bool binned` and let
+        // var_index default to 0, while the CollapseMatrix below collapses
+        // with the i_prime matrix — wrong-variable physics when i_prime != 0.
+        PROspec shifted = FillSpectra(args.config, args.prop, args.systs, *model, throws, args.binned, args.config.i_prime);
         log<LOG_DEBUG>(L"%1% || Shifted spectrum %2%\nfor throw %3%")
             % __func__ % shifted.Spec() % throws;
         PROspec newSpec = PROspec::PoissonVariation(PROspec(CollapseMatrix(args.config, shifted.Spec()) + args.L * throwC, CollapseMatrix(args.config, shifted.Error())), dseed(rng));
