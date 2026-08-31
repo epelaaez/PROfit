@@ -2,8 +2,20 @@
 
 void run_plot(const PROconfig &config, const PROpeller &prop, const PROmetric &metric, const PROmodel &model, const std::vector<PROsyst> &variable_systs, const Eigen::VectorXf &CVParams, const Eigen::VectorXf &fakeDataParams, const Eigen::VectorXf &fake_data_osc_param_vector, const std::vector<PROdata> &variable_data, const PROpt &options) {
     std::uniform_int_distribution<uint32_t> dseed(0, std::numeric_limits<uint32_t>::max());
-    log<LOG_INFO>(L"%1% || Making a PROsyst thats full covariance for future error bar creation (might be slow) ")% __func__ ;
-    PROsyst allcovsyst = variable_systs[config.i_prime].allsplines2cov(config, prop, model, CVParams, dseed(PROseed::global_rng));
+    // allcovsyst (every spline converted to a covariance) is only needed for the
+    // fractional-systematics PDFs, the Covar.pdf/ROOT covariance plots, and the
+    // chi2/ndf labels on the error-band plots. Skip the conversion when none of
+    // those are requested — but ALWAYS consume the seed draw so the global RNG
+    // stream (and hence every downstream error-band throw) is flag-independent.
+    const bool need_allcov = options.with_covar || !options.no_frac_syst;
+    const uint32_t allcov_seed = dseed(PROseed::global_rng);
+    PROsyst allcovsyst;
+    if(need_allcov) {
+        log<LOG_INFO>(L"%1% || Making a PROsyst thats full covariance for future error bar creation (might be slow) ")% __func__ ;
+        allcovsyst = variable_systs[config.i_prime].allsplines2cov(config, prop, model, CVParams, allcov_seed);
+    } else {
+        log<LOG_INFO>(L"%1% || --no-frac-syst without --with-covar: skipping the spline->covariance conversion; no chi2/ndf labels on error-band plots.")% __func__ ;
+    }
 
     // --bkg-subtract: resolve the wildcard once. The same matched subchannel
     // list is used for every variable in this block; bkg_full / bkg_collapsed
@@ -49,15 +61,17 @@ void run_plot(const PROconfig &config, const PROpeller &prop, const PROmetric &m
         cv_objs.push_back(objs);
     }
 
-    std::string filename = options.final_output_tag+"_fractional_systematics.pdf";
-    plotPriorFractionalSystematicBreakdown(config, variable_cvs[config.i_prime], allcovsyst, filename,config.i_prime);
-    std::string rfilename = options.final_output_tag+"_ratio_fractional_systematics.pdf";
-    if(config.m_num_detectors > 1)
-        plotPriorFractionalSystematicRatios(config, variable_cvs[config.i_prime], allcovsyst, rfilename,config.i_prime);
+    if(!options.no_frac_syst) {
+        std::string filename = options.final_output_tag+"_fractional_systematics.pdf";
+        plotPriorFractionalSystematicBreakdown(config, variable_cvs[config.i_prime], allcovsyst, filename,config.i_prime);
+        std::string rfilename = options.final_output_tag+"_ratio_fractional_systematics.pdf";
+        if(config.m_num_detectors > 1)
+            plotPriorFractionalSystematicRatios(config, variable_cvs[config.i_prime], allcovsyst, rfilename,config.i_prime);
 
-    std::string crfilename = options.final_output_tag+"_channel_ratio_fractional_systematics.pdf";
-    if(options.plot_channel_ratios && config.m_num_channels > 1)
-        plotPriorFractionalSystematicChannelRatios(config, variable_cvs[config.i_prime], allcovsyst, crfilename, config.i_prime);
+        std::string crfilename = options.final_output_tag+"_channel_ratio_fractional_systematics.pdf";
+        if(options.plot_channel_ratios && config.m_num_channels > 1)
+            plotPriorFractionalSystematicChannelRatios(config, variable_cvs[config.i_prime], allcovsyst, crfilename, config.i_prime);
+    }
 
     std::vector<std::map<std::string, std::unique_ptr<TH1D>>> other_hists;
     for(size_t io = 0; io < config.m_num_variables; ++io) {
@@ -521,44 +535,52 @@ void run_plot(const PROconfig &config, const PROpeller &prop, const PROmetric &m
 
     }
 
-    //Now some covariances
-    std::map<std::string, std::unique_ptr<TH2D>> matrices = covarianceTH2D(allcovsyst, config, variable_cvs[config.i_prime]);
-    c.Print((options.final_output_tag+"_PROplot_Covar.pdf" + "[").c_str(), "pdf");
+    //Now some covariances (opt-in: slow and large with many bins/systematics)
+    std::map<std::string, std::unique_ptr<TH2D>> matrices;
+    if(options.with_covar) {
+        matrices = covarianceTH2D(allcovsyst, config, variable_cvs[config.i_prime]);
+        c.Print((options.final_output_tag+"_PROplot_Covar.pdf" + "[").c_str(), "pdf");
 
-    std::vector<std::string> first_plots = {"collapsed_total_cor","collapsed_total_frac_cov","total_cor","total_frac_cov"};
+        std::vector<std::string> first_plots = {"collapsed_total_cor","collapsed_total_frac_cov","total_cor","total_frac_cov"};
 
-    for(const auto &name: first_plots){
-        auto &mat = matrices.at(name);
-        mat->Draw("colz");
-        TText *t = new TText();
-        t->SetNDC();                
-        t->SetTextFont(42);                          
-        t->SetTextSize(0.03);      
-        t->SetTextAlign(33);        
-        std::string pv = "PROfit v"+std::string(PROJECT_VERSION_STR);
-        t->DrawText(0.895, 0.955, pv.c_str()); 
-        c.Print((options.final_output_tag+"_PROplot_Covar.pdf").c_str(), "pdf");
+        for(const auto &name: first_plots){
+            auto &mat = matrices.at(name);
+            mat->Draw("colz");
+            TText *t = new TText();
+            t->SetNDC();
+            t->SetTextFont(42);
+            t->SetTextSize(0.03);
+            t->SetTextAlign(33);
+            std::string pv = "PROfit v"+std::string(PROJECT_VERSION_STR);
+            t->DrawText(0.895, 0.955, pv.c_str());
+            c.Print((options.final_output_tag+"_PROplot_Covar.pdf").c_str(), "pdf");
+        }
+
+
+        for(const auto &[name, mat]: matrices) {
+            if (std::find(first_plots.begin(), first_plots.end(), name) != first_plots.end())continue;
+            mat->Draw("colz");
+            TText *t = new TText();
+            t->SetNDC();
+            t->SetTextFont(42);
+            t->SetTextSize(0.03);
+            t->SetTextAlign(33);
+            std::string pv = "PROfit v"+std::string(PROJECT_VERSION_STR);
+            t->DrawText(0.895, 0.955, pv.c_str());
+            c.Print((options.final_output_tag+"_PROplot_Covar.pdf").c_str(), "pdf");
+        }
+        c.Print((options.final_output_tag+"_PROplot_Covar.pdf" + "]").c_str(), "pdf");
     }
-
-
-    for(const auto &[name, mat]: matrices) {
-        if (std::find(first_plots.begin(), first_plots.end(), name) != first_plots.end())continue;
-        mat->Draw("colz");
-        TText *t = new TText();
-        t->SetNDC();                
-        t->SetTextFont(42);                          
-        t->SetTextSize(0.03);      
-        t->SetTextAlign(33);        
-        std::string pv = "PROfit v"+std::string(PROJECT_VERSION_STR);
-        t->DrawText(0.895, 0.955, pv.c_str()); 
-        c.Print((options.final_output_tag+"_PROplot_Covar.pdf").c_str(), "pdf");
-    }
-    c.Print((options.final_output_tag+"_PROplot_Covar.pdf" + "]").c_str(), "pdf");
 
     //errorband
-    std::unique_ptr<PROmetric> allcov_metric(metric.Clone());
-    allcov_metric->override_systs(allcovsyst);
-    std::vector<std::vector<TPaveText>> other_channel_chitexts; 
+    // The chi2/ndf labels need the all-covariance metric; without allcovsyst
+    // (--no-frac-syst and no --with-covar) they are skipped entirely.
+    std::unique_ptr<PROmetric> allcov_metric;
+    if(need_allcov) {
+        allcov_metric.reset(metric.Clone());
+        allcov_metric->override_systs(allcovsyst);
+    }
+    std::vector<std::vector<TPaveText>> other_channel_chitexts;
 
     for(size_t io = 0; io < config.m_num_variables; ++io) {
 
@@ -572,7 +594,7 @@ void run_plot(const PROconfig &config, const PROpeller &prop, const PROmetric &m
             for(size_t id =0; id < config.m_num_detectors; id++){
                 for(size_t ic = 0; ic < config.m_num_channels; ic++){
                     TPaveText chi2text(0.59, 0.50, 0.89, 0.59, "NDC");
-                    if(io==config.i_prime){
+                    if(io==config.i_prime && need_allcov){
                         log<LOG_INFO>(L"%1% || On channel %2%:") % __func__ % global_channel_index ;
                         // Intentionally uses the UNsubtracted CV and data even under
                         // --bkg-subtract: the chi2 is numerically invariant under the
@@ -618,7 +640,7 @@ void run_plot(const PROconfig &config, const PROpeller &prop, const PROmetric &m
             // Everything here is in unscaled counts; width/area scaling of the
             // data happens once inside plot_channels.
             PROsubtractedErrorBand sub = getErrorBandBkgSubtracted(config, prop, variable_systs[io],
-                    model, variable_cvs[io], CVParams, bkg_subchannels, options.binwidth_scale, io);
+                    model, variable_cvs[io], CVParams, bkg_subchannels, options.binwidth_scale, io, (size_t)options.band_throws);
             other_err_bands.push_back(sub.band);
             cv_plot.Spec() -= build_subchannel_mask_spec(config, cv_plot, bkg_subchannels, io);
             Eigen::VectorXf new_err = (data_plot.Error().array().square()
@@ -626,7 +648,7 @@ void run_plot(const PROconfig &config, const PROpeller &prop, const PROmetric &m
                                        + sub.bkg_mcstat_var_collapsed.array()).sqrt();
             data_plot = PROdata(Eigen::VectorXf(data_plot.Spec() - sub.bkg_cv_collapsed), new_err);
         } else {
-            other_err_bands.push_back(getErrorBand(config, prop, variable_systs[io], model, variable_cvs[io], CVParams, options.binwidth_scale, io));
+            other_err_bands.push_back(getErrorBand(config, prop, variable_systs[io], model, variable_cvs[io], CVParams, options.binwidth_scale, io, (size_t)options.band_throws));
         }
         auto objs = plot_channels(options.final_output_tag+"_PROplot_Variable_"+std::to_string(io)+"_ErrorBand.pdf", config, cv_plot, {}, data_plot,
                 other_err_bands.back(), {}, other_channel_chitexts[io], options.pbounds, opt | PlotOptions::DataMCRatio, io,
@@ -745,10 +767,12 @@ void run_plot(const PROconfig &config, const PROpeller &prop, const PROmetric &m
         }
     }
 
-    fout.mkdir("Covariance");
-    fout.cd("Covariance");
-    for(const auto &[name, mat]: matrices)
-        mat->Write(name.c_str());
+    if(options.with_covar) {
+        fout.mkdir("Covariance");
+        fout.cd("Covariance");
+        for(const auto &[name, mat]: matrices)
+            mat->Write(name.c_str());
+    }
 
     fout.mkdir("ErrorBand");
     fout.cd("ErrorBand");

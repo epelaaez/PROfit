@@ -305,9 +305,10 @@ namespace PROfit{
      * @param cvparams    CV physics parameter vector.
      * @param scale       If true, divide errors by bin width.
      * @param other_index Variable index.
+     * @param nthrows     Number of systematic throws (default 2500).
      * @return PROerrorbar with asymmetric per-bin uncertainties.
      */
-    PROerrorbar getErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const PROspec &cv_spec, const Eigen::VectorXf &cvparams,bool scale=false, int other_index=0);
+    PROerrorbar getErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const PROspec &cv_spec, const Eigen::VectorXf &cvparams,bool scale=false, int other_index=0, size_t nthrows=2500);
 
     /**
      * @brief Compute an error band analytically from the covariance-type systematics alone.
@@ -353,7 +354,7 @@ namespace PROfit{
 
     /**
      * @brief Background-subtracted pre-fit error band, publication convention.
-     * @details Each of the 2500 systematic throws is split into signal and background
+     * @details Each of the nthrows (default 2500) systematic throws is split into signal and background
      * pieces (FillSystRandomThrowSplit) and the throw's OWN background is subtracted, so
      * background systematic variations cancel out of the band: the band shows
      * signal-only systematics around the subtracted CV. The background's per-bin
@@ -370,9 +371,10 @@ namespace PROfit{
      * @param bkg_subchannels Global subchannel indices to subtract (from find_subchannels_by_pattern).
      * @param scale           If true, divide band errors by bin width.
      * @param other_index     Variable index.
+     * @param nthrows         Number of systematic throws (default 2500).
      * @return PROsubtractedErrorBand (see struct docs).
      */
-    PROsubtractedErrorBand getErrorBandBkgSubtracted(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const PROspec &cv_spec, const Eigen::VectorXf &cvparams, const std::vector<size_t> &bkg_subchannels, bool scale=false, int other_index=0);
+    PROsubtractedErrorBand getErrorBandBkgSubtracted(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const PROspec &cv_spec, const Eigen::VectorXf &cvparams, const std::vector<size_t> &bkg_subchannels, bool scale=false, int other_index=0, size_t nthrows=2500);
 
     /**
      * @brief Produce a bar chart showing fractional prior uncertainty per systematic.

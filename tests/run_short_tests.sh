@@ -127,7 +127,9 @@ run_test t08surface       --use-fake-data surface -g 4 "${AXES[@]}"
 run_test t09surfaceamr    --use-fake-data surface -g 4 "${AXES[@]}" --surface-amr --amr-initial 4 --amr-levels 1
 
 # --- 4. Plotting variants -----------------------------------------------------
-run_test t10plot          --use-fake-data plot --with-splines
+# t10 opts into the covariance plots (off by default since --with-covar);
+# t11/t12 run the default (no Covar.pdf / ROOT Covariance dir).
+run_test t10plot          --use-fake-data plot --with-splines --with-covar
 run_test t11plotwidth     --use-fake-data --scale-by-width plot
 run_test t12plotbkgsub    --use-fake-data plot --bkg-subtract background
 
@@ -173,7 +175,8 @@ sed -e 's|plotname="DetSys1" tag="det"|plotname="DetSys1" tag="det" apply_to_sub
 SAVED_COMMON=("${COMMON[@]}")
 COMMON=(-x local_applyto.xml -t "${TAG}apt" -n 1 -v 2 --seed 405 --preset fast)
 run_test t22aptprocess process
-run_test t23aptplot   --use-fake-data plot --with-splines
+# --with-covar: t26aptzero asserts on the Covariance dir in this ROOT file.
+run_test t23aptplot   --use-fake-data plot --with-splines --with-covar
 run_test t24aptglobal --use-fake-data global
 # A wildcard matching no subchannel fullname must be refused loudly.
 sed 's|apply_to_subchannel="_ND_"|apply_to_subchannel="_TYPO_"|' local_applyto.xml > local_applyto_typo.xml
