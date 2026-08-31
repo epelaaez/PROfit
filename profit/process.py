@@ -22,8 +22,7 @@ def PROcess_dataframes(c):
     t1 = clock()
     eventweights = {}
     for i_f, (f, ttree) in enumerate(zip(c.m_mcgen_file_name, ttree_dfs)):
-         if f not in eventweights:
-             eventweights[f] = loadsysts(f, ttree, c)
+         eventweights[i_f] = loadsysts(i_f, ttree, c)
          compute_branches(f, i_f, ttree, c)
 
     # List of systematics
@@ -37,7 +36,7 @@ def PROcess_dataframes(c):
     prop = init_propeller(c)
 
     for idf, tdf in enumerate(ttree_dfs):
-        process_events(tdf, idf, syst_structs, eventweights[c.m_mcgen_file_name[idf]], prop, c)
+        process_events(tdf, idf, syst_structs, eventweights[idf], prop, c)
     t2 = clock()
 
     profit.PROlogINFO("DONE PROCESSING EVENTS [%f seconds]" % (t2-t1))
@@ -152,14 +151,11 @@ def compute_branches(fname, fid, ttree_df, c):
             weight_formulas.append(profit.DataFrameFormula("branch_weight_%i_%i_%i" % (wi+1, fid, ib), wname, ttree_df))
         c.m_branch_variables[fid][ib].branch_weight_formulas = weight_formulas
 
-def loadsysts(fname, ttree_df, c):
+def loadsysts(fid, ttree_df, c):
     friends = []
-    friend_names = []
-    for friend, friend_f in zip(c.m_mcgen_file_friend_treename_map.get(fname, []), c.m_mcgen_file_friend_map.get(fname, [])):
-        # Remove duplicates (TODO: why are they there???)
-        if friend in friend_names: continue
-
-        friend_names.append(friend)
+    # Friend lists are per-MCFile (indexed by file id), so no filename-keyed
+    # duplicates to skip anymore.
+    for friend, friend_f in zip(c.m_mcgen_file_friend_treename_map[fid], c.m_mcgen_file_friend_map[fid]):
         for df in load_df(friend_f, friend, concat=None, allowed_branches=c.m_mcgen_variation_allowlist):
             friends.append(df)
 

@@ -831,6 +831,8 @@ int PROconfig::LoadFromXML(const std::string &filename){
             log<LOG_DEBUG>(L"%1% || MultisimFile %2%, treename: %3%  ") % __func__ % m_mcgen_file_name.back().c_str() % m_mcgen_tree_name.back().c_str();
 
             m_mcgen_numfriends.push_back(0);
+            m_mcgen_file_friend_map.emplace_back();
+            m_mcgen_file_friend_treename_map.emplace_back();
 
             //Here we can grab some friend tree information
             tinyxml2::XMLElement *pFriend;
@@ -857,8 +859,14 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 }
 
 
-                m_mcgen_file_friend_treename_map[m_mcgen_file_name.back()].push_back( pFriend->Attribute("treename") );
-                m_mcgen_file_friend_map[m_mcgen_file_name.back()].push_back(ffname);
+                const char* friend_treename = pFriend->Attribute("treename");
+                if(friend_treename==NULL){
+                    log<LOG_ERROR>(L"%1% || ERROR: <friend> tag inside <MCFile filename='%2%'> is missing its treename attribute.") % __func__ % m_mcgen_file_name.back().c_str();
+                    throw std::invalid_argument("<MCFile/friend> requires a treename attribute");
+                }
+
+                m_mcgen_file_friend_treename_map.back().push_back(friend_treename);
+                m_mcgen_file_friend_map.back().push_back(ffname);
                 m_mcgen_numfriends.back()+=1;
                 pFriend = pFriend->NextSiblingElement("friend");
             }//END of friend loop
@@ -2456,8 +2464,8 @@ void PROconfig::remove_unused_files(){
         std::vector<float> temp_scale;
         std::vector<int> temp_numfriends;
         std::vector<bool> temp_fake;
-        std::map<std::string,std::vector<std::string>> temp_file_friend_map;
-        std::map<std::string,std::vector<std::string>> temp_file_friend_treename_map;
+        std::vector<std::vector<std::string>> temp_file_friend_map;
+        std::vector<std::vector<std::string>> temp_file_friend_treename_map;
         std::vector<std::vector<std::vector<std::string>>> temp_weight_names;
         std::vector<std::vector<int>> temp_num_weights;
         std::vector<std::vector<std::shared_ptr<BranchVariable>>> temp_branch_variables;
@@ -2498,8 +2506,8 @@ void PROconfig::remove_unused_files(){
                 temp_scale.push_back(m_mcgen_scale[i]);
                 temp_numfriends.push_back(m_mcgen_numfriends[i]);
                 temp_fake.push_back(m_mcgen_fake[i]);
-                temp_file_friend_map[m_mcgen_file_name[i]] = m_mcgen_file_friend_map[m_mcgen_file_name[i]];		
-                temp_file_friend_treename_map[m_mcgen_file_name[i]] = m_mcgen_file_friend_treename_map[m_mcgen_file_name[i]];
+                temp_file_friend_map.push_back(m_mcgen_file_friend_map[i]);
+                temp_file_friend_treename_map.push_back(m_mcgen_file_friend_treename_map[i]);
 
                 temp_weight_names.push_back(this_file_weight_names);
                 temp_num_weights.push_back(this_file_num_weights);

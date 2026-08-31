@@ -84,6 +84,77 @@ namespace PROfit {
         return fname_use;
     }
 
+    // Build the main TChain (and its friend TChains, entry-aligned on the same file
+    // list) for MCFile fid. The filename= attribute may be a single file, a TChain
+    // wildcard (anything containing ".root" is handed to TChain::Add, which expands
+    // globs itself, in alphabetical order), or a text filelist (one path per line).
+    // Friend bookkeeping is indexed per MCFile (see PROconfig.h) so several <MCFile>
+    // blocks may share one filename/wildcard string.
+    // Fills chain + friendChains (caller owns/deletes both) and returns the entry count.
+    static long int buildMCFileChain(const PROconfig &inconfig, int fid, bool useXrootD,
+            TChain *&chain, std::vector<TChain*> &friendChains){
+
+        const auto& fn = inconfig.m_mcgen_file_name.at(fid);
+        const auto& friend_treenames = inconfig.m_mcgen_file_friend_treename_map.at(fid);
+
+        std::vector<std::string> filesForChain;
+
+        if (fn.find(".root") != std::string::npos) {
+            log<LOG_INFO>(L"%1% || Starting a (single) TChain, loading file %2%") % __func__  % fn.c_str();
+            filesForChain.push_back(useXrootD ? convertToXRootD(fn) : fn);
+        }else{
+            log<LOG_INFO>(L"%1% || Starting a TChain, loading from filelist %2%") % __func__  % fn.c_str();
+            std::ifstream infile(fn.c_str());
+            if (!infile) {
+                log<LOG_ERROR>(L"%1% || Failed to open input filelist %2%") % __func__  % fn.c_str();
+                exit(EXIT_FAILURE);
+            }
+
+            std::string line;
+            while (std::getline(infile, line)) {
+                if(useXrootD) line = convertToXRootD(line);
+                log<LOG_INFO>(L"%1% || Loading file %2% into TChain") %__func__ % line.c_str();
+                filesForChain.push_back(line);
+            }
+
+            infile.close();
+        }
+
+        chain = new TChain(inconfig.m_mcgen_tree_name.at(fid).c_str());
+        friendChains.assign(friend_treenames.size(), nullptr);
+        for (size_t k = 0; k < friend_treenames.size(); k++)
+            friendChains[k] = new TChain(friend_treenames[k].c_str());
+
+        // TChain::Add returns the number of files connected: 1 for a plain path,
+        // the match count for a wildcard. A wildcard matching nothing (or an empty
+        // filelist) would otherwise sail on to an empty chain and a segfault/empty
+        // spectrum far from the real problem, so make it fatal here.
+        int files_added = 0;
+        for(auto &file: filesForChain){
+            files_added += chain->Add(file.c_str());
+            for (size_t k = 0; k < friend_treenames.size(); k++) {
+                log<LOG_DEBUG>(L"%1% || Adding friend tree %2% from file %3%") % __func__ % friend_treenames[k].c_str() % file.c_str();
+                friendChains[k]->Add(file.c_str());
+            }
+        }
+        if(files_added == 0){
+            log<LOG_ERROR>(L"%1% || ERROR: MCFile filename '%2%' matched NO files (wildcard did not expand to anything, or the filelist is empty). Check the path/pattern.") % __func__ % fn.c_str();
+            log<LOG_ERROR>(L"Terminating.");
+            exit(EXIT_FAILURE);
+        }
+
+        for (size_t k = 0; k < friendChains.size(); k++) {
+            log<LOG_DEBUG>(L"%1% || Adding friend chain %2% to main chain %3%") % __func__ % k % fid;
+            chain->AddFriend(friendChains[k]);
+        }
+
+        long int nentries = (long int)chain->GetEntries();
+        log<LOG_INFO>(L"%1% || MCFile %2%: %3% file(s), %4% total entries") % __func__ % fid % files_added % nentries;
+        if(nentries == 0)
+            log<LOG_WARNING>(L"%1% || MCFile %2% ('%3%') has ZERO entries -- spectra from it will be empty.") % __func__ % fid % fn.c_str();
+        return nentries;
+    }
+
 
     void SystStruct::CleanSpecs(){
         if(p_cv)  p_cv.reset();
@@ -217,76 +288,7 @@ namespace PROfit {
         for(int fid=0; fid < num_files; ++fid) {
             const auto& fn = inconfig.m_mcgen_file_name.at(fid);
 
-
-            std::vector<std::string> filesForChain;
-
-            if (fn.find(".root") != std::string::npos) {
-                log<LOG_INFO>(L"%1% || Starting a (single) TChain, loading file %2%") % __func__  % fn.c_str();
-                filesForChain.push_back(useXrootD ? convertToXRootD(fn) : fn);
-            }else{
-
-                log<LOG_INFO>(L"%1% || Starting a TCHain, loading from filelist %2%") % __func__  % fn.c_str();
-                std::ifstream infile(fn.c_str()); 
-                if (!infile) {
-                    log<LOG_ERROR>(L"%1% || Failed to open input filelist %2%") % __func__  % fn.c_str();
-                    exit(EXIT_FAILURE);
-                }
-
-                std::string line;
-                while (std::getline(infile, line)) {
-                    if(useXrootD) line = convertToXRootD(line);
-                    log<LOG_INFO>(L"%1% || Loading file %2% into TChain") %__func__ % line.c_str();
-                    filesForChain.push_back(line);
-                }
-
-                infile.close();
-            }
-
-            chains[fid] = new TChain(inconfig.m_mcgen_tree_name.at(fid).c_str());
-            if (inconfig.m_mcgen_numfriends[fid] > 0) {
-                friendChains[fid].resize(inconfig.m_mcgen_numfriends[fid], nullptr);
-            }
-
-            for(auto &file: filesForChain){ 
-
-                chains[fid]->Add(file.c_str()); 
-
-                if (inconfig.m_mcgen_numfriends[fid] > 0) {
-                    auto mcgen_file_friend_treename_iter = inconfig.m_mcgen_file_friend_treename_map.find(fn);
-                    if (mcgen_file_friend_treename_iter != inconfig.m_mcgen_file_friend_treename_map.end()) {
-                        auto mcgen_file_friend_iter = inconfig.m_mcgen_file_friend_map.find(fn);
-                        if (mcgen_file_friend_iter == inconfig.m_mcgen_file_friend_map.end()) {
-                            log<LOG_ERROR>(L"%1% || Friend TTree provided but no friend file??") % __func__;
-                            log<LOG_ERROR>(L"Terminating.");
-                            exit(EXIT_FAILURE);
-                        }
-
-                        for (size_t k = 0; k < mcgen_file_friend_treename_iter->second.size(); k++) {
-                            std::string treefriendname = mcgen_file_friend_treename_iter->second.at(k);
-                            //std::string treefriendfile = mcgen_file_friend_iter->second.at(k);//not used
-
-                            if (!friendChains[fid][k]) {
-                                friendChains[fid][k] = new TChain(treefriendname.c_str());
-                            }
-
-                            // Add the file to the friend chain
-                            log<LOG_DEBUG>(L"%1% || Adding friend tree %2% from file %3%") % __func__ % treefriendname.c_str() % file.c_str();
-                            friendChains[fid][k]->Add(file.c_str());
-                        }
-
-                    }
-                } // End friend initialization
-            } // End chain filling
-
-            if (inconfig.m_mcgen_numfriends[fid] > 0) {
-                for (size_t k = 0; k < friendChains[fid].size(); k++) {
-                    log<LOG_DEBUG>(L"%1% || Adding friend chain %2% to main chain %3%") % __func__ % k % fid;
-                    chains[fid]->AddFriend(friendChains[fid][k]);
-                }
-            }
-
-
-            nentries[fid] = chains[fid]->GetEntries();
+            nentries[fid] = buildMCFileChain(inconfig, fid, useXrootD, chains[fid], friendChains[fid]);
 
 
 
@@ -1050,70 +1052,8 @@ namespace PROfit {
         for(int fid=0; fid < num_files; ++fid) {
             const auto& fn = inconfig.m_mcgen_file_name.at(fid);
 
-            std::vector<std::string> filesForChain;
-
-            if (fn.find(".root") != std::string::npos) {
-                log<LOG_INFO>(L"%1% || Starting a (single) TChain, loading file %2%") % __func__  % fn.c_str();
-                filesForChain.push_back(fn);
-            }else{
-                log<LOG_INFO>(L"%1% || Starting a TChain, loading from filelist %2%") % __func__  % fn.c_str();
-                std::ifstream infile(fn.c_str());
-                if (!infile) {
-                    log<LOG_ERROR>(L"%1% || Failed to open input filelist %2%") % __func__  % fn.c_str();
-                    exit(EXIT_FAILURE);
-                }
-
-                std::string line;
-                while (std::getline(infile, line)) {
-                    log<LOG_INFO>(L"%1% || Loading file %2% into TChain") %__func__ % line.c_str();
-                    filesForChain.push_back(line);
-                }
-
-                infile.close();
-            }
-
-            chains[fid] = new TChain(inconfig.m_mcgen_tree_name.at(fid).c_str());
-            if (inconfig.m_mcgen_numfriends[fid] > 0) {
-                friendChains[fid].resize(inconfig.m_mcgen_numfriends[fid], nullptr);
-            }
-
-            for(auto &file: filesForChain){
-                chains[fid]->Add(file.c_str());
-
-                if (inconfig.m_mcgen_numfriends[fid] > 0) {
-                    auto mcgen_file_friend_treename_iter = inconfig.m_mcgen_file_friend_treename_map.find(fn);
-                    if (mcgen_file_friend_treename_iter != inconfig.m_mcgen_file_friend_treename_map.end()) {
-                        auto mcgen_file_friend_iter = inconfig.m_mcgen_file_friend_map.find(fn);
-                        if (mcgen_file_friend_iter == inconfig.m_mcgen_file_friend_map.end()) {
-                            log<LOG_ERROR>(L"%1% || Friend TTree provided but no friend file??") % __func__;
-                            log<LOG_ERROR>(L"Terminating.");
-                            exit(EXIT_FAILURE);
-                        }
-
-                        for (size_t k = 0; k < mcgen_file_friend_treename_iter->second.size(); k++) {
-                            std::string treefriendname = mcgen_file_friend_treename_iter->second.at(k);
-
-                            if (!friendChains[fid][k]) {
-                                friendChains[fid][k] = new TChain(treefriendname.c_str());
-                            }
-
-                            log<LOG_DEBUG>(L"%1% || Adding friend tree %2% from file %3%") % __func__ % treefriendname.c_str() % file.c_str();
-                            friendChains[fid][k]->Add(file.c_str());
-                        }
-                    }
-                }
-            }
-
-            // Add friend chains to main chain
-            if (inconfig.m_mcgen_numfriends[fid] > 0) {
-                for (size_t k = 0; k < friendChains[fid].size(); k++) {
-                    log<LOG_DEBUG>(L"%1% || Adding friend chain %2% to main chain %3%") % __func__ % k % fid;
-                    chains[fid]->AddFriend(friendChains[fid][k]);
-                }
-            }
-
-            nentries[fid] = (long int)chains[fid]->GetEntries();
-            log<LOG_INFO>(L"%1% || Total Entries: %2%") % __func__ %  nentries[fid];
+            // No xrootd conversion here, matching the pre-refactor data path.
+            nentries[fid] = buildMCFileChain(inconfig, fid, /*useXrootD=*/false, chains[fid], friendChains[fid]);
 
             // grab branches 
             int num_branch = inconfig.m_branch_variables[fid].size();

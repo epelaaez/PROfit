@@ -310,10 +310,17 @@ channel, **in order**. `<friend>` trees carry the systematic weight branches
 `incl_systematics="false"` (the cosmics here) get no systematic variations
 at all.
 
-Two MCFile details worth knowing: `filename` can be a single ROOT file **or a
-plain-text filelist** of ROOT files, and the `pot` attribute is the
-*generated* POT of that file — events are scaled from it up to the detector
-`pot` declared at the top of the XML.
+Three MCFile details worth knowing: `filename` can be a single ROOT file, a
+**TChain wildcard** (any name containing `.root` is handed to `TChain::Add`,
+which expands the glob itself — a pattern matching no files is a fatal error),
+**or a plain-text filelist** of ROOT files; several `<MCFile>` blocks may share
+one `filename`/wildcard string (e.g. to split branches across blocks); and the
+`pot` attribute is the *generated* POT of that file — summed over every file
+the wildcard/filelist pulls in — from which events are scaled up to the
+detector `pot` declared at the top of the XML. One wildcard caveat: the config
+hash sees only the pattern string, so new files appearing in a globbed
+directory do not invalidate the `_prop.bin`/`_syst.bin` caches — re-`process`
+with `--force`.
 
 ### Systematics: the `<variation_list>`
 
