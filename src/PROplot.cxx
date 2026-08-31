@@ -326,6 +326,7 @@ namespace PROfit{
         // Sigma - Sigma(C+Sigma)^-1 Sigma. Exact here: with no free fit
         // parameters the Gaussian conditional is the whole posterior.
         Eigen::VectorXf shift = Eigen::VectorXf::Zero(cv_coll.size());
+        bool constrained = false;
         if(data_spec.size() != 0 && data_spec.size() != cv_coll.size()) {
             log<LOG_ERROR>(L"%1% || data_spec has %2% bins but variable %3% has %4% collapsed bins; ignoring the data constraint.") % __func__ % data_spec.size() % var_index % cv_coll.size();
         } else if(data_spec.size() != 0 && syst.GetNCovar() > 0) {
@@ -348,10 +349,12 @@ namespace PROfit{
                 Eigen::LDLT<Eigen::MatrixXd> M_ldlt(M);
                 shift = (K * M_ldlt.solve(u)).cast<float>();
                 cov = (Sig_full - K * M_ldlt.solve(K.transpose())).cast<float>();
+                constrained = true;
             }
         }
 
         PROerrorbar ebar(cv_coll.size());
+        ebar.constrained = constrained;
         for(int i = 0; i < cv_coll.size(); ++i) {
             float scale_factor = scale ? 1.0/config.collapsed_bin_widths.at(var_index)(i) : 1.0;
             if(std::isnan(scale_factor)) scale_factor = 1;
@@ -443,6 +446,7 @@ namespace PROfit{
 	// note: since this is just for plotting diagonals, won't worry about filling in
 	//       covariance for collapsed 2d histogram.
         PROerrorbar* errband_1d = new PROerrorbar(nbinsx);
+        errband_1d->constrained = errband.constrained;
         log<LOG_DEBUG>(L"%1% || input err_band pt: %2%") % __func__ % errband.error_point;
         log<LOG_DEBUG>(L"%1% || input err_band up: %2%") % __func__ % errband.error_up;
         // sum error points, combine errors in quadrature
@@ -478,6 +482,14 @@ namespace PROfit{
 
     double ratio_err(double A, double dA, double B, double dB, double corr){
         return (A/B)*sqrt(pow(dA/A,2)+pow(dB/B,2)-2*(corr*dA*dB/(A*B)));
+    }
+
+    // Draw color for the post-fit best fit and its band: green marks a legacy
+    // (unconstrained, --legacy-postfit-error) band so it can't be mistaken for
+    // the default data-constrained red one; red otherwise (including no band).
+    static Color_t postfit_color(const std::optional<PROerrorbar> &posterrband){
+        return (posterrband && !posterrband->constrained) ? TColor::GetColor(52, 168, 83)
+                                                          : TColor::GetColor(234, 67, 53);
     }
 
     void plot_detector_ratios(
@@ -703,7 +715,7 @@ namespace PROfit{
                 leg->AddEntry(data_ratio, "Data", "pe");
                 leg->AddEntry(cv_ratio, "CV Prediction", "l");
                 if(has_bf && bf_ratio) {
-                    leg->AddEntry(bf_ratio, posterrband ? "Constrained Best-Fit" : "Best-Fit", "l");
+                    leg->AddEntry(bf_ratio, (posterrband && posterrband->constrained) ? "Constrained Best-Fit" : "Best-Fit", "l");
                 }
 
                 std::string canvas_name = "ratio_" + channel_short_labels[idx_num] + "_over_" + channel_short_labels[idx_den];
@@ -738,14 +750,15 @@ namespace PROfit{
 
                 // Draw best-fit
                 if(has_bf && bf_ratio) {
-                    bf_ratio->SetLineColor(kRed);
+                    const Color_t bfcol = postfit_color(posterrband);
+                    bf_ratio->SetLineColor(bfcol);
                     bf_ratio->SetLineWidth(2);
                     bf_ratio->Draw("hist same");
 
                     if(posterrband && post_channel_errband) {
-                        post_channel_errband->SetFillColor(kRed);
+                        post_channel_errband->SetFillColor(bfcol);
                         post_channel_errband->SetFillStyle(3254);
-                        post_channel_errband->SetLineColor(kRed);
+                        post_channel_errband->SetLineColor(bfcol);
                         post_channel_errband->SetLineWidth(1);
                         post_channel_errband->Draw("2 same");
                     }
@@ -793,7 +806,7 @@ namespace PROfit{
         log<LOG_DEBUG>(L"%1% || Finished plot_detector_ratios") % __func__;
     }                                                                              
 
-    void plot_hist1ds(TCanvas* c, TH1D* cv_hist, TGraphAsymmErrors* errband, THStack* cvstack, std::vector<std::pair<std::string, const char*>>* subplots, TH1D* bf_hist, TGraphAsymmErrors* posterrband, TH1D* data_hist, std::string* dat_str, PlotOptions opt, std::string hist_titles, std::string ratio_titles, const std::string &filename, const PlotBounds &bounds, const std::string &text){
+    void plot_hist1ds(TCanvas* c, TH1D* cv_hist, TGraphAsymmErrors* errband, THStack* cvstack, std::vector<std::pair<std::string, const char*>>* subplots, TH1D* bf_hist, TGraphAsymmErrors* posterrband, TH1D* data_hist, std::string* dat_str, PlotOptions opt, std::string hist_titles, std::string ratio_titles, const std::string &filename, const PlotBounds &bounds, const std::string &text, Color_t bfcol = TColor::GetColor(234, 67, 53)){
 
         log<LOG_DEBUG>(L"%1% || Plotting 1D Histogram %2%") % __func__ % hist_titles.c_str();
         std::unique_ptr<TLegend> leg = std::make_unique<TLegend>(0.38,0.74,0.89,0.91);
@@ -805,7 +818,6 @@ namespace PROfit{
 
         Color_t cvcol =  TColor::GetColor(66, 103, 210);
         if(!bf_hist)cvcol=kBlack;
-        Color_t bfcol = TColor::GetColor(234, 67, 53);
 
         TPad* p1 = NULL;
         if(bool(opt&PlotOptions::DataMCRatio) || bool(opt&PlotOptions::DataPostfitRatio)){
@@ -1238,7 +1250,7 @@ namespace PROfit{
             std::string dat_str = "Data";
             plot_hist1ds(&c, cv_rat.get(), band.get(), nullptr, nullptr,
                          bf_rat.get(), post_band.get(), data_rat.get(), &dat_str,
-                         PlotOptions{}, title, "", filename, ratio_bounds, std::string());
+                         PlotOptions{}, title, "", filename, ratio_bounds, std::string(), postfit_color(posterrband));
         }}}}
     }
 
@@ -1426,7 +1438,7 @@ namespace PROfit{
             std::string dat_str = "Data";
             plot_hist1ds(&c, cv_rat.get(), band.get(), nullptr, nullptr,
                          bf_rat.get(), post_band.get(), data_rat.get(), &dat_str,
-                         ropt, title, ratio_titles, filename, ratio_bounds, std::string());
+                         ropt, title, ratio_titles, filename, ratio_bounds, std::string(), postfit_color(posterrband));
         }}}}
     }
     
@@ -1632,7 +1644,7 @@ namespace PROfit{
 
                         TH2D* bf_hist = NULL;
                         if(best_fit){
-                            std::string bf_hist_title = config.m_detector_plotnames[det]  + " "+ config.m_channel_plotnames[channel]+(posterrband ? " Constrained Best-Fit;" : " Best-Fit;")+xtitle2d+";"+ytitle2d;
+                            std::string bf_hist_title = config.m_detector_plotnames[det]  + " "+ config.m_channel_plotnames[channel]+((posterrband && posterrband->constrained) ? " Constrained Best-Fit;" : " Best-Fit;")+xtitle2d+";"+ytitle2d;
                             bf_hist = new TH2D(bf_hist_title.c_str(),bf_hist_title.c_str(), channel_nbins_x, edges_x.data(), channel_nbins_y, edges_y.data());
 
                             Eigen::VectorXf tmp_bf = CollapseMatrix(config, best_fit->Spec(), other_index);
@@ -1746,7 +1758,7 @@ namespace PROfit{
                                 objs[mdc+"_data_slice_ybin"+std::to_string(ybin)] = data_hist_slice->Clone();
                             }
 
-                            plot_hist1ds(&c, &cv_hist_slice, channel_errband, {}, {}, bf_hist_slice, post_channel_errband, data_hist_slice, &dat_str, {}, ybin_str, ratio_titles, filename, bounds, slice_chi_label);
+                            plot_hist1ds(&c, &cv_hist_slice, channel_errband, {}, {}, bf_hist_slice, post_channel_errband, data_hist_slice, &dat_str, {}, ybin_str, ratio_titles, filename, bounds, slice_chi_label, postfit_color(posterrband));
                         }
 
                         // Plot the second variable in bins of the first variable
@@ -1809,7 +1821,7 @@ namespace PROfit{
                                 objs[mdc+"_data_slice_xbin"+std::to_string(xbin)] = data_hist_slice->Clone();
                             }
 
-                            plot_hist1ds(&c, &cv_hist_slice, channel_errband, {}, {}, bf_hist_slice, post_channel_errband, data_hist_slice, &dat_str, {}, xbin_str, ratio_titles_y, filename, bounds, slice_chi_label);
+                            plot_hist1ds(&c, &cv_hist_slice, channel_errband, {}, {}, bf_hist_slice, post_channel_errband, data_hist_slice, &dat_str, {}, xbin_str, ratio_titles_y, filename, bounds, slice_chi_label, postfit_color(posterrband));
                         }
 
                         const std::string hist_title_y = config.m_mode_plotnames[mode]+" "+config.m_detector_plotnames[det]+" "+config.m_channel_names[channel]+";"+ytitle2d+";"+ytitle;
@@ -1916,7 +1928,7 @@ namespace PROfit{
                             }
                         }
                         const std::string y_chi_label = chi_label(make_projection(y_projection_groups));
-                        plot_hist1ds(&c, &cv_hist_y, channel_errband_y, cvstack_y, &subplots_y, bf_hist_y, post_channel_errband_y, data_hist_y, &dat_str, opt, hist_title_y, ratio_titles_y, filename, bounds, y_chi_label);
+                        plot_hist1ds(&c, &cv_hist_y, channel_errband_y, cvstack_y, &subplots_y, bf_hist_y, post_channel_errband_y, data_hist_y, &dat_str, opt, hist_title_y, ratio_titles_y, filename, bounds, y_chi_label, postfit_color(posterrband));
                     }
 
                     std::vector<float> edges = config.m_channel_variable_bins[channel][other_index].Edges();
@@ -2066,7 +2078,7 @@ namespace PROfit{
                         if(TText *line = (TText*)box.GetListOfLines()->First()) chi_label_text = line->GetTitle();
                     }
                     // should probably be switching this to a more clear boolean...
-                    plot_hist1ds(&c, &cv_hist, channel_errband, cvstack, &subplots, bf_hist, post_channel_errband, data_hist, &dat_str, opt, hist_titles, ratio_titles, filename, bounds, chi_label_text);
+                    plot_hist1ds(&c, &cv_hist, channel_errband, cvstack, &subplots, bf_hist, post_channel_errband, data_hist, &dat_str, opt, hist_titles, ratio_titles, filename, bounds, chi_label_text, postfit_color(posterrband));
                     ++global_channel_index;
                     cv_hists.push_back(cv_hist);
 		    if(data){

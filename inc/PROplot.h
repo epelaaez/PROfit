@@ -626,6 +626,7 @@ namespace PROfit{
 
             cv = CollapseMatrix(config, cv);
             PROerrorbar ebar(cv.size());
+            ebar.constrained = use_data;
             for(int i = 0; i < cv.size(); ++i) {
                 std::vector<float> binconts(specs.size());
                 for(size_t j = 0; j < specs.size(); ++j) {

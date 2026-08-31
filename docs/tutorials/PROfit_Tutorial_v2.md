@@ -705,8 +705,11 @@ PDFs are directly comparable by eye.
 # 6. Subcommand `global` — fitting and fitter configuration
 
 `global` performs one full global best fit of all physics + spline parameters
-and draws the post-fit results. It takes no subcommand options of its own —
-everything is controlled by the global arguments.
+and draws the post-fit results. Its only subcommand option is
+`--legacy-postfit-error` (also on `profile`), which reverts the post-fit band
+to the pre-v3.0 recipe — posterior spline throws around the best fit, but
+*prior* (unconstrained) covariance-systematic throws with no center shift (see
+Appendix C.2). Everything else is controlled by the global arguments.
 
 ```bash
 PROfit -x tutorial.xml -t TUT -o glob1 --seed 405 -n 8 \
@@ -2115,6 +2118,17 @@ lines once: shift `Σ[:,B](C+Σ_BB)⁻¹u`, covariance
 `Σ − Σ[:,B](C+Σ_BB)⁻¹Σ[B,:]`, symmetric errors `√diag`, centered on
 `P(θ̂) + shift`. (Called without data it returns the prior `√diag(Σ)` band —
 the pre-fit degenerate case.)
+
+**Legacy variant.** `global --legacy-postfit-error` (also on `profile`) skips
+Step 2 entirely and reverts to the pre-v3.0 recipe: the spline posterior of
+Step 1 is kept, but each sample gets a *prior* covariance throw `L·g`
+(exactly as in C.1), the center shift is zero, and the curve/band sit on the
+raw best-fit spectrum with the plain `Best-Fit` label, drawn **green**
+(RGB 52,168,83) instead of the usual post-fit red so a legacy plot is
+recognizable at a glance. This double-counts the
+data's constraint on the covariance systematics (the χ² already marginalized
+them) and is **not statistically correct** — it exists for systematics
+studies and for reproducing pre-v3.0 plots.
 
 ### C.3 Properties & checks
 

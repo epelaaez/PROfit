@@ -7,6 +7,7 @@ void run_global(float &global_fit_chi2, Eigen::VectorXf &global_fit_result, cons
     if(!fixed[0] || !options.systs_only) opt |= GlobalFitOptions::FreqSeedPts;
     opt |= options.MCMC_prefit_errors ? GlobalFitOptions::MCMCPrefitErrorBand : GlobalFitOptions::PrefitErrorBand;
     opt |= GlobalFitOptions::PostFitErrorBand;
+    if(options.legacy_postfit_errors) opt |= GlobalFitOptions::LegacyPostFitErrorBand;
     opt |= GlobalFitOptions::Correlations;
     PROspec cv = FillSpectra(config, prop, metric.GetSysts(), metric.GetModel(), CVParams , true , config.i_prime);
     GlobalFitResult fitres = run_global_fit(config, prop, data, metric, ub, lb, fitConfig, CVParams, cv, fixed, opt); 
