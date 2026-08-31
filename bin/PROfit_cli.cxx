@@ -162,6 +162,7 @@ PROpt::PROpt(int argc, char **argv) {
         profc_command = app.add_subcommand("fc", "Run Feldman-Cousins for this injected signal");
         profc_command->add_option("-u,--universes", nuniv, "Number of Feldman Cousins universes to throw")->default_val(1000);
         profc_command->add_flag("--gof", gof_pvalue, "Get GOF pvalue");
+        profc_command->add_flag("--reuse", reuse_dist, "Reuse existing <tag>_<out>_FC.root file for pvalue calculation instead of throwing new universes.");
         profc_command->add_flag("--pval", pvalue, "Get FC pvalue")->excludes("--gof");
 
         // PROAdaptiveFC, adaptive FC pipeline. Slice 1: Wilks prepass + meta-mesh + diagnostics.

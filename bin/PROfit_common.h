@@ -188,6 +188,7 @@ struct PROpt {
     PlotBounds pbounds; 
     size_t nuniv;
     bool gof_pvalue = false;
+    bool reuse_dist = false;
     bool pvalue = false;
 
     // fc-adaptive (slice 1: Wilks prepass + meta-mesh + diagnostics).
