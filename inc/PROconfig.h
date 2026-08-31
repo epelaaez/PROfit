@@ -476,8 +476,13 @@ namespace PROfit{
             std::vector<int> m_mcgen_numfriends;	
             std::vector<bool> m_mcgen_fake;
             std::vector<float> m_mcgen_partial_load_frac;
-            std::map<std::string,std::vector<std::string>> m_mcgen_file_friend_map;
-            std::map<std::string,std::vector<std::string>> m_mcgen_file_friend_treename_map;
+            // Friend trees, per MCFile (file × friend_index). Indexed by file id, NOT
+            // keyed by filename: several <MCFile> blocks may legitimately share one
+            // filename= string (e.g. the same TChain wildcard), and the old
+            // filename-keyed maps merged their friend lists, overflowing the
+            // per-file friendChains vector in PROcess_CAFAna (segfault).
+            std::vector<std::vector<std::string>> m_mcgen_file_friend_map;
+            std::vector<std::vector<std::string>> m_mcgen_file_friend_treename_map;
             std::vector<std::vector<std::vector<std::string>>> m_mcgen_weight_names; // file × branch × weight_index
             std::vector<std::vector<int>> m_mcgen_num_weights; // file × branch → count of weights
             std::vector<std::vector<std::shared_ptr<BranchVariable>>> m_branch_variables;
