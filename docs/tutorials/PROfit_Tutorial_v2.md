@@ -18,10 +18,13 @@ Useful contacts and links:
 * Slack: **#profit** (shortbaseline/SBN workspace)
 * Listserv: profit@listserv.fnal.gov
 
-> **Versioning:** this tutorial targets the **v2 release line** (development
-> branch `project-SBN-dev`). Breaking XML changes were made in the v1→v2
-> update, so v1.x XMLs will **not** work with v2 binaries, and bugfixes are
-> not back-ported to the v1.1 line — use v2.1.1+ for anything new.
+> **Versioning:** this tutorial targets the **v2 release line and its v3
+> continuation** (development branch `project-SBN-dev`; the project version
+> was bumped to **3.0.0** in August 2026 — same XML schema, but changed
+> fitter defaults and post-fit covariance conventions, see the fitting and
+> plotting sections). Breaking XML changes were made in the v1→v2 update, so
+> v1.x XMLs will **not** work with v2/v3 binaries, and bugfixes are not
+> back-ported to the v1.1 line — use v2.1.1+ for anything new.
 
 ### Getting set up
 
@@ -362,6 +365,13 @@ The `<allowlist>` attributes:
   space-separated list (default `-3 -2 -1 0 1 2 3`).
 * `prior=` / `center=` — override the default N(0,1) Gaussian pull;
   `<correlation>` blocks make spline priors correlated.
+* `prior_type="gaussian|uniform"` — `uniform` (spline type only) removes the
+  Gaussian pull entirely: the parameter floats freely inside its
+  `restrict="lo,hi"` range, which becomes **mandatory** (and `prior=`,
+  `center=`, and `<correlation>` entries are forbidden for it). Use it for
+  a genuinely unconstrained scale factor you want measured, not pulled.
+  One caveat: FC/Brazil pseudo-experiment throws currently still sample a
+  truncated *Gaussian* for such splines, not the declared uniform.
 * `mode="covariance_to_spline"` with `num_decomp_knobs=` promotes a
   covariance to its leading eigenmode splines (the same machinery PROjector
   uses — see section 9). `restrict` bounds a spline's allowed range.
@@ -375,6 +385,51 @@ The `<allowlist>` attributes:
   required — or even looked for — in MCFiles that fill a matching
   subchannel. This is how per-detector systematics work in multi-detector
   fits where each detector's MC carries a different set of weight branches.
+
+### Asymmetric errors from histogram sources: `<HistVarFiles>`
+
+The `hist1d`/`hist2d` systematic types reweight events by looking up a
+ratio histogram in a kinematic variable (`xvar=`/`yvar=`). Historically one
+histogram gave a single mirrored ±1σ universe; since v3.0 a systematic can
+carry **several independently-measured variation histograms**, each tagged
+with a knob value — the natural way to feed in *asymmetric* errors (a −1σ
+and a +1σ histogram measured separately):
+
+```xml
+<variation_list>
+  <allowlist type="hist1d" xvar="var0" mirror="false">my_asym_syst</allowlist>
+</variation_list>
+<HistVarFiles>
+  <HistVarSection name="my_asym_syst">
+    <variation filename="syst_dn.root" histname="ratio_m1sigma" knobval="-1"/>
+    <variation filename="syst_up.root" histname="ratio_p1sigma" knobval="1"/>
+    <subchannel>nu_ICARUS_numu_signal</subchannel>  <!-- optional scope; EXACT fullname, no regex -->
+  </HistVarSection>
+</HistVarFiles>
+```
+
+The section `name` must match a `hist1d`/`hist2d` entry in the variation
+list, which must set `mirror="false"` when more than one variation is
+declared. Each histogram becomes one universe at its `knobval`; the CV
+(ratio 1 at knob 0) is inserted automatically, and the standard per-bin
+response spline is built through the knots — the asymmetry lives in the
+spline shape while the fit pull stays a symmetric Gaussian (standard
+vertical-morphing practice). Things to get right:
+
+* declaration order is free (sorted by knobval internally), but **knob
+  values must be unique** — duplicates currently produce silently corrupt
+  splines rather than an error;
+* the fit parameter *and* FC throws are bounded by the extreme knob values,
+  so a ±1σ-only pair clamps the parameter to [−1, 1] — supply ±2/±3σ
+  histograms, or set `restrict=`, if the fit may want to pull further;
+* `<subchannel>` entries are **exact fullnames** (unlike every pattern site)
+  and are not checked for existence — a typo silently disables the
+  systematic (all events fall out of scope, flat spline);
+* lookups happen on each histogram's own binning; out-of-range events get
+  weight 1;
+* the config hash covers the filenames and knob values but **not the
+  histogram contents** — after editing a variation file in place, re-run
+  `process --force`.
 
 ---
 
@@ -398,7 +453,9 @@ Subcommands:
   fc-adaptive  Adaptive Feldman-Cousins. Sub-modes: build-mesh, init-bank, print-bank, print-mesh, asimov, brazil, brazil-cleanup, merge-mesh, merge-bank.
   global       Just do a single global fit.
   mcmc         Get bayesian posteriors using MCMC
+  protest      Testing ground for rapid quick tests (developer scratch space).
   scale-test   Run timing benchmarks for FillSpectra / metric / fit hot paths.
+  proletariat  Stage, tar, and submit grid jobs (section 11).
 ```
 
 ### Tags, outputs, and the binary cache
@@ -451,10 +508,20 @@ multithreaded runs are statistically equivalent but not byte-identical.
 | `--statonly` | drop systematics entirely |
 | `--shapeonly` / `--rateonly` | shape-only or single-bin-normalisation analysis |
 | `-c/--chi2 PROchi\|PROCNP\|Poisson` | χ² metric (default PROchi) |
-| `--grad-mode central-lin` | gradient strategy: `central-full` (most accurate) / `one-sided-full` / `central-lin` (default, Gauss-Newton, 5-10× faster) / `one-sided-lin` |
+| `--grad-mode analytic` | gradient strategy: `analytic` (default, alias `exact`) / `central-full` / `one-sided-full` / `central-lin` (Gauss-Newton) / `one-sided-lin` |
 
-`--grad-mode central-lin` is exact at minima and fine for scans; use
-`central-full` for final publication-quality runs.
+The **default gradient is now `analytic`** (closed-form spectrum Jacobian
+through the oscillation models and splines, *plus* the exact
+covariance-scaling term the old Gauss-Newton `-lin` modes dropped): as
+accurate as `central-full` at the cost of roughly one evaluation, so it is
+the right choice for scans *and* publication runs. It applies to PROchi's
+binned strategies; `PROCNP`, `Poisson`, and `--eventbyevent` automatically
+fall back to `central-lin` with a one-time warning. `central-full` remains
+the finite-difference gold standard for cross-checks (and `scale-test
+--tests gradcheck` validates every mode against it). Note the default change
+(from `central-lin`) means fits are **not bit-reproducible against
+pre-August-2026 seeded references**; pass `--grad-mode central-lin` to
+reproduce old numbers.
 
 ### Logging and housekeeping
 
@@ -498,18 +565,34 @@ The output is _prop.bin and _syst.bin files which are efficiently loaded by the 
 Usage: PROfit plot [OPTIONS]
 Options:
   --with-splines              Include graphs of splines in output.
-  --bkg-subtract TEXT         Substring pattern; that background's CV is subtracted
-                              from data and CV at plot time (publication convention).
+  --with-covar                Include the covariance/correlation matrix plots
+                              (off by default since v3.0 — they are the slow part).
+  --no-frac-syst              Skip the fractional-systematics breakdown PDFs.
+  --band-throws INT [2500]    Number of throws used to build the error band.
+  --bkg-subtract TEXT         Pattern (unanchored regex; plain substrings work);
+                              that background's CV is subtracted from data and CV
+                              at plot time (publication convention).
 ```
 
 Plus the relevant global options: `--area-norm`, `--scale-by-width`,
 `--plot-bounds ymax 100 ratmin 0.5 ratmax 1.5`, and all the injection
 machinery from section 3.
 
+> **Changed default (v3.0):** `plot` no longer produces the covariance
+> plots (`_PROplot_Covar.pdf` and the ROOT `Covariance/` directory) unless
+> you pass `--with-covar` — that flag alone restores the old output exactly
+> (byte-identical bands in seeded runs). `--no-frac-syst` additionally drops
+> the fractional-systematics PDFs; with *both* the covariance plots off and
+> `--no-frac-syst`, the slow spline→covariance conversion is skipped
+> entirely (a big speedup for spline-heavy configs) and the χ²/ndf labels
+> disappear from the error-band pages. If a downstream script consumes
+> `_PROplot_Covar.pdf` or the `Covariance/` ROOT directory, add
+> `--with-covar` to its plot command.
+
 ### The CV and error band
 
 ```bash
-PROfit -x tutorial.xml -t TUT -o plotcv --seed 405 plot
+PROfit -x tutorial.xml -t TUT -o plotcv --seed 405 plot --with-covar
 ```
 
 Outputs (one `Variable_<i>` set per plotted binning of each channel):
@@ -517,8 +600,8 @@ Outputs (one `Variable_<i>` set per plotted binning of each channel):
 * `TUT_plotcv_PROplot_Variable_0_CV.pdf` — stacked CV spectra, fitting variable
 * `TUT_plotcv_PROplot_Variable_0_ErrorBand.pdf` — CV + full systematic band
 * `TUT_plotcv_PROplot_Variable_2_*.pdf`, ... — same for the other variables
-* `TUT_plotcv_PROplot_Covar.pdf` — all covariance matrices, per systematic and total
-* `TUT_plotcv_fractional_systematics.pdf` — fractional uncertainty per bin, one panel per systematic `tag` plus a summary (the `tag=` attributes in the variation list control this grouping — without them you get one unreadable 30-line legend)
+* `TUT_plotcv_PROplot_Covar.pdf` — all covariance matrices, per systematic and total (`--with-covar` only)
+* `TUT_plotcv_fractional_systematics.pdf` — fractional uncertainty per bin, one panel per systematic `tag` plus a summary (the `tag=` attributes in the variation list control this grouping — without them you get one unreadable 30-line legend; suppressed by `--no-frac-syst`)
 * `TUT_plotcv_ratio_fractional_systematics.pdf` — same as a ratio
 * `TUT_plotcv_PROplot.root` — everything above as ROOT objects
 
@@ -693,6 +776,15 @@ Every fit in PROfit is a three-stage pipeline:
 3. **L-BFGS-B local fits** (`n_localfit`): full gradient-based minimizations
    from the best swarm point and each seed point; best result wins.
 
+The default `grad-*` presets (below) rebalance this pipeline around the
+analytic gradient: the Latin hypercube samples **physics parameters only**
+(`latin_phys_only` — nuisances start at their centers, where the pull term
+puts them anyway), the particle-swarm stage is effectively disabled (one
+iteration), and the budget goes into **many L-BFGS-B multistarts** instead —
+with the exact gradient, local descents are cheap and reliable enough that
+they beat swarm exploration. The classic three-stage behavior is still
+available via the older presets (`good`, `overkill`, ...).
+
 After the global fit, PROfit runs a **harmonic seed search** over Δm² (the χ²
 is quasi-periodic in log Δm², so degenerate local minima are found by a
 frequency scan) — those seeds are handed to every subsequent profile/surface
@@ -706,13 +798,29 @@ once — be careful) and the **scan** fit (done thousands of times in
 profile/surface — be fast). Configure them with:
 
 ```bash
---preset fast              # ONE value sets both global and scan config
+--preset grad-fast         # ONE value sets both global and scan config
 --preset good overkill     # first = global, second = scan
 --fit-options n_latin_points 2000 max_iterations 5000     # global fit knobs
 --scan-fit-options n_localfit 2 ...                        # scan fit knobs
 ```
 
-Presets are `fast`, `good` (default), `overkill`, and `sensitivity`.
+Presets come in two families:
+
+* **`grad-fast` / `grad-good` / `grad-deep` / `grad-overkill`** — the
+  analytic-gradient-era presets and the **current defaults**
+  (`grad-good` for the global fit, `grad-fast` for scans): physics-only
+  Latin hypercube, no effective PSO, escalating numbers of L-BFGS-B
+  multistarts (roughly 8 / 16 / 50 / 100; the deeper two also warm-start
+  the nuisances at each multistart via `localfit_warm_nuisance`).
+* **`fast` / `good` / `overkill` / `sensitivity`** — the classic
+  LHS→PSO→L-BFGS-B presets, kept for compatibility and for metrics/modes
+  where the analytic gradient doesn't apply.
+
+> **Reproducing pre-v3.0 numbers:** the defaults used to be
+> `good`/`fast` with `--grad-mode central-lin`. Passing `-p good fast` alone
+> does **not** restore them — the gradient mode is independent of the
+> preset — you need `-p good fast --grad-mode central-lin` for
+> bit-comparable results against old seeded runs.
 
 > ⚠️ **CLI11 trap:** if you pass a single preset (`--preset fast`) make sure
 > the *next* token is a flag or the subcommand is protected — greedy vector
@@ -726,7 +834,9 @@ highlights:
 ------ PROfitter Specific Parameters ------
   n_latin_points          : Number of Latin hypercube points sampled across all parameters
   latin_diversity_factor  : 0 = no distance weighting, 1 = most diverse points
+  latin_phys_only         : 1 = LHS samples physics only, nuisances start at centers (grad-* presets)
   n_localfit              : Total number of L-BFGS-B fits after PSO
+  localfit_warm_nuisance  : 1 = warm-start nuisances at each multistart (grad-deep/overkill)
   n_max_local_retries     : Retries if L-BFGS-B throws
 ------ Particle Swarm Optimization ------
   n_swarm_particles, n_swarm_iterations, n_swarm_max_stagnent_iterations,
@@ -1028,6 +1138,8 @@ Options:
   -u,--universes UINT [1000]  Number of Feldman Cousins universes to throw
   --gof                       Get GOF pvalue
   --pval                      Get FC pvalue
+  --reuse                     Recompute the p-values from an existing
+                              <tag>_<out>_FC.root instead of throwing universes
 ```
 
 At the injected point (`-i`, or CV if none), `fc` throws `-u` universes —
@@ -1047,6 +1159,32 @@ Output is `TUT_fc1_FC.root` containing a TTree with, per universe, the two
 90%/95% quantiles and compare to the Wilks values. This is the honest but
 brute-force approach: to calibrate a whole *contour* you would repeat it at
 every grid point, which is exactly what `fc-adaptive` automates.
+
+### Reusing a saved distribution: `--reuse`
+
+`fc --reuse` reads a previously produced `<tag>_<out>_FC.root` back and
+re-runs only the observed fits on the (real or injected) data plus the
+empirical p-value calculation — no universes are thrown, so a `--gof`/
+`--pval` re-evaluation against an expensive stored Δχ² distribution takes
+minutes instead of days. Rules of the road, all of which are on you (the
+file carries **no** provenance metadata — nothing checks them):
+
+* the reused file must come from the **same XML, injected point, χ² metric
+  (`-c`), and systematic selection** as the current invocation — a mismatch
+  silently compares an observed Δχ² against the wrong null distribution;
+* `-u/--universes` is ignored under `--reuse` (the sample size is the file's
+  entry count; there is no top-up mechanism);
+* **back up the FC.root first**: the run rewrites the file (and its CSV) in
+  place at the end, so an interrupted run can destroy the stored
+  distribution, and `--gof --reuse` on a `--pval`-capable file drops the
+  stored osc-fit nuisance record;
+* `--pval --reuse` on a file produced with only `--gof` is refused (the
+  needed branches are absent) — it falls back to fresh throws with a
+  warning if the file is missing entirely;
+* if you plan to `hadd` FC.root files from parallel jobs into one pooled
+  distribution, give every job a **distinct `--seed`** — identical seeds
+  produce identical throw sets and there is no deduplication — and never
+  mix `--gof`-only files into a `--pval` pool.
 
 ### Adaptive FC: `fc-adaptive`
 
@@ -1614,6 +1752,16 @@ fullosc component (rule 2), and disappear the intrinsic νe (rule 3).
 Same physics and rules (0–3) as `3+1`, re-parameterized in angles, with the
 unitarity constraint.
 
+> ⚠️ **Results from before August 2026 are invalid for this model.** Its
+> P(νμ→νμ) was missing the factor 4 in sin²2θμμ = 4|Uμ4|²(1−|Uμ4|²), so any
+> pre-fix fit/contour/FC study involving νμ disappearance had a 4× weaker
+> disappearance amplitude (old sin²θ₂₄ exclusion curves ~×4 too weak). The
+> binary-cache hash only covers the XML, **not the code**, so old
+> `_mesh.bin`/`_bank.bin`/`_brazil.bin` and PROjector constraint files made
+> with this model load silently into fixed builds — regenerate them all.
+> (`_prop.bin`/`_syst.bin` contain no probabilities and are fine; the other
+> 3+1 variants and the 2-flavor models were verified unaffected.)
+
 | # | name | meaning | fit space | bounds | default |
 |---|---|---|---|---|---|
 | 0 | `dmsq` | Δm²₄₁ [eV²] | log10 | 10⁻² – 10² | 10⁻² |
@@ -1660,7 +1808,10 @@ contours); `xi` is the log geometric ratio ξ = ½·log(|Ue4|²/|Uμ4|²)
 ### `3+1_decay_invis` — 3+1 with invisible sterile decay
 
 The `3+1` mixing-element model extended with an invisible-decay coupling;
-combined unitarity + positivity constraint. Rules **0–3** as in `3+1`.
+combined unitarity + positivity constraint (g² = 0, the pure-3+1 limit, is
+accepted since August 2026 — it was previously rejected by a strict
+inequality, which biased fits near the no-decay boundary). Rules **0–3** as
+in `3+1`.
 
 | # | name | meaning | fit space | bounds | default |
 |---|---|---|---|---|---|
@@ -1802,7 +1953,7 @@ band, references the best-fit spectrum rather than the CV.)*
 The idea is the simplest thing you could do: **throw every systematic from
 its prior many times, rebuild the spectrum each time, and look at the spread
 of spectra you get.** No data is involved anywhere. Concretely, for each of
-`N = 2500` throws `i`:
+`N = 2500` throws `i` (configurable with `plot --band-throws N`):
 
 1. **Throw every spline from its prior**: `s_j⁽ⁱ⁾ ~ N(c_j, σ_j)`,
    independently per spline (marginals only — XML correlations enter the fit

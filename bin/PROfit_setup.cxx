@@ -70,7 +70,9 @@ PROdata construct_data(std::vector<PROdata> &variable_data, bool use_real_data, 
                     log<LOG_WARNING>(L"%1% || WARNING But we are forcing ahead, be SUPER clear and happy you understand what your doing.  ") % __func__;
                 }else{
                     log<LOG_ERROR>(L"%1% || ERROR config hash (%2%) and binary loaded data (%3%) hash not compatable! ") % __func__ %  dataconfig.hash % data.hash ;
-                    return 1;
+                    // NOT "return 1": PROdata(size_t) is non-explicit, so that would
+                    // silently continue with a 1-bin zero data spectrum.
+                    exit(EXIT_FAILURE);
                 }
             }
         }
@@ -263,7 +265,10 @@ void include_or_exclude_systs(std::vector<PROsyst> &variable_systs, const PROcon
         }
         int io=0;
         for(PROsyst &syst: variable_systs){
-            if(config.m_channel_variable_plot_bool.at(io)){
+            // variable_systs are built for plot=="true" OR i_prime — the fitting
+            // variable must get the subset even when it is not plotted, or the
+            // metric silently fits the full systematics set.
+            if(config.m_channel_variable_plot_bool.at(io) || (size_t)io == config.i_prime){
                 syst = syst.subset(systs_to_include);
             }
             io++;
@@ -291,7 +296,8 @@ void include_or_exclude_systs(std::vector<PROsyst> &variable_systs, const PROcon
         }
         int io=0;
         for(PROsyst &syst: variable_systs){
-            if(config.m_channel_variable_plot_bool.at(io)){
+            // Same plot=="true"-or-i_prime rule as the subset branch above.
+            if(config.m_channel_variable_plot_bool.at(io) || (size_t)io == config.i_prime){
                 syst = syst.excluding(systs_to_exclude);
             }
             io++;

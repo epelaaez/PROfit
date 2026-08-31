@@ -254,13 +254,23 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
         Eigen::VectorXf pull_grad_nuis; // size = nsyst, dP/dθ_n
         if (linearised || analytic) {
             Minv_delta_b = M.llt().solve(delta);
-            const Eigen::VectorXf centered = subvector2 - syst->spline_centers;
+            Eigen::VectorXf centered = subvector2 - syst->spline_centers;
+            // Match Pull(): uniform-prior splines contribute NO pull — mask them
+            // here too, or the gradient carries a phantom Gaussian pull the value
+            // doesn't have.
+            for(size_t i = 0; i < syst->spline_prior_types.size(); ++i)
+                if(syst->spline_prior_types[i] == SplinePriorType::Uniform) centered(i) = 0.0f;
             if (!correlated_systematics) {
                 // Pull = sum_j (centered_j / sigma_j)^2  → dP/dθ_n_j = 2 centered_j / sigma_j^2
                 pull_grad_nuis = 2.0f * centered.array() /
                                  (syst->spline_priors.array() * syst->spline_priors.array());
             } else {
                 pull_grad_nuis = 2.0f * (prior_covariance_inv * centered);
+                // dPull/dθ_i is exactly 0 for a uniform spline (its centered entry
+                // is identically 0 in the value); zero it in case Σ⁻¹ carries
+                // off-diagonal terms in those rows.
+                for(size_t i = 0; i < syst->spline_prior_types.size(); ++i)
+                    if(syst->spline_prior_types[i] == SplinePriorType::Uniform) pull_grad_nuis(i) = 0.0f;
             }
         }
 
