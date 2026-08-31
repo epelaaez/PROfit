@@ -58,6 +58,7 @@ namespace PROfit{
             Eigen::VectorXf error_point;  ///< Central value per bin (may be scaled).
             Eigen::VectorXf center_shift; ///< Offset of the band center from error_point (nonzero only for data-constrained bands, where the posterior prediction is pulled away from the best-fit spectrum).
             Eigen::MatrixXf covariance;   ///< Bin-to-bin covariance matrix.
+            bool constrained = false;     ///< True when the covariance-systematic component is the data-constrained posterior (drives the "Constrained Best-Fit" plot labels); false for prior/unconstrained bands, including --legacy-postfit-error.
             /**
              * @brief Construct a PROerrorbar with all vectors/matrices zeroed.
              * @param size Number of bins in the collapsed spectrum.

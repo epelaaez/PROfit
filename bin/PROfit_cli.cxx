@@ -127,6 +127,12 @@ PROpt::PROpt(int argc, char **argv) {
         //PROfile, make N profile'd chi^2 for each physics and nuisence parameters
         profile_command = app.add_subcommand("profile", "Make a 1D profiled chi2 for each physics and nuisence parameter.");
         profile_command->add_flag("--mcmc-prefit", MCMC_prefit_errors, "Use MCMC to sample the systematic priors for the pre-fit error band.");
+        profile_command->add_flag("--legacy-postfit-error", legacy_postfit_errors,
+            "Legacy (pre-v3.0) post-fit error band: posterior MCMC throws of the spline nuisances "
+            "around the best fit, but with PRIOR (unconstrained) throws of the covariance-type "
+            "systematics instead of the data-constrained posterior pull, and no center shift. "
+            "The legacy curve and band are drawn green instead of the usual post-fit red. "
+            "Not statistically correct; for studies and reproducing old plots.");
         profile_command->add_flag("--probe", use_probe, "Use PRObe adaptive importance sampling instead of the legacy 18-uniform scan.");
         profile_command->add_option("--probe-chunks", n_probe_chunks, "When --probe is set, split each physics parameter scan into N parallel chunks. Default 1 (no chunking). Useful only when physics scans are the wall-time bottleneck and you have spare threads beyond nuisance work. Hard-capped at nthreads.")->default_val(1);
         profile_command->add_flag("--profile-timing", profile_timing, "Emit a scan-timing summary at end of PROfile (per-fit cost, parallel efficiency, latin/PSO/LBFGS breakdown). Diagnostic only.");
@@ -251,6 +257,12 @@ PROpt::PROpt(int argc, char **argv) {
 
         //PROglobal
         global_command = app.add_subcommand("global", "Just do a single global fit.");
+        global_command->add_flag("--legacy-postfit-error", legacy_postfit_errors,
+            "Legacy (pre-v3.0) post-fit error band: posterior MCMC throws of the spline nuisances "
+            "around the best fit, but with PRIOR (unconstrained) throws of the covariance-type "
+            "systematics instead of the data-constrained posterior pull, and no center shift. "
+            "The legacy curve and band are drawn green instead of the usual post-fit red. "
+            " for studies and reproducing old plots.");
 
         mcmc_command = app.add_subcommand("mcmc", "Get bayesian posteriors using MCMC");
         mcmc_command->add_option("--vars", mcmc_vars, "Variables to find posteriors of.");
