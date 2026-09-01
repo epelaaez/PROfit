@@ -19,8 +19,7 @@
 #include "PROmetrics/PROchi.h"
 #include "PROmodel.h"
 #include "PROmodels/PROmodelSimple.h"
-#include "PROmodels/PROmodel2flav.h"
-#include "PROmodels/PROmodel3p1.h"
+#include "PROmodels/PROmodelSine.h"
 #include "PROdata.h"
 #include "PROlog.h"
 #include "PROcess.h"
@@ -491,17 +490,12 @@ PYBIND11_MODULE(_profit, m) {
         .def(py::init<const PROfit::PROpeller&>())
         .def(py::init<const PROfit::NullModel&>());
 
-    py::class_<PROfit::PROnumudis, PROfit::PROmodel>(m, "PROnumudis")
-        .def(py::init<const PROfit::PROpeller&>())
-        .def(py::init<const PROfit::PROnumudis&>());
-
-    py::class_<PROfit::PROnueapp, PROfit::PROmodel>(m, "PROnueapp")
-        .def(py::init<const PROfit::PROpeller&>())
-        .def(py::init<const PROfit::PROnueapp&>());
-
-    py::class_<PROfit::PRO3p1, PROfit::PROmodel>(m, "PRO3p1")
-        .def(py::init<const PROfit::PROpeller&>())
-        .def(py::init<const PROfit::PRO3p1&>());
+    // The sine-kernel oscillation models (numudis, nueapp, nuedis, the 3+1 variants,
+    // and the NC-disappearance models) are all instances of PROsineModel, selected by
+    // recipe tag; construct them from Python via get_model_from_string on a PROconfig.
+    // (Note: this file is not wired into the CMake build; the old per-model bindings
+    // it carried no longer matched the C++ constructors and were removed.)
+    py::class_<PROfit::PROsineModel, PROfit::PROmodel>(m, "PROsineModel");
 
     // PROsurf
     py::class_<PROfit::PROsurf>(m, "PROsurf")

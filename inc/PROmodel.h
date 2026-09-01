@@ -12,8 +12,12 @@
  * Concrete models live in family files; only the factory constructs them
  * (exception: NullModel, used directly by bin/PROfit.cxx):
  *   - inc/PROmodels/PROmodelSimple.h — NullModel, PROtemplate (non-oscillation).
- *   - inc/PROmodels/PROmodel2flav.h  — PROnumudis, PROnumudisTEST, PROnueapp, PROnuedis.
- *   - inc/PROmodels/PROmodel3p1.h    — PRO3p1 and variants (_angles, _3A, _3B, _3C, _decay_invis).
+ *   - inc/PROmodels/PROmodelSine.h   — PROsineModel + the recipe registry for every
+ *     single-Delta-m^2 sine-kernel model: numudis, nueapp, nuedis, 3+1, 3+1_angles,
+ *     3+1_3A/3B/3C, and the NC-disappearance models NCnumudisapp, NCdisapp,
+ *     3+1_3A/3B/3C_NC.
+ *   - inc/PROmodels/PROmodel2flav.h  — PROnumudisTEST (two-variable L,E validation model).
+ *   - inc/PROmodels/PROmodel3p1.h    — PRO3p1_decay_invis (custom damped-oscillation kernel).
  *   - inc/PROmodels/PROmodel3p2.h    — PRO3p2.
  *   - inc/PROmodels/PROmodelLBL.h    — PROLBL (NuFastLBL three-flavour matter oscillations).
  */
@@ -187,7 +191,9 @@ public:
  * @details Reads `config.m_model_tag` to select the appropriate model and passes
  * `config.m_model_parameter_map` for variable-index lookup.
  * Supported names: "nullmodel", "numudis", "numudisTEST", "nueapp", "nuedis",
- * "3+1", "3+1_angles", "3+1_3A", "3+1_3B", "3+1_3C", "3+1_decay_invis", "3+2", "LBL".
+ * "NCnumudisapp", "NCdisapp", "3+1", "3+1_angles", "3+1_3A", "3+1_3B", "3+1_3C",
+ * "3+1_3A_NC", "3+1_3B_NC", "3+1_3C_NC", "3+1_decay_invis", "3+2", "LBL",
+ * "template"/"template_fit".
  * Terminates with LOG_ERROR if the name is unrecognised.
  * @param config  Parsed configuration; provides the model tag and parameter map.
  * @param prop    MC event store used to build H_combined histograms.
