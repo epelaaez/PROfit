@@ -121,7 +121,7 @@ std::unique_ptr<PROmodel> get_model_from_string(const PROconfig& config, const P
     if(const SineModelRecipe *recipe = find_sine_recipe(name)) {
         return std::unique_ptr<PROmodel>(new PROsineModel(prop, config.m_model_parameter_map, *recipe));
     }
-    log<LOG_ERROR>(L"%1% || Unrecognized model name %2%. Try numudis, nueapp, nuedis, NCnumudisapp, NCdisapp, 3+1, 3+1_angles, 3+1_3(A,B,C), 3+1_3(A,B,C)_NC, 3+1_decay_invis, 3+2, LBL, template_fit. for now. Terminating.") % __func__ % name.c_str();
+    log<LOG_ERROR>(L"%1% || Unrecognized model name %2%. Try numudis, nueapp, nuedis, NCnumudisapp, NCdisapp, 3+1, 3+1_angles, 3+1_3(A,B,C), 3+1_NC, 3+1_angles_NC, 3+1_3(A,B,C)_NC, 3+1_decay_invis, 3+2, LBL, template_fit. for now. Terminating.") % __func__ % name.c_str();
     exit(EXIT_FAILURE);
 }
 

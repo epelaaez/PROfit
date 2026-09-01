@@ -192,8 +192,8 @@ public:
  * `config.m_model_parameter_map` for variable-index lookup.
  * Supported names: "nullmodel", "numudis", "numudisTEST", "nueapp", "nuedis",
  * "NCnumudisapp", "NCdisapp", "3+1", "3+1_angles", "3+1_3A", "3+1_3B", "3+1_3C",
- * "3+1_3A_NC", "3+1_3B_NC", "3+1_3C_NC", "3+1_decay_invis", "3+2", "LBL",
- * "template"/"template_fit".
+ * "3+1_NC", "3+1_angles_NC", "3+1_3A_NC", "3+1_3B_NC", "3+1_3C_NC",
+ * "3+1_decay_invis", "3+2", "LBL", "template"/"template_fit".
  * Terminates with LOG_ERROR if the name is unrecognised.
  * @param config  Parsed configuration; provides the model tag and parameter map.
  * @param prop    MC event store used to build H_combined histograms.
