@@ -48,6 +48,20 @@ MetaMesh build_meta_mesh(const std::vector<PROmesh::AMRResult> &throws,
                          float p_thresh,
                          int baseline_level);
 
+// Union-merge N meta-meshes (identical finest grid + bounds, caller-validated)
+// into the coarsest tiling refining every input. Returns empty cells on a
+// tiling-invariant violation. baseline_level only affects log counters.
+MetaMesh merge_meta_meshes(const std::vector<MetaMesh> &inputs,
+                           int baseline_level);
+
+// Meta-mesh from a finest-grid flag map ([i * H + j]): finest cells over
+// flagged bins, coarsest tiling elsewhere. Union-merges with any sibling
+// mesh of the same finest grid + bounds (brazil-cleanup).
+MetaMesh build_mesh_from_flags(int finest_nx, int finest_ny, int max_levels,
+                               float x_lo, float x_hi, float y_lo, float y_hi,
+                               const std::vector<uint8_t> &flags,
+                               int baseline_level);
+
 void compute_cell_centers(const MetaMesh &mm,
                           bool xlog, bool ylog,
                           std::vector<float> &cx_out,
@@ -120,6 +134,13 @@ struct CellVerdict {
     bool  decidable = false;  ///< Bank had enough PEs to give a stable quantile.
 };
 
+// Bank-only precompute of crit_dchi2/decidable per [cl_idx][cell_idx]
+// (`included` left false). One sort per cell; reuse across many throws.
+std::vector<std::vector<CellVerdict>> compute_bank_crits(
+    const PEBank &bank,
+    const std::vector<float> &cl_targets,
+    int min_pes_for_decision);
+
 std::vector<std::vector<CellVerdict>> classify_against_bank(
     const PEBank &bank,
     const AsimovObs &obs,
@@ -138,6 +159,18 @@ void write_slice1_diagnostics(
     const AdaptiveFCConfig &acfg,
     size_t xaxis_idx, size_t yaxis_idx,
     AdaptiveFCResult &result_out);
+
+// Meta-mesh visualisation (level-coloured cells + info panel). Pass
+// n_throws <= 0 for meshes loaded from disk / derived meshes (merge,
+// brazil-cleanup): throw-tally alpha modulation and info lines are skipped.
+void plot_metamesh_pdf(const MetaMesh &mm,
+                       const PROmodel &model,
+                       const std::string &filename,
+                       int n_throws,
+                       float p_thresh,
+                       int baseline_level,
+                       bool logx, bool logy,
+                       size_t xaxis_idx, size_t yaxis_idx);
 
 void plot_pebank_summary_pdf(const PEBank &bank,
                              const std::string &filename,
@@ -187,6 +220,20 @@ void save_asimov_root(
     const std::string &filename,
     bool xlog_axis, bool ylog_axis);
 
+// Flag finest-grid bins ([i * H + j]) traversed by the SAVED Brazil quantile
+// contour TGraphs in <tag>_brazil.root — the exact curve objects the band
+// PDF drew; nothing is recomputed. quantiles must be among the five saved
+// levels (0.025 0.16 0.5 0.84 0.975); cl_targets empty = all CLs in the
+// file. halo dilates by that many bins.
+std::vector<uint8_t> flag_bins_from_saved_brazil_contours(
+    const PEBank &bank,
+    const std::string &brazil_root_path,
+    const std::vector<float> &cl_targets,
+    const std::vector<float> &quantiles,
+    bool xlog_axis, bool ylog_axis,
+    int halo,
+    int &n_curves_used);
+
 void plot_brazil_band_pdf(
     const PEBank &bank,
     const std::vector<std::vector<float>> &inclusion_frac, // [cl_idx][cell_idx]
@@ -200,7 +247,9 @@ void plot_brazil_band_pdf(
     bool draw_truth_marker,
     float truth_x_phys,
     float truth_y_phys,
-    int n_throws);
+    const std::vector<int> &n_throws_kept,     // [cl] throws entering the band
+    const std::vector<int> &n_throws_dropped,  // [cl] closed-contour throws removed
+    const std::string &band_flag = "");        // flag-styled bands: "america", "ireland" ("" = standard)
 
 void save_brazil_root(
     const PEBank &bank,
@@ -208,6 +257,7 @@ void save_brazil_root(
     const std::vector<std::vector<float>> &per_throw_dchi2,                   // [t][cell]
     const std::vector<float> &per_throw_global_chi2,                          // [t]
     const std::vector<std::vector<float>> &inclusion_frac,                    // [cl][cell]
+    const std::vector<std::vector<uint8_t>> &throw_kept,                      // [cl][t]
     const std::vector<float> &cl_targets,
     const std::string &filename,
     bool xlog_axis, bool ylog_axis);

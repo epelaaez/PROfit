@@ -5,6 +5,7 @@
 #include "TH1F.h"
 #include "TLatex.h"
 #include "TLegend.h"
+#include "TLegendEntry.h"
 #include "TMarker.h"
 #include "TText.h"
 #include <cmath>
@@ -40,12 +41,14 @@ namespace PROfit{
                                                     const std::string &pattern) {
         std::vector<size_t> matched;
         if (pattern.empty()) return matched;
-        // Substring match, matching PROsyst's wildcard convention used in
-        // CreateFlatMatrix (src/PROsyst.cxx ~L397). m_fullnames is the canonical
-        // list of "<mode>_<detector>_<channel>_<subchannel>" names indexed by
-        // global subchannel index.
+        // Unanchored regex (plain substrings behave as before; see PROconfig.h),
+        // matching PROsyst's wildcard convention used in CreateFlatMatrix.
+        // m_fullnames is the canonical list of
+        // "<mode>_<detector>_<channel>_<subchannel>" names indexed by global
+        // subchannel index.
+        std::regex re = CompilePattern(pattern, "subchannel pattern");
         for (size_t i = 0; i < config.m_fullnames.size(); ++i) {
-            if (config.m_fullnames[i].find(pattern) != std::string::npos) {
+            if (PatternMatches(config.m_fullnames[i], re)) {
                 matched.push_back(i);
             }
         }
@@ -114,6 +117,12 @@ namespace PROfit{
         for(size_t im = 0; im < inconfig.m_num_modes; im++){
             for(size_t id = 0; id < inconfig.m_num_detectors; id++){
                 for(size_t ic = 0; ic < inconfig.m_num_channels; ic++){
+                    // toTH2D reads Edges(1)/NBinsAlong(1), which is out-of-bounds for
+                    // channels whose binning for this variable is 1D.
+                    if(inconfig.m_channel_variable_dims[ic][other_index] != 2) {
+                        global_subchannel_index += inconfig.m_num_subchannels[ic];
+                        continue;
+                    }
                     for(size_t sc = 0; sc < inconfig.m_num_subchannels[ic]; sc++){
                         const std::string& subchannel_name  = inconfig.m_fullnames[global_subchannel_index];
                         std::unique_ptr<TH2D> htmp = std::make_unique<TH2D>(spec.toTH2D(inconfig, global_subchannel_index, other_index));
@@ -238,7 +247,7 @@ namespace PROfit{
 
             return spline_graphs;
         }
-    PROerrorbar getErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const PROspec &cv_spec, const Eigen::VectorXf &cvparams,bool scale, int other_index) {
+    PROerrorbar getErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const PROspec &cv_spec, const Eigen::VectorXf &cvparams,bool scale, int other_index, size_t nthrows) {
 
         Eigen::VectorXf cv = CollapseMatrix(config, cv_spec.Spec(), other_index);
 
@@ -259,7 +268,12 @@ namespace PROfit{
             }
         }
 
-        size_t nerrorsample = 2500;
+        size_t nerrorsample = nthrows;
+        // +/-1 sigma quantile indices: 0.84/0.16 of the sorted throws. At the
+        // default nthrows=2500 these are 2100/400, matching the historic
+        // hard-coded binconts[2.5*840] / binconts[2.5*160].
+        const size_t qhi = std::min((size_t)(0.84*nerrorsample), nerrorsample - 1);
+        const size_t qlo = (size_t)(0.16*nerrorsample);
 
         std::vector<Eigen::VectorXf> specs;
         std::uniform_int_distribution<uint32_t> dseed(0, std::numeric_limits<uint32_t>::max());
@@ -283,8 +297,8 @@ namespace PROfit{
             float scale_factor = scale ? 1.0/config.collapsed_bin_widths.at(other_index)(i) :  1.0;
             if(std::isnan(scale_factor)) scale_factor = 1;
             std::sort(binconts.begin(), binconts.end());
-            float ehi = std::abs((binconts[2.5*840] - cv(i))*scale_factor);
-            float elo = std::abs((cv(i) - binconts[2.5*160])*scale_factor);
+            float ehi = std::abs((binconts[qhi] - cv(i))*scale_factor);
+            float elo = std::abs((cv(i) - binconts[qlo])*scale_factor);
             ebar.error_up(i) =  ehi;
             ebar.error_down(i) =  elo;
             ebar.error_point(i) = cv(i)*scale_factor;
@@ -293,14 +307,80 @@ namespace PROfit{
         return ebar;
     }
 
-    PROsubtractedErrorBand getErrorBandBkgSubtracted(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const PROspec &cv_spec, const Eigen::VectorXf &cvparams, const std::vector<size_t> &bkg_subchannels, bool scale, int other_index) {
+    PROerrorbar getCovarianceOnlyErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const Eigen::VectorXf &params, bool scale, int var_index, const Eigen::VectorXf &data_spec) {
+        Eigen::VectorXf cv = FillSpectra(config, prop, syst, model, params, true, var_index).Spec();
+        Eigen::VectorXf cv_coll = CollapseMatrix(config, cv, var_index);
+
+        Eigen::MatrixXf cov;
+        if(syst.GetNCovar() > 0) {
+            Eigen::MatrixXf L = syst.DecomposeFractionalCovariance(config, cv);
+            cov = L * L.transpose();
+        } else {
+            cov = Eigen::MatrixXf::Zero(cv_coll.size(), cv_coll.size());
+        }
+
+        // Data-constrained posterior of the covariance systematics (Putnam SBN
+        // note Eqs. 7-8): with u = d - cv on the contributing bins (active and
+        // data > 0, PROchi convention, C = diag(max(data,1))), the prediction
+        // shifts by Sigma(C+Sigma)^-1 u and the band covariance becomes
+        // Sigma - Sigma(C+Sigma)^-1 Sigma. Exact here: with no free fit
+        // parameters the Gaussian conditional is the whole posterior.
+        Eigen::VectorXf shift = Eigen::VectorXf::Zero(cv_coll.size());
+        bool constrained = false;
+        if(data_spec.size() != 0 && data_spec.size() != cv_coll.size()) {
+            log<LOG_ERROR>(L"%1% || data_spec has %2% bins but variable %3% has %4% collapsed bins; ignoring the data constraint.") % __func__ % data_spec.size() % var_index % cv_coll.size();
+        } else if(data_spec.size() != 0 && syst.GetNCovar() > 0) {
+            std::vector<int> contrib;
+            for(int i = 0; i < data_spec.size(); ++i)
+                if(config.IsBinActive(var_index, i) && data_spec(i) > 0)
+                    contrib.push_back(i);
+            if(!contrib.empty()) {
+                const size_t nb = contrib.size();
+                Eigen::MatrixXd Sig_full = cov.cast<double>();
+                Eigen::MatrixXd K(cv_coll.size(), nb);      // Sigma[:, contrib]
+                Eigen::MatrixXd M(nb, nb);                  // C + Sigma on contrib bins
+                Eigen::VectorXd u(nb);
+                for(size_t a = 0; a < nb; ++a) {
+                    K.col(a) = Sig_full.col(contrib[a]);
+                    for(size_t b = 0; b < nb; ++b) M(a, b) = Sig_full(contrib[a], contrib[b]);
+                    M(a, a) += std::max<double>(data_spec(contrib[a]), 1.0);
+                    u(a) = data_spec(contrib[a]) - cv_coll(contrib[a]);
+                }
+                Eigen::LDLT<Eigen::MatrixXd> M_ldlt(M);
+                shift = (K * M_ldlt.solve(u)).cast<float>();
+                cov = (Sig_full - K * M_ldlt.solve(K.transpose())).cast<float>();
+                constrained = true;
+            }
+        }
+
+        PROerrorbar ebar(cv_coll.size());
+        ebar.constrained = constrained;
+        for(int i = 0; i < cv_coll.size(); ++i) {
+            float scale_factor = scale ? 1.0/config.collapsed_bin_widths.at(var_index)(i) : 1.0;
+            if(std::isnan(scale_factor)) scale_factor = 1;
+            float err = std::sqrt(std::max(cov(i,i), 0.0f)) * scale_factor;
+            ebar.error_up(i) = err;
+            ebar.error_down(i) = err;
+            ebar.error_point(i) = cv_coll(i)*scale_factor;
+            ebar.center_shift(i) = shift(i)*scale_factor;
+        }
+        ebar.covariance = cov;
+        return ebar;
+    }
+
+    PROsubtractedErrorBand getErrorBandBkgSubtracted(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const PROspec &cv_spec, const Eigen::VectorXf &cvparams, const std::vector<size_t> &bkg_subchannels, bool scale, int other_index, size_t nthrows) {
 
         Eigen::VectorXf mask        = build_subchannel_bin_mask(config, bkg_subchannels, other_index);
         Eigen::VectorXf bkg_cv_full = cv_spec.Spec().cwiseProduct(mask);
         Eigen::VectorXf cv_sig      = CollapseMatrix(config, Eigen::VectorXf(cv_spec.Spec() - bkg_cv_full), other_index);
         Eigen::VectorXf bkg_cv_coll = CollapseMatrix(config, bkg_cv_full, other_index);
 
-        size_t nerrorsample = 2500;
+        size_t nerrorsample = nthrows;
+        // +/-1 sigma quantile indices: 0.84/0.16 of the sorted throws. At the
+        // default nthrows=2500 these are 2100/400, matching the historic
+        // hard-coded binconts[2.5*840] / binconts[2.5*160].
+        const size_t qhi = std::min((size_t)(0.84*nerrorsample), nerrorsample - 1);
+        const size_t qlo = (size_t)(0.16*nerrorsample);
 
         std::vector<Eigen::VectorXf> sig_specs;
         std::uniform_int_distribution<uint32_t> dseed(0, std::numeric_limits<uint32_t>::max());
@@ -327,8 +407,8 @@ namespace PROfit{
             float scale_factor = scale ? 1.0/config.collapsed_bin_widths.at(other_index)(i) :  1.0;
             if(std::isnan(scale_factor)) scale_factor = 1;
             std::sort(binconts.begin(), binconts.end());
-            float ehi = std::abs((binconts[2.5*840] - cv_sig(i))*scale_factor);
-            float elo = std::abs((cv_sig(i) - binconts[2.5*160])*scale_factor);
+            float ehi = std::abs((binconts[qhi] - cv_sig(i))*scale_factor);
+            float elo = std::abs((cv_sig(i) - binconts[qlo])*scale_factor);
             result.band.error_up(i) =  ehi;
             result.band.error_down(i) =  elo;
             result.band.error_point(i) = cv_sig(i)*scale_factor;
@@ -366,6 +446,7 @@ namespace PROfit{
 	// note: since this is just for plotting diagonals, won't worry about filling in
 	//       covariance for collapsed 2d histogram.
         PROerrorbar* errband_1d = new PROerrorbar(nbinsx);
+        errband_1d->constrained = errband.constrained;
         log<LOG_DEBUG>(L"%1% || input err_band pt: %2%") % __func__ % errband.error_point;
         log<LOG_DEBUG>(L"%1% || input err_band up: %2%") % __func__ % errband.error_up;
         // sum error points, combine errors in quadrature
@@ -375,16 +456,20 @@ namespace PROfit{
                 double err_sq = 0;
                 for(int by1 = (int)(nbinsy*bx)+offset; by1 < (int)(nbinsy*(bx+1))+offset; by1++){
                     errband_1d->error_point(bx) += errband.error_point(by1);
+                    errband_1d->center_shift(bx) += errband.center_shift(by1);
                     for(int by2 = (int)(nbinsy*bx)+offset; by2 < (int)(nbinsy*(bx+1))+offset; by2++){
                         err_sq += errband.covariance(by1, by2);
                     }
                 }
 
-                errband_1d->error_up(bx) = std::sqrt(err_sq);
-                errband_1d->error_down(bx) = std::sqrt(err_sq);
+                // Clamp: the central covariance can make a fully-constrained
+                // block sum slightly negative in float.
+                errband_1d->error_up(bx) = std::sqrt(std::max(0.0, err_sq));
+                errband_1d->error_down(bx) = std::sqrt(std::max(0.0, err_sq));
             }
             else{
                 errband_1d->error_point(bx) = errband.error_point(bx+offset);
+                errband_1d->center_shift(bx) = errband.center_shift(bx+offset);
                 errband_1d->error_up(bx) = errband.error_up(bx+offset);
                 errband_1d->error_down(bx) = errband.error_down(bx+offset);
             }
@@ -397,6 +482,14 @@ namespace PROfit{
 
     double ratio_err(double A, double dA, double B, double dB, double corr){
         return (A/B)*sqrt(pow(dA/A,2)+pow(dB/B,2)-2*(corr*dA*dB/(A*B)));
+    }
+
+    // Draw color for the post-fit best fit and its band: green marks a legacy
+    // (unconstrained, --legacy-postfit-error) band so it can't be mistaken for
+    // the default data-constrained red one; red otherwise (including no band).
+    static Color_t postfit_color(const std::optional<PROerrorbar> &posterrband){
+        return (posterrband && !posterrband->constrained) ? TColor::GetColor(52, 168, 83)
+                                                          : TColor::GetColor(234, 67, 53);
     }
 
     void plot_detector_ratios(
@@ -622,7 +715,7 @@ namespace PROfit{
                 leg->AddEntry(data_ratio, "Data", "pe");
                 leg->AddEntry(cv_ratio, "CV Prediction", "l");
                 if(has_bf && bf_ratio) {
-                    leg->AddEntry(bf_ratio, "Best-Fit", "l");
+                    leg->AddEntry(bf_ratio, (posterrband && posterrband->constrained) ? "Constrained Best-Fit" : "Best-Fit", "l");
                 }
 
                 std::string canvas_name = "ratio_" + channel_short_labels[idx_num] + "_over_" + channel_short_labels[idx_den];
@@ -657,14 +750,15 @@ namespace PROfit{
 
                 // Draw best-fit
                 if(has_bf && bf_ratio) {
-                    bf_ratio->SetLineColor(kRed);
+                    const Color_t bfcol = postfit_color(posterrband);
+                    bf_ratio->SetLineColor(bfcol);
                     bf_ratio->SetLineWidth(2);
                     bf_ratio->Draw("hist same");
 
                     if(posterrband && post_channel_errband) {
-                        post_channel_errband->SetFillColor(kRed);
+                        post_channel_errband->SetFillColor(bfcol);
                         post_channel_errband->SetFillStyle(3254);
-                        post_channel_errband->SetLineColor(kRed);
+                        post_channel_errband->SetLineColor(bfcol);
                         post_channel_errband->SetLineWidth(1);
                         post_channel_errband->Draw("2 same");
                     }
@@ -712,7 +806,7 @@ namespace PROfit{
         log<LOG_DEBUG>(L"%1% || Finished plot_detector_ratios") % __func__;
     }                                                                              
 
-    void plot_hist1ds(TCanvas* c, TH1D* cv_hist, TGraphAsymmErrors* errband, THStack* cvstack, std::vector<std::pair<std::string, const char*>>* subplots, TH1D* bf_hist, TGraphAsymmErrors* posterrband, TH1D* data_hist, std::string* dat_str, PlotOptions opt, std::string hist_titles, std::string ratio_titles, const std::string &filename, PlotBounds &bounds, TText* text){
+    void plot_hist1ds(TCanvas* c, TH1D* cv_hist, TGraphAsymmErrors* errband, THStack* cvstack, std::vector<std::pair<std::string, const char*>>* subplots, TH1D* bf_hist, TGraphAsymmErrors* posterrband, TH1D* data_hist, std::string* dat_str, PlotOptions opt, std::string hist_titles, std::string ratio_titles, const std::string &filename, const PlotBounds &bounds, const std::string &text, Color_t bfcol = TColor::GetColor(234, 67, 53)){
 
         log<LOG_DEBUG>(L"%1% || Plotting 1D Histogram %2%") % __func__ % hist_titles.c_str();
         std::unique_ptr<TLegend> leg = std::make_unique<TLegend>(0.38,0.74,0.89,0.91);
@@ -724,7 +818,6 @@ namespace PROfit{
 
         Color_t cvcol =  TColor::GetColor(66, 103, 210);
         if(!bf_hist)cvcol=kBlack;
-        Color_t bfcol = TColor::GetColor(234, 67, 53);
 
         TPad* p1 = NULL;
         if(bool(opt&PlotOptions::DataMCRatio) || bool(opt&PlotOptions::DataPostfitRatio)){
@@ -825,7 +918,7 @@ namespace PROfit{
                 leg_hack->SetFillColor(bfcol);
                 leg_hack->SetLineColor(bfcol);
                 leg_hack->SetLineWidth(2);
-                leg->AddEntry(leg_hack,"Best Fit #pm 1#sigma (post-fit)" ,"fl");
+                leg->AddEntry(leg_hack,"Best-Fit #pm 1#sigma (post-fit)" ,"fl");
             }else{
                 leg->AddEntry(leg_hack, "Best Fit #pm 1#sigma (post-fit)", "l");
             }
@@ -872,12 +965,13 @@ namespace PROfit{
             posterrband->Draw("2 same");
         }
 
-        if(text) {
+        if(!text.empty()) {
             TLine *dummy_line = new TLine(0,0,0.1,0);
             dummy_line->SetLineColor(kWhite);
             dummy_line->SetLineWidth(0);
-            const char* label = text->GetTitle();
-            leg->AddEntry(dummy_line,label,"l");
+            TLegendEntry *chi_entry = leg->AddEntry(dummy_line,text.c_str(),"l");
+            chi_entry->SetTextFont(42);
+            chi_entry->SetTextSize(0.03);
         }
 
 
@@ -1014,7 +1108,341 @@ namespace PROfit{
         log<LOG_DEBUG>(L"%1% || Finishing Plotting 1D Histogram %2%") % __func__ % hist_titles.c_str();
     }
 
-    std::map<std::string, TObject *> plot_channels(const std::string &filename, const PROconfig &config, std::optional<PROspec> cv, std::optional<PROspec> best_fit, std::optional<PROdata> data, std::optional<PROerrorbar> errband, std::optional<PROerrorbar> posterrband, std::vector<TPaveText> &texts, PlotBounds &bounds, PlotOptions opt, int other_index, bool ratio_bool, const std::vector<size_t> *skip_stack_subchannels) {
+    // Ratio of the same channel between two detectors, drawn as a spectrum.
+    // Uses the error-band covariance rather than TH1::Divide so the correlation
+    // between detectors is propagated. For 2D channels the y-axis is summed,
+    // matching the projection used for the 1D pages.
+    void plot_detector_ratio_spectra(TCanvas &c,
+                                     const PROconfig &config,
+                                     const Eigen::VectorXf &cv_coll,
+                                     const std::optional<Eigen::VectorXf> &bf_coll,
+                                     const std::optional<Eigen::VectorXf> &data_coll,
+                                     const std::optional<PROerrorbar> &errband,
+                                     const std::optional<PROerrorbar> &posterrband,
+                                     const std::vector<size_t> &channel_offsets,
+                                     const std::string &filename,
+                                     int other_index)
+    {
+        if(config.m_num_detectors < 2) return;
+
+        // Deliberately empty: --plot-bounds ymax etc. refer to event counts, not ratios.
+        PlotBounds ratio_bounds;
+
+        auto sum_vec = [](const Eigen::VectorXf &v, size_t off, size_t bx, size_t ny) {
+            float s = 0.0f;
+            for(size_t by = 0; by < ny; ++by) s += v(off + bx*ny + by);
+            return s;
+        };
+        auto sum_block = [](const Eigen::MatrixXf &m, size_t offr, size_t offc, size_t bx, size_t ny) {
+            float s = 0.0f;
+            for(size_t i = 0; i < ny; ++i)
+                for(size_t j = 0; j < ny; ++j)
+                    s += m(offr + bx*ny + i, offc + bx*ny + j);
+            return s;
+        };
+
+        for(size_t mode = 0; mode < config.m_num_modes; ++mode) {
+        for(size_t det1 = 0; det1 < config.m_num_detectors; ++det1) {
+        for(size_t det2 = det1 + 1; det2 < config.m_num_detectors; ++det2) {
+        for(size_t ch = 0; ch < config.m_num_channels; ++ch) {
+
+            const size_t gidx1 = (mode*config.m_num_detectors + det1)*config.m_num_channels + ch;
+            const size_t gidx2 = (mode*config.m_num_detectors + det2)*config.m_num_channels + ch;
+            if(gidx1 >= channel_offsets.size() || gidx2 >= channel_offsets.size()) continue;
+            const size_t off1 = channel_offsets[gidx1];
+            const size_t off2 = channel_offsets[gidx2];
+
+            const size_t nx = config.m_channel_variable_bins[ch][other_index].NBinsAlong(0);
+            const size_t ny = config.m_channel_variable_dims[ch][other_index] == 2
+                            ? config.m_channel_variable_bins[ch][other_index].NBinsAlong(1) : 1;
+            std::vector<float> edges = config.m_channel_variable_bins[ch][other_index].Edges(0);
+
+            const std::string ratname = config.m_detector_plotnames[det1] + " / " + config.m_detector_plotnames[det2];
+            const std::string xtitle   = config.GetChannelXAxisTitle(ch, other_index);
+            const std::string title    = config.m_mode_plotnames[mode] + " " + config.m_channel_plotnames[ch]
+                                       + ";" + xtitle + ";" + ratname;
+            const std::string sfx = "_ratspec_" + std::to_string(mode) + "_" + std::to_string(det1)
+                                  + "_" + std::to_string(det2) + "_" + std::to_string(ch);
+
+            std::unique_ptr<TH1D> cv_rat = std::make_unique<TH1D>(("cvrat"+sfx).c_str(), title.c_str(), nx, edges.data());
+            cv_rat->SetDirectory(nullptr);
+            cv_rat->SetLineWidth(2);
+
+            std::unique_ptr<TH1D> bf_rat, data_rat;
+            if(bf_coll) {
+                bf_rat = std::make_unique<TH1D>(("bfrat"+sfx).c_str(), title.c_str(), nx, edges.data());
+                bf_rat->SetDirectory(nullptr);
+            }
+            if(data_coll) {
+                data_rat = std::make_unique<TH1D>(("datrat"+sfx).c_str(), title.c_str(), nx, edges.data());
+                data_rat->SetDirectory(nullptr);
+                data_rat->SetLineColor(kBlack);
+                data_rat->SetLineWidth(2);
+                data_rat->SetMarkerStyle(kFullCircle);
+                data_rat->SetMarkerColor(kBlack);
+                data_rat->SetMarkerSize(1);
+            }
+
+            std::vector<float> rel_err(nx, 0.0f), post_rel_err(nx, 0.0f);
+
+            for(size_t bx = 0; bx < nx; ++bx) {
+                const float a = sum_vec(cv_coll, off1, bx, ny);
+                const float b = sum_vec(cv_coll, off2, bx, ny);
+                const float r = (b != 0.0f) ? a/b : 0.0f;
+                cv_rat->SetBinContent(bx+1, r);
+
+                if(errband && a != 0.0f && b != 0.0f) {
+                    const Eigen::MatrixXf &C = errband->covariance;
+                    const float caa = sum_block(C, off1, off1, bx, ny);
+                    const float cbb = sum_block(C, off2, off2, bx, ny);
+                    const float cab = sum_block(C, off1, off2, bx, ny);
+                    // clamp: the cancellation can go slightly negative in float
+                    const float relvar = std::max(0.0f, caa/(a*a) + cbb/(b*b) - 2.0f*cab/(a*b));
+                    rel_err[bx] = std::sqrt(relvar);
+                    cv_rat->SetBinError(bx+1, r*rel_err[bx]);
+                }
+
+                if(bf_coll) {
+                    const float ba = sum_vec(*bf_coll, off1, bx, ny);
+                    const float bb = sum_vec(*bf_coll, off2, bx, ny);
+                    const float br = (bb != 0.0f) ? ba/bb : 0.0f;
+                    bf_rat->SetBinContent(bx+1, br);
+                    if(posterrband && ba != 0.0f && bb != 0.0f) {
+                        const Eigen::MatrixXf &C = posterrband->covariance;
+                        const float caa = sum_block(C, off1, off1, bx, ny);
+                        const float cbb = sum_block(C, off2, off2, bx, ny);
+                        const float cab = sum_block(C, off1, off2, bx, ny);
+                        const float relvar = std::max(0.0f, caa/(ba*ba) + cbb/(bb*bb) - 2.0f*cab/(ba*bb));
+                        post_rel_err[bx] = std::sqrt(relvar);
+                        bf_rat->SetBinError(bx+1, br*post_rel_err[bx]);
+                    }
+                }
+
+                if(data_coll) {
+                    const float da = sum_vec(*data_coll, off1, bx, ny);
+                    const float db = sum_vec(*data_coll, off2, bx, ny);
+                    const float dr = (db != 0.0f) ? da/db : 0.0f;
+                    data_rat->SetBinContent(bx+1, dr);
+                    // data detectors are statistically independent
+                    const float dvar = (da > 0.0f && db > 0.0f) ? (1.0f/da + 1.0f/db) : 0.0f;
+                    data_rat->SetBinError(bx+1, dr*std::sqrt(dvar));
+                }
+            }
+
+            std::unique_ptr<TGraphAsymmErrors> band, post_band;
+            if(errband) {
+                band = std::make_unique<TGraphAsymmErrors>(cv_rat.get());
+                for(size_t bx = 0; bx < nx; ++bx) {
+                    const float e = cv_rat->GetBinContent(bx+1)*rel_err[bx];
+                    band->SetPointEYhigh(bx, e);
+                    band->SetPointEYlow(bx, e);
+                }
+            }
+            if(bf_coll && posterrband) {
+                post_band = std::make_unique<TGraphAsymmErrors>(bf_rat.get());
+                for(size_t bx = 0; bx < nx; ++bx) {
+                    const float e = bf_rat->GetBinContent(bx+1)*post_rel_err[bx];
+                    post_band->SetPointEYhigh(bx, e);
+                    post_band->SetPointEYlow(bx, e);
+                }
+            }
+
+            std::string dat_str = "Data";
+            plot_hist1ds(&c, cv_rat.get(), band.get(), nullptr, nullptr,
+                         bf_rat.get(), post_band.get(), data_rat.get(), &dat_str,
+                         PlotOptions{}, title, "", filename, ratio_bounds, std::string(), postfit_color(posterrband));
+        }}}}
+    }
+
+    // Ratio between two channels in the same detector, drawn as a spectrum.
+    // Basically a copy of `plot_detector_ratio_spectra`, with two differences: 
+    // in the 2D case, the two slots can have different y binning, so the covariance blocks
+    // are rectangular and the y stride is per-slot; and the x binning has to be checked
+    // rather than assumed equal (which was more natural for multi-detector ratios).
+    void plot_channel_ratio_spectra(TCanvas &c,
+                                    const PROconfig &config,
+                                    const Eigen::VectorXf &cv_coll,
+                                    const std::optional<Eigen::VectorXf> &bf_coll,
+                                    const std::optional<Eigen::VectorXf> &data_coll,
+                                    const std::optional<PROerrorbar> &errband,
+                                    const std::optional<PROerrorbar> &posterrband,
+                                    const std::vector<size_t> &channel_offsets,
+                                    const std::string &filename,
+                                    int other_index,
+                                    PlotOptions opt)
+    {
+        if(config.m_num_channels < 2) return;
+
+        PlotBounds ratio_bounds;
+
+        auto sum_vec = [](const Eigen::VectorXf &v, size_t off, size_t bx, size_t ny) {
+            float s = 0.0f;
+            for(size_t by = 0; by < ny; ++by) s += v(off + bx*ny + by);
+            return s;
+        };
+
+        // rows and columns may come from channels with different y binning, so per-slot stride 
+        auto sum_block = [](const Eigen::MatrixXf &m, size_t offr, size_t ny_r,
+                            size_t offc, size_t ny_c, size_t bx) {
+            float s = 0.0f;
+            for(size_t i = 0; i < ny_r; ++i)
+                for(size_t j = 0; j < ny_c; ++j)
+                    s += m(offr + bx*ny_r + i, offc + bx*ny_c + j);
+            return s;
+        };
+        auto same_edges = [](const std::vector<float> &a, const std::vector<float> &b) {
+            if(a.size() != b.size()) return false;
+            for(size_t i = 0; i < a.size(); ++i) {
+                const float sc = std::max(1.0f, std::max(std::fabs(a[i]), std::fabs(b[i])));
+                if(std::fabs(a[i] - b[i]) > 1e-4f*sc) return false;
+            }
+            return true;
+        };
+
+        for(size_t mode = 0; mode < config.m_num_modes; ++mode) {
+        for(size_t det = 0; det < config.m_num_detectors; ++det) {
+        for(size_t ch1 = 0; ch1 < config.m_num_channels; ++ch1) {
+        for(size_t ch2 = ch1 + 1; ch2 < config.m_num_channels; ++ch2) {
+
+            const size_t gidx1 = (mode*config.m_num_detectors + det)*config.m_num_channels + ch1;
+            const size_t gidx2 = (mode*config.m_num_detectors + det)*config.m_num_channels + ch2;
+            if(gidx1 >= channel_offsets.size() || gidx2 >= channel_offsets.size()) continue;
+            const size_t off1 = channel_offsets[gidx1];
+            const size_t off2 = channel_offsets[gidx2];
+
+            const size_t nx   = config.m_channel_variable_bins[ch1][other_index].NBinsAlong(0);
+            const size_t nx_d = config.m_channel_variable_bins[ch2][other_index].NBinsAlong(0);
+            std::vector<float> edges   = config.m_channel_variable_bins[ch1][other_index].Edges(0);
+            std::vector<float> edges_d = config.m_channel_variable_bins[ch2][other_index].Edges(0);
+            if(nx != nx_d || !same_edges(edges, edges_d)) {
+                log<LOG_WARNING>(L"%1% || Skipping channel ratio %2%/%3%: x binning differs (%4% vs %5% bins). A ratio requires identical binning in both channels.")
+                    % __func__ % config.m_channel_names[ch1].c_str() % config.m_channel_names[ch2].c_str() % nx % nx_d;
+                continue;
+            }
+
+            const size_t ny1 = config.m_channel_variable_dims[ch1][other_index] == 2
+                             ? config.m_channel_variable_bins[ch1][other_index].NBinsAlong(1) : 1;
+            const size_t ny2 = config.m_channel_variable_dims[ch2][other_index] == 2
+                             ? config.m_channel_variable_bins[ch2][other_index].NBinsAlong(1) : 1;
+
+            const std::string xt1 = config.GetChannelXAxisTitle(ch1, other_index);
+            const std::string xt2 = config.GetChannelXAxisTitle(ch2, other_index);
+            if(xt1 != xt2) {
+                log<LOG_WARNING>(L"%1% || Channel ratio %2%/%3%: x axis titles differ (%4% vs %5%). Binning is compatible so the ratio is drawn, but check that the two channels bin the same observable.")
+                    % __func__ % config.m_channel_names[ch1].c_str() % config.m_channel_names[ch2].c_str() % xt1.c_str() % xt2.c_str();
+            }
+
+            const std::string ratname = config.m_channel_plotnames[ch1] + " / " + config.m_channel_plotnames[ch2];
+            const std::string title   = config.m_mode_plotnames[mode] + " " + config.m_detector_plotnames[det]
+                                      + ";" + xt1 + ";" + ratname;
+            const std::string sfx = "_chratspec_" + std::to_string(mode) + "_" + std::to_string(det)
+                                  + "_" + std::to_string(ch1) + "_" + std::to_string(ch2);
+
+            std::unique_ptr<TH1D> cv_rat = std::make_unique<TH1D>(("cvrat"+sfx).c_str(), title.c_str(), nx, edges.data());
+            cv_rat->SetDirectory(nullptr);
+            cv_rat->SetLineWidth(2);
+
+            std::unique_ptr<TH1D> bf_rat, data_rat;
+            if(bf_coll) {
+                bf_rat = std::make_unique<TH1D>(("bfrat"+sfx).c_str(), title.c_str(), nx, edges.data());
+                bf_rat->SetDirectory(nullptr);
+            }
+            if(data_coll) {
+                data_rat = std::make_unique<TH1D>(("datrat"+sfx).c_str(), title.c_str(), nx, edges.data());
+                data_rat->SetDirectory(nullptr);
+                data_rat->SetLineColor(kBlack);
+                data_rat->SetLineWidth(2);
+                data_rat->SetMarkerStyle(kFullCircle);
+                data_rat->SetMarkerColor(kBlack);
+                data_rat->SetMarkerSize(1);
+            }
+
+            std::vector<float> rel_err(nx, 0.0f), post_rel_err(nx, 0.0f);
+
+            for(size_t bx = 0; bx < nx; ++bx) {
+                const float a = sum_vec(cv_coll, off1, bx, ny1);
+                const float b = sum_vec(cv_coll, off2, bx, ny2);
+                const float r = (b != 0.0f) ? a/b : 0.0f;
+                cv_rat->SetBinContent(bx+1, r);
+
+                if(errband && a != 0.0f && b != 0.0f) {
+                    const Eigen::MatrixXf &C = errband->covariance;
+                    const float caa = sum_block(C, off1, ny1, off1, ny1, bx);
+                    const float cbb = sum_block(C, off2, ny2, off2, ny2, bx);
+                    const float cab = sum_block(C, off1, ny1, off2, ny2, bx);
+                    const float raw = caa/(a*a) + cbb/(b*b) - 2.0f*cab/(a*b);
+                    
+                    if(raw < 0.0f)
+                        log<LOG_WARNING>(L"%1% || Channel ratio %2%/%3% bin %4%: relative variance came out negative (%5%) before clamping. The systematic cancellation between these channels is at or below the error-band throw noise.")
+                            % __func__ % config.m_channel_names[ch1].c_str() % config.m_channel_names[ch2].c_str() % bx % raw;
+                    rel_err[bx] = std::sqrt(std::max(0.0f, raw));
+                    cv_rat->SetBinError(bx+1, r*rel_err[bx]);
+                }
+
+                if(bf_coll) {
+                    const float ba = sum_vec(*bf_coll, off1, bx, ny1);
+                    const float bb = sum_vec(*bf_coll, off2, bx, ny2);
+                    const float br = (bb != 0.0f) ? ba/bb : 0.0f;
+                    bf_rat->SetBinContent(bx+1, br);
+                    if(posterrband && ba != 0.0f && bb != 0.0f) {
+                        const Eigen::MatrixXf &C = posterrband->covariance;
+                        const float caa = sum_block(C, off1, ny1, off1, ny1, bx);
+                        const float cbb = sum_block(C, off2, ny2, off2, ny2, bx);
+                        const float cab = sum_block(C, off1, ny1, off2, ny2, bx);
+                        const float relvar = std::max(0.0f, caa/(ba*ba) + cbb/(bb*bb) - 2.0f*cab/(ba*bb));
+                        post_rel_err[bx] = std::sqrt(relvar);
+                        bf_rat->SetBinError(bx+1, br*post_rel_err[bx]);
+                    }
+                }
+
+                if(data_coll) {
+                    const float da = sum_vec(*data_coll, off1, bx, ny1);
+                    const float db = sum_vec(*data_coll, off2, bx, ny2);
+                    const float dr = (db != 0.0f) ? da/db : 0.0f;
+                    data_rat->SetBinContent(bx+1, dr);
+                    
+                    // assumes the two channels are mutually exclusive selections (no correlation term...)
+                    const float dvar = (da > 0.0f && db > 0.0f) ? (1.0f/da + 1.0f/db) : 0.0f;
+                    data_rat->SetBinError(bx+1, dr*std::sqrt(dvar));
+                }
+            }
+
+            std::unique_ptr<TGraphAsymmErrors> band, post_band;
+            if(errband) {
+                band = std::make_unique<TGraphAsymmErrors>(cv_rat.get());
+                for(size_t bx = 0; bx < nx; ++bx) {
+                    const float e = cv_rat->GetBinContent(bx+1)*rel_err[bx];
+                    band->SetPointEYhigh(bx, e);
+                    band->SetPointEYlow(bx, e);
+                }
+            }
+            if(bf_coll && posterrband) {
+                post_band = std::make_unique<TGraphAsymmErrors>(bf_rat.get());
+                for(size_t bx = 0; bx < nx; ++bx) {
+                    const float e = bf_rat->GetBinContent(bx+1)*post_rel_err[bx];
+                    post_band->SetPointEYhigh(bx, e);
+                    post_band->SetPointEYlow(bx, e);
+                }
+            }
+
+            PlotOptions ropt = PlotOptions{};
+            std::string ratio_titles = "";
+            if(data_rat && bf_rat && post_band && bool(opt&PlotOptions::DataPostfitRatio)) {
+                ropt = PlotOptions::DataPostfitRatio;
+                ratio_titles = ";" + xt1 + ";Data/Best-Fit";
+            } else if(data_rat && band) {
+                ropt = PlotOptions::DataMCRatio;
+                ratio_titles = ";" + xt1 + ";Data/MC";
+            }
+
+            std::string dat_str = "Data";
+            plot_hist1ds(&c, cv_rat.get(), band.get(), nullptr, nullptr,
+                         bf_rat.get(), post_band.get(), data_rat.get(), &dat_str,
+                         ropt, title, ratio_titles, filename, ratio_bounds, std::string(), postfit_color(posterrband));
+        }}}}
+    }
+    
+    std::map<std::string, TObject *> plot_channels(const std::string &filename, const PROconfig &config, std::optional<PROspec> cv, std::optional<PROspec> best_fit, std::optional<PROdata> data, std::optional<PROerrorbar> errband, std::optional<PROerrorbar> posterrband, std::vector<TPaveText> &texts, const PlotBounds &bounds, PlotOptions opt, int other_index, bool ratio_bool, bool plot_channel_ratios, const std::vector<size_t> *skip_stack_subchannels, PROmetric *chi_metric, const PROspec *chi_spec) {
 
         log<LOG_DEBUG>(L"%1% || Starting plot_channels") % __func__;
         std::string rat_y_title = bool(opt&PlotOptions::DataMCRatio) ? "Data/MC" : "Data/Best-Fit";
@@ -1030,9 +1458,9 @@ namespace PROfit{
         std::vector<TH1D> data_hists;
         std::vector<TH1D> cv_hists;
         std::vector<TH1D> bf_hists;
+        std::vector<size_t> channel_offsets;   // collapsed bin start of each mode/det/channel
 
         size_t global_subchannel_index = 0;
-        size_t global_subchannel_index_2d = 0;
         size_t global_channel_index = 0;
         int tot_offset = 0;
 
@@ -1051,6 +1479,7 @@ namespace PROfit{
                 for(size_t channel = 0; channel < config.m_num_channels; ++channel) {
 
                     log<LOG_DEBUG>(L"%1% || channel %2%") % __func__ % channel;
+                    channel_offsets.push_back(tot_offset);
                     std::string mdc = config.m_mode_names[mode]+"_"+config.m_detector_names[det]+"_"+config.m_channel_names[channel];
 
                     std::string xtitle = config.GetChannelXAxisTitle(channel, other_index);
@@ -1112,6 +1541,7 @@ namespace PROfit{
                         posterrband_1d = make_1d_err(*posterrband, channel_nbins_x, channel_nbins_y, tot_offset, config.m_channel_variable_dims[channel][other_index]);
                     }
 
+                    std::string projected_x_chi_label; // We want to pass this to the 1d plotter outside the 2d plotting
                     if(config.m_channel_variable_dims[channel][other_index] == 2){
                         gStyle->SetPalette(kViridis);
                         std::string joined_title = config.m_channel_variable_units[channel][other_index];
@@ -1126,19 +1556,87 @@ namespace PROfit{
                         std::vector<float> edges_x = config.m_channel_variable_bins[channel][other_index].Edges(0);
                         std::vector<float> edges_y = config.m_channel_variable_bins[channel][other_index].Edges(1);
 
+                        // Helpers to plot chi^2 for each heatmap/slice/projection
+                        const size_t channel_start = config.GetCollapsedGlobalVariableBinStart(global_channel_index, other_index);
+
+                        // In `groups`, each outer vector is one displayed bin; its inner vector lists the flattened
+                        // source bins to sum. For a 3x2 Y projection, groups looks like {{0, 2, 4}, {1, 3, 5}}, i.e.,
+                        // the first bin contains bins 0, 2, and 4 from the flat bins, and the second bin contains bins
+                        // 1, 3, and 5 from the flat bins.
+                        auto make_projection = [&](const std::vector<std::vector<size_t>> &groups) {
+                            size_t nrows = 0;
+                            for(const auto &group : groups) {
+                                if(std::any_of(group.begin(), group.end(), [&](size_t bin) {
+                                    return config.IsBinActive(other_index, channel_start + bin);
+                                })) ++nrows;
+                            }
+
+                            // Maps from original bins (nbins_p_2dchan) to active bins in projection (nrows)
+                            Eigen::MatrixXf projection = Eigen::MatrixXf::Zero(nrows, nbins_p_2dchan);
+                            size_t row = 0;
+                            for(const auto &group : groups) {
+                                bool active = false;
+                                for(size_t bin : group) {
+                                    if(config.IsBinActive(other_index, channel_start + bin)) {
+                                        projection(row, bin) = 1.0f;
+                                        active = true;
+                                    }
+                                }
+                                if (active) ++row; // Only advance matrix row if at least one bin in group is active
+                            }
+                            return projection;
+                        };
+                        auto chi_label = [&](const Eigen::MatrixXf &projection) {
+                            if(!chi_metric || !chi_spec || projection.rows() == 0) return std::string();
+                            const float chi2 = chi_metric->getSingleChannelChi(global_channel_index, *chi_spec, other_index, projection);
+                            return std::string("#chi^{2}/nbins = ") + to_string_prec(chi2, 2) + "/" + std::to_string(projection.rows());
+                        };
+                        auto draw_chi_label = [&](const std::string &label) {
+                            if(label.empty()) return;
+                            TPaveText text(0.62, 0.91, 0.89, 0.96, "NDC");
+                            text.AddText(label.c_str());
+                            text.SetFillColor(0);
+                            text.SetBorderSize(0);
+                            text.SetTextAlign(12);
+                            text.SetTextFont(42);
+                            text.SetTextSize(0.03);
+                            text.DrawClone();
+                        };
+
+                        std::vector<std::vector<size_t>> full_groups(nbins_p_2dchan);
+                        for(size_t bin = 0; bin < (size_t)nbins_p_2dchan; ++bin) full_groups[bin] = {bin};
+                        const std::string full_chi_label = chi_label(make_projection(full_groups));
+                        std::vector<std::vector<size_t>> x_projection_groups(channel_nbins_x);
+                        for(size_t xbin = 0; xbin < channel_nbins_x; ++xbin) {
+                            for(size_t ybin = 0; ybin < channel_nbins_y; ++ybin) {
+                                x_projection_groups[xbin].push_back(xbin*channel_nbins_y + ybin);
+                            }
+                        }
+                        projected_x_chi_label = chi_label(make_projection(x_projection_groups));
+
+                        const std::string plot_title_2d = config.m_detector_plotnames[det]+" "+config.m_channel_names[channel]+" CV";
+                        auto make_slice_title = [&](size_t slice_number, const std::string &slice_variable, float low_edge, float high_edge, const std::string &horizontal_axis) {
+                            std::ostringstream title;
+                            title << plot_title_2d << " - Slice " << slice_number << ": "
+                                  << slice_variable << " in [" << low_edge << ", " << high_edge << ")"
+                                  << ";" << horizontal_axis << ";" << ytitle;
+                            return title.str();
+                        };
+
                         // this needs to be a sum over all subchannels
-                        //
                         TH2D* cv_hist = new TH2D(hist_title.c_str(),hist_title.c_str(), channel_nbins_x, edges_x.data(), channel_nbins_y, edges_y.data());
+                        // global_subchannel_index still points at this channel's first
+                        // subchannel here; it is only advanced in the stack loop below.
                         for(size_t subchannel = 0; subchannel < config.m_num_subchannels[channel]; ++subchannel){
-                            const std::string& subchannel_name  = config.m_fullnames[global_subchannel_index_2d];
+                            const std::string& subchannel_name  = config.m_fullnames[global_subchannel_index + subchannel];
                             cv_hist->Add(cv2dhists[subchannel_name].get());
-                            ++global_subchannel_index_2d;
                         }
 
                         TPad p2d("p2d", "p2d", 0, 0, 1, 1);
                         p2d.cd();
                         cv_hist->SetTitle(hist_title.c_str());
                         cv_hist->Draw("colz");
+                        draw_chi_label(full_chi_label);
                         objs[mdc+"_cv2d"] = cv_hist->Clone();
                         c.cd();
                         p2d.Draw();
@@ -1146,19 +1644,31 @@ namespace PROfit{
 
                         TH2D* bf_hist = NULL;
                         if(best_fit){
-                            std::string bf_hist_title = config.m_detector_plotnames[det]  + " "+ config.m_channel_plotnames[channel]+" Best-Fit;"+xtitle2d+";"+ytitle2d;
+                            std::string bf_hist_title = config.m_detector_plotnames[det]  + " "+ config.m_channel_plotnames[channel]+((posterrband && posterrband->constrained) ? " Constrained Best-Fit;" : " Best-Fit;")+xtitle2d+";"+ytitle2d;
                             bf_hist = new TH2D(bf_hist_title.c_str(),bf_hist_title.c_str(), channel_nbins_x, edges_x.data(), channel_nbins_y, edges_y.data());
 
                             Eigen::VectorXf tmp_bf = CollapseMatrix(config, best_fit->Spec(), other_index);
                             for(size_t xbin = 0; xbin < channel_nbins_x; xbin++){
                                 for(size_t ybin = 0; ybin < channel_nbins_y; ybin++) {
-                                    bf_hist->SetBinContent(xbin+1, ybin+1, tmp_bf(xbin*channel_nbins_y+ybin + tot_offset));
+                                    const size_t flat_bin = xbin*channel_nbins_y+ybin + tot_offset;
+                                    float val = tmp_bf(flat_bin);
+                                    // Fold the posterior covariance pull in: the 2D map,
+                                    // and every slice/projection taken from it below,
+                                    // shows the CONSTRAINED best fit.
+                                    if(posterrband) {
+                                        float denom = posterrband->error_point(flat_bin);
+                                        float f = (denom != 0 && std::isfinite(denom)) ? val/denom : 1.0f;
+                                        if(!std::isfinite(f)) f = 1.0f;
+                                        val += f*posterrband->center_shift(flat_bin);
+                                    }
+                                    bf_hist->SetBinContent(xbin+1, ybin+1, val);
                                 }
                             }
 
                             TPad pbfd("pbfd", "pbfd", 0, 0, 1, 1);
                             pbfd.cd();
                             bf_hist->Draw("colz");
+                            draw_chi_label(full_chi_label);
                             objs[mdc+"_bestfit2d"] = bf_hist->Clone();
                             c.cd();
                             pbfd.Draw();
@@ -1180,6 +1690,7 @@ namespace PROfit{
                             TPad pdata("pdata", "pdata", 0, 0, 1, 1);
                             pdata.cd();
                             data_hist->Draw("colz");
+                            draw_chi_label(full_chi_label);
                             objs[mdc+"_data2d"] = data_hist->Clone();
                             c.cd();
                             pdata.Draw();
@@ -1189,28 +1700,39 @@ namespace PROfit{
 
                         float scale = 1.0;
 
+                        // Plot the first variable in bins of the second variable
                         for(size_t ybin = 1; ybin <= channel_nbins_y; ybin++) {
+                            std::vector<std::vector<size_t>> groups(channel_nbins_x);
+                            for(size_t xbin = 0; xbin < channel_nbins_x; ++xbin) {
+                                groups[xbin] = {xbin*channel_nbins_y + (ybin-1)};
+                            }
+                            const std::string slice_chi_label = chi_label(make_projection(groups));
                             TGraphAsymmErrors *post_channel_errband = NULL; 
                             if(posterrband) {
-                                post_channel_errband = new TGraphAsymmErrors(bf_hist->ProjectionX("slc", ybin, ybin));
+                                post_channel_errband = new TGraphAsymmErrors(bf_hist->ProjectionX("xslc_bf", ybin, ybin));
                                 for(size_t xbin = 0; xbin < channel_nbins_x; ++xbin) {
-                                    post_channel_errband->SetPointEYhigh(xbin, scale*(posterrband->error_up((ybin-1)*channel_nbins_x+xbin+tot_offset)));
-                                    post_channel_errband->SetPointEYlow(xbin, scale*(posterrband->error_down((ybin-1)*channel_nbins_x+xbin+tot_offset)));
+                                    const size_t flat_bin = xbin * channel_nbins_y + (ybin - 1) + tot_offset;
+                                    // Anchored via the shifted bf_hist projection above.
+                                    post_channel_errband->SetPointEYhigh(xbin, scale*posterrband->error_up(flat_bin));
+                                    post_channel_errband->SetPointEYlow(xbin, scale*posterrband->error_down(flat_bin));
                                 }
                                 objs[mdc+"_posterrband_slice_ybin"+std::to_string(ybin)] = post_channel_errband->Clone();
                             }
 
                             TGraphAsymmErrors* channel_errband = NULL;
                             if(errband) {
-                                channel_errband = new TGraphAsymmErrors(cv_hist->ProjectionX("slc", ybin, ybin));
+                                channel_errband = new TGraphAsymmErrors(cv_hist->ProjectionX("xslc_cv", ybin, ybin));
                                 for(size_t xbin = 0; xbin < channel_nbins_x; ++xbin) {
-                                    channel_errband->SetPointEYhigh(xbin, scale*(errband->error_up((ybin-1)*channel_nbins_x+xbin+tot_offset)));
-                                    channel_errband->SetPointEYlow(xbin, scale*(errband->error_down((ybin-1)*channel_nbins_x+xbin+tot_offset)));
+                                    const size_t flat_bin = xbin * channel_nbins_y + (ybin - 1) + tot_offset;
+                                    channel_errband->SetPointEYhigh(xbin, scale*errband->error_up(flat_bin));
+                                    channel_errband->SetPointEYlow(xbin, scale*errband->error_down(flat_bin));
                                 }
                                 objs[mdc+"_preerrband_slice_ybin"+std::to_string(ybin)] = channel_errband->Clone();
                             }
 
-                            std::string ybin_str = "Slice "+std::to_string(ybin)+" "+hist_title;
+                            std::string ybin_str = make_slice_title(ybin, ytitle2d,
+                                                                    edges_y[ybin-1], edges_y[ybin],
+                                                                    xtitle2d);
 
                             TH1D cv_hist_slice = *(cv_hist->ProjectionX("slc", ybin, ybin));
                             cv_hist_slice.SetTitle(ybin_str.c_str());
@@ -1236,8 +1758,177 @@ namespace PROfit{
                                 objs[mdc+"_data_slice_ybin"+std::to_string(ybin)] = data_hist_slice->Clone();
                             }
 
-                            plot_hist1ds(&c, &cv_hist_slice, channel_errband, {}, {}, bf_hist_slice, post_channel_errband, data_hist_slice, &dat_str, {}, ybin_str, ratio_titles, filename, bounds, {});
+                            plot_hist1ds(&c, &cv_hist_slice, channel_errband, {}, {}, bf_hist_slice, post_channel_errband, data_hist_slice, &dat_str, {}, ybin_str, ratio_titles, filename, bounds, slice_chi_label, postfit_color(posterrband));
                         }
+
+                        // Plot the second variable in bins of the first variable
+                        const std::string ratio_titles_y = ";"+ytitle2d+";"+rat_y_title;
+                        for(size_t xbin = 1; xbin <= channel_nbins_x; ++xbin) {
+                            std::vector<std::vector<size_t>> groups(channel_nbins_y);
+                            for(size_t ybin = 0; ybin < channel_nbins_y; ++ybin) {
+                                groups[ybin] = {(xbin-1)*channel_nbins_y + ybin};
+                            }
+                            const std::string slice_chi_label = chi_label(make_projection(groups));
+                            TGraphAsymmErrors *post_channel_errband = NULL;
+                            if(posterrband) {
+                                post_channel_errband = new TGraphAsymmErrors(bf_hist->ProjectionY("yslc_bf", xbin, xbin));
+                                for(size_t ybin = 0; ybin < channel_nbins_y; ++ybin) {
+                                    const size_t flat_bin = (xbin-1)*channel_nbins_y+ybin+tot_offset;
+                                    // Anchored via the shifted bf_hist projection above.
+                                    post_channel_errband->SetPointEYhigh(ybin, scale*posterrband->error_up(flat_bin));
+                                    post_channel_errband->SetPointEYlow(ybin, scale*posterrband->error_down(flat_bin));
+                                }
+                                objs[mdc+"_posterrband_slice_xbin"+std::to_string(xbin)] = post_channel_errband->Clone();
+                            }
+
+                            TGraphAsymmErrors *channel_errband = NULL;
+                            if(errband) {
+                                channel_errband = new TGraphAsymmErrors(cv_hist->ProjectionY("yslc_cv", xbin, xbin));
+                                for(size_t ybin = 0; ybin < channel_nbins_y; ++ybin) {
+                                    const size_t flat_bin = (xbin-1)*channel_nbins_y+ybin+tot_offset;
+                                    channel_errband->SetPointEYhigh(ybin, scale*errband->error_up(flat_bin));
+                                    channel_errband->SetPointEYlow(ybin, scale*errband->error_down(flat_bin));
+                                }
+                                objs[mdc+"_preerrband_slice_xbin"+std::to_string(xbin)] = channel_errband->Clone();
+                            }
+
+                            std::string xbin_str = make_slice_title(xbin, xtitle2d,
+                                                                    edges_x[xbin-1], edges_x[xbin],
+                                                                    ytitle2d);
+                            TH1D cv_hist_slice = *(cv_hist->ProjectionY("yslc", xbin, xbin));
+                            cv_hist_slice.SetTitle(xbin_str.c_str());
+                            cv_hist_slice.GetYaxis()->SetTitle(ytitle.c_str());
+                            objs[mdc+"_cv_slice_xbin"+std::to_string(xbin)] = cv_hist_slice.Clone();
+
+                            TH1D *bf_hist_slice = NULL;
+                            if(best_fit) {
+                                bf_hist_slice = bf_hist->ProjectionY("bfyslc", xbin, xbin);
+                                bf_hist_slice->SetTitle(xbin_str.c_str());
+                                bf_hist_slice->GetYaxis()->SetTitle(ytitle.c_str());
+                                objs[mdc+"_bestfit_slice_xbin"+std::to_string(xbin)] = bf_hist_slice->Clone();
+                            }
+
+                            TH1D *data_hist_slice = NULL;
+                            if(data) {
+                                data_hist_slice = data_hist->ProjectionY("datayslc", xbin, xbin);
+                                data_hist_slice->SetTitle(dat_str.c_str());
+                                data_hist_slice->GetYaxis()->SetTitle(ytitle.c_str());
+                                data_hist_slice->SetLineColor(kBlack);
+                                data_hist_slice->SetLineWidth(2);
+                                data_hist_slice->SetMarkerStyle(kFullCircle);
+                                data_hist_slice->SetMarkerColor(kBlack);
+                                data_hist_slice->SetMarkerSize(1);
+                                objs[mdc+"_data_slice_xbin"+std::to_string(xbin)] = data_hist_slice->Clone();
+                            }
+
+                            plot_hist1ds(&c, &cv_hist_slice, channel_errband, {}, {}, bf_hist_slice, post_channel_errband, data_hist_slice, &dat_str, {}, xbin_str, ratio_titles_y, filename, bounds, slice_chi_label, postfit_color(posterrband));
+                        }
+
+                        const std::string hist_title_y = config.m_mode_plotnames[mode]+" "+config.m_detector_plotnames[det]+" "+config.m_channel_names[channel]+";"+ytitle2d+";"+ytitle;
+                        TH1D cv_hist_y(("cv_y"+std::to_string(global_channel_index)).c_str(), hist_title_y.c_str(), channel_nbins_y, edges_y.data());
+                        cv_hist_y.SetLineWidth(2);
+                        cv_hist_y.SetFillStyle(0);
+
+                        THStack *cvstack_y = NULL;
+                        std::vector<std::pair<std::string, const char*>> subplots_y;
+                        std::vector<std::unique_ptr<TH1D>> cv_subchannel_hists_y;
+                        if(cv) {
+                            if(bool(opt&PlotOptions::CVasStack))
+                                cvstack_y = new THStack(("y"+std::to_string(global_channel_index)).c_str(), "");
+
+                            // global_subchannel_index still points at this channel's first
+                            // subchannel; it is only advanced in the 1D stack loop below.
+                            const size_t first_subchannel = global_subchannel_index;
+                            for(size_t subchannel = 0; subchannel < config.m_num_subchannels[channel]; ++subchannel) {
+                                const size_t global_index = first_subchannel+subchannel;
+                                const std::string &subchannel_name = config.m_fullnames[global_index];
+                                auto sub_hist = std::make_unique<TH1D>(cv->toTH1D(config, global_index, other_index, 1));
+                                sub_hist->SetDirectory(nullptr);
+                                sub_hist->SetLineWidth(1);
+                                sub_hist->SetLineColor(kBlack);
+                                const std::string &color = config.m_subchannel_colors[channel][subchannel];
+                                sub_hist->SetFillColor(color == "NONE" ? kRed-7 : config.HexToROOTColor(color));
+                                if(bool(opt&PlotOptions::BinWidthScaled)) sub_hist->Scale(1, "width");
+
+                                const bool skip_stack = skip_stack_subchannels &&
+                                    std::find(skip_stack_subchannels->begin(), skip_stack_subchannels->end(), global_index) != skip_stack_subchannels->end();
+                                if(cvstack_y && !skip_stack) {
+                                    cvstack_y->Add(sub_hist.get());
+                                    subplots_y.push_back({subchannel_name, config.m_subchannel_plotnames[channel][subchannel].c_str()});
+                                }
+                                cv_hist_y.Add(sub_hist.get());
+                                cv_subchannel_hists_y.push_back(std::move(sub_hist));
+                            }
+                            if(bool(opt&PlotOptions::AreaNormalized)) {
+                                const float integral = cv_hist_y.Integral();
+                                cv_hist_y.Scale(1/integral);
+                                if(cvstack_y) {
+                                    TList *stack_hists = cvstack_y->GetHists();
+                                    for(const auto &&obj: *stack_hists) ((TH1*)obj)->Scale(1/integral);
+                                }
+                            }
+                            objs[mdc+"_cv1d_y"] = cv_hist_y.Clone();
+                            if(cvstack_y) objs[mdc+"_cvstack_y"] = cvstack_y->Clone();
+                        }
+
+                        TH1D *bf_hist_y = best_fit ? bf_hist->ProjectionY("bf_integrated_x") : NULL;
+                        if(bf_hist_y) {
+                            if(bool(opt&PlotOptions::BinWidthScaled)) bf_hist_y->Scale(1, "width");
+                            if(bool(opt&PlotOptions::AreaNormalized)) bf_hist_y->Scale(1/bf_hist_y->Integral());
+                            objs[mdc+"_bestfit_y"] = bf_hist_y->Clone();
+                        }
+                        TH1D *data_hist_y = data ? data_hist->ProjectionY("data_integrated_x") : NULL;
+                        if(data_hist_y) {
+                            data_hist_y->SetLineColor(kBlack);
+                            data_hist_y->SetLineWidth(2);
+                            data_hist_y->SetMarkerStyle(kFullCircle);
+                            data_hist_y->SetMarkerColor(kBlack);
+                            data_hist_y->SetMarkerSize(1);
+                            if(bool(opt&PlotOptions::BinWidthScaled)) data_hist_y->Scale(1, "width");
+                            if(bool(opt&PlotOptions::AreaNormalized)) data_hist_y->Scale(1/data_hist_y->Integral());
+                            objs[mdc+"_data_y"] = data_hist_y->Clone();
+                        }
+
+                        auto make_y_errorband = [&](const PROerrorbar &band, TH1D *central) {
+                            // The central hist is projected from the (already shifted)
+                            // bf_hist for the post band, so the graph is born anchored
+                            // at the constrained best fit; only widths are set here.
+                            TGraphAsymmErrors *graph = new TGraphAsymmErrors(central);
+                            for(size_t ybin = 0; ybin < channel_nbins_y; ++ybin) {
+                                double variance = 0.0;
+                                for(size_t x1 = 0; x1 < channel_nbins_x; ++x1)
+                                    for(size_t x2 = 0; x2 < channel_nbins_x; ++x2)
+                                        variance += band.covariance(tot_offset+x1*channel_nbins_y+ybin,
+                                                                    tot_offset+x2*channel_nbins_y+ybin);
+                                double error = std::sqrt(std::max(0.0, variance));
+                                if(bool(opt&PlotOptions::AreaNormalized) || bool(opt&PlotOptions::BinWidthScaled)) {
+                                    // central is shifted, so the ebar-units reference is
+                                    // error_point + center_shift: keeps the conversion
+                                    // factor free of the pull.
+                                    double point = 0.0;
+                                    for(size_t xbin = 0; xbin < channel_nbins_x; ++xbin)
+                                        point += band.error_point(tot_offset+xbin*channel_nbins_y+ybin)
+                                               + band.center_shift(tot_offset+xbin*channel_nbins_y+ybin);
+                                    if(point != 0.0 && std::isfinite(point)) error *= central->GetBinContent(ybin+1)/point;
+                                }
+                                graph->SetPointEYhigh(ybin, error);
+                                graph->SetPointEYlow(ybin, error);
+                            }
+                            return graph;
+                        };
+                        TGraphAsymmErrors *channel_errband_y = errband ? make_y_errorband(*errband, &cv_hist_y) : NULL;
+                        TGraphAsymmErrors *post_channel_errband_y = posterrband ? make_y_errorband(*posterrband, bf_hist_y) : NULL;
+                        if(channel_errband_y) objs[mdc+"_preerrband_y"] = channel_errband_y->Clone();
+                        if(post_channel_errband_y) objs[mdc+"_posterrband_y"] = post_channel_errband_y->Clone();
+
+                        std::vector<std::vector<size_t>> y_projection_groups(channel_nbins_y);
+                        for(size_t ybin = 0; ybin < channel_nbins_y; ++ybin) {
+                            for(size_t xbin = 0; xbin < channel_nbins_x; ++xbin) {
+                                y_projection_groups[ybin].push_back(xbin*channel_nbins_y + ybin);
+                            }
+                        }
+                        const std::string y_chi_label = chi_label(make_projection(y_projection_groups));
+                        plot_hist1ds(&c, &cv_hist_y, channel_errband_y, cvstack_y, &subplots_y, bf_hist_y, post_channel_errband_y, data_hist_y, &dat_str, opt, hist_title_y, ratio_titles_y, filename, bounds, y_chi_label, postfit_color(posterrband));
                     }
 
                     std::vector<float> edges = config.m_channel_variable_bins[channel][other_index].Edges();
@@ -1310,6 +2001,9 @@ namespace PROfit{
                     }
 
                     TH1D* bf_hist = NULL;
+                    // ebar-units -> drawn-units conversion per bin, computed from the
+                    // UNSHIFTED curve (the shift below must not contaminate it).
+                    std::vector<float> post_conv;
                     if(best_fit) {
                         bf_hist = new TH1D(("bf"+std::to_string(global_channel_index)).c_str(), "", channel_nbins_x, edges.data());
                         for(size_t bin = 0; bin < channel_nbins_x; ++bin) {
@@ -1319,6 +2013,22 @@ namespace PROfit{
                             bf_hist->Scale(1, "width");
                         if(bool(opt&PlotOptions::AreaNormalized))
                             bf_hist->Scale(1.0/bf_hist->Integral());
+                        // Fold the posterior covariance pull into the drawn curve:
+                        // this is the CONSTRAINED best fit (spline best fit + data
+                        // constraint on the covariance systematics), the same center
+                        // the band is measured about. Zero shift for prior bands.
+                        if(posterrband) {
+                            post_conv.assign(channel_nbins_x, 1.0f);
+                            for(size_t bin = 0; bin < channel_nbins_x; ++bin) {
+                                if(bool(opt&PlotOptions::AreaNormalized) || bool(opt&PlotOptions::BinWidthScaled)) {
+                                    float denom = posterrband_1d->error_point(bin);
+                                    float f = (denom != 0 && std::isfinite(denom)) ? bf_hist->GetBinContent(bin+1)/denom : 1.0f;
+                                    if(!std::isfinite(f)) f = 1.0f;
+                                    post_conv[bin] = f;
+                                }
+                                bf_hist->SetBinContent(bin+1, bf_hist->GetBinContent(bin+1) + post_conv[bin]*posterrband_1d->center_shift(bin));
+                            }
+                        }
                         objs[mdc+"_bestfit"] = bf_hist->Clone();
                     }
 
@@ -1347,30 +2057,28 @@ namespace PROfit{
 
                     TGraphAsymmErrors *post_channel_errband = NULL;
                     if(posterrband) {
+                        // bf_hist already IS the constrained best fit (shift folded in
+                        // above), so the graph is born anchored at the band center;
+                        // only the widths need the unit conversion, taken from the
+                        // pre-shift factors so the shift does not contaminate them.
                         post_channel_errband = new TGraphAsymmErrors(bf_hist);
                         for(size_t bin = 0; bin < channel_nbins_x; ++bin) {
-                            float scale = 1.0;
-                            if(bool(opt&PlotOptions::AreaNormalized) || bool(opt&PlotOptions::BinWidthScaled)) {
-                                float denom = posterrband_1d->error_point(bin);
-                                scale = (denom != 0 && std::isfinite(denom)) ? post_channel_errband->GetPointY(bin) / denom : 1.0f;
-                                if(!std::isfinite(scale)) scale = 1.0f;
-                            }
+                            float scale = post_conv.empty() ? 1.0f : post_conv[bin];
                             post_channel_errband->SetPointEYhigh(bin, scale*(posterrband_1d->error_up(bin)));
                             post_channel_errband->SetPointEYlow(bin, scale*(posterrband_1d->error_down(bin)));
                         }
                         objs[mdc+"_posterrband"] = post_channel_errband->Clone();
                     }
 
-                    TText* text = NULL;
-                    if(texts.size()!=0) {
-                        if(texts.size()==1){
-                            text = (TText*)texts.front().GetListOfLines()->First();
-                        }else{
-                            text = (TText*)texts.at(global_channel_index).GetListOfLines()->First();
-                        }
+                    std::string chi_label_text;
+                    if(config.m_channel_variable_dims[channel][other_index] == 2 && !projected_x_chi_label.empty()) {
+                        chi_label_text = projected_x_chi_label;
+                    } else if(texts.size()!=0) {
+                        TPaveText &box = texts.size() == 1 ? texts.front() : texts.at(global_channel_index);
+                        if(TText *line = (TText*)box.GetListOfLines()->First()) chi_label_text = line->GetTitle();
                     }
                     // should probably be switching this to a more clear boolean...
-                    plot_hist1ds(&c, &cv_hist, channel_errband, cvstack, &subplots, bf_hist, post_channel_errband, data_hist, &dat_str, opt, hist_titles, ratio_titles, filename, bounds, text);
+                    plot_hist1ds(&c, &cv_hist, channel_errband, cvstack, &subplots, bf_hist, post_channel_errband, data_hist, &dat_str, opt, hist_titles, ratio_titles, filename, bounds, chi_label_text, postfit_color(posterrband));
                     ++global_channel_index;
                     cv_hists.push_back(cv_hist);
 		    if(data){
@@ -1381,6 +2089,21 @@ namespace PROfit{
                 }
             }
         }
+        
+        // plot ratio across detectors and/or across channels
+        if(cv && (config.m_num_detectors > 1 || (plot_channel_ratios && config.m_num_channels > 1))) {
+            Eigen::VectorXf cv_coll = CollapseMatrix(config, cv->Spec(), other_index);
+            std::optional<Eigen::VectorXf> bf_coll, data_coll;
+            if(best_fit) bf_coll = CollapseMatrix(config, best_fit->Spec(), other_index);
+            if(data)     data_coll = data->Spec();
+            if(config.m_num_detectors > 1)
+                plot_detector_ratio_spectra(c, config, cv_coll, bf_coll, data_coll,
+                                            errband, posterrband, channel_offsets, filename, other_index);
+            if(plot_channel_ratios && config.m_num_channels > 1)
+                plot_channel_ratio_spectra(c, config, cv_coll, bf_coll, data_coll,
+                                           errband, posterrband, channel_offsets, filename, other_index, opt);
+        }
+
         c.Print((filename+"]").c_str());
 
         log<LOG_DEBUG>(L"%1% || ratio_bool: %2%") % __func__ % ratio_bool;
@@ -1403,8 +2126,11 @@ namespace PROfit{
             log<LOG_DEBUG>(L"%1% || Converting covariance to correlation") % __func__;
 	    for(int i = 0; i < cov_coll.rows(); i++){
 	        for(int j = 0; j < cov_coll.rows(); j++){
-		    corr_coll->SetBinContent(i+1, j+1, cov_coll(i, j)/cov_coll(i, i)/cov_coll(j, j));
-		    post_corr_coll->SetBinContent(i+1, j+1, post_cov_coll(i, j)/post_cov_coll(i, i)/post_cov_coll(j, j));
+		    // correlation = cov(i,j)/sqrt(cov(i,i)*cov(j,j)); zero-variance bins get 0.
+		    float denom = std::sqrt(cov_coll(i, i) * cov_coll(j, j));
+		    float post_denom = std::sqrt(post_cov_coll(i, i) * post_cov_coll(j, j));
+		    corr_coll->SetBinContent(i+1, j+1, denom > 0 ? cov_coll(i, j)/denom : 0.0f);
+		    post_corr_coll->SetBinContent(i+1, j+1, post_denom > 0 ? post_cov_coll(i, j)/post_denom : 0.0f);
 		}
 	    }
 
@@ -1684,7 +2410,7 @@ namespace PROfit{
                         log<LOG_INFO>(L"%1% || hsum for tag '%2%': nbins=%3%, max=%4%, integral=%5%")
                             % __func__ % tag.c_str() % hsum->GetNbinsX() % hsum->GetMaximum() % hsum->Integral();
 
-                        hsum->SetXTitle(config.m_channel_plotnames[channel].c_str());
+                        hsum->SetXTitle(config.GetChannelAxisTitle(channel, other_index, 0).c_str());
                         hsum->SetYTitle("Fractional Uncertainty");
                         hsum->SetLineColor(kBlack);
                         hsum->SetLineWidth(2);
@@ -1739,7 +2465,7 @@ namespace PROfit{
                         hsum->SetBinContent(i+1, sqrt(hsum->GetBinContent(i+1)));
                     }
                     leg->AddEntry(hsum,"Sum","l");
-                    hsum->SetXTitle(config.m_channel_plotnames[channel].c_str());
+                    hsum->SetXTitle(config.GetChannelAxisTitle(channel, other_index, 0).c_str());
                     hsum->SetTitle(("Summary: "+name).c_str());
                     hsum->SetYTitle("Fractional Uncertainty");
                     hsum->SetLineColor(kBlack);
@@ -2122,6 +2848,229 @@ namespace PROfit{
                 global_channel_index += config.m_num_channels;
             }
         }
+
+        c.Print((filename+"]").c_str());
+        return 0;
+    };
+
+int plotPriorFractionalSystematicChannelRatios(const PROconfig &config, const PROspec &spec, const PROsyst &allsplinesyst, std::string filename, int other_index) {
+        //Input PROsyst needs to be the allsplinesyst for now
+
+        if(config.m_num_channels < 2) {
+            log<LOG_WARNING>(L"%1% || Need at least 2 channels for channel-ratio systematics. Found %2%.")
+                % __func__ % config.m_num_channels;
+            return 1;
+        }
+
+        std::vector<int> colors = {
+            kAzure+1, kRed+1, kGreen+3, kOrange+7, kBlue+2, kViolet+2,
+            kGray+1, kYellow+2, kTeal+3, kPink+2, kMagenta+2, kSpring+5
+        };
+        std::vector<int> line_styles = {1, 1};
+
+        std::map<std::string,std::vector<std::string>> used_tags;
+        for(const auto &name: allsplinesyst.covar_names){
+            auto it = config.m_mcgen_variation_tags.find(name);
+            if (it == config.m_mcgen_variation_tags.end()) {
+                log<LOG_WARNING>(L"%1% || Systematic %2% not in tags map") % __func__ % name.c_str();
+                continue;
+            }
+            for(auto &t: it->second) used_tags[t].push_back(name);
+        }
+
+        int nTags = used_tags.size()+1;
+        int gridCols = std::ceil(std::sqrt(nTags));
+        int gridRows = std::ceil(nTags / float(gridCols));
+
+        TCanvas c("c", "Channel Ratio Systematics", 1600, 1200);
+        c.Print((filename+"[").c_str());
+        c.Divide(gridCols, gridRows);
+
+        Eigen::MatrixXf diag = spec.Spec().array().matrix().asDiagonal();
+        // NOTE: the matrix CollapseMatrix overload takes no variable index, so this
+        // (like plotPriorFractionalSystematicRatios) is only valid for i_prime.
+        Eigen::VectorXf collapsed_cv = CollapseMatrix(config, spec.Spec(), other_index);
+
+        auto sum_vec = [](const Eigen::VectorXf &v, size_t off, size_t bx, size_t ny) {
+            float s = 0.0f;
+            for(size_t by = 0; by < ny; ++by) s += v(off + bx*ny + by);
+            return s;
+        };
+        auto sum_block = [](const Eigen::MatrixXf &m, size_t offr, size_t ny_r,
+                            size_t offc, size_t ny_c, size_t bx) {
+            float s = 0.0f;
+            for(size_t i = 0; i < ny_r; ++i)
+                for(size_t j = 0; j < ny_c; ++j)
+                    s += m(offr + bx*ny_r + i, offc + bx*ny_c + j);
+            return s;
+        };
+        auto same_edges = [](const std::vector<float> &a, const std::vector<float> &b) {
+            if(a.size() != b.size()) return false;
+            for(size_t i = 0; i < a.size(); ++i) {
+                const float sc = std::max(1.0f, std::max(std::fabs(a[i]), std::fabs(b[i])));
+                if(std::fabs(a[i] - b[i]) > 1e-4f*sc) return false;
+            }
+            return true;
+        };
+
+        for(size_t mode = 0; mode < config.m_num_modes; ++mode) {
+        for(size_t det = 0; det < config.m_num_detectors; ++det) {
+        for(size_t ch1 = 0; ch1 < config.m_num_channels; ++ch1) {
+        for(size_t ch2 = ch1 + 1; ch2 < config.m_num_channels; ++ch2) {
+
+            const size_t gidx1 = (mode*config.m_num_detectors + det)*config.m_num_channels + ch1;
+            const size_t gidx2 = (mode*config.m_num_detectors + det)*config.m_num_channels + ch2;
+
+            const size_t nx   = config.m_channel_variable_bins[ch1][other_index].NBinsAlong(0);
+            const size_t nx_d = config.m_channel_variable_bins[ch2][other_index].NBinsAlong(0);
+            std::vector<float> bin_edges = config.m_channel_variable_bins[ch1][other_index].Edges(0);
+            std::vector<float> edges_d   = config.m_channel_variable_bins[ch2][other_index].Edges(0);
+            if(nx != nx_d || !same_edges(bin_edges, edges_d)) {
+                log<LOG_WARNING>(L"%1% || Skipping channel ratio %2%/%3%: x binning differs (%4% vs %5% bins).")
+                    % __func__ % config.m_channel_names[ch1].c_str() % config.m_channel_names[ch2].c_str() % nx % nx_d;
+                continue;
+            }
+
+            const size_t ny1 = config.m_channel_variable_dims[ch1][other_index] == 2
+                             ? config.m_channel_variable_bins[ch1][other_index].NBinsAlong(1) : 1;
+            const size_t ny2 = config.m_channel_variable_dims[ch2][other_index] == 2
+                             ? config.m_channel_variable_bins[ch2][other_index].NBinsAlong(1) : 1;
+
+            const size_t off1 = config.GetCollapsedGlobalVariableBinStart(gidx1, other_index);
+            const size_t off2 = config.GetCollapsedGlobalVariableBinStart(gidx2, other_index);
+
+            const std::string ratname = config.m_channel_plotnames[ch1] + "/" + config.m_channel_plotnames[ch2];
+            const std::string name    = config.m_mode_plotnames[mode] + " " + config.m_detector_plotnames[det] + " " + ratname;
+            const std::string xtitle  = ratname + " " + config.GetChannelXAxisTitle(ch1, other_index);
+            const std::string sfx     = "_" + std::to_string(mode) + "_" + std::to_string(det)
+                                      + "_" + std::to_string(ch1) + "_" + std::to_string(ch2);
+
+            c.Clear();
+            c.Divide(gridCols, gridRows);
+            int padIndex = 1;
+
+            std::vector<TH1F*> vsums;
+            std::vector<std::string> vnames;
+
+            for (const auto &[tag, vec] : used_tags) {
+
+                c.cd(padIndex++);
+                TLegend* leg = new TLegend(0.11, 0.6, 0.89, 0.89);
+                leg->SetNColumns(3);
+
+                TH1F* hsum = new TH1F(("Sum_"+tag+sfx).c_str(), tag.c_str(), bin_edges.size()-1, bin_edges.data());
+                hsum->Reset();
+                std::vector<TH1F*> hvec;
+                int i = 0;
+
+                for(const auto &systname : vec){
+
+                    Eigen::MatrixXf frac_covariance = allsplinesyst.GrabMatrix(systname);
+                    Eigen::MatrixXf full_covariance = diag*frac_covariance*diag;
+                    Eigen::MatrixXf C = CollapseMatrix(config, full_covariance);
+
+                    int color_idx = i % colors.size();
+                    int style_idx = (i / 4) % line_styles.size();
+                    i++;
+                    TH1F* h = new TH1F((tag+"_ChanRat"+sfx+"_"+std::to_string(i)).c_str(),
+                                       (tag + ";" + xtitle).c_str(), bin_edges.size()-1, bin_edges.data());
+
+                    for(size_t bx = 0; bx < nx; ++bx) {
+                        const float a = sum_vec(collapsed_cv, off1, bx, ny1);
+                        const float b = sum_vec(collapsed_cv, off2, bx, ny2);
+                        float var_i = 0.0f;
+                        if(a != 0.0f && b != 0.0f) {
+                            const float caa = sum_block(C, off1, ny1, off1, ny1, bx);
+                            const float cbb = sum_block(C, off2, ny2, off2, ny2, bx);
+                            const float cab = sum_block(C, off1, ny1, off2, ny2, bx);
+                            var_i = std::max(0.0f, caa/(a*a) + cbb/(b*b) - 2.0f*cab/(a*b));
+                        }
+                        h->SetBinContent(bx+1, std::sqrt(var_i));
+                        hsum->SetBinContent(bx+1, hsum->GetBinContent(bx+1) + var_i);
+                    }
+
+                    const std::string &plotname = config.m_mcgen_variation_plotname_map.at(systname);
+                    leg->AddEntry(h, plotname.c_str(), "l");
+                    h->SetLineColor(colors[color_idx]);
+                    h->SetLineStyle(line_styles[style_idx]);
+                    hvec.push_back(h);
+
+                }//end syst
+
+                for (size_t bx = 0; bx < nx; ++bx)
+                    hsum->SetBinContent(bx+1, std::sqrt(std::max(0.0, hsum->GetBinContent(bx+1))));
+                leg->AddEntry(hsum, "Sum", "l");
+
+                hsum->SetXTitle(xtitle.c_str());
+                hsum->SetYTitle("Fractional Uncertainty on Ratio");
+                hsum->SetLineColor(kBlack);
+                hsum->SetLineWidth(2);
+                hsum->SetLineStyle(1);
+                hsum->SetMinimum(0);
+                hsum->SetStats(0);
+                hsum->Draw("HIST");
+                hsum->SetMaximum(hsum->GetMaximum()*1.7);
+                gPad->Modified();
+                gPad->Update();
+
+                vsums.push_back(hsum);
+                vnames.push_back(tag);
+                for(auto &h : hvec) h->Draw("HIST SAME");
+                leg->Draw();
+
+                TText *t = new TText();
+                t->SetNDC(); t->SetTextFont(42); t->SetTextSize(0.03); t->SetTextAlign(33);
+                std::string pv = "PROfit v"+std::string(PROJECT_VERSION_STR);
+                t->DrawText(0.895, 0.945, pv.c_str());
+
+            }//end tag
+
+            //and each sum of sums to wrap it off!
+            c.cd(padIndex++);
+
+            TH1F* hsum = new TH1F(("USum"+sfx).c_str(), ("Summary! "+name).c_str(), bin_edges.size()-1, bin_edges.data());
+            hsum->Reset();
+            TLegend* leg = new TLegend(0.11, 0.6, 0.89, 0.89);
+            leg->SetNColumns(3);
+            std::vector<TH1F*> hvec;
+            for(size_t t = 0; t < vsums.size(); t++){
+                int color_idx = t % colors.size();
+                for (size_t bx = 0; bx < nx; ++bx)
+                    hsum->SetBinContent(bx+1, hsum->GetBinContent(bx+1)+pow(vsums.at(t)->GetBinContent(bx+1),2));
+                TH1F *h = (TH1F*)vsums.at(t)->Clone((vnames[t]+sfx).c_str());
+                leg->AddEntry(h, vnames[t].c_str(), "l");
+                h->SetLineColor(colors[color_idx]);
+                h->SetLineStyle(1);
+                h->SetLineWidth(1);
+                hvec.push_back(h);
+            }
+            for (size_t bx = 0; bx < nx; ++bx)
+                hsum->SetBinContent(bx+1, std::sqrt(hsum->GetBinContent(bx+1)));
+            leg->AddEntry(hsum, "Sum", "l");
+
+            hsum->SetXTitle(xtitle.c_str());
+            hsum->SetTitle(("Summary: "+name).c_str());
+            hsum->SetYTitle("Fractional Uncertainty on Ratio");
+            hsum->SetLineColor(kBlack);
+            hsum->SetLineWidth(2);
+            hsum->SetLineStyle(1);
+            hsum->SetMinimum(0);
+            hsum->SetStats(0);
+            hsum->Draw("HIST");
+            hsum->SetMaximum(hsum->GetMaximum()*1.7);
+            gPad->Modified();
+            gPad->Update();
+            for(auto &h : hvec) h->Draw("HIST SAME");
+            leg->Draw();
+
+            TText *t = new TText();
+            t->SetNDC(); t->SetTextFont(42); t->SetTextSize(0.03); t->SetTextAlign(33);
+            std::string pv = "PROfit v"+std::string(PROJECT_VERSION_STR);
+            t->DrawText(0.895, 0.945, pv.c_str());
+
+            c.Update();
+            c.Print(filename.c_str());
+        }}}}
 
         c.Print((filename+"]").c_str());
         return 0;

@@ -51,7 +51,7 @@ int PRO3p1_decay_invis::UnitarityConstraint(const Eigen::VectorXf &v){
     const float Ue4sq = maybe_convert_log("Ue4^2", v(param_name_to_index.at("Ue4^2")));
     const float Um4sq = maybe_convert_log("Um4^2", v(param_name_to_index.at("Um4^2")));
     const float g2 = maybe_convert_log("g2", v(param_name_to_index.at("g2")));
-    return   ((Ue4sq+Um4sq)<1 && g2>0 ? 1 : 0);
+    return   ((Ue4sq+Um4sq)<1 && g2>=0 ? 1 : 0);
 }
 
 // Equations from Jesse Mendez, slide 5 bottom https://microboone-docdb.fnal.gov/cgi-bin/sso/RetrieveFile?docid=45475&filename=2025-10-31-mendez-sterile-deacy.pdf&version=1
@@ -225,6 +225,67 @@ Eigen::MatrixXf PRO3p1_decay_invis::get_probs(const Eigen::VectorXf &phys, const
     }
 
     return probs;
+}
+
+
+std::vector<Eigen::MatrixXf> PRO3p1_decay_invis::get_probs_grad(const Eigen::VectorXf &phys, const std::vector<std::vector<float>> &var_arrs) const {
+    // Parameters: Δm², Ue = |Ue4|², Um = |Um4|², g² (linear). With
+    //   δ = k · Δm² · L/E,   c = cos 2δ,   e = exp(−g² δ / 8π),   osc = 1 − 2 e c + e²
+    // the probabilities (see the derivation above Pmue) are
+    //   P_aa  = 1 − 2 Ua (1 − e c) + Ua² · osc        (a = μ for col 1, e for col 3)
+    //   P_mue = Ue · Um · osc
+    // Everything except the mixings depends on θ only through δ and g²:
+    //   ∂e/∂δ = −(g²/8π) e,   ∂c/∂δ = −2 sin 2δ,   ∂(ec)/∂δ = e' c + e c',   ∂osc/∂δ = −2 ∂(ec)/∂δ + 2 e e'
+    //   ∂e/∂g² = −(δ/8π) e,   ∂(ec)/∂g² = c ∂e/∂g²,                          ∂osc/∂g² = −2 ∂(ec)/∂g² + 2 e ∂e/∂g²
+    //   ∂δ/∂Δm² = k · L/E
+    // and for the mixings  ∂P_aa/∂Ua = −2 (1 − e c) + 2 Ua · osc,  ∂P_mue/∂Ue = Um · osc,  ∂P_mue/∂Um = Ue · osc.
+    const auto &le_arr = var_arrs[0];
+    float dmsq  = maybe_convert_log("dmsq", phys(0));
+    float Ue4sq = maybe_convert_log("Ue4^2", phys(1));
+    float Um4sq = maybe_convert_log("Um4^2", phys(2));
+    float g2    = maybe_convert_log("g2", phys(3));
+
+    constexpr float LN10 = 2.302585093f;
+    float ddm = is_log10[0] ? LN10 * dmsq  : 1.0f;
+    float dUe = is_log10[1] ? LN10 * Ue4sq : 1.0f;
+    float dUm = is_log10[2] ? LN10 * Um4sq : 1.0f;
+    float dg2 = is_log10[3] ? LN10 * g2    : 1.0f;
+
+    constexpr float k = 1.266932679f;
+    constexpr float inv8pi = 1.0f / (8.0f * 3.14159f);   // same constant as get_probs
+    std::vector<Eigen::MatrixXf> grads(4, Eigen::MatrixXf::Zero(le_arr.size(), model_functions.size()));
+    for(size_t i = 0; i < le_arr.size(); ++i) {
+        float delta   = k * dmsq * le_arr[i];
+        float costerm = std::cos(2.0f*delta);
+        float expterm = std::exp(-g2 * delta * inv8pi);
+        float ec      = expterm * costerm;
+        float osc     = 1.0f - 2.0f*ec + expterm*expterm;
+
+        // Derivatives of ec and osc wrt delta and g2.
+        float de_ddelta = -g2 * inv8pi * expterm;
+        float dc_ddelta = -2.0f * std::sin(2.0f*delta);
+        float dec_ddelta  = de_ddelta * costerm + expterm * dc_ddelta;
+        float dosc_ddelta = -2.0f * dec_ddelta + 2.0f * expterm * de_ddelta;
+        float de_dg2   = -delta * inv8pi * expterm;
+        float dec_dg2  = de_dg2 * costerm;
+        float dosc_dg2 = -2.0f * dec_dg2 + 2.0f * expterm * de_dg2;
+        float ddelta_ddm = k * le_arr[i] * ddm;
+
+        // col 1: P_mumu = 1 - 2 Um (1 - ec) + Um^2 osc
+        grads[0](i, 1) = (2.0f*Um4sq*dec_ddelta + Um4sq*Um4sq*dosc_ddelta) * ddelta_ddm;
+        grads[2](i, 1) = (-2.0f*(1.0f - ec) + 2.0f*Um4sq*osc) * dUm;
+        grads[3](i, 1) = (2.0f*Um4sq*dec_dg2 + Um4sq*Um4sq*dosc_dg2) * dg2;
+        // col 2: P_mue = Ue Um osc
+        grads[0](i, 2) = Ue4sq * Um4sq * dosc_ddelta * ddelta_ddm;
+        grads[1](i, 2) = Um4sq * osc * dUe;
+        grads[2](i, 2) = Ue4sq * osc * dUm;
+        grads[3](i, 2) = Ue4sq * Um4sq * dosc_dg2 * dg2;
+        // col 3: P_ee = 1 - 2 Ue (1 - ec) + Ue^2 osc
+        grads[0](i, 3) = (2.0f*Ue4sq*dec_ddelta + Ue4sq*Ue4sq*dosc_ddelta) * ddelta_ddm;
+        grads[1](i, 3) = (-2.0f*(1.0f - ec) + 2.0f*Ue4sq*osc) * dUe;
+        grads[3](i, 3) = (2.0f*Ue4sq*dec_dg2 + Ue4sq*Ue4sq*dosc_dg2) * dg2;
+    }
+    return grads;
 }
 
 }

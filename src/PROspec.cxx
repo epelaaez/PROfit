@@ -109,7 +109,7 @@ TH1D PROspec::toTH1DSlices(PROconfig const & inconfig, int subchannel_index, int
     int nbins_dim = inconfig.m_channel_variable_bins[channel_index][other_index].NBinsAlong(dim);
     std::vector<float> bin_edges = inconfig.m_channel_variable_bins[channel_index][other_index].Edges(dim);
     std::string hist_name = inconfig.m_fullnames[subchannel_index];
-    std::string xaxis_title =  inconfig.GetChannelXAxisTitle(channel_index, other_index);
+    std::string xaxis_title = inconfig.GetChannelAxisTitle(channel_index, other_index, dim);
 
     //fill 1D hist
     TH1D hSpec((hist_name+std::to_string(other_index)+std::to_string(dim)+std::to_string(subchannel_index)).c_str(),hist_name.c_str(), nbins_dim, &bin_edges[0]);
@@ -138,7 +138,7 @@ TH1D PROspec::toTH1D(PROconfig const & inconfig, int subchannel_index, int other
     int nbins_dim = inconfig.m_channel_variable_bins[channel_index][other_index].NBinsAlong(dim);
     std::vector<float> bin_edges = inconfig.m_channel_variable_bins[channel_index][other_index].Edges(dim);
     std::string hist_name = inconfig.m_fullnames[subchannel_index];
-    std::string xaxis_title =  inconfig.GetChannelXAxisTitle(channel_index, other_index);
+    std::string xaxis_title = inconfig.GetChannelAxisTitle(channel_index, other_index, dim);
 
 
     // project along input dimension
@@ -162,10 +162,16 @@ TH2D PROspec::toTH2D(PROconfig const & inconfig, int subchannel_index, int other
     int global_bin_start = inconfig.GetGlobalVariableBinStart(subchannel_index, other_index);
     int channel_index = inconfig.GetLocalChannelIndexFromGlobalSubchannelIndex(subchannel_index);
 
+    if(inconfig.m_channel_variable_bins[channel_index][other_index].NDim() < 2) {
+        log<LOG_ERROR>(L"%1% || toTH2D called for channel %2%, variable %3%, whose binning is 1D") % __func__ % channel_index % other_index;
+        log<LOG_ERROR>(L"Terminating.");
+        exit(EXIT_FAILURE);
+    }
+
     //set up hist specs
     std::vector<float> bin_edges = inconfig.m_channel_variable_bins[channel_index][other_index].Edges(dim);
     std::string hist_name = inconfig.m_fullnames[subchannel_index];
-    std::string xaxis_title =  inconfig.GetChannelXAxisTitle(channel_index, other_index);
+    std::string xaxis_title = inconfig.GetChannelAxisTitle(channel_index, other_index, 0);
 
     // 2D binning info
     size_t channel_nbins_x = inconfig.m_channel_variable_bins[channel_index][other_index].NBinsAlong(0);
@@ -179,6 +185,7 @@ TH2D PROspec::toTH2D(PROconfig const & inconfig, int subchannel_index, int other
     TH2D hSpec(hist_name.c_str(),hist_name.c_str(), channel_nbins_x, edges_x.data(), channel_nbins_y, edges_y.data());
     hSpec.SetDirectory(nullptr);  // detach from gDirectory; multiple calls reuse names and would otherwise warn.
     hSpec.GetXaxis()->SetTitle(xaxis_title.c_str());
+    hSpec.GetYaxis()->SetTitle(inconfig.GetChannelAxisTitle(channel_index, other_index, 1).c_str());
 
     for(int xbin = 0; xbin < (int)channel_nbins_x; xbin++){
         for(int ybin = 0; ybin < (int)channel_nbins_y; ybin++){

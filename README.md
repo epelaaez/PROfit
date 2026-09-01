@@ -92,6 +92,18 @@ export PATH=$PATH:$PWD/bin   # optional
 <details>
 <summary>Setting up dependencies on the FNAL gpvms</summary>
 
+In an AL9 enviroment (Prefered)
+```bash
+    source /cvmfs/larsoft.opensciencegrid.org/spack-packages/setup-env.sh
+    spack load gcc@12.2.0
+    spack load cmake@3.27.7
+    spack load boost/iylabz2
+    spack load hdf5@1.14.3
+    spack load root@6.28.12
+    spack load ifdhc@2.7.2
+```
+
+
 Inside an SL7 container:
 
 ```bash

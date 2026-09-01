@@ -127,7 +127,9 @@ run_test t08surface       --use-fake-data surface -g 4 "${AXES[@]}"
 run_test t09surfaceamr    --use-fake-data surface -g 4 "${AXES[@]}" --surface-amr --amr-initial 4 --amr-levels 1
 
 # --- 4. Plotting variants -----------------------------------------------------
-run_test t10plot          --use-fake-data plot --with-splines
+# t10 opts into the covariance plots (off by default since --with-covar);
+# t11/t12 run the default (no Covar.pdf / ROOT Covariance dir).
+run_test t10plot          --use-fake-data plot --with-splines --with-covar
 run_test t11plotwidth     --use-fake-data --scale-by-width plot
 run_test t12plotbkgsub    --use-fake-data plot --bkg-subtract background
 
@@ -161,6 +163,60 @@ fi
 # match-everything pattern must both be refused.
 expect_fail t20pjpartial  --use-fake-data --projector-prefit "fullosc" global
 expect_fail t21pjall      --use-fake-data --projector-prefit "nu_" global
+
+# --- 9. apply_to_subchannel (per-subchannel systematic scoping) ---------------
+# DetSys1 (spline) restricted to ND, RPA_CCQE (covariance) restricted to FD.
+# process must not require (or read) their weight branches in non-matching
+# files; outside the match splines are flat at 1 and covariance blocks exactly
+# zero — asserted numerically by check_applyto.C on the t23 plot output.
+sed -e 's|plotname="DetSys1" tag="det"|plotname="DetSys1" tag="det" apply_to_subchannel="_ND_"|' \
+    -e 's|plotname="RPA_CCQE" tag="QE-MEC"|plotname="RPA_CCQE" tag="QE-MEC" apply_to_subchannel="_FD_"|' \
+    local_test.xml > local_applyto.xml
+SAVED_COMMON=("${COMMON[@]}")
+COMMON=(-x local_applyto.xml -t "${TAG}apt" -n 1 -v 2 --seed 405 --preset fast)
+run_test t22aptprocess process
+# --with-covar: t26aptzero asserts on the Covariance dir in this ROOT file.
+run_test t23aptplot   --use-fake-data plot --with-splines --with-covar
+run_test t24aptglobal --use-fake-data global
+# A wildcard matching no subchannel fullname must be refused loudly.
+sed 's|apply_to_subchannel="_ND_"|apply_to_subchannel="_TYPO_"|' local_applyto.xml > local_applyto_typo.xml
+COMMON=(-x local_applyto_typo.xml -t "${TAG}apttypo" -n 1 -v 2 --seed 405 --preset fast)
+expect_fail t25apttypo    process
+COMMON=("${SAVED_COMMON[@]}")
+# Numeric assertion: non-matching covariance blocks exactly zero, non-matching
+# splines exactly flat (needs root; skipped silently if unavailable).
+ROOTEXE="${ROOTEXE:-$(command -v root || true)}"
+[ -z "$ROOTEXE" ] && [ -x /usr/local/root/root/bin/root ] && ROOTEXE=/usr/local/root/root/bin/root
+if [ -n "$ROOTEXE" ]; then
+    if "$ROOTEXE" -l -b -q "$REPO/tests/check_applyto.C(\"${TAG}apt_t23aptplot_PROplot.root\")" > logs/t26aptzero.log 2>&1; then
+        note "PASS  t26aptzero  (non-matching cov blocks zero, splines flat)"
+        PASS=$((PASS+1))
+    else
+        note "FAIL  t26aptzero -- see logs/t26aptzero.log"
+        FAIL=$((FAIL+1))
+    fi
+else
+    note "SKIP  t26aptzero  (no root executable for the numeric assertion)"
+fi
+
+# --- 10. regex wildcards (patterns are unanchored ECMAScript regexes) ---------
+# Plain substrings keep their old meaning (every test above covers that); here
+# a genuine regex alternation must be accepted end-to-end. NAME:percent splits
+# on the LAST colon, so regex constructs containing ':' survive too.
+sed 's#>nu_ND_numu:0.02<#>nu_(ND|FD)_numu:0.02<#' local_test.xml > local_regex.xml
+SAVED_COMMON=("${COMMON[@]}")
+COMMON=(-x local_regex.xml -t "${TAG}rgx" -n 1 -v 2 --seed 405 --preset fast)
+run_test t27regexprocess process
+run_test t28regexglobal --use-fake-data global
+# An invalid regex must be refused loudly (CompilePattern fatal)...
+sed 's#>nu_ND:0.01<#>*bad:0.01<#' local_test.xml > local_regex_bad.xml
+COMMON=(-x local_regex_bad.xml -t "${TAG}rgxbad" -n 1 -v 2 --seed 405 --preset fast)
+expect_fail t29badregex   process
+# ...and so must a valid regex that matches no subchannel (zero-match fatal).
+sed 's#>nu_ND:0.01<#>^nomatch$:0.01<#' local_test.xml > local_regex_none.xml
+COMMON=(-x local_regex_none.xml -t "${TAG}rgxnone" -n 1 -v 2 --seed 405 --preset fast)
+expect_fail t30nomatch    process
+COMMON=("${SAVED_COMMON[@]}")
 
 note "----------------------------------------------------------------------"
 note "RESULT: $PASS passed, $FAIL failed  (outputs in $RUNDIR)"

@@ -24,6 +24,15 @@ ScanFitContext::Outcome ScanFitContext::fitAt(float value) {
     std::vector<Eigen::VectorXf> seeds = global_seeds;
     Eigen::VectorXf near_bf = store.nearest_bf(value);
     if(near_bf.size() > 0) seeds.push_back(std::move(near_bf));
+    // If any scan fit (of ANY parameter, on ANY thread) has beaten the caller's
+    // global minimum, seed from that point too — the per-parameter store cannot
+    // propagate a deeper basin across parameters, this can. PROfitter clamps
+    // each seed to the pinned bounds before recording its chi², so the scanned
+    // axis being elsewhere in the seed is harmless.
+    if(global_min) {
+        Eigen::VectorXf gm = global_min->seed_if_improved();
+        if(gm.size() > 0) seeds.push_back(std::move(gm));
+    }
 
     // Per-fit RNG seed: advances even on failure so the sequence stays
     // reproducible regardless of which fits succeed.
@@ -36,8 +45,8 @@ ScanFitContext::Outcome ScanFitContext::fitAt(float value) {
         // NOTE: PROfitter::FitScan (leaner scan-mode pipeline) is deliberately
         // unused while a fit-quality regression in it is investigated; every
         // scan sub-fit runs the full Fit() pipeline.
-        const float chi = seeds.empty() ? fitter.Fit(metric)
-                                        : fitter.Fit(metric, seeds);
+        static const std::vector<FixedSeed> no_fixed_seeds;
+        const float chi = fitter.Fit(metric, seeds, fixed_seeds ? *fixed_seeds : no_fixed_seeds);
         if(!std::isfinite(chi)) {
             log<LOG_WARNING>(L"%1% || Scan fit at param %2% = %3% returned non-finite chi2 (%4%); point skipped.")
                 % __func__ % param_idx % value % chi;
@@ -47,6 +56,10 @@ ScanFitContext::Outcome ScanFitContext::fitAt(float value) {
             out.pt.chi2 = chi;
             out.pt.best_fit = fitter.best_fit;
             store.add(out.pt);
+            if(global_min && global_min->update(chi, fitter.best_fit)) {
+                log<LOG_INFO>(L"%1% || Scan fit at param %2% = %3% found a new scan-wide lowest chi2 %4%; subsequent scan fits will be seeded from it.")
+                    % __func__ % param_idx % value % chi;
+            }
         }
     } catch(const std::exception &e) {
         log<LOG_WARNING>(L"%1% || Scan fit at param %2% = %3% threw ('%4%'); point skipped.")

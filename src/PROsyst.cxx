@@ -17,13 +17,14 @@ namespace PROfit {
         shape_only = shapeonly;
         for(const auto& syst: systs) {
             log<LOG_DEBUG>(L"%1% || syst mode: %2%") % __func__ % syst.mode.c_str();
-            if(syst.mode == "spline" || syst.mode == "norm" || syst.mode == "hist1d" || syst.mode == "hist2d") {
+            if(syst.mode == "spline" || syst.mode == "norm" || syst.mode == "hist1d" || syst.mode == "hist2d" || syst.mode == "explicit_spline") {
                 bool unmirrored = config.m_mcgen_variation_unmirrored.find(syst.systname) != config.m_mcgen_variation_unmirrored.end();
                 FillSpline(syst, unmirrored);
                 bool is_flux = config.has_flux_tag(syst.systname);
                 spline_is_pre_migration.push_back(is_flux);
                 log<LOG_DEBUG>(L"%1% || Spline '%2%' classified as %3%") % __func__ % syst.systname.c_str()
                     % (is_flux ? "pre-migration (flux)" : "post-migration");
+                spline_prior_types.back() = config.GetSplinePriorType(syst.systname);
                 ++n_splines;
             } else if(syst.mode == "spline_to_covariance") {
                 if(model == nullptr){
@@ -88,6 +89,7 @@ namespace PROfit {
                 spline_restrict_lo.pop_back();
                 spline_restrict_hi.pop_back();
                 spline_binnings.pop_back();
+                spline_prior_types.pop_back();
 
                 // Store as covariance instead
                 syst_map[syst.systname] = {covmat.size(), SystType::Covariance};
@@ -135,6 +137,10 @@ namespace PROfit {
                 for(size_t ci = n_covar_before; ci < n_covar_after; ++ci) propagate(covar_names[ci]);
             }else if(syst.mode == "flat"){
                 this->CreateFlatMatrix(config, syst);
+                covar_names.push_back(syst.systname);
+                ++n_covar;
+            }else if(syst.mode == "norm_to_covariance"){
+                this->CreateNormMatrix(config, syst);
                 covar_names.push_back(syst.systname);
                 ++n_covar;
             }else if(syst.mode == "external_covariance"){
@@ -201,7 +207,9 @@ namespace PROfit {
             Eigen::MatrixXf fractional_mcstat_cov =  prop.variable_mc_stat_err[other_index].array().square().inverse().matrix().asDiagonal();
             toFiniteMatrix(fractional_mcstat_cov);
             Eigen::MatrixXf mcstat_corr = GenerateCorrMatrix(fractional_mcstat_cov);
-            syst_map["mcstat"] = {covmat.size(), SystType::Covariance};
+            // Register under the systematic's XML name (like every other covariance at
+            // syst_map[syst.systname] above) so downstream tag/plotname lookups match its key.
+            syst_map[config.m_mcstat_systname] = {covmat.size(), SystType::Covariance};
             covmat.push_back(fractional_mcstat_cov);
             corrmat.push_back(mcstat_corr);
             ++n_covar;
@@ -244,6 +252,9 @@ namespace PROfit {
                         ret.spline_restrict_lo.push_back(spline_restrict_lo[idx]);
                         ret.spline_restrict_hi.push_back(spline_restrict_hi[idx]);
                         ret.spline_binnings.push_back(spline_binnings[idx]);
+                        ret.spline_prior_types.push_back(spline_prior_types[idx]);
+                        if(idx < spline_is_pre_migration.size())
+                            ret.spline_is_pre_migration.push_back(spline_is_pre_migration[idx]);
                         tmp_priors(ret.n_splines) = spline_priors(idx);
                         tmp_centers(ret.n_splines) = spline_centers(idx);
                         ++ret.n_splines;
@@ -295,6 +306,9 @@ namespace PROfit {
             ret.spline_restrict_lo.push_back(spline_restrict_lo[idx]);
             ret.spline_restrict_hi.push_back(spline_restrict_hi[idx]);
             ret.spline_binnings.push_back(spline_binnings[idx]);
+            ret.spline_prior_types.push_back(spline_prior_types[idx]);
+            if(idx < spline_is_pre_migration.size())
+                ret.spline_is_pre_migration.push_back(spline_is_pre_migration[idx]);
             tmp_priors(ret.n_splines) = spline_priors(idx);
             tmp_centers(ret.n_splines) = spline_centers(idx);
             ++ret.n_splines;
@@ -460,7 +474,9 @@ namespace PROfit {
         Eigen::MatrixXf fracM = Eigen::MatrixXf::Zero(nbins, nbins);
         Eigen::MatrixXf corrM = Eigen::MatrixXf::Identity(nbins, nbins);
 
-        size_t colonPos = sysname.find(':');
+        // Split on the LAST colon: the percent never contains one, and the
+        // pattern may (regex constructs like (?:...) or [[:alpha:]]).
+        size_t colonPos = sysname.rfind(':');
         if (colonPos == std::string::npos) {
             log<LOG_ERROR>(L"%1% || ERROR, you asked for a flat systematic but its not in NAME:percentate format %2%") % __func__  % sysname.c_str();
             exit(EXIT_FAILURE);
@@ -472,11 +488,11 @@ namespace PROfit {
 
 
         log<LOG_INFO>(L"%1% || Wildcard %2% (and percent %3%) which matches: ") % __func__  % wild.c_str() % flat_percent;
-        std::vector<std::string> flatnames;
-        for(auto & name: config.m_fullnames){
-            if(name.find(wild)!=std::string::npos){
-                flatnames.push_back(name); 
-            }
+        // Unanchored regex (plain substrings behave as before); see PROconfig.h.
+        std::vector<std::string> flatnames = MatchNames(config.m_fullnames, wild, "flat systematic '" + sysname + "'");
+        if(flatnames.empty()) {
+            log<LOG_ERROR>(L"%1% || ERROR: flat systematic '%2%' pattern '%3%' matches NO subchannel fullname. Fullnames are <mode>_<detector>_<channel>_<subchannel>; matching is an unanchored regex (plain substrings work).") % __func__ % sysname.c_str() % wild.c_str();
+            exit(EXIT_FAILURE);
         }
         log<LOG_INFO>(L"%1% || %2% . ") % __func__  % flatnames;
 
@@ -501,6 +517,28 @@ namespace PROfit {
 
         return;
     }
+
+    void PROsyst::CreateNormMatrix(const PROconfig &config, const SystStruct& syst){
+        std::string sysname = syst.GetSysName();
+        log<LOG_INFO>(L"%1% || Generating a correlated normalization covariance matrix for %2%.") % __func__ % sysname.c_str();
+
+        int nbins = config.m_num_variable_bins_total[other_index];
+        Eigen::MatrixXf fracM = Eigen::MatrixXf::Zero(nbins, nbins);
+        Eigen::MatrixXf corrM = Eigen::MatrixXf::Zero(nbins, nbins);
+        const float covariance = syst.norm_value * syst.norm_value * syst.inflate * syst.inflate;
+
+        for(int row : syst.norm_bins){
+            for(int col : syst.norm_bins){
+                fracM(row, col) = covariance;
+                corrM(row, col) = 1.0;
+            }
+        }
+
+        syst_map[sysname] = {covmat.size(), SystType::Covariance};
+        covmat.push_back(fracM);
+        corrmat.push_back(corrM);
+    }
+
     Eigen::MatrixXf PROsyst::LoadExternalFractionalCovariance(const PROconfig &config, const SystStruct& syst){
         //this is matrix name
         std::string matrixname = syst.GetSysName();
@@ -750,6 +788,26 @@ namespace PROfit {
         return c[0] + x*(c[1] + x*(c[2] + x*c[3]));
     }
 
+    float PROsyst::GetSplineShiftDeriv(int spline_num, float shift, int bin) const {
+        const Spline& spline = splines[spline_num];
+        if (bin < 0 || bin >= spline.bins) return 0;
+
+        // Same segment lookup as GetSplineShift so value and derivative always
+        // come from the same cubic.
+        int offset = bin * spline.segments_per_bin;
+        const SplineSegment* segs = &spline.segments[offset];
+        const SplineSegment* end = segs + spline.segments_per_bin;
+        const SplineSegment* seg = std::upper_bound(segs, end, shift, [](float x, const SplineSegment& s) { return x < s.knot; });
+        if (seg != segs) --seg;
+
+        float hi = seg + 1 < end ? seg[1].knot : spline_hi[spline_num];
+        float width = hi - seg->knot;
+        float x = (shift - seg->knot) / width;
+        const auto& c = seg->coeffs;
+        // d/dshift of c0 + x(c1 + x(c2 + x c3)) with x = (shift-knot)/width
+        return (c[1] + x*(2.0f*c[2] + 3.0f*x*c[3])) / width;
+    }
+
     void PROsyst::FillSpline(const SystStruct& syst, bool unmirrored) {
         std::vector<PROspec> ratios;
         ratios.reserve(syst.p_multi_spec.size());
@@ -904,6 +962,7 @@ namespace PROfit {
         spline_restrict_lo.push_back(syst.restrict_lo);
         spline_restrict_hi.push_back(syst.restrict_hi);
         spline_binnings.push_back(syst.binning);
+        spline_prior_types.push_back(SplinePriorType::Gaussian);
 
     }
 
@@ -990,6 +1049,7 @@ namespace PROfit {
             syst_map[knob_name] = {splines.size(), SystType::Spline};
             splines.push_back(std::move(spline));
             spline_names.push_back(knob_name);
+            spline_prior_types.push_back(SplinePriorType::Gaussian);
             spline_lo.push_back(lo);
             spline_hi.push_back(hi);
             // Keep the restrict bookkeeping vectors the SAME length as splines/spline_lo,
@@ -1161,6 +1221,13 @@ namespace PROfit {
     }
 
     Eigen::MatrixXf PROsyst::DecomposeFractionalCovariance(const PROconfig &config, const Eigen::VectorXf &cv_vec) const {
+        // Spline-only (no covariance systs): fractional_covariance is the
+        // ctor's all-zero placeholder, whose SVD has no singular value above
+        // tolerance. A zero factor is the correct no-op throw shift.
+        if(n_covar == 0) {
+            size_t nbins = config.m_num_variable_bins_total_collapsed[other_index < 0 ? (int)config.i_prime : other_index];
+            return Eigen::MatrixXf::Zero(nbins, nbins);
+        }
         // The mutable last_decomp_* cache is written from this const method;
         // metric clones and throw helpers share PROsyst objects across
         // threads, so guard the cache. Function-local mutex keeps PROsyst
@@ -1240,6 +1307,9 @@ namespace PROfit {
 
     Eigen::MatrixXf PROsyst::DecomposeFractionalCovarianceFull(const PROconfig &config, const Eigen::VectorXf &cv_vec) const {
         (void)config;
+        // Spline-only: same zero-factor short-circuit as the collapsed version above.
+        if(n_covar == 0)
+            return Eigen::MatrixXf::Zero(cv_vec.size(), cv_vec.size());
         // Same cache/mutex pattern as DecomposeFractionalCovariance above.
         static std::mutex decomp_full_cache_mutex;
         {

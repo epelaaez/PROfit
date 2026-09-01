@@ -192,6 +192,9 @@ namespace PROfit {
              */
             void CreateFlatMatrix(const PROconfig& config, const SystStruct& syst);
 
+            /* Function: Build a fully correlated fractional covariance over the selected bins. */
+            void CreateNormMatrix(const PROconfig& config, const SystStruct& syst);
+
             /* Function: Given a SystStruct, load an external fractinal covariance matrix, and calculate correlation matrix, and add matrices to covmat_map and corrtmat_map
              */
             void LoadExternalCovarianceMatrix(const PROconfig& config, const SystStruct& syst);
@@ -248,6 +251,12 @@ namespace PROfit {
             float GetSplineShift(int syst_num, float shift, int bin) const;
             float GetSplineShift(std::string name, float shift, int bin) const;
 
+            /* Function: Analytic derivative d(weight)/d(shift) of GetSplineShift for the
+             * same (spline, shift, bin). Evaluates the derivative of the cubic segment
+             * GetSplineShift would use, so the two are consistent everywhere including
+             * beyond the outermost knots. Returns 0 for an out-of-range bin. */
+            float GetSplineShiftDeriv(int syst_num, float shift, int bin) const;
+
             /* Function: Get cv spectrum shifted using spline */
             PROspec GetSplineShiftedSpectrum(const PROconfig& config, const PROpeller& prop, std::string name, float shift) const;
             PROspec GetSplineShiftedSpectrum(const PROconfig& config, const PROpeller& prop, int syst_num, float shift) const;
@@ -288,6 +297,7 @@ namespace PROfit {
             /// These are applied before the decay energy migration for 3+1+visible decay in FillSpectra.
             std::vector<bool> spline_is_pre_migration;
 
+            std::vector<SplinePriorType> spline_prior_types; ///< Prior model for each spline nuisance parameter.
             bool has_external_prior_cov = false;     ///< If true, metrics use external_prior_cov as a fully correlated Gaussian prior (PROjector).
             Eigen::MatrixXf external_prior_cov;      ///< Absolute prior covariance over the spline nuisance parameters (used with spline_centers).
             std::map<std::string, Cov2SplineDebugInfo> cov2spline_debug_info; ///< Debug info per "covariance_to_spline" systematic, keyed by parent systname.

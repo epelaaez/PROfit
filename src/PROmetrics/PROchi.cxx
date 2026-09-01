@@ -4,6 +4,7 @@
 #include "PROlog.h"
 #include "PROtocall.h"
 #include <Eigen/Eigen>
+#include <algorithm>
 #include <cmath>
 using namespace PROfit;
 
@@ -11,7 +12,6 @@ using namespace PROfit;
 PROchi::PROchi(const std::string tag, const PROconfig &conin, const PROpeller &pin, const PROsyst *systin, const PROmodel &modelin, const PROdata &datain, EvalStrategy strat, bool shape_only, std::vector<float> physics_param_fixed) : PROmetric(), model_tag(tag), config(conin), peller(pin), syst(systin), model(modelin), data(datain), strat(strat), shape_only(shape_only), physics_param_fixed(physics_param_fixed), correlated_systematics(false) {
     last_value = 0.0; last_param = Eigen::VectorXf::Zero(model.nparams+syst->GetNSplines());
     fixed_index = -999;
-    gradient_mode = GradientOneSidedFull; ///< Default for PROchi: one-sided forward FD on full chi² (~2× faster).
 
     // An externally supplied posterior (PROjector projected mode) takes precedence over
     // any XML-configured prior correlations: it already IS the full prior covariance.
@@ -20,6 +20,13 @@ PROchi::PROchi(const std::string tag, const PROconfig &conin, const PROpeller &p
             log<LOG_WARNING>(L"%1% || Both an external prior covariance and XML prior correlations are set; using the external one.") % __func__;
         correlated_systematics = true;
         prior_covariance = systin->external_prior_cov;
+        for(size_t i = 0; i < systin->spline_prior_types.size(); ++i) {
+            if (systin->spline_prior_types[i] == SplinePriorType::Uniform) {
+                prior_covariance.row(i).setZero();
+                prior_covariance.col(i).setZero();
+                prior_covariance(i, i) = 1.0f;
+            }
+        }
         prior_covariance_inv = prior_covariance.inverse();
     }
     // Build the correlation matrix between priors if configured to
@@ -47,6 +54,13 @@ PROchi::PROchi(const std::string tag, const PROconfig &conin, const PROpeller &p
           prior_covariance(iB, iA) = std::get<2>(t);
         }
         prior_covariance = systin->spline_priors.asDiagonal() * prior_covariance * systin->spline_priors.asDiagonal();
+        for(size_t i = 0; i < systin->spline_prior_types.size(); ++i) {
+            if (systin->spline_prior_types[i] == SplinePriorType::Uniform) {
+                prior_covariance.row(i).setZero();
+                prior_covariance.col(i).setZero();
+                prior_covariance(i, i) = 1.0f;
+            }
+        }
         prior_covariance_inv = prior_covariance.inverse();
     }
 
@@ -82,6 +96,9 @@ PROchi::PROchi(const std::string tag, const PROconfig &conin, const PROpeller &p
 float PROchi::Pull(const Eigen::VectorXf &systs) {
     // No correlations: sum of squares
     Eigen::VectorXf centered = systs - syst->spline_centers;
+    for(size_t i = 0; i < syst->spline_prior_types.size(); ++i) {
+        if(syst->spline_prior_types[i] == SplinePriorType::Uniform) centered(i) = 0.0f;
+    }
     if (!correlated_systematics) {
         return (centered.array().square() / syst->spline_priors.array().square()).sum();
     }
@@ -215,7 +232,31 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
         // stencil pointing into the interior, and the "out-of-bounds gradient
         // bounce" is applied (zero the gradient when it would push further
         // out of the box).
-        const GradientMode mode = gradient_mode;
+        GradientMode mode = gradient_mode;
+        // The analytic gradient needs the binned factorised spectrum
+        // (spec = systw .* H*probs); the event-by-event fill mixes physics and
+        // systematics per event, so use the FD fallback mode there.
+        if (mode == GradientAnalytic && strat == EventByEvent) {
+            static std::atomic<bool> warned_ebe{false};
+            if(!warned_ebe.exchange(true))
+                log<LOG_WARNING>(L"%1% || Analytic gradient not available for the EventByEvent strategy; falling back to %2%.") % __func__ % gradientModeName(GradientFallback);
+            mode = GradientFallback;
+        }
+        // Visible-decay models with pre-migration (flux) splines also break the
+        // factorisation: the flux weight enters the physics half at the parent
+        // truth-E, BEFORE the decay migration, so systw is not a per-reco-bin
+        // factor (FillSpectra takes its uncached N_truth-prescaling path there).
+        if (mode == GradientAnalytic && model.uses_get_counts()
+            && syst->spline_is_pre_migration.size() == syst->GetNSplines()
+            && std::find(syst->spline_is_pre_migration.begin(),
+                         syst->spline_is_pre_migration.end(), true)
+                   != syst->spline_is_pre_migration.end()) {
+            static std::atomic<bool> warned_premig{false};
+            if(!warned_premig.exchange(true))
+                log<LOG_WARNING>(L"%1% || Analytic gradient not available for visible-decay models with pre-migration flux splines; falling back to %2%.") % __func__ % gradientModeName(GradientFallback);
+            mode = GradientFallback;
+        }
+        const bool analytic   = (mode == GradientAnalytic);
         const bool linearised = (mode == GradientCentralLin) || (mode == GradientOneSidedLin);
         const bool one_sided  = (mode == GradientOneSidedFull) || (mode == GradientOneSidedLin);
 
@@ -226,16 +267,116 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
         // prior_covariance_inv (correlated) — no FD on the pull.
         Eigen::VectorXf Minv_delta_b;
         Eigen::VectorXf pull_grad_nuis; // size = nsyst, dP/dθ_n
-        if (linearised) {
+        if (linearised || analytic) {
             Minv_delta_b = M.llt().solve(delta);
-            const Eigen::VectorXf centered = subvector2 - syst->spline_centers;
+            Eigen::VectorXf centered = subvector2 - syst->spline_centers;
+            // Match Pull(): uniform-prior splines contribute NO pull — mask them
+            // here too, or the gradient carries a phantom Gaussian pull the value
+            // doesn't have.
+            for(size_t i = 0; i < syst->spline_prior_types.size(); ++i)
+                if(syst->spline_prior_types[i] == SplinePriorType::Uniform) centered(i) = 0.0f;
             if (!correlated_systematics) {
                 // Pull = sum_j (centered_j / sigma_j)^2  → dP/dθ_n_j = 2 centered_j / sigma_j^2
                 pull_grad_nuis = 2.0f * centered.array() /
                                  (syst->spline_priors.array() * syst->spline_priors.array());
             } else {
                 pull_grad_nuis = 2.0f * (prior_covariance_inv * centered);
+                // dPull/dθ_i is exactly 0 for a uniform spline (its centered entry
+                // is identically 0 in the value); zero it in case Σ⁻¹ carries
+                // off-diagonal terms in those rows.
+                for(size_t i = 0; i < syst->spline_prior_types.size(); ++i)
+                    if(syst->spline_prior_types[i] == SplinePriorType::Uniform) pull_grad_nuis(i) = 0.0f;
             }
+        }
+
+        if (analytic) {
+            // ----- Fully analytic gradient -----
+            // Notation (θ = all parameters, physics + nuisance):
+            //   s(θ)  full-binning MC spectrum (result.Spec(), N bins)
+            //   T     collapsing matrix (N × n_c, sparse): collapsed spectrum c = Tᵀ s
+            //   d     data spectrum (collapsed), idx = non-empty active bins
+            //   δ(θ)  = c(idx) − d(idx)                                  (reduced residual)
+            //   F     fractional systematic covariance (N × N, symmetric)
+            //   M(θ)  = diag(d(idx)) + [Tᵀ diag(s) F diag(s) T](idx,idx)   (stat + syst)
+            //   P(θ)  nuisance pull penalty
+            //   χ²(θ) = δᵀ M⁻¹ δ + P
+            //
+            // Step 1 — differentiate χ² = δᵀ M⁻¹ δ + P term by term (product rule;
+            // both δ and M depend on θ). Since M is symmetric the two residual
+            // terms are equal, and d(M⁻¹)/dθ = −M⁻¹ (dM/dθ) M⁻¹:
+            //   dχ²/dθ = (dδ/dθ)ᵀ M⁻¹ δ + δᵀ M⁻¹ (dδ/dθ) + δᵀ [d(M⁻¹)/dθ] δ + dP/dθ
+            //          = 2 δᵀ M⁻¹ (dδ/dθ) − δᵀ M⁻¹ (dM/dθ) M⁻¹ δ + dP/dθ.
+            // Writing u = M⁻¹ δ (one Cholesky solve, shared by both terms):
+            //   dχ²/dθ = 2 uᵀ (dδ/dθ) − uᵀ (dM/dθ) u + dP/dθ.
+            //
+            // Step 2 — residual term. δ depends on θ only through s, so with the
+            // spectrum Jacobian G = ds/dθ (N × nparams, from FillSpectraGradient):
+            //   dδ/dθ = (Tᵀ G)(idx, :)     ⇒     2 uᵀ (dδ/dθ) = 2 (TᵀG)(idx,:)ᵀ u.
+            //
+            // Step 3 — covariance term uᵀ (dM/dθ) u (this is the term the linearised
+            // FD modes drop). Work one parameter θ_j at a time, and write ṡ = ds/dθ_j
+            // (= G(:,j), a full-binning vector). The stat part diag(d) does not depend
+            // on θ, so only M_sys = [Tᵀ diag(s) F diag(s) T](idx,idx) contributes;
+            // the product rule on diag(s) F diag(s) gives
+            //   dM_sys/dθ_j = [Tᵀ ( diag(ṡ) F diag(s) + diag(s) F diag(ṡ) ) T](idx,idx).
+            //
+            // 3a. Undo the (idx,idx) restriction. u lives on the idx bins only; define
+            //     u_c ∈ R^{n_c} as u placed at its idx positions and 0 elsewhere. Then
+            //     for any n_c × n_c matrix A,  uᵀ A(idx,idx) u = u_cᵀ A u_c  (the zeros
+            //     kill every row/column outside idx), so
+            //       uᵀ (dM/dθ_j) u = u_cᵀ Tᵀ ( diag(ṡ) F diag(s) + diag(s) F diag(ṡ) ) T u_c.
+            //
+            // 3b. Undo the collapse. Define w = T u_c ∈ R^N: since T maps each full
+            //     bin to exactly one collapsed bin, w is just u_c broadcast — every
+            //     full bin carries the u value of the collapsed bin it belongs to. So
+            //       uᵀ (dM/dθ_j) u = wᵀ diag(ṡ) F diag(s) w + wᵀ diag(s) F diag(ṡ) w.
+            //
+            // 3c. The two summands are transposes of each other (F is symmetric), and
+            //     each is a scalar, so they are equal:
+            //       uᵀ (dM/dθ_j) u = 2 wᵀ diag(ṡ) F diag(s) w.
+            //
+            // 3d. Read this as elementwise products of N-vectors (∘ = Hadamard):
+            //     diag(s) w = w ∘ s, and diag(ṡ) w = w ∘ ṡ, hence
+            //       2 wᵀ diag(ṡ) F diag(s) w = 2 (w ∘ ṡ) · [F (w ∘ s)] = 2 ṡ · ( w ∘ g ),
+            //     with g = F (w ∘ s) ∈ R^N (one matrix-vector product with F).
+            //     Note g depends on s, u and F but NOT on which parameter θ_j we are
+            //     differentiating with respect to — so it is computed once per gradient
+            //     call, and the per-parameter cost is one dot product G(:,j)·(w ∘ g).
+            //
+            // Putting it together, for each parameter j:
+            //   dχ²/dθ_j = 2 (TᵀG)(idx,j)·u − 2 G(:,j)·(w ∘ g) + dP/dθ_j,
+            // i.e. grad = 2 (TᵀG)(idx,:)ᵀ u − 2 Gᵀ (w∘g) + [0; dP/dθ_nuis]. No finite
+            // differences, no extra spectrum fills, no extra Cholesky factorisation.
+            const Eigen::SparseMatrix<float> &T = config.GetCollapsingMatrixSparse();
+            Eigen::VectorXf u_c = Eigen::VectorXf::Zero(T.cols());
+            for(size_t k = 0; k < reduced_size; ++k)
+                u_c(non_empty_indices[k]) = Minv_delta_b(k);
+            const Eigen::VectorXf w_full = T * u_c;
+            const Eigen::VectorXf g_full = syst->fractional_covariance * w_full.cwiseProduct(result.Spec());
+            const Eigen::VectorXf wg = w_full.cwiseProduct(g_full);
+
+            Eigen::MatrixXf G = FillSpectraGradient(config, peller, *syst, model, param, fs_cache, config.i_prime);
+            Eigen::MatrixXf TtG = T.transpose() * G; // collapsed-space Jacobian (ncollapsed × nparams)
+            Eigen::VectorXf grad_vec = 2.0f * (TtG(idx, Eigen::all).transpose() * Minv_delta_b)
+                                     - 2.0f * (G.transpose() * wg);
+            grad_vec.segment(model.nparams, nsyst) += pull_grad_nuis;
+
+            for (size_t i = 0; i < model.nparams + nsyst; i++) {
+                if(is_fixed.size() > 0 && is_fixed.at(i)) { gradient(i) = 0.0f; continue; }
+                gradient(i) = grad_vec(i);
+                // Same boundary "bounce" as the FD paths: zero the gradient when
+                // it would push further out of the box.
+                const float boundary_tol = 2.0f * std::numeric_limits<float>::epsilon();
+                const bool at_lower = std::fabs(param(i) - lb(i)) < boundary_tol;
+                const bool at_upper = std::fabs(ub(i) - param(i)) < boundary_tol;
+                if ((at_lower && gradient(i) > 0) || (at_upper && gradient(i) < 0))
+                    gradient(i) = 0.0f;
+                if (!std::isfinite(gradient(i))) gradient(i) = 0.0f;
+            }
+
+            last_param = param;
+            last_value = value;
+            return value;
         }
 
         // ----- Helpers (closures over the outer scope) -----
@@ -400,7 +541,7 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
     return value;
 }
 
-float PROchi::getSingleChannelChi(size_t global_channel_index, const PROspec & cv, size_t var_index) {
+float PROchi::getSingleChannelChi(size_t global_channel_index, const PROspec &cv, size_t var_index, const Eigen::MatrixXf &projection) {
 
     size_t nbin = config.m_channel_variable_bins[config.GetLocalChannelIndexFromGlobalChannelIndex(global_channel_index)][var_index].NBins();
     size_t startBin = config.GetCollapsedGlobalVariableBinStart(global_channel_index, var_index);
@@ -428,6 +569,14 @@ float PROchi::getSingleChannelChi(size_t global_channel_index, const PROspec & c
     }
 
     Eigen::VectorXf delta = (CollapseMatrix(config, cv.Spec()) - (shape_only ? data.Normalize(config,cv) : data.Spec()))(idx);
+    if(projection.size()) {
+        Eigen::MatrixXf active_projection(projection.rows(), idx.size());
+        for(Eigen::Index col = 0; col < idx.size(); ++col) {
+            active_projection.col(col) = projection.col(idx(col) - (Eigen::Index)startBin);
+        }
+        M = active_projection * M * active_projection.transpose();
+        delta = active_projection * delta;
+    }
     float covar_portion = delta.dot(M.llt().solve(delta));
     float value = covar_portion;//pull;
 
@@ -439,4 +588,3 @@ void PROchi::print([[maybe_unused]] const Eigen::VectorXf &param){
 
 return;
 }
-

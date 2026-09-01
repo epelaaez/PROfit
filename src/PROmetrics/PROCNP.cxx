@@ -15,7 +15,6 @@ using namespace PROfit;
 PROCNP::PROCNP(const std::string tag, const PROconfig &conin, const PROpeller &pin, const PROsyst *systin, const PROmodel &modelin, const PROdata &datain, EvalStrategy strat, bool shape_only, std::vector<float> physics_param_fixed) : PROmetric(), model_tag(tag), config(conin), peller(pin), syst(systin), model(modelin), data(datain), strat(strat), shape_only(shape_only), physics_param_fixed(physics_param_fixed), correlated_systematics(false) {
     last_value = 0.0; last_param = Eigen::VectorXf::Zero(model.nparams+syst->GetNSplines());
     fixed_index = -999;
-    gradient_mode = GradientOneSidedFull; ///< Default for PROCNP: one-sided forward FD on full chi² (~2× faster).
 
     // Snapshot the config's fit-region mask (if any). Unlike PROchi, CNP keeps
     // zero-data bins (mu/2 substitution), so the mask is the ONLY exclusion
@@ -50,6 +49,13 @@ PROCNP::PROCNP(const std::string tag, const PROconfig &conin, const PROpeller &p
             prior_covariance(iB, iA) = std::get<2>(t);
         }
         prior_covariance = systin->spline_priors.asDiagonal() * prior_covariance * systin->spline_priors.asDiagonal();
+        for(size_t i = 0; i < systin->spline_prior_types.size(); ++i) {
+            if (systin->spline_prior_types[i] == SplinePriorType::Uniform) {
+                prior_covariance.row(i).setZero();
+                prior_covariance.col(i).setZero();
+                prior_covariance(i, i) = 1.0f;
+            }
+        }
         prior_covariance_inv = prior_covariance.inverse();
     }
 }
@@ -57,6 +63,9 @@ PROCNP::PROCNP(const std::string tag, const PROconfig &conin, const PROpeller &p
 float PROCNP::Pull(const Eigen::VectorXf &systs) {
     // No correlations: sum of squares
     Eigen::VectorXf centered = systs - syst->spline_centers;
+    for(size_t i = 0; i < syst->spline_prior_types.size(); ++i) {
+        if(syst->spline_prior_types[i] == SplinePriorType::Uniform) centered(i) = 0.0f;
+    }
     if (!correlated_systematics) {
         return (centered.array().square() / syst->spline_priors.array().square()).sum();
     }
@@ -68,7 +77,7 @@ Eigen::VectorXf PROCNP::cachedNoshiftCollapsedCV(const Eigen::VectorXf &phys, Ei
         return cnp_cached_collapsed_cv;
     Eigen::VectorXf noshiftvec = Eigen::VectorXf::Zero(param_size);
     noshiftvec.head(model.nparams) = phys;
-    cnp_cached_collapsed_cv = CollapseMatrix(config, FillSpectra(config, peller, *syst, model, noshiftvec, strat != EventByEvent).Spec());
+    cnp_cached_collapsed_cv = CollapseMatrix(config, FillSpectra(config, peller, *syst, model, noshiftvec, strat != EventByEvent, config.i_prime).Spec());
     cnp_cached_phys = phys;
     cnp_cv_cache_valid = true;
     return cnp_cached_collapsed_cv;
@@ -169,7 +178,16 @@ float PROCNP::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
         // Linearised modes intentionally freeze M (including M_stat) at the
         // base point — this is the Gauss-Newton approximation, dropping the
         // (M⁻¹δ)^T (dM/dθ) (M⁻¹δ) term that's second-order in δ.
-        const GradientMode mode = gradient_mode;
+        GradientMode mode = gradient_mode;
+        // Analytic gradient is implemented in PROchi only so far; the CNP stat
+        // covariance adds a μ-dependent term that is not yet wired up. Use the
+        // FD fallback mode (Gauss-Newton linearised, exact at the minimum).
+        if (mode == GradientAnalytic) {
+            static std::atomic<bool> warned_analytic{false};
+            if(!warned_analytic.exchange(true))
+                log<LOG_WARNING>(L"%1% || Analytic gradient not implemented for PROCNP; falling back to %2%.") % __func__ % gradientModeName(GradientFallback);
+            mode = GradientFallback;
+        }
         const bool linearised = (mode == GradientCentralLin) || (mode == GradientOneSidedLin);
         const bool one_sided  = (mode == GradientOneSidedFull) || (mode == GradientOneSidedLin);
         const size_t nsyst = syst->GetNSplines();
@@ -178,12 +196,21 @@ float PROCNP::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
         Eigen::VectorXf pull_grad_nuis;
         if (linearised) {
             Minv_delta_b = M.llt().solve(delta);
-            const Eigen::VectorXf centered = subvector2 - syst->spline_centers;
+            Eigen::VectorXf centered = subvector2 - syst->spline_centers;
+            // Match Pull(): uniform-prior splines contribute NO pull — mask them
+            // here too, or the gradient carries a phantom Gaussian pull the value
+            // doesn't have.
+            for(size_t i = 0; i < syst->spline_prior_types.size(); ++i)
+                if(syst->spline_prior_types[i] == SplinePriorType::Uniform) centered(i) = 0.0f;
             if (!correlated_systematics) {
                 pull_grad_nuis = 2.0f * centered.array() /
                                  (syst->spline_priors.array() * syst->spline_priors.array());
             } else {
                 pull_grad_nuis = 2.0f * (prior_covariance_inv * centered);
+                // dPull/dθ_i is exactly 0 for a uniform spline; zero it in case
+                // Σ⁻¹ carries off-diagonal terms in those rows.
+                for(size_t i = 0; i < syst->spline_prior_types.size(); ++i)
+                    if(syst->spline_prior_types[i] == SplinePriorType::Uniform) pull_grad_nuis(i) = 0.0f;
             }
         }
 
@@ -348,7 +375,7 @@ float PROCNP::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
 
     return value;}
 
-float PROCNP::getSingleChannelChi(size_t global_channel_index, const PROspec &cv, size_t var_index) {
+float PROCNP::getSingleChannelChi(size_t global_channel_index, const PROspec &cv, size_t var_index, const Eigen::MatrixXf &projection) {
 
     size_t nbin = config.m_channel_variable_bins[config.GetLocalChannelIndexFromGlobalChannelIndex(global_channel_index)][var_index].NBins();
     size_t startBin = config.GetCollapsedGlobalVariableBinStart(global_channel_index,var_index);
@@ -381,6 +408,14 @@ float PROCNP::getSingleChannelChi(size_t global_channel_index, const PROspec &cv
     }
 
     Eigen::VectorXf delta = (CollapseMatrix(config, cv.Spec()) - normdata)(idx);
+    if(projection.size()) {
+        Eigen::MatrixXf active_projection(projection.rows(), idx.size());
+        for(Eigen::Index col = 0; col < idx.size(); ++col) {
+            active_projection.col(col) = projection.col(idx(col) - (Eigen::Index)startBin);
+        }
+        M = active_projection * M * active_projection.transpose();
+        delta = active_projection * delta;
+    }
     float covar_portion = delta.dot(M.llt().solve(delta));
     float value = covar_portion;
 
@@ -399,11 +434,11 @@ void PROCNP::print(const Eigen::VectorXf &param){
     noshiftvec.head(model.nparams) = subvector1;
     Eigen::VectorXf subvector2 = param.segment(model.nparams, syst->GetNSplines());
 
-    PROspec result = FillSpectra(config, peller, *syst, model, param, strat == BinnedChi2);
+    PROspec result = FillSpectra(config, peller, *syst, model, param, strat == BinnedChi2, config.i_prime);
     log<LOG_INFO>(L"%1% || Result Spectra: ") % __func__ ;
     result.Print();
 
-    PROspec cv = FillSpectra(config, peller, *syst, model, noshiftvec, strat != EventByEvent);
+    PROspec cv = FillSpectra(config, peller, *syst, model, noshiftvec, strat != EventByEvent, config.i_prime);
     log<LOG_INFO>(L"%1% || CV is : \n ") % __func__ ;
     cv.Print();
     Eigen::MatrixXf collapsed_data_stat_covariance = data.Spec().array().matrix().asDiagonal();
@@ -472,11 +507,11 @@ void PROCNP::print(const Eigen::VectorXf &param){
             }
         }
 
-        PROspec result = FillSpectra(config, peller, *syst, model, tmpParams, strat != EventByEvent);
+        PROspec result = FillSpectra(config, peller, *syst, model, tmpParams, strat != EventByEvent, config.i_prime);
 
         Eigen::MatrixXf new_collapsed_stat_covariance = collapsed_stat_covariance;
         if(i < model.nparams) {
-            PROspec cv = FillSpectra(config, peller, *syst, model, subvector1, strat != EventByEvent);
+            PROspec cv = FillSpectra(config, peller, *syst, model, subvector1, strat != EventByEvent, config.i_prime);
             Eigen::MatrixXf collapsed_data_stat_covariance = data.Spec().array().matrix().asDiagonal();
             Eigen::MatrixXf mc_stat_covariance = cv.Spec().array().matrix().asDiagonal();
             Eigen::MatrixXf collapsed_mc_stat_covariance = CollapseMatrix(config, mc_stat_covariance);
@@ -513,5 +548,3 @@ void PROCNP::print(const Eigen::VectorXf &param){
 
     return;
 }
-
-

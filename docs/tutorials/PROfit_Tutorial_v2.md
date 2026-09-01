@@ -4,8 +4,9 @@ This tutorial walks through the full PROfit v2.X workflow, from the conceptual
 building blocks and XML configuration all the way to Feldman-Cousins and the
 PROjector two-stage fit. Every plot shown here can be regenerated with the
 companion script [`make_tutorial_plots.sh`](make_tutorial_plots.sh) in this
-directory — each plot placeholder below is labelled with the exact output file
-that script produces.
+directory; the embedded images live in [`figures/`](figures/) and are rendered
+from those PDFs by [`make_tutorial_figures.sh`](make_tutorial_figures.sh) —
+each figure caption names the exact output file it came from.
 
 > **Note:** This walk-through was developed and tested on the `project-SBN-dev`
 > branch of PROfit v2.X. If commands here disagree with `PROfit --help` on your
@@ -17,16 +18,20 @@ Useful contacts and links:
 * Slack: **#profit** (shortbaseline/SBN workspace)
 * Listserv: profit@listserv.fnal.gov
 
-> **Versioning:** this tutorial targets the **v2 release line** (development
-> branch `project-SBN-dev`). Breaking XML changes were made in the v1→v2
-> update, so v1.x XMLs will **not** work with v2 binaries, and bugfixes are
-> not back-ported to the v1.1 line — use v2.1.1+ for anything new.
+> **Versioning:** this tutorial targets the **v2 release line and its v3
+> continuation** (development branch `project-SBN-dev`; the project version
+> was bumped to **3.0.0** in August 2026 — same XML schema, but changed
+> fitter defaults and post-fit covariance conventions, see the fitting and
+> plotting sections). Breaking XML changes were made in the v1→v2 update, so
+> v1.x XMLs will **not** work with v2/v3 binaries, and bugfixes are not
+> back-ported to the v1.1 line — use v2.1.1+ for anything new.
 
 ### Getting set up
 
-PROfit needs ROOT, Boost, HDF5, and CMake (on the FNAL gpvms set these up
-from cvmfs inside an SL7 container first; on your own machine apt-get or
-homebrew versions are fine). Then:
+PROfit needs ROOT, Boost, HDF5, and CMake (on the FNAL gpvms — AL9 since the
+2024/25 migration — set these up from cvmfs with `spack load`; on legacy SL7
+containers use UPS `setup`; on your own machine apt-get or homebrew versions
+are fine). Then:
 
 ```bash
 git clone https://github.com/markrosslonergan/Elephant_Vanishes.git
@@ -44,12 +49,6 @@ systematics. The MC files (`fake_sbn_mc_ND.root`, `fake_sbn_mc_FD.root`, ~1 GB
 each) live alongside the XML, or ping Mark Ross-Lonergan on Slack for a
 tarball. **These are toy files for teaching — do not use for physics results.**
 
-The XML ships pointing at a gpvm path, so localize it once before starting:
-
-```bash
-sed "s|/exp/uboone/data/users/markross|/path/to/your/mc/files|g" \
-    working_dir/Neutrino2026/fake_sbn_v2.xml > tutorial.xml
-```
 
 All commands below use `tutorial.xml`, the tag `TUT`, and a fixed seed so your
 numbers should match.
@@ -61,17 +60,20 @@ numbers should match.
 1. [PROfit conceptual introduction](#1-profit-conceptual-introduction)
 2. [The PROfit XML](#2-the-profit-xml)
 3. [General arguments and how stuff works](#3-general-arguments-and-how-stuff-works)
-4. [Subcommand `plot` — exploring your spectra](#4-subcommand-plot--exploring-your-spectra)
-5. [Subcommand `global` — fitting and fitter configuration](#5-subcommand-global--fitting-and-fitter-configuration)
-6. [Subcommand `profile` — 1D profiled Δχ²](#6-subcommand-profile--1d-profiled-χ²)
-7. [Subcommand `surface` — 2D Wilks surfaces and AMR](#7-subcommand-surface--2d-wilks-surfaces-and-amr)
-8. [Feldman-Cousins: `fc` and `fc-adaptive`](#8-feldman-cousins-fc-and-fc-adaptive)
-9. [PROjector — two-stage pre-fit / projected fits](#9-projector--two-stage-pre-fit--projected-fits)
+4. [Subcommand `process` — loading your files](#4-subcommand-process--loading-your-files)
+5. [Subcommand `plot` — exploring your spectra](#5-subcommand-plot--exploring-your-spectra)
+6. [Subcommand `global` — fitting and fitter configuration](#6-subcommand-global--fitting-and-fitter-configuration)
+7. [Subcommand `profile` — 1D profiled Δχ²](#7-subcommand-profile--1d-profiled-χ²)
+8. [Subcommand `surface` — 2D Wilks surfaces and AMR](#8-subcommand-surface--2d-wilks-surfaces-and-amr)
+9. [Feldman-Cousins: `fc` and `fc-adaptive`](#9-feldman-cousins-fc-and-fc-adaptive)
+10. [PROjector — two-stage pre-fit / projected fits](#10-projector--two-stage-pre-fit--projected-fits)
+11. [PROletariat — grid submission: `proletariat`](#11-proletariat--grid-submission-proletariat)
 
 Appendices:
 
 * [Appendix A: regenerating every plot in this tutorial](#appendix-a-regenerating-every-plot-in-this-tutorial)
 * [Appendix B: available physics models](#appendix-b-available-physics-models-incpromodelh)
+* [Appendix C: the pre-fit and post-fit error bands, in full](#appendix-c-the-pre-fit-and-post-fit-error-bands-in-full)
 
 ---
 
@@ -131,15 +133,28 @@ subchannel has a *fullname* of the form
 ```
 
 Everywhere PROfit accepts a "pattern" (background subtraction, POT scaling,
-PROjector channel selection, flat systematics) it does **plain substring
-matching** against these fullnames — no regex. `"_ND_"` matches everything in
-the near detector; `background` matches every background subchannel in every
-channel and detector.
+PROjector channel selection, flat/norm systematics, `apply_to_subchannel=`)
+it matches it against these fullnames as an **unanchored regex**
+(`std::regex_search`, ECMAScript). A plain substring is a valid regex and
+behaves exactly as before: `"_ND_"` matches everything in the near detector;
+`background` matches every background subchannel in every channel and
+detector. Regex gives you more when you need it — `"nu_(ND|FD)_numu"`,
+`"^nu_ND_numu_signal$"` (anchored full match). Two caveats: in XML, `&` and
+`<` must be written `&amp;`/`&lt;` (standard XML escaping — all other regex
+metacharacters pass through untouched), and on the command line quote the
+pattern so the shell doesn't expand `*`, `(`, `|`, etc. A pattern that is an
+invalid regex, or that matches nothing (flat/norm/`apply_to_subchannel`), is
+a fatal, clearly-logged error.
 
 **Variables.** Each channel can carry several binnings (`<bins>` entries):
-reconstructed energy, true L/E, true energy, and so on. One of them is the
-*fitting variable* (the reconstructed one); the others are used for the
-oscillation model (true L/E) and diagnostics. Plots are made for all of them.
+reconstructed energy, true L/E, true energy, and so on. Exactly one of them is
+the *fitting variable* — the one the χ² is actually computed in; the others are
+used for the oscillation model (true L/E) and diagnostics. Plots are made for
+all of them. Mark the fitting variable with `fit="true"` on its `<bins>` entry,
+or leave every entry unmarked to fit the first one (the historical default).
+`--fit-variable N` overrides the XML at run time, and needs **no re-`process`**:
+all variables live in the cached `_prop.bin`/`_syst.bin` already, and the
+fitting variable is not part of the config hash.
 
 **The parameter vector.** A fit point is
 `[physics parameters, one parameter per spline systematic]`, in that order.
@@ -197,7 +212,7 @@ Three things to keep in mind:
   dummy detector instead (e.g. `sbndnumu` + `icarusnumu`) — at the cost of
   handling the relative POT scaling yourself in the branch weights.
 * **Never put underscores inside a name.** The fullname is built by joining
-  the four levels with `_`; an underscore inside a name breaks the substring
+  the four levels with `_`; an underscore inside a name breaks the pattern
   bookkeeping.
 
 ### Channels, binnings, and subchannels
@@ -215,12 +230,30 @@ Three things to keep in mind:
 </channel>
 ```
 
-Each `<bins>` entry is one *variable*. The **first** `<bins>` entry is the
-fitting variable (reconstructed energy here); the rest are extra binnings
-that PROfit tracks and plots for you (`plot="false"` suppresses plotting of a
-variable, useful for the 200-bin true-L/E binning that only exists for the
-oscillation model). Subchannel `plotname` and `color` control the stacked
-histograms in `plot`.
+Each `<bins>` entry is one *variable*, numbered from 0 in the order they appear
+(any `<bins2D>` entries come first, then the 1D `<bins>`). With no `fit=`
+attribute anywhere, the **first** entry is the fitting variable (reconstructed
+energy here); the rest are extra binnings that PROfit tracks and plots for you
+(`plot="false"` suppresses plotting of a variable, useful for the 200-bin
+true-L/E binning that only exists for the oscillation model). Subchannel
+`plotname` and `color` control the stacked histograms in `plot`.
+
+To fit a different variable, put `fit="true"` on its `<bins>` entry:
+
+```xml
+    <bins unit="Reconstructed Neutrino Energy [GeV]" min="0.1" max="3.0" nbins="16"/>
+    <bins unit="True L/E [km/GeV]" min="0" max="2.5" nbins="200" plot="false"/>
+    <bins unit="True Neutrino Energy [GeV]" min="0" max="3" nbins="20" fit="true"/>
+    <bins unit="Random Value" min="0" max="1" nbins="50"/>
+```
+
+At most one entry per channel may be marked, and every channel that marks one
+must land on the same index — variables are numbered globally, so a
+disagreement is a config error and PROfit refuses to start. A variable that a
+`<parameter variable_index=...>` claims for the oscillation model (true L/E
+here) is also refused: that binning is a physics grid, not an observable.
+`--fit-variable N` overrides the XML for a single run without touching the file
+and without re-running `process`.
 
 ### The oscillation model
 
@@ -321,16 +354,82 @@ The `<allowlist>` attributes:
   plots (comma-separated multi-tags are allowed but a few functions dislike
   them).
 * `binning` — which variable's bins the systematic response is built on
-  (`var0`, `var1`, ... in the order of the `<bins>`/`<variable>` entries;
-  default `var0`). E.g. cross-section splines are often better built in true
-  energy, detector systematics in the reco variable.
+  (`var0`, `var1`, ... in the order of the `<bins>`/`<variable>` entries; the
+  default, `reco`, means *the fitting variable*, so it follows `fit="true"`).
+  E.g. cross-section splines are often better built in true energy, detector
+  systematics in the reco variable. Note this default is baked into
+  `_syst.bin` at `process` time: if you later switch the fitting variable, an
+  unqualified systematic keeps the binning it was built with. Write
+  `binning="varN"` explicitly if you want that pinned down.
 * `knobvals` — for splines, the knob values if not stored in the file, as a
   space-separated list (default `-3 -2 -1 0 1 2 3`).
 * `prior=` / `center=` — override the default N(0,1) Gaussian pull;
   `<correlation>` blocks make spline priors correlated.
+* `prior_type="gaussian|uniform"` — `uniform` (spline type only) removes the
+  Gaussian pull entirely: the parameter floats freely inside its
+  `restrict="lo,hi"` range, which becomes **mandatory** (and `prior=`,
+  `center=`, and `<correlation>` entries are forbidden for it). Use it for
+  a genuinely unconstrained scale factor you want measured, not pulled.
+  One caveat: FC/Brazil pseudo-experiment throws currently still sample a
+  truncated *Gaussian* for such splines, not the declared uniform.
 * `mode="covariance_to_spline"` with `num_decomp_knobs=` promotes a
   covariance to its leading eigenmode splines (the same machinery PROjector
   uses — see section 9). `restrict` bounds a spline's allowed range.
+* `apply_to_subchannel="pattern"` — restrict a weight-based systematic
+  (`spline`, `covariance`, `covariance_to_spline`, `hist1d/2d`, ...) to the
+  subchannels whose fullname matches the pattern (same unanchored-regex
+  matching as `norm`/`flat` — plain substrings work as-is, e.g.
+  `apply_to_subchannel="nu_SBND"` or `"_ND_"`, and regex like
+  `"nu_(ND|FD)"` too). Non-matching subchannels get exactly no response (flat spline
+  at 1 / zero covariance block), and the systematic's weight branch is only
+  required — or even looked for — in MCFiles that fill a matching
+  subchannel. This is how per-detector systematics work in multi-detector
+  fits where each detector's MC carries a different set of weight branches.
+
+### Asymmetric errors from histogram sources: `<HistVarFiles>`
+
+The `hist1d`/`hist2d` systematic types reweight events by looking up a
+ratio histogram in a kinematic variable (`xvar=`/`yvar=`). Historically one
+histogram gave a single mirrored ±1σ universe; since v3.0 a systematic can
+carry **several independently-measured variation histograms**, each tagged
+with a knob value — the natural way to feed in *asymmetric* errors (a −1σ
+and a +1σ histogram measured separately):
+
+```xml
+<variation_list>
+  <allowlist type="hist1d" xvar="var0" mirror="false">my_asym_syst</allowlist>
+</variation_list>
+<HistVarFiles>
+  <HistVarSection name="my_asym_syst">
+    <variation filename="syst_dn.root" histname="ratio_m1sigma" knobval="-1"/>
+    <variation filename="syst_up.root" histname="ratio_p1sigma" knobval="1"/>
+    <subchannel>nu_ICARUS_numu_signal</subchannel>  <!-- optional scope; EXACT fullname, no regex -->
+  </HistVarSection>
+</HistVarFiles>
+```
+
+The section `name` must match a `hist1d`/`hist2d` entry in the variation
+list, which must set `mirror="false"` when more than one variation is
+declared. Each histogram becomes one universe at its `knobval`; the CV
+(ratio 1 at knob 0) is inserted automatically, and the standard per-bin
+response spline is built through the knots — the asymmetry lives in the
+spline shape while the fit pull stays a symmetric Gaussian (standard
+vertical-morphing practice). Things to get right:
+
+* declaration order is free (sorted by knobval internally), but **knob
+  values must be unique** — duplicates currently produce silently corrupt
+  splines rather than an error;
+* the fit parameter *and* FC throws are bounded by the extreme knob values,
+  so a ±1σ-only pair clamps the parameter to [−1, 1] — supply ±2/±3σ
+  histograms, or set `restrict=`, if the fit may want to pull further;
+* `<subchannel>` entries are **exact fullnames** (unlike every pattern site)
+  and are not checked for existence — a typo silently disables the
+  systematic (all events fall out of scope, flat spline);
+* lookups happen on each histogram's own binning; out-of-range events get
+  weight 1;
+* the config hash covers the filenames and knob values but **not the
+  histogram contents** — after editing a variation file in place, re-run
+  `process --force`.
 
 ---
 
@@ -351,10 +450,12 @@ Subcommands:
   profile      Make a 1D profiled chi2 for each physics and nuisence parameter.
   plot         Make plots of CV, or injected point with error bars and covariance.
   fc           Run Feldman-Cousins for this injected signal
-  fc-adaptive  Adaptive Feldman-Cousins. Sub-modes: build-mesh, init-bank, print-bank, asimov, brazil.
+  fc-adaptive  Adaptive Feldman-Cousins. Sub-modes: build-mesh, init-bank, print-bank, print-mesh, asimov, brazil, brazil-cleanup, merge-mesh, merge-bank.
   global       Just do a single global fit.
   mcmc         Get bayesian posteriors using MCMC
+  protest      Testing ground for rapid quick tests (developer scratch space).
   scale-test   Run timing benchmarks for FillSpectra / metric / fit hot paths.
+  proletariat  Stage, tar, and submit grid jobs (section 11).
 ```
 
 ### Tags, outputs, and the binary cache
@@ -407,10 +508,20 @@ multithreaded runs are statistically equivalent but not byte-identical.
 | `--statonly` | drop systematics entirely |
 | `--shapeonly` / `--rateonly` | shape-only or single-bin-normalisation analysis |
 | `-c/--chi2 PROchi\|PROCNP\|Poisson` | χ² metric (default PROchi) |
-| `--grad-mode central-lin` | gradient strategy: `central-full` (most accurate) / `one-sided-full` / `central-lin` (default, Gauss-Newton, 5-10× faster) / `one-sided-lin` |
+| `--grad-mode analytic` | gradient strategy: `analytic` (default, alias `exact`) / `central-full` / `one-sided-full` / `central-lin` (Gauss-Newton) / `one-sided-lin` |
 
-`--grad-mode central-lin` is exact at minima and fine for scans; use
-`central-full` for final publication-quality runs.
+The **default gradient is now `analytic`** (closed-form spectrum Jacobian
+through the oscillation models and splines, *plus* the exact
+covariance-scaling term the old Gauss-Newton `-lin` modes dropped): as
+accurate as `central-full` at the cost of roughly one evaluation, so it is
+the right choice for scans *and* publication runs. It applies to PROchi's
+binned strategies; `PROCNP`, `Poisson`, and `--eventbyevent` automatically
+fall back to `central-lin` with a one-time warning. `central-full` remains
+the finite-difference gold standard for cross-checks (and `scale-test
+--tests gradcheck` validates every mode against it). Note the default change
+(from `central-lin`) means fits are **not bit-reproducible against
+pre-August-2026 seeded references**; pass `--grad-mode central-lin` to
+reproduce old numbers.
 
 ### Logging and housekeeping
 
@@ -434,24 +545,54 @@ MC event loop (quick tests only).
 
 ---
 
-# 4. Subcommand `plot` — exploring your spectra
+# 4. Subcommand `process` — loading your files
+
+```
+Usage: PROfit process [OPTIONS]
+
+Options:
+  -h,--help                   Print this help message and exit
+```
+
+The process command loops through events in the input data, prediction, and systematic files and processes them to efficiently store only the necessary information described in the xml. 
+The output is _prop.bin and _syst.bin files which are efficiently loaded by the remaining PROfit commands.
+
+---
+
+# 5. Subcommand `plot` — exploring your spectra
 
 ```
 Usage: PROfit plot [OPTIONS]
 Options:
   --with-splines              Include graphs of splines in output.
-  --bkg-subtract TEXT         Substring pattern; that background's CV is subtracted
-                              from data and CV at plot time (publication convention).
+  --with-covar                Include the covariance/correlation matrix plots
+                              (off by default since v3.0 — they are the slow part).
+  --no-frac-syst              Skip the fractional-systematics breakdown PDFs.
+  --band-throws INT [2500]    Number of throws used to build the error band.
+  --bkg-subtract TEXT         Pattern (unanchored regex; plain substrings work);
+                              that background's CV is subtracted from data and CV
+                              at plot time (publication convention).
 ```
 
 Plus the relevant global options: `--area-norm`, `--scale-by-width`,
 `--plot-bounds ymax 100 ratmin 0.5 ratmax 1.5`, and all the injection
 machinery from section 3.
 
+> **Changed default (v3.0):** `plot` no longer produces the covariance
+> plots (`_PROplot_Covar.pdf` and the ROOT `Covariance/` directory) unless
+> you pass `--with-covar` — that flag alone restores the old output exactly
+> (byte-identical bands in seeded runs). `--no-frac-syst` additionally drops
+> the fractional-systematics PDFs; with *both* the covariance plots off and
+> `--no-frac-syst`, the slow spline→covariance conversion is skipped
+> entirely (a big speedup for spline-heavy configs) and the χ²/ndf labels
+> disappear from the error-band pages. If a downstream script consumes
+> `_PROplot_Covar.pdf` or the `Covariance/` ROOT directory, add
+> `--with-covar` to its plot command.
+
 ### The CV and error band
 
 ```bash
-PROfit -x tutorial.xml -t TUT -o plotcv --seed 405 plot
+PROfit -x tutorial.xml -t TUT -o plotcv --seed 405 plot --with-covar
 ```
 
 Outputs (one `Variable_<i>` set per plotted binning of each channel):
@@ -459,25 +600,26 @@ Outputs (one `Variable_<i>` set per plotted binning of each channel):
 * `TUT_plotcv_PROplot_Variable_0_CV.pdf` — stacked CV spectra, fitting variable
 * `TUT_plotcv_PROplot_Variable_0_ErrorBand.pdf` — CV + full systematic band
 * `TUT_plotcv_PROplot_Variable_2_*.pdf`, ... — same for the other variables
-* `TUT_plotcv_PROplot_Covar.pdf` — all covariance matrices, per systematic and total
-* `TUT_plotcv_fractional_systematics.pdf` — fractional uncertainty per bin, one panel per systematic `tag` plus a summary (the `tag=` attributes in the variation list control this grouping — without them you get one unreadable 30-line legend)
+* `TUT_plotcv_PROplot_Covar.pdf` — all covariance matrices, per systematic and total (`--with-covar` only)
+* `TUT_plotcv_fractional_systematics.pdf` — fractional uncertainty per bin, one panel per systematic `tag` plus a summary (the `tag=` attributes in the variation list control this grouping — without them you get one unreadable 30-line legend; suppressed by `--no-frac-syst`)
 * `TUT_plotcv_ratio_fractional_systematics.pdf` — same as a ratio
 * `TUT_plotcv_PROplot.root` — everything above as ROOT objects
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_plotcv_PROplot_Variable_0_CV.pdf`
-> (stacked CV, reconstructed energy, ND+FD νe and νμ channels)
-> <!-- <img src="UPLOAD_URL_HERE" width="600"/> -->
+<img src="figures/TUT_plotcv_PROplot_Variable_0_CV.png" width="800"/>
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_plotcv_PROplot_Variable_0_ErrorBand.pdf`
-> (CV + total systematic error band; "data" points are the Asimov CV since we injected nothing)
-> <!-- <img src="UPLOAD_URL_HERE" width="600"/> -->
+*`TUT_plotcv_PROplot_Variable_0_CV.pdf` — stacked CV, reconstructed energy, ND+FD νe and νμ channels.*
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_plotcv_PROplot_Covar.pdf` (page with the total collapsed covariance/correlation)
-> <!-- <img src="UPLOAD_URL_HERE" width="600"/> -->
+<img src="figures/TUT_plotcv_PROplot_Variable_0_ErrorBand.png" width="800"/>
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_plotcv_fractional_systematics.pdf`
-> (per-bin fractional uncertainty by systematic tag: flux / xsec / det / QE-MEC / RES / other)
-> <!-- <img src="UPLOAD_URL_HERE" width="600"/> -->
+*`TUT_plotcv_PROplot_Variable_0_ErrorBand.pdf` — CV + total systematic error band; "data" points are the Asimov CV since we injected nothing.*
+
+<img src="figures/TUT_plotcv_PROplot_Covar.png" width="600"/>
+
+*`TUT_plotcv_PROplot_Covar.pdf` (page 1) — the total collapsed correlation matrix.*
+
+<img src="figures/TUT_plotcv_fractional_systematics.png" width="600"/>
+
+*`TUT_plotcv_fractional_systematics.pdf` — per-bin fractional uncertainty by systematic tag: flux / xsec / det / QE-MEC / RES / other.*
 
 ### Injecting a signal
 
@@ -501,12 +643,13 @@ central value**, e.g. to make an oscillated spectrum the null hypothesis.
 They can be combined — inject one point as truth and a different one as the
 CV — to study fitting under a wrong model.
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_plotinj_PROplot_Osc.pdf`
-> <!-- <img src="UPLOAD_URL_HERE" width="600"/> -->
+<img src="figures/TUT_plotinj_PROplot_Osc.png" width="800"/>
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_plotinj_PROplot_Variable_0_ErrorBand.pdf`
-> (error band with injected-signal fake data)
-> <!-- <img src="UPLOAD_URL_HERE" width="600"/> -->
+*`TUT_plotinj_PROplot_Osc.pdf` — oscillated vs unoscillated spectra for the injected point.*
+
+<img src="figures/TUT_plotinj_PROplot_Variable_0_ErrorBand.png" width="800"/>
+
+*`TUT_plotinj_PROplot_Variable_0_ErrorBand.pdf` — error band with injected-signal fake data.*
 
 ### Injecting systematic shifts
 
@@ -517,9 +660,9 @@ PROfit -x tutorial.xml -t TUT -o plotsyst --seed 405 \
     -i dmsq 1 sinsq2thme 0.01 --inject-systs Flux1 1.0 DetSys2 -2.0 plot
 ```
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_plotsyst_PROplot_Variable_0_ErrorBand.pdf`
-> (fake data now includes both the signal and the systematic shifts)
-> <!-- <img src="UPLOAD_URL_HERE" width="600"/> -->
+<img src="figures/TUT_plotsyst_PROplot_Variable_0_ErrorBand.png" width="800"/>
+
+*`TUT_plotsyst_PROplot_Variable_0_ErrorBand.pdf` — fake data now includes both the signal and the systematic shifts.*
 
 ### Looking at the splines themselves
 
@@ -531,8 +674,9 @@ adds `TUT_plotspl_PROplot_Spline.pdf`: per-bin response splines for every
 spline systematic, with the knob points overlaid — the single most useful
 plot for debugging a suspicious multisigma input.
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_plotspl_PROplot_Spline.pdf` (example page)
-> <!-- <img src="UPLOAD_URL_HERE" width="600"/> -->
+<img src="figures/TUT_plotspl_PROplot_Spline.png" width="700"/>
+
+*`TUT_plotspl_PROplot_Spline.pdf` (example page) — per-bin response splines with the knob points overlaid.*
 
 ### Background subtraction
 
@@ -546,9 +690,9 @@ points as √(N + σ²_bkg-syst + σ²_bkg-MCstat).
 PROfit -x tutorial.xml -t TUT -o plotbsub --seed 405 plot --bkg-subtract background
 ```
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_plotbsub_PROplot_Variable_0_ErrorBand.pdf`
-> (background-subtracted spectra; compare with the plotcv version)
-> <!-- <img src="UPLOAD_URL_HERE" width="600"/> -->
+<img src="figures/TUT_plotbsub_PROplot_Variable_0_ErrorBand.png" width="800"/>
+
+*`TUT_plotbsub_PROplot_Variable_0_ErrorBand.pdf` — background-subtracted spectra; compare with the plotcv version.*
 
 Other useful toggles to try yourself: `--area-norm`, `--scale-by-width`,
 `--scale FD 0.5` (half the far-detector POT), `--poisson-throw`. And when
@@ -558,11 +702,14 @@ PDFs are directly comparable by eye.
 
 ---
 
-# 5. Subcommand `global` — fitting and fitter configuration
+# 6. Subcommand `global` — fitting and fitter configuration
 
 `global` performs one full global best fit of all physics + spline parameters
-and draws the post-fit results. It takes no subcommand options of its own —
-everything is controlled by the global arguments.
+and draws the post-fit results. Its only subcommand option is
+`--legacy-postfit-error` (also on `profile`), which reverts the post-fit band
+to the pre-v3.0 recipe — posterior spline throws around the best fit, but
+*prior* (unconstrained) covariance-systematic throws with no center shift (see
+Appendix C.2). Everything else is controlled by the global arguments.
 
 ```bash
 PROfit -x tutorial.xml -t TUT -o glob1 --seed 405 -n 8 \
@@ -577,15 +724,17 @@ Outputs:
 * `TUT_glob1_PROglobal_postfit_posteriors.pdf` — post-fit parameter constraints
 * `TUT_glob1_PROglobal.root` — all of the above as ROOT objects
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_glob1_PROglobal_hists.pdf`
-> (pre-fit vs post-fit spectra with ratio panel — your at-a-glance goodness-of-fit)
-> <!-- <img src="UPLOAD_URL_HERE" width="700"/> -->
+<img src="figures/TUT_glob1_PROglobal_hists.png" width="800"/>
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_glob1_PROglobal_postfit_correlation_matrix.pdf`
-> <!-- <img src="UPLOAD_URL_HERE" width="600"/> -->
+*`TUT_glob1_PROglobal_hists.pdf` — pre-fit vs post-fit spectra with ratio panel — your at-a-glance goodness-of-fit.*
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_glob1_PROglobal_postfit_posteriors.pdf`
-> <!-- <img src="UPLOAD_URL_HERE" width="600"/> -->
+<img src="figures/TUT_glob1_PROglobal_postfit_correlation_matrix.png" width="600"/>
+
+*`TUT_glob1_PROglobal_postfit_correlation_matrix.pdf` — post-fit parameter correlations.*
+
+<img src="figures/TUT_glob1_PROglobal_postfit_posteriors.png" width="700"/>
+
+*`TUT_glob1_PROglobal_postfit_posteriors.pdf` (representative pages: CrossSection1, DetSys1, Flux1, FiducialVol_FD) — post-fit parameter constraints, one parameter per page.*
 
 The text output looks like:
 
@@ -630,6 +779,15 @@ Every fit in PROfit is a three-stage pipeline:
 3. **L-BFGS-B local fits** (`n_localfit`): full gradient-based minimizations
    from the best swarm point and each seed point; best result wins.
 
+The default `grad-*` presets (below) rebalance this pipeline around the
+analytic gradient: the Latin hypercube samples **physics parameters only**
+(`latin_phys_only` — nuisances start at their centers, where the pull term
+puts them anyway), the particle-swarm stage is effectively disabled (one
+iteration), and the budget goes into **many L-BFGS-B multistarts** instead —
+with the exact gradient, local descents are cheap and reliable enough that
+they beat swarm exploration. The classic three-stage behavior is still
+available via the older presets (`good`, `overkill`, ...).
+
 After the global fit, PROfit runs a **harmonic seed search** over Δm² (the χ²
 is quasi-periodic in log Δm², so degenerate local minima are found by a
 frequency scan) — those seeds are handed to every subsequent profile/surface
@@ -643,13 +801,29 @@ once — be careful) and the **scan** fit (done thousands of times in
 profile/surface — be fast). Configure them with:
 
 ```bash
---preset fast              # ONE value sets both global and scan config
+--preset grad-fast         # ONE value sets both global and scan config
 --preset good overkill     # first = global, second = scan
 --fit-options n_latin_points 2000 max_iterations 5000     # global fit knobs
 --scan-fit-options n_localfit 2 ...                        # scan fit knobs
 ```
 
-Presets are `fast`, `good` (default), `overkill`, and `sensitivity`.
+Presets come in two families:
+
+* **`grad-fast` / `grad-good` / `grad-deep` / `grad-overkill`** — the
+  analytic-gradient-era presets and the **current defaults**
+  (`grad-good` for the global fit, `grad-fast` for scans): physics-only
+  Latin hypercube, no effective PSO, escalating numbers of L-BFGS-B
+  multistarts (roughly 8 / 16 / 50 / 100; the deeper two also warm-start
+  the nuisances at each multistart via `localfit_warm_nuisance`).
+* **`fast` / `good` / `overkill` / `sensitivity`** — the classic
+  LHS→PSO→L-BFGS-B presets, kept for compatibility and for metrics/modes
+  where the analytic gradient doesn't apply.
+
+> **Reproducing pre-v3.0 numbers:** the defaults used to be
+> `good`/`fast` with `--grad-mode central-lin`. Passing `-p good fast` alone
+> does **not** restore them — the gradient mode is independent of the
+> preset — you need `-p good fast --grad-mode central-lin` for
+> bit-comparable results against old seeded runs.
 
 > ⚠️ **CLI11 trap:** if you pass a single preset (`--preset fast`) make sure
 > the *next* token is a flag or the subcommand is protected — greedy vector
@@ -663,7 +837,9 @@ highlights:
 ------ PROfitter Specific Parameters ------
   n_latin_points          : Number of Latin hypercube points sampled across all parameters
   latin_diversity_factor  : 0 = no distance weighting, 1 = most diverse points
+  latin_phys_only         : 1 = LHS samples physics only, nuisances start at centers (grad-* presets)
   n_localfit              : Total number of L-BFGS-B fits after PSO
+  localfit_warm_nuisance  : 1 = warm-start nuisances at each multistart (grad-deep/overkill)
   n_max_local_retries     : Retries if L-BFGS-B throws
 ------ Particle Swarm Optimization ------
   n_swarm_particles, n_swarm_iterations, n_swarm_max_stagnent_iterations,
@@ -699,7 +875,7 @@ is deliberately easy — they all implement the same `PROmetric` interface.
 
 ---
 
-# 6. Subcommand `profile` — 1D profiled Δχ²
+# 7. Subcommand `profile` — 1D profiled Δχ²
 
 ```
 Usage: PROfit profile [OPTIONS]
@@ -733,16 +909,17 @@ Outputs:
 * `TUT_prof1_PROfile.root` — every profile as a TGraph, plus the 1σ summary
 * `TUT_prof1_global_fit.txt` — the global best fit table
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_prof1_PROfile.pdf`
-> (per-parameter profiled Δχ²; top row = physics, rest = nuisances vs their priors)
-> <!-- <img src="UPLOAD_URL_HERE" width="1100"/> -->
+<img src="figures/TUT_prof1_PROfile.png" width="700"/>
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_prof1_PROfile_1sigma.pdf`
-> (±1σ nuisance summary; star = injected, black = best fit)
-> <!-- <img src="UPLOAD_URL_HERE" width="800"/> -->
+*`TUT_prof1_PROfile.pdf` — per-parameter profiled Δχ²; top row = physics, rest = nuisances vs their priors.*
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_prof1_PROfile_hists.pdf`
-> <!-- <img src="UPLOAD_URL_HERE" width="700"/> -->
+<img src="figures/TUT_prof1_PROfile_1sigma.png" width="800"/>
+
+*`TUT_prof1_PROfile_1sigma.pdf` — ±1σ nuisance summary; star = injected, black = best fit.*
+
+<img src="figures/TUT_prof1_PROfile_hists.png" width="800"/>
+
+*`TUT_prof1_PROfile_hists.pdf` — pre-fit vs post-fit spectra.*
 
 How to read `PROfile.pdf`: each nuisance panel shows the profiled Δχ²
 (black) against the dashed-red prior (a 1σ Gaussian pull by construction),
@@ -777,9 +954,9 @@ PROfit -x tutorial.xml -t TUT -o probe1 --seed 405 -n 8 \
     -i dmsq 1 sinsq2thme 0.01 profile --probe
 ```
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_probe1_PROfile.pdf`
-> (PRObe version — compare point placement with the legacy scan above)
-> <!-- <img src="UPLOAD_URL_HERE" width="1100"/> -->
+<img src="figures/TUT_probe1_PROfile.png" width="700"/>
+
+*`TUT_probe1_PROfile.pdf` — PRObe version — compare point placement with the legacy scan above.*
 
 If the two physics-parameter scans are your wall-time bottleneck and you have
 threads to spare, `--probe-chunks 4` splits each physics scan across threads
@@ -796,7 +973,7 @@ PROfit -x tutorial.xml -t TUT -o profso --seed 405 -n 8 --syst-only profile --pr
 
 ---
 
-# 7. Subcommand `surface` — 2D Wilks surfaces and AMR
+# 8. Subcommand `surface` — 2D Wilks surfaces and AMR
 
 `surface` maps Δχ² over a 2D grid of two physics parameters, profiling over
 everything else at each point. Contours at Wilks-theorem critical values
@@ -850,9 +1027,9 @@ tutorial — grid size and thread count are your levers. Outputs:
 * `TUT_surf1_surface.pdf` — a quick-look contour plot
 * `TUT_surf1_global_fit.txt` — the global best fit
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_surf1_surface.pdf`
-> (Asimov sensitivity, 30×30 grid, 90%/95% CL contours)
-> <!-- <img src="UPLOAD_URL_HERE" width="600"/> -->
+<img src="figures/TUT_surf1_surface.png" width="600"/>
+
+*`TUT_surf1_surface.pdf` — Asimov sensitivity Δχ² surface, 30×30 grid.*
 
 We stress: PROfit's job is to give you the *surface data*; ROOT is not the
 place to make pretty contour plots. The `.txt` output loads trivially into
@@ -868,22 +1045,21 @@ PROfit -x tutorial.xml -t TUT -o surfnoflux --seed 405 -n 8 --exclude-systs Flux
 
 ### PROcurve: watching the pulls along a 1D path
 
-`--curve-mode x1 y1 x2 y2` (values in the axes' native — here log10 — space)
+`--curve-mode param1start param2start param1end param2end` (values in the axes' native — here log10 — space)
 replaces the 2D scan with a 1D walk from point A to point B across the
-(x, y) plane, fitting the nuisances at each step and plotting how every pull
+(param1, param2) plane, fitting the nuisances at each step and plotting how every pull
 evolves along the path. It's the quickest way to see *which* systematics
 bend to absorb an oscillation signal as you approach it. `-g` sets the
 number of points on the path.
 
 ```bash
 PROfit -x tutorial.xml -t TUT -o curve1 --seed 405 -n 8 \
-    surface $AXES -g 20 --curve-mode -3 -1 -1 1
+    surface $AXES -g 20 --curve-mode -1 -3 1 -1
 ```
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_curve1_PROcurve.pdf`
-> (path across the plane + every nuisance parameter's best-fit value along it,
-> here from (sin²2θμe, Δm²) = (10⁻³, 0.1 eV²) to (10⁻¹, 10 eV²))
-> <!-- <img src="UPLOAD_URL_HERE" width="800"/> -->
+<img src="figures/TUT_curve1_PROcurve.png" width="800"/>
+
+*`TUT_curve1_PROcurve.pdf` — path across the plane + every nuisance parameter's best-fit value along it, here from (Δm², sin²2θμe) = (0.1 eV², 10⁻³) to (10 eV², 10⁻¹).*
 
 ### Adaptive mesh refinement: `--surface-amr`
 
@@ -901,11 +1077,18 @@ Effective resolution along the contour is `amr_initial × 2^amr_levels`
 (here 80×80) for roughly the cost of the coarse grid plus a band around the
 contours — typically a **6-8× wall-time win** at equivalent contour quality.
 The scan writes `TUT_surfamr_surface_amr.txt` (same column format, one row
-per evaluated mesh point) alongside the usual `_surf.root` / `_surface.pdf`.
+per evaluated mesh point) alongside the usual `_surf.root` / `_surface.pdf`,
+plus a `TUT_surfamr_amr_mesh.pdf` mesh diagnostic.
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_surfamr_surface.pdf`
-> (AMR surface; note the refined mesh hugging the 1σ/2σ contours)
-> <!-- <img src="UPLOAD_URL_HERE" width="600"/> -->
+<img src="figures/TUT_surfamr_surface.png" width="600"/>
+
+*`TUT_surfamr_surface.pdf` — AMR surface; note the refined mesh hugging the 1σ/2σ contours.*
+
+<img src="figures/TUT_surfamr_amr_mesh.png" width="600"/>
+
+*`TUT_surfamr_amr_mesh.pdf` — the mesh itself: cells refined only along the two
+target Δχ² contours (overlaid curves), with per-level fit counts. Here the
+80×80-equivalent contour resolution cost 1067 fits instead of 6400.*
 
 ### Brazil bands
 
@@ -922,9 +1105,8 @@ PROfit -x tutorial.xml -t TUT -o surfbrz --seed 405 -n 16 --log surfbrz.log \
     surface $AXES --surface-amr --amr-initial 10 --amr-levels 2 --brazil-band
 ```
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_surfbrz_surface.pdf`
-> (median sensitivity with ±1σ/±2σ Brazil bands)
-> <!-- <img src="UPLOAD_URL_HERE" width="600"/> -->
+This command does not make a Brazil band itself, but outputs information that could be used to make a Brazil band externally.
+
 
 ### A note on models: parameterize in the variable you plot
 
@@ -944,7 +1126,7 @@ if the end goal is a contour in an effective angle, fit in that angle.
 
 ---
 
-# 8. Feldman-Cousins: `fc` and `fc-adaptive`
+# 9. Feldman-Cousins: `fc` and `fc-adaptive`
 
 Wilks' theorem (Δχ² cuts of 2.30/5.99/...) assumes Gaussian-land: no physical
 boundaries, no degenerate minima. Oscillation fits violate both, so for
@@ -959,6 +1141,8 @@ Options:
   -u,--universes UINT [1000]  Number of Feldman Cousins universes to throw
   --gof                       Get GOF pvalue
   --pval                      Get FC pvalue
+  --reuse                     Recompute the p-values from an existing
+                              <tag>_<out>_FC.root instead of throwing universes
 ```
 
 At the injected point (`-i`, or CV if none), `fc` throws `-u` universes —
@@ -974,10 +1158,36 @@ PROfit -x tutorial.xml -t TUT -o fc1 --seed 405 -n 8 \
 ```
 
 Output is `TUT_fc1_FC.root` containing a TTree with, per universe, the two
-χ² values, Δχ², and the best-fit parameters — from which you extract the
+χ² values and the best-fit parameters — from which you extract the
 90%/95% quantiles and compare to the Wilks values. This is the honest but
 brute-force approach: to calibrate a whole *contour* you would repeat it at
 every grid point, which is exactly what `fc-adaptive` automates.
+
+### Reusing a saved distribution: `--reuse`
+
+`fc --reuse` reads a previously produced `<tag>_<out>_FC.root` back and
+re-runs only the observed fits on the (real or injected) data plus the
+empirical p-value calculation — no universes are thrown, so a `--gof`/
+`--pval` re-evaluation against an expensive stored Δχ² distribution takes
+minutes instead of days. Rules of the road, all of which are on you (the
+file carries **no** provenance metadata — nothing checks them):
+
+* the reused file must come from the **same XML, injected point, χ² metric
+  (`-c`), and systematic selection** as the current invocation — a mismatch
+  silently compares an observed Δχ² against the wrong null distribution;
+* `-u/--universes` is ignored under `--reuse` (the sample size is the file's
+  entry count; there is no top-up mechanism);
+* **back up the FC.root first**: the run rewrites the file (and its CSV) in
+  place at the end, so an interrupted run can destroy the stored
+  distribution, and `--gof --reuse` on a `--pval`-capable file drops the
+  stored osc-fit nuisance record;
+* `--pval --reuse` on a file produced with only `--gof` is refused (the
+  needed branches are absent) — it falls back to fresh throws with a
+  warning if the file is missing entirely;
+* if you plan to `hadd` FC.root files from parallel jobs into one pooled
+  distribution, give every job a **distinct `--seed`** — identical seeds
+  produce identical throw sets and there is no deduplication — and never
+  mix `--gof`-only files into a `--pval` pool.
 
 ### Adaptive FC: `fc-adaptive`
 
@@ -992,8 +1202,12 @@ build-mesh  →  <tag>_<out>_mesh.bin      (Wilks prepass: N throws, each an AMR
 init-bank   →  <tag>_<out>_bank.bin      (pseudo-experiment bank: PEs per meta-mesh cell,
                                           doubling with refinement level; re-running ADDS PEs)
 print-bank  →  summary PDFs               (bank occupancy diagnostics)
+print-mesh  →  mesh PDFs                  (<tag>_mesh.bin, or any mesh files via --merge-input)
 asimov      →  FC contour + verdict PDFs  (classify the Asimov data against the bank)
 brazil      →  Brazil-band PDFs           (throw pseudo-data, classify each against the bank)
+merge-mesh  →  <tag>_<out>_mesh.bin       (union-merge mesh binaries from separate runs)
+merge-bank  →  <tag>_<out>_bank.bin       (harvest PEs from separate bank binaries onto that mesh)
+brazil-cleanup → <tag>_<out>_cleanup_mesh.bin  (mesh densified at the Brazil ±2σ contours; no fits)
 ```
 
 A full small-scale run (bump `--throws` and `--n-pe-min` for real studies):
@@ -1019,45 +1233,158 @@ for it to enter the meta-mesh), `--baseline-level` (levels always kept),
 `--cl` (target CLs), `--update-layer` / `--update-only-layer` (target which
 refinement layers get new PEs on an `init-bank` re-run), `--stat-only-throws`.
 
+### Merging meshes and banks: `merge-mesh` and `merge-bank`
+
+The PE bank is by far the most expensive artifact in the pipeline, so PROfit
+can combine meshes and banks produced by *separate* runs — different `-o`
+tags, different machines, different days — into one study. `--merge-input`
+takes explicit filenames or (quoted) glob patterns; the merged artifacts are
+written under the normal `-t`/`-o` naming, and every downstream stage
+(`print-bank`, `asimov`, `brazil`, `init-bank` top-up) consumes them as if
+they had been produced in one run.
+
+```bash
+# Union-merge two meshes (wherever the inputs disagree, the finer tiling wins)
+PROfit -x tutorial.xml -t TUT -o merged --seed 405 -n 8 $AFC \
+    --mode merge-mesh --merge-input TUT_runA_mesh.bin TUT_runB_mesh.bin
+
+# Harvest the PEs from both banks onto the merged mesh
+PROfit -x tutorial.xml -t TUT -o merged --seed 405 -n 8 $AFC \
+    --mode merge-bank --merge-input 'TUT_run[AB]_bank.bin'
+
+# Top up: every cell to 400 PEs (cells already at/above 400 are left alone)
+PROfit -x tutorial.xml -t TUT -o merged --seed 405 -n 8 $AFC \
+    --mode init-bank --n-pe-min 400 --n-pe-max 400
+```
+
+**Where this is useful:**
+
+1. **Grid / cluster PE production.** Build the mesh once, ship it to N jobs,
+   run `init-bank` in each job under its own `-o` tag **with a distinct
+   `--seed`**, copy the banks back, and merge (the shipping half is what
+   the [`proletariat` subcommand](#10-proletariat--grid-submission-proletariat)
+   automates):
+
+   ```bash
+   # one job, i = 0..N-1  (each job has its own copy of the shared mesh
+   # as TUT_grid<i>_mesh.bin — identical copies merge to themselves)
+   PROfit -x tutorial.xml -t TUT -o grid$i --seed $((1000+i)) -n 8 $AFC \
+       --mode init-bank --n-pe-min 100 --n-pe-max 5000
+
+   # back home:
+   PROfit ... -o merged $AFC --mode merge-mesh --merge-input 'TUT_grid*_mesh.bin'
+   PROfit ... -o merged $AFC --mode merge-bank --merge-input 'TUT_grid*_bank.bin'
+   ```
+
+2. **Updating the mesh without losing the bank.** Re-running `build-mesh`
+   with more throws or different `--p-thresh` changes the meta-mesh, and a
+   plain `init-bank` would then discard the old bank as footprint-mismatched.
+   Instead: `merge-mesh` the old and new meshes, `merge-bank` the old bank
+   onto the union, then `init-bank` to generate PEs only where the mesh
+   actually changed. Every cell whose footprint survived keeps its PEs.
+
+3. **Combining independent studies of the same configuration** — e.g. a
+   coarse exploratory bank and a later refined one.
+
+**Rules and gotchas:**
+
+* PEs are Δχ² samples thrown at a cell **center**, so `merge-bank` carries a
+  cell over only when the merged mesh has the *exact same footprint*
+  (same position and size). PEs from cells that changed refinement are at the
+  wrong truth points and are dropped — the log reports carried / dropped /
+  still-empty counts per input.
+* All inputs must share the finest grid resolution and axis bounds
+  (`--prepass-amr-initial`, `--prepass-amr-levels`, `--xlo/xhi/ylo/yhi`);
+  mismatches are refused loudly.
+* Bitwise-identical PEs (same per-PE seed *and* Δχ²) are deduplicated, so
+  merging two banks generated with the same `--seed` silently costs you the
+  overlap — you get a warning, but the wasted CPU already happened. Give
+  every grid job a distinct seed.
+* The binaries carry no XML/fit-config provenance, so the merge **cannot**
+  verify that inputs used the same XML, χ² metric (`-c`), `--preset`, and
+  `--grad-mode`. Mixing those pools different Δχ² distributions — that
+  discipline is on you.
+* The brazil archive (`_brazil.bin`) is *not* merged: throws are cheap
+  relative to banks and are simply re-thrown against the merged bank.
+
+### Sharpening the band edges: `brazil-cleanup`
+
+The Wilks prepass refines the mesh around the *Asimov* contour, but the
+Brazil ±2σ band edges — the P(included) = 0.025 and 0.975 contours of the
+throw ensemble — spread beyond it, often into coarse baseline cells where
+the band looks blocky. `brazil-cleanup` closes that loop: it reads the
+bank (grid geometry) and the **saved contour curves in
+`<tag>_<out>_brazil.root`** (**no fits, no throws, nothing recomputed — it
+runs in seconds**), rasterizes the requested quantile curves
+(`--cleanup-quantiles`, default `0.025 0.975`; any of the five saved levels
+0.025/0.16/0.5/0.84/0.975 works) onto the finest grid, and writes
+`<tag>_<out>_cleanup_mesh.bin`: finest cells along the curves ±
+`--cleanup-halo` bins (default 1), coarsest tiling elsewhere. Because the
+curves come from the brazil ROOT artifact itself, the refined region is
+*by construction* the same contours the band PDF drew — run it on the
+`_brazil.root` from the same brazil invocation as the band you are looking
+at. It shares the finest grid with the original mesh by construction,
+so it union-merges with it:
+
+```bash
+# 1. band-edge refinement mesh from the finished brazil run (tag "afc")
+PROfit -x tutorial.xml -t TUT -o afc --seed 405 -n 8 $AFC --mode brazil-cleanup
+
+# 2. union with the original mesh, harvest the original bank, top up, re-throw
+PROfit -x tutorial.xml -t TUT -o afc2 --seed 405 -n 8 $AFC \
+    --mode merge-mesh --merge-input TUT_afc_mesh.bin TUT_afc_cleanup_mesh.bin
+PROfit -x tutorial.xml -t TUT -o afc2 --seed 405 -n 8 $AFC \
+    --mode merge-bank --merge-input TUT_afc_bank.bin
+PROfit -x tutorial.xml -t TUT -o afc2 --seed 406 -n 8 $AFC \
+    --mode init-bank --n-pe-min 25 --n-pe-max 400
+PROfit -x tutorial.xml -t TUT -o afc2 --seed 405 -n 8 $AFC \
+    --mode brazil --n-brazil-throws 50
+```
+
+Every PE from the original bank survives wherever the cell footprint is
+unchanged (everywhere except the newly refined band-edge cells), so the
+top-up only pays for the new fine cells. Iterate if the edges are still
+coarse. To eyeball any mesh along the way (the cleanup mesh, the merged
+mesh, ...): `--mode print-mesh --merge-input TUT_afc_cleanup_mesh.bin`
+renders each given file as `<same name>.pdf`; with no `--merge-input` it
+plots the current tag's `_mesh.bin`. A decided cell sitting inside the band whose neighbour is
+*undecidable* is also refined — that is exactly where the contour runs off
+into unsampled territory, and the top-up is what makes it decidable.
+
 Outputs along the way:
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_afc_metamesh.pdf`
-> (the meta-mesh: cell refinement levels, concentrated where throws put the contour)
-> <!-- <img src="UPLOAD_URL_HERE" width="600"/> -->
+<img src="figures/TUT_afc_metamesh.png" width="600"/>
+*`TUT_afc_metamesh.pdf` — the meta-mesh: cell refinement levels, concentrated where throws put the contour.*
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_afc_throws.pdf`
-> (the Wilks-prepass throw contours that built the mesh)
-> <!-- <img src="UPLOAD_URL_HERE" width="600"/> -->
+<img src="figures/TUT_afc_throws.png" width="600"/>
+*`TUT_afc_throws.pdf` — the Wilks-prepass throw contours that built the mesh.*
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_afc_bank_summary.pdf` (PE bank occupancy per level)
-> <!-- <img src="UPLOAD_URL_HERE" width="600"/> -->
+<img src="figures/TUT_afc_bank_summary.png" width="600"/>
+*`TUT_afc_bank_summary.pdf` — PE bank occupancy per level.*
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_afc_asimov_contour.pdf`
-> (FC-corrected contour vs the Wilks contour)
-> <!-- <img src="UPLOAD_URL_HERE" width="600"/> -->
+<img src="figures/TUT_afc_asimov_contour.png" width="600"/>
+*`TUT_afc_asimov_contour.pdf` — FC-corrected contour vs the Wilks contour.*
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_afc_asimov_verdict.pdf`
-> (per-cell FC vs Wilks verdict map)
-> <!-- <img src="UPLOAD_URL_HERE" width="600"/> -->
+<img src="figures/TUT_afc_asimov_verdict.png" width="600"/>
+*`TUT_afc_asimov_verdict.pdf` — per-cell FC vs Wilks verdict map.*
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_afc_brazil_band.pdf`
-> (FC-corrected Brazil band from the bank)
-> <!-- <img src="UPLOAD_URL_HERE" width="600"/> -->
+<img src="figures/TUT_afc_brazil_band.png" width="600"/>
+*`TUT_afc_brazil_band.pdf` — FC-corrected Brazil band from the bank.*
 
 Determinism note: with `-n 1` and a fixed `--seed` the entire pipeline is
 bit-reproducible; multithreaded runs are statistically equivalent.
 
 ---
 
-# 9. PROjector — two-stage pre-fit / projected fits
+# 10. PROjector — two-stage pre-fit / projected fits
 
 PROjector answers "what does my near detector buy me?" properly. Instead of
 fitting ND and FD simultaneously every time, you (1) fit **only** the ND
 channels once and save the nuisance posterior, then (2) run any FD study with
 those channels masked out and the saved posterior installed as a correlated
-prior. Same statistical content as the joint fit (to the Gaussian
-approximation), at a fraction of the per-fit cost — which matters enormously
-for FC studies.
+prior. Same statistical content as the joint fit (with a Gaussian
+approximation and a no-near-detector-oscillation approximation), at a fraction 
+of the per-fit cost — which matters enormously for FC studies.
 
 ### Stage 1: the pre-fit
 
@@ -1067,7 +1394,7 @@ PROfit -x tutorial.xml -t TUT -o pj --seed 405 -n 8 \
 # → TUT_pj_PROjector_constraint.bin
 ```
 
-What happens: every subchannel matching `_ND_` (substring, and matches must
+What happens: every subchannel matching `_ND_` (unanchored regex — substrings work — and matches must
 cover **whole channels** — χ² lives in collapsed space) is selected; all
 covariance-type systematics are *promoted* to their eigenmode splines so the
 fit has explicit parameters for them (`--projector-knobs N` limits to the top
@@ -1105,13 +1432,13 @@ the constraint file), masks the pre-fit channels OUT of the χ² (active-bins
 mask + zeroed data), and installs (θ̂, Σ) as a fully correlated Gaussian prior
 on the promoted spline parameters.
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_pjprof_PROfile_1sigma.pdf`
-> (projected nuisance constraints — compare against the joint-fit `TUT_prof1_PROfile_1sigma.pdf`)
-> <!-- <img src="UPLOAD_URL_HERE" width="800"/> -->
+<img src="figures/TUT_pjprof_PROfile_1sigma.png" width="800"/>
 
-> 📷 **PLOT PLACEHOLDER** — `TUT_pjsurf_surface.pdf`
-> (projected FD-only sensitivity with the ND constraint as prior, vs the joint surface `TUT_surfamr_surface.pdf`)
-> <!-- <img src="UPLOAD_URL_HERE" width="600"/> -->
+*`TUT_pjprof_PROfile_1sigma.pdf` — projected nuisance constraints — compare against the joint-fit `TUT_prof1_PROfile_1sigma.pdf`.*
+
+<img src="figures/TUT_pjsurf_surface.png" width="800"/>
+
+*`TUT_pjsurf_surface.pdf` — projected FD-only sensitivity with the ND constraint as prior, vs the joint surface `TUT_surfamr_surface.pdf`.*
 
 ### Rules and closure checks
 
@@ -1128,6 +1455,187 @@ on the promoted spline parameters.
   constraint only — correlations enter the pull term, not the throws (PROfit
   prints a runtime warning to remind you).
 
+Note that autocorrelation and harmonic scan plots will not be filled properly with the projector option.
+
+---
+
+# 11. PROletariat — grid submission: `proletariat`
+
+Everything above runs on one machine. For the artifacts that are genuinely
+expensive at scale — FC PE banks above all — the workflow is: ship PROfit and
+its inputs to N FermiGrid jobs, run a worker script in each, copy the outputs
+back, and merge (section 8). The shipping half used to be a hand-maintained
+shell script (`grid/maketar_submit_v2.4.sh`, now deprecated); it is now the
+`proletariat` subcommand, implemented by the `PROletariat` class
+(`inc/PROletariat.h`).
+
+`proletariat` does three things:
+
+1. **Stages** a fresh tarball: the running PROfit binary itself (located via
+   `/proc/self/exe` — the exact executable you invoked is what ships), your
+   `-x` XML, any analysis artifacts it finds in the current directory
+   (see below), and any `--input` extras, all under a directory literally
+   named `grid_dir/`.
+2. **Tars** it to `grid_dir.tar` in the current directory and prints the
+   contents.
+3. **Submits** N copies of your worker script with `jobsub_submit`, attaching
+   the tarball via the dropbox mechanism. On the worker node, jobsub unpacks
+   it at `$INPUT_TAR_DIR_LOCAL/grid_dir/`.
+
+Unlike every other subcommand, `proletariat` dispatches *before* the XML is
+parsed or any binaries are loaded — it only needs the file paths and tags, so
+it runs in seconds even for heavy configurations.
+
+### Quick start
+
+```bash
+# from the directory holding your XML and TUT_prop.bin / TUT_syst.bin:
+PROfit -x tutorial.xml -t TUT proletariat \
+    -N 500 --script ../../grid/runFC_v2.4_v4_AL9.sh \
+    --lifetime 2d --memory 4000 --disk 10000 \
+    --dry-run          # drop this to actually submit
+```
+
+`--dry-run` does the full staging and tarring, prints the exact
+`jobsub_submit` command it *would* run (copy-paste ready), and stops —
+useful for checking the tarball contents on a dev box that has no jobsub
+client. The staging directory is always cleaned up; the tarball is left
+behind on purpose.
+
+### The container: AL9 by default, `--sl7` for legacy
+
+Grid jobs run inside an Apptainer/Singularity container, and the OS inside
+it decides how the worker script sets up its environment:
+
+* **AL9 (default)** — the `fnal-wn-el9` image; software comes from the CVMFS
+  **Spack** distribution (`spack load root@6.28.12` etc.). This matches the
+  migrated FermiGrid worker nodes and gpvms.
+* **SL7 (legacy)** — pass `--sl7` to submit with the old `fnal-wn-sl7` image
+  instead; software comes from CVMFS **UPS** (`setup root v6_28_12 -q ...`).
+  Use this only if you need to reproduce an old campaign or your worker
+  script predates the migration.
+
+An explicit `--singularity-image <path>` overrides the choice entirely and
+is mutually exclusive with `--sl7` (passing both is a parse error). The
+reference worker script (below) detects the OS at runtime from
+`/etc/os-release` and picks Spack or UPS itself, so the same script works
+under either image — the submitter's flag is the only switch you touch.
+
+### What gets bundled
+
+Always (missing = hard error):
+
+* the PROfit binary, staged under the literal name `PROfit` (worker scripts
+  invoke `./PROfit`) — override which binary ships with `--profit-bin`;
+* the worker script (`--script`);
+* the `-x` XML;
+* every `--input` file (repeatable).
+
+Automatically, if present in the current directory (missing = an INFO line,
+not an error):
+
+* `<tag>_prop.bin` and `<tag>_syst.bin` — the binary caches, so workers skip
+  the expensive `process` step;
+* `<tag>_<output>_mesh.bin` and `<tag>_<output>_bank.bin` — AFC artifacts
+  matching your `-t`/`-o` tags, for `init-bank` grid production.
+
+The tarball layout is flat (`grid_dir/<basename>`), so two inputs with the
+same basename from different directories are refused loudly rather than
+silently clobbering each other.
+
+### The worker script
+
+The payload is still a shell script you own — `grid/runFC_v2.4_v4_AL9.sh` is
+the reference implementation and worth reading in full (the older
+`runFC_v2.4_v2.sh` is its UPS/SL7-only predecessor). Its contract:
+
+* inputs appear at `$INPUT_TAR_DIR_LOCAL/grid_dir/`; copy them into
+  `$_CONDOR_SCRATCH_DIR` and run there;
+* the binary is `./PROfit`; the script sets up ROOT/Boost/etc. from CVMFS
+  before touching it — Spack on AL9, UPS on SL7, chosen at runtime from the
+  container's `/etc/os-release` — and sanity-checks with `ldd` and
+  `./PROfit --help` so "missing library" and "bad physics" fail
+  distinguishably;
+* `$PROCESS` (0..N-1) is the job's identity, but it **restarts at 0 in every
+  submission** — a seed or `-o` tag built from it alone collides across
+  batches. Fold in `$CLUSTER` (unique per `jobsub_submit`), e.g.
+  `SEED=$(( (CLUSTER % 1000000) * 1000 + PROCESS ))` and
+  `-o fc_${CLUSTER}_$((PROCESS+1))`, and run with `-n 1`. Colliding seeds
+  are not just statistically dubious: with `-n 1` the duplicate jobs are
+  bitwise identical, merge-bank silently dedupes their PEs (section 8), and
+  the CPU is wasted; colliding `-o` tags additionally give different
+  campaigns identical output *filenames*, which then can't share a
+  directory at `--merge-input` time;
+* copy outputs back with `ifdh cp` to a `/pnfs` scratch area, namespaced by
+  `$CLUSTER` so a resubmission doesn't clobber the last campaign.
+
+### Arguments
+
+| Option | Default | What it does |
+|---|---|---|
+| `--script` | *(required)* | Worker script executed on each grid node. |
+| `-N, --n-jobs` | `2` | Number of jobs (`jobsub_submit -N`). Each sees its own `$PROCESS`. |
+| `--lifetime` | `2d` | `--expected-lifetime`; 3d is the FermiGrid ceiling before rejection. |
+| `--memory` | `4000` | Requested memory in MB. |
+| `--disk` | `10000` | Requested scratch disk in MB. |
+| `--input` | — | Extra file(s) for the tarball (repeatable). Missing file = hard error. |
+| `--dry-run` | off | Stage + tar + print the jobsub command; do not submit. |
+| `--backend` | `jobsub` | Scheduler backend: `jobsub` or `slurm` (SLURM is a stub for now and errors out). |
+| `--group` | `sbnd` | Experiment group (`jobsub_submit -G`). |
+| `--role` | `Analysis` | `--role`. |
+| `--singularity-image` | `fnal-wn-el9:latest` (CVMFS path) | Apptainer/Singularity image the jobs run in. Excludes `--sl7`. |
+| `--sl7` | off | Use the legacy `fnal-wn-sl7:latest` image instead of AL9. Excludes `--singularity-image`. |
+| `--resource-provides` | `usage_model=DEDICATED,OPPORTUNISTIC,OFFSITE` | Usage model. |
+| `--lines` | the three `+FERMIHTC_*` classads | Condor classad `--lines` entries. **Replaces** the defaults when given — to *append*, use `--jobsub-arg` instead. |
+| `--jobsub-arg` | — | Raw argument passed to `jobsub_submit` verbatim (repeatable) — the escape hatch for anything not covered above. |
+| `--profit-bin` | this executable | Override the PROfit binary to ship. |
+
+The default `--lines` are `+FERMIHTC_AutoRelease=True`,
+`+FERMIHTC_GraceMemory=4000`, `+FERMIHTC_GraceLifetime=7200` — auto-release
+held jobs with a memory/lifetime grace margin. The submission also pins
+`(TARGET.HAS_SINGULARITY=?=true)` as a condor requirement.
+
+### End-to-end: a grid FC bank campaign
+
+```bash
+# 1. build the mesh locally (section 8)
+PROfit -x tutorial.xml -t TUT -o grid --seed 405 -n 8 $AFC --mode build-mesh
+
+# 2. ship it: TUT_prop.bin, TUT_syst.bin and TUT_grid_mesh.bin are picked up
+#    automatically from the cwd; check first with --dry-run
+PROfit -x tutorial.xml -t TUT -o grid proletariat \
+    -N 500 --script runFC_v2.4_v4_AL9.sh --lifetime 2d
+
+# 3. ...wait; fetch outputs from /pnfs to a local dir...
+
+# 4. merge and continue exactly as in section 8
+PROfit -x tutorial.xml -t TUT -o merged $AFC --mode merge-mesh --merge-input 'TUT_fc_*_mesh.bin'
+PROfit -x tutorial.xml -t TUT -o merged $AFC --mode merge-bank --merge-input 'TUT_fc_*_bank.bin'
+```
+
+### Rules and gotchas
+
+* **Run it where your artifacts live.** Auto-bundling searches the *current
+  directory* for `<tag>_prop.bin` etc.; the tarball also lands there. Anything
+  elsewhere needs an explicit `--input path/to/file`.
+* **The tarball is big.** The PROfit binary alone is ~250 MB; with the syst
+  cache a typical tarball is 300–400 MB. The size is logged before
+  submission — jobsub's dropbox handles it, but don't be surprised.
+* Submission needs a working **jobsub client** (a GPVM, valid token/proxy).
+  Everything up to and including `--dry-run` works anywhere.
+* **Seeds are your job.** `proletariat` submits N identical scripts; the
+  worker script must diversify `--seed`/`-o` from `$PROCESS` **and**
+  `$CLUSTER` — `$PROCESS` alone repeats across submissions. Identical
+  seeds silently dedupe at merge-bank time (section 8).
+* **Match the image to the script.** A worker script that only knows UPS
+  (`setup <prod>`) dies during environment setup under the default AL9
+  image, and a Spack-only script dies under `--sl7`. The reference script
+  detects the OS and handles both; if you maintain your own, either make it
+  do the same or submit with the image it expects.
+* The old `grid/maketar_submit_v2.4.sh` is kept for reference but
+  deprecated; it had a latent bug (the `file://` script URL broke unless the
+  script sat in the submission directory) that the subcommand fixes.
+
 ---
 
 # Appendix A: regenerating every plot in this tutorial
@@ -1143,6 +1651,21 @@ The script localizes the XML, processes once, and runs every command shown
 above with fixed seeds. Outputs land in `docs/tutorials/tutorial_run/` (set
 `TUTORIAL_OUTDIR` to change). See the script header for the environment
 overrides (`PROFIT_BIN`, `PROFIT_TEST_MCDIR`, `NTHREADS`, `SEED`).
+
+The images embedded in this document are PNG renders of those PDFs (GitHub
+markdown cannot display PDFs inline), produced by:
+
+```bash
+docs/tutorials/make_tutorial_figures.sh   # PDFs → docs/tutorials/figures/*.png
+```
+
+It needs `pdftoppm` (poppler-utils) and `montage` (ImageMagick), picks the
+relevant page of each multi-page PDF (e.g. the collapsed correlation page of
+`_Covar.pdf`), tiles the per-(detector × channel) pages into 2×2 montages,
+and skips any PDF not yet generated — so after running the missing heavy
+steps you can re-run it and just uncomment the corresponding `<img>` tags in
+the remaining placeholders. Commit `figures/`, not `tutorial_run/` (which
+holds ~GB binaries).
 
 ---
 
@@ -1232,6 +1755,16 @@ fullosc component (rule 2), and disappear the intrinsic νe (rule 3).
 Same physics and rules (0–3) as `3+1`, re-parameterized in angles, with the
 unitarity constraint.
 
+> ⚠️ **Results from before August 2026 are invalid for this model.** Its
+> P(νμ→νμ) was missing the factor 4 in sin²2θμμ = 4|Uμ4|²(1−|Uμ4|²), so any
+> pre-fix fit/contour/FC study involving νμ disappearance had a 4× weaker
+> disappearance amplitude (old sin²θ₂₄ exclusion curves ~×4 too weak). The
+> binary-cache hash only covers the XML, **not the code**, so old
+> `_mesh.bin`/`_bank.bin`/`_brazil.bin` and PROjector constraint files made
+> with this model load silently into fixed builds — regenerate them all.
+> (`_prop.bin`/`_syst.bin` contain no probabilities and are fine; the other
+> 3+1 variants and the 2-flavor models were verified unaffected.)
+
 | # | name | meaning | fit space | bounds | default |
 |---|---|---|---|---|---|
 | 0 | `dmsq` | Δm²₄₁ [eV²] | log10 | 10⁻² – 10² | 10⁻² |
@@ -1278,7 +1811,10 @@ contours); `xi` is the log geometric ratio ξ = ½·log(|Ue4|²/|Uμ4|²)
 ### `3+1_decay_invis` — 3+1 with invisible sterile decay
 
 The `3+1` mixing-element model extended with an invisible-decay coupling;
-combined unitarity + positivity constraint. Rules **0–3** as in `3+1`.
+combined unitarity + positivity constraint (g² = 0, the pure-3+1 limit, is
+accepted since August 2026 — it was previously rejected by a strict
+inequality, which biased fits near the no-decay boundary). Rules **0–3** as
+in `3+1`.
 
 | # | name | meaning | fit space | bounds | default |
 |---|---|---|---|---|---|
@@ -1335,6 +1871,439 @@ for sideband/template fits and cross-section-style normalization studies.
 
 ---
 
-*Why is the repository called "Elephant Vanishes"? Old habit — all of Mark's
-git repos are named after the book he was reading when he created them.
-This one was Haruki Murakami's* The Elephant Vanishes.
+# Appendix C: the pre-fit and post-fit error bands, in full
+
+This appendix is the complete, self-contained recipe for the shaded error
+bands PROfit draws around the prediction. There are two of them, and they
+answer two different questions:
+
+* the **pre-fit band** answers *"before we look at any data, how uncertain is
+  our prediction?"* — it is a picture of the systematic priors, nothing more;
+* the **post-fit band** answers *"after the fit, how uncertain is the
+  prediction, and where does it actually sit?"* — the data has now constrained
+  both the spline nuisances *and* the covariance-encoded systematics, so this
+  band is (usually much) narrower, and its center can move.
+
+Below we work out the exact maths in the form the code computes it, name the
+function that implements each step, and state every assumption. Section C.4
+at the end *derives* the key formulas from scratch, so nothing here needs to
+be taken on faith.
+
+### C.0 Notation and shared ingredients
+
+Everything happens in the **collapsed bin space of the fitting variable**
+(`config.i_prime`) — the same space the χ² lives in, after subchannels have
+been summed into channels. Throughout, write:
+
+```
+θ = (φ, s)        the parameter vector: physics φ, then one param per spline s
+P(θ)              the collapsed predicted spectrum at θ (FillSpectra + collapse)
+θ_CV              the central-value parameters (physics at CV, splines at their centers)
+θ̂  = (φ̂, ŝ)      the global best fit
+d                 the collapsed data spectrum (Asimov, fake, or real)
+```
+
+**Covariance-type systematics** (including MC-stat) are not fit parameters:
+their summed *fractional* covariance `F` (`PROsyst::fractional_covariance`)
+is folded into the χ² analytically, as described in section 1. The band
+machinery needs two things built from `F` once, at a reference spectrum
+(`PROsyst::DecomposeFractionalCovariance`): the *absolute* covariance, and a
+"square root" of it that turns unit Gaussian random numbers into correlated
+spectrum fluctuations. Note that `F` lives in the *uncollapsed* bin space, so
+the absolute covariance is built there and collapsed afterwards:
+
+```
+Σ = collapse( diag(P_unc)·F·diag(P_unc) )   absolute covariance; P_unc is the
+                                            UNCOLLAPSED spectrum matching F's dims
+Σ = U S Uᵀ                                  (eigendecomposition)
+L = U·√S        with modes below tolerance dropped (their columns are zero)
+```
+
+so that `Σ = L·Lᵀ` (up to the dropped below-tolerance modes), and a random
+spectrum fluctuation with exactly the covariance Σ is simply `L·g` with
+`g ~ N(0, 1)` per component. `L` is n_bins × n_bins with `k ≤ n_bins`
+non-zero columns (the rank). Each non-zero column of `L` is one independent
+"mode" of correlated systematic variation — that picture matters in C.2 and
+C.4, where each mode becomes one effective parameter.
+
+One approximation to note now: `L` is **frozen at its reference spectrum**.
+Inside the χ² the covariance is rescaled by the *current* prediction at every
+single evaluation, but the band machinery builds `L` once — the
+**linear-response approximation**. The default pre-fit band references the CV
+spectrum; the post-fit band, the `--mcmc-prefit` variant, and both degenerate
+shortcuts (below) reference the best-fit spectrum, because that is the
+spectrum they are drawn around.
+
+**Spline systematics** have Gaussian priors `s_j ~ N(c_j, σ_j)` (XML
+`center=`/`prior=`, defaults 0 and 1), and are genuine fit parameters — the
+fit moves them, so their post-fit spread must come from sampling the fit's
+posterior, not from a formula.
+
+All bands are reported per bin as **16/84 percentiles** of an ensemble of
+sampled spectra — a 68% interval that keeps any real asymmetry, rather than
+forcing a symmetric ±σ — plus a full bin-to-bin covariance of the ensemble
+for anything downstream that needs correlations (2D→1D projections,
+ratio-error propagation).
+
+### C.1 The pre-fit band — sampling the prior
+
+*(Implemented in `getErrorBand` → `FillSystRandomThrow` (src/PROcess.cxx);
+the per-variable bands from `plot` and the default global pre-fit band both
+use this. `--mcmc-prefit` swaps in a prior-only Metropolis chain through the
+same machinery as C.2 with zero data — note that variant, like the post-fit
+band, references the best-fit spectrum rather than the CV.)*
+
+The idea is the simplest thing you could do: **throw every systematic from
+its prior many times, rebuild the spectrum each time, and look at the spread
+of spectra you get.** No data is involved anywhere. Concretely, for each of
+`N = 2500` throws `i` (configurable with `plot --band-throws N`):
+
+1. **Throw every spline from its prior**: `s_j⁽ⁱ⁾ ~ N(c_j, σ_j)`,
+   independently per spline (marginals only — XML correlations enter the fit
+   through the pull term, not these throws). Physics stays at the CV.
+2. **Rebuild the spectrum through the full (nonlinear) spline response**:
+   `S⁽ⁱ⁾ = P(φ_CV, s⁽ⁱ⁾)` — each event/bin is reweighted through its response
+   spline at the thrown knob values, then collapsed. This is where the
+   nonlinearity of the spline systematics is kept honestly: a +1σ throw and a
+   −1σ throw need not have equal and opposite effects.
+3. **Add a covariance throw on top**: `S⁽ⁱ⁾ ← S⁽ⁱ⁾ + L·g⁽ⁱ⁾`, `g⁽ⁱ⁾ ~ N(0,1)`,
+   with `L` built at the CV spectrum. This single vector of Gaussian numbers,
+   pushed through `L`, fluctuates all bins together with exactly the
+   covariance Σ.
+
+The band in each bin `b` is then read off the ensemble:
+
+```
+e⁺_b = q84_b − P_b(θ_CV)        e⁻_b = P_b(θ_CV) − q16_b
+```
+
+with `q16/q84` the percentiles of the 2500 values of `S_b⁽ⁱ⁾`, quoted about
+the **CV prediction** — which is the ensemble center to first order (spline
+nonlinearity can shift the throw mean slightly off the CV; it is the same
+effect that makes e⁺ ≠ e⁻). The stored covariance is
+`(1/N)·Σᵢ (S⁽ⁱ⁾−P_CV)(S⁽ⁱ⁾−P_CV)ᵀ`.
+
+That is the whole story before data: **prior widths, centered on the CV.**
+
+### C.2 The post-fit band — sampling the posterior
+
+*(Implemented in `getMCMCErrorBand` (inc/PROplot.h), called by
+`run_global_fit` (bin/PROfit_fit.cxx) with the data spectrum; drawn by
+`plot_channels`.)*
+
+After the fit, the two kinds of systematic need different treatment, because
+the fit treated them differently. The **splines** were genuine fit
+parameters, so their post-fit spread comes from sampling the fit's posterior
+directly (Step 1). The **covariance systematics** were never fit parameters —
+the fit marginalized them analytically — so their post-fit spread has to be
+*reconstructed* from a formula (Step 2). The two mechanisms compose exactly,
+and section C.4 proves the formula used in Step 2.
+
+**Step 1 — sample the spline posterior with MCMC.** A Metropolis chain runs
+over the *free* spline parameters (physics is held at `φ̂`, as are any
+`--fix`'d splines), targeting the fit likelihood itself,
+
+```
+exp( −χ²(φ̂, s | d) / 2 )
+```
+
+with the full fit metric. Two things ride along for free because the target
+is the real χ²: the covariance-marginalized `M = stat + Σ(θ)` (where the
+covariance is rescaled by the *current* prediction at every evaluation — the
+frozen `L` of C.0 is only a band-reconstruction approximation, never a fit
+approximation), and the spline pull terms including any configured
+correlations. In plain words: the chain wanders through spline space visiting
+each point in proportion to how well it describes the data, given everything
+else the fit knew. Defaults: 25,000 burn-in + 20,000 kept steps
+(`--fit-options MCMCburn/MCMCiter`). Each kept step `i` gives a spectrum
+
+```
+S⁽ⁱ⁾ = P(φ̂, s⁽ⁱ⁾)        (collapsed; NO prior covariance throw here)
+```
+
+— note the covariance systematics contribute *nothing* yet; adding a prior
+`L·g` throw here would be wrong, because the data has constrained them.
+
+**Step 2 — reconstruct the covariance-systematic posterior per sample.**
+Here is the key fact (derived in C.4): because the covariance systematics
+shift the spectrum *linearly* and have Gaussian priors, their posterior given
+the data and a fixed spline point is **exactly Gaussian, with a mean and
+covariance you can write down**. So instead of fitting them, we compute the
+Gaussian and draw from it — once per chain step.
+
+First, restrict to the **contributing bins** `B`: bins that are active
+(`PROconfig::SetActiveBins` mask) **and** have `d_b > 0`. These are exactly
+the bins PROchi uses (its statistical term is `diag(max(d,1))` and zero-data
+bins are marginalized away), so the reconstruction is constrained by the same
+information the fit was — PROjector-masked channels, for example, cannot pull
+on anything. On those bins define:
+
+```
+C   = diag( max(d_b, 1) )                 statistical covariance, b ∈ B
+L_B = rows of L in B, zero columns dropped   (n_B × k)
+A   = 1_k + L_Bᵀ C⁻¹ L_B                  (k × k, factorized once, in double)
+```
+
+Then for every chain step `i`, with residual `u⁽ⁱ⁾ = d − S⁽ⁱ⁾` on `B`:
+
+```
+α⁽ⁱ⁾ = A⁻¹ L_Bᵀ C⁻¹ u⁽ⁱ⁾  +  δ⁽ⁱ⁾ ,      δ⁽ⁱ⁾ ~ N(0, A⁻¹)
+S⁽ⁱ⁾ ← S⁽ⁱ⁾ + L·α⁽ⁱ⁾                      (full rows: the shift touches every bin,
+                                           the constraint is informed only by B)
+```
+
+In plain words: the first term is the *best-fit pull* — how far the data
+drags each covariance mode, given where this particular spline sample left
+the prediction — and the second term is the *left-over uncertainty* of that
+pull. (Numerically, `δ` is drawn as `U⁻¹v` with `A = UᵀU` the Cholesky factor
+and `v ~ N(0,1_k)`, which has covariance exactly `A⁻¹` without ever forming a
+matrix inverse.)
+
+Pushed into spectrum space (via the identity `A⁻¹L_BᵀC⁻¹ = L_Bᵀ(C+Σ_BB)⁻¹`,
+proved in C.4), the two pieces become the familiar constraint formulas:
+
+```
+mean pull:      L·α_min = Σ[:,B] (C + Σ_BB)⁻¹ u        (the "constrained" shift)
+fluctuation:    cov( L·δ ) = Σ − Σ[:,B] (C + Σ_BB)⁻¹ Σ[B,:]   (the shrunk width)
+```
+
+— i.e. exactly the conditional-Gaussian update every "ND-constrains-FD"-style
+analysis uses, applied per posterior sample. This is provably identical
+(C.4) to promoting the covariance to eigen-knob spline parameters
+(`covariance_to_spline`) and fitting them, up to two caveats: the linear
+response of `L` (frozen at the best-fit spectrum) and the promoted knobs'
+±3σ spline range, which the analytic pull does not have.
+
+**Step 3 — extract the band.** Per bin `b`, sort the `S_b⁽ⁱ⁾` and take
+
+```
+m_b  = q50_b                          the sample median
+e⁺_b = q84_b − m_b ,   e⁻_b = m_b − q16_b
+shift_b = m_b − P_b(θ̂)               stored as center_shift
+```
+
+Why the **median** and not the best-fit spectrum? After Step 2 the sample
+cloud genuinely sits *away* from `P(θ̂)` — the data pulled it. If we quoted
+`|quantile − P(θ̂)|` instead, a thin band sitting next to the best fit would
+get folded into a fat band straddling it, which is both wrong and misleading.
+So the code measures the width about where the cloud actually is (the
+median), and records *how far the cloud moved* separately (`center_shift`).
+The stored covariance is made **central** for the same reason (second moment
+minus the mean-shift outer product), so that projected widths do not
+double-count the displacement.
+
+**Step 4 — what is drawn.** The red curve in every post-fit plot is the
+**constrained best fit**
+
+```
+P_constrained = P(θ̂) + shift
+```
+
+— the spline best fit *plus* the covariance pull — folded into the best-fit
+histogram at construction, so the main stack view, 2D maps, slices,
+projections, and all ratio panels use it consistently. The band `[m − e⁻,
+m + e⁺]` rides exactly on that curve. The payoff of this convention: an
+all-spline analysis and an all-covariance analysis of the same systematics
+produce the *same* red line and the *same* band (that is the equivalence of
+C.4 made visible); and for a spline-only fit `shift ≡ 0`, so nothing moves
+and the plots look exactly as they always did. Legends label the curve
+`Best-Fit ± 1σ (post-fit)` in the main view and `Constrained Best-Fit` on
+the ratio pages.
+
+**Degenerate shortcut.** If the chain would have zero free parameters
+(covariance-only systematics, or everything `--fix`'d), there is nothing to
+sample — the conditional Gaussian of Step 2 *is* the entire posterior — so no
+MCMC runs at all. `getCovarianceOnlyErrorBand` evaluates the two closed-form
+lines once: shift `Σ[:,B](C+Σ_BB)⁻¹u`, covariance
+`Σ − Σ[:,B](C+Σ_BB)⁻¹Σ[B,:]`, symmetric errors `√diag`, centered on
+`P(θ̂) + shift`. (Called without data it returns the prior `√diag(Σ)` band —
+the pre-fit degenerate case.)
+
+**Legacy variant.** `global --legacy-postfit-error` (also on `profile`) skips
+Step 2 entirely and reverts to the pre-v3.0 recipe: the spline posterior of
+Step 1 is kept, but each sample gets a *prior* covariance throw `L·g`
+(exactly as in C.1), the center shift is zero, and the curve/band sit on the
+raw best-fit spectrum with the plain `Best-Fit` label, drawn **green**
+(RGB 52,168,83) instead of the usual post-fit red so a legacy plot is
+recognizable at a glance. This double-counts the
+data's constraint on the covariance systematics (the χ² already marginalized
+them) and is **not statistically correct** — it exists for systematics
+studies and for reproducing pre-v3.0 plots.
+
+### C.3 Properties & checks
+
+Closure properties you can test:
+
+* **Shrinkage**: the covariance part of the posterior strictly shrinks —
+  `Σ_post = Σ − Σ(C+Σ)⁻¹Σ` is smaller than `Σ` as a matrix. Bin-by-bin on a
+  plot the guarantee holds at matched prediction: the pre-fit `L` is scaled
+  at the CV spectrum and the post-fit `L` at the best-fit spectrum, so if the
+  fit moved the prediction a lot in some bin, the absolute widths being
+  compared reference different event counts there. In practice (best fit ≈
+  CV) the post-fit band is narrower everywhere, and in the high-statistics
+  limit `Σ ≫ C` it approaches the pure statistical width — the data has
+  simply measured the bins.
+* **Asimov closure**: with `d = P(θ̂)` the per-sample pulls average to zero,
+  `shift → 0`, and the constrained best fit coincides with the plain best
+  fit.
+* **The pull is a shrinkage of the residual — as a vector, not per bin**:
+  the shift `Σ(C+Σ)⁻¹·u` scales each *mode* of Σ by a factor between 0 and 1
+  (large where the systematic budget dominates the statistics, small where
+  statistics dominate). Because the modes correlate bins, an individual bin
+  can legitimately be pulled *beyond* its own residual, or even against it,
+  by its correlated neighbours — seeing that in a plot is not a bug.
+* **Representation independence**: converting a `covariance` systematic to
+  `covariance_to_spline` (all modes kept) must reproduce the same band and
+  the same constrained best fit, up to MC noise, the linearity approximation,
+  and pulls beyond 3σ.
+
+Some things to note, which may not be obvious:
+
+* The constraint assumes the covariance systematics act **linearly and
+  unboundedly** on the spectrum. The same assumption their presence in the
+  χ² covariance already makes, so this is NOT the same as splines with a 3 sigma cutoff (but should be close)
+* `C = diag(max(d,1))` matches **PROchi**; for `PROCNP`/`Poisson` fits the
+  reconstruction is an approximation to the corresponding stat model.
+* PROjector-masked channels (active-bins mask, zeroed data) are excluded
+  from `B` automatically. Aka masked bins cannot pull on the systematics.
+* The post-fit band is a posterior **conditioned on the very data drawn on
+  top of it**. Agreement of data with the shrunken band is partly by
+  construction: goodness-of-fit comes from the fit χ², never from this plot.
+* For 2D fitting variables everything above happens per flattened (x,y) bin;
+  the 1D projection bands sum the shift linearly and take widths from the
+  (central) covariance summed over the projected block, while the per-slice
+  pages use the per-bin percentile widths directly.
+
+### C.4 Why this works — deriving the pull and its covariance
+
+Nothing in Step 2 of C.2 needs to be taken on faith: both formulas fall out
+of ordinary calculus on the χ², in about a page. What we can show is equivalance of pulls and covariance, aka *putting a systematic in the covariance matrix and fitting it as an
+explicit pull parameter are the **same fit**, and the pull's best-fit value
+and uncertainty can be recovered exactly even when you chose the covariance
+route.* (This is the result of G. Putnam's SBN note "How to Obtain Pull Terms
+for Systematic Uncertainties Embedded in a Covariance Matrix", written here
+in PROfit's variables. Need to upload to DocDB)
+
+**Setup.** Take the covariance systematics and make them explicit fit
+parameters for a moment. C.0 built `Σ = L·Lᵀ`, so each non-zero column of `L`
+is one independent mode of correlated variation; give each mode a knob
+`α_j`, so the prediction becomes `P(θ) + L·α`, and give each knob a unit
+Gaussian prior (that is what "the mode has size √S" already encoded into
+`L`), contributing a pull term `αᵀα`. With `C` the statistical covariance and
+`u ≡ d − P(θ)` the residual, the χ² with everything explicit is
+
+```
+χ²(θ, α) = (u − L·α)ᵀ C⁻¹ (u − L·α)  +  αᵀα  +  pulls(s)
+```
+
+In plain words: how far is the (shifted) prediction from the data in units
+of the statistical error, plus how far did we bend each systematic knob in
+units of its prior.
+
+**Step 1 — minimize over α.** Expand the first term and collect powers of α:
+
+```
+χ² = uᵀC⁻¹u  −  2αᵀ(LᵀC⁻¹u)  +  αᵀ(LᵀC⁻¹L + 1)α  +  pulls(s)
+```
+
+Setting the derivative with respect to α to zero:
+
+```
+∂χ²/∂α = −2 LᵀC⁻¹u + 2 (1 + LᵀC⁻¹L) α  =  0
+```
+
+and naming `A ≡ 1 + LᵀC⁻¹L` (the same `A` as C.2), the best-fit pull is
+
+```
+α_min = A⁻¹ LᵀC⁻¹ u
+```
+
+The second derivative is `∂²χ²/∂α∂α = 2A`, a constant — the χ² is *exactly*
+a parabola in α (this is what "linear systematic" buys you). A quadratic χ²
+means a Gaussian likelihood, and a curvature of `2A` means its covariance is
+
+```
+cov(α) = A⁻¹        (the "restricted" posterior covariance of the pulls)
+```
+
+Those are precisely the two objects Step 2 of C.2 uses: draw
+`α = α_min + δ` with `δ ~ N(0, A⁻¹)`.
+
+**Step 2 — complete the square.** Because the χ² is an exact parabola in α,
+it can be rewritten with no approximation as its minimum plus the quadratic
+around it:
+
+```
+χ²(θ, α) = χ²(θ, α_min)  +  (α − α_min)ᵀ A (α − α_min)
+```
+
+(Multiply out the right-hand side and use the stationarity condition
+`A·α_min = LᵀC⁻¹u`; every cross term cancels.) This one line *is* the whole
+theorem: for any fixed θ and data, the α-dependence of the likelihood is
+exactly the Gaussian `N(α_min, A⁻¹)` — so sampling α from that Gaussian, per
+posterior sample of θ, reproduces the full joint posterior of (θ, α). That
+is literally what the code does.
+
+**Step 3 — recover the covariance-matrix form.** What is the minimum value
+`χ²(θ, α_min)`? Substituting α_min into the expanded χ² (two of the three
+α-terms merge via stationarity):
+
+```
+χ²(θ, α_min) = uᵀC⁻¹u − uᵀC⁻¹L·A⁻¹·LᵀC⁻¹u + pulls(s)
+```
+
+Now use the Woodbury matrix identity, which states exactly that
+
+```
+(C + L·Lᵀ)⁻¹  =  C⁻¹ − C⁻¹L·A⁻¹·LᵀC⁻¹
+```
+
+(you can verify it by multiplying both sides by `C + LLᵀ`). The two terms
+collapse into one:
+
+```
+χ²(θ, α_min)  =  uᵀ (C + Σ)⁻¹ u  +  pulls(s)
+```
+
+which is PROfit's actual χ² — the one with `M = C + Σ` that the fitter
+minimizes and section 1 describes. So: **fitting the knobs explicitly and
+profiling them out gives the identical χ²(θ) as never introducing them and
+putting Σ in the covariance matrix.** (For Gaussians, profiling and
+marginalizing differ only by a θ-independent constant, so the statement holds
+either way you read it.) The two representations are the same fit; the
+covariance route just discards the record of where the knobs went — and
+Steps 1–2 above are the recipe for getting that record back.
+
+**Step 4 — the spectrum-space forms.** The band code applies the pull to the
+spectrum, so translate both objects with `Σ = LLᵀ`. First a small identity:
+
+```
+LᵀC⁻¹(C + Σ) = Lᵀ + LᵀC⁻¹LLᵀ = (1 + LᵀC⁻¹L)Lᵀ = A·Lᵀ
+      ⇒   A⁻¹LᵀC⁻¹ = Lᵀ(C + Σ)⁻¹
+```
+
+Applying it to the mean and to the covariance (`A⁻¹ = 1 − Lᵀ(C+Σ)⁻¹L`
+follows from the same line):
+
+```
+L·α_min   =  L·Lᵀ(C+Σ)⁻¹u        =  Σ (C+Σ)⁻¹ u
+cov(L·δ)  =  L·A⁻¹·Lᵀ            =  Σ − Σ (C+Σ)⁻¹ Σ
+```
+
+— the "constrained shift" and "shrunk width" quoted in C.2. In the fit
+itself only the contributing bins `B` enter, which is the same derivation
+with `L` replaced by `L_B` and the shift `L·α` still applied to every bin —
+exactly the restriction Step 2 of C.2 makes.
+
+**Reading the result.** `Σ(C+Σ)⁻¹` is a matrix "fraction" — systematics over
+(statistics + systematics). Where the systematic budget dominates, the
+fraction approaches 1 and the data pulls the prediction essentially all the
+way onto itself; where statistics dominate, it approaches 0 and the
+prediction barely moves. The posterior width `Σ − Σ(C+Σ)⁻¹Σ` is the prior
+width minus what the data pinned down — always smaller, shrinking to the
+statistical floor in the high-statistics limit. Everything the post-fit band
+does is these two lines, evaluated once per MCMC sample.
+
+---
+
+*Why is the repository called "Elephant Vanishes"? Old habit — all of my git repos are named after the book I was reading when I created them. This one was Haruki Murakami's* The Elephant Vanishes.

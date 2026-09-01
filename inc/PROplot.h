@@ -86,7 +86,7 @@ namespace PROfit{
             }
         return 1;
         };
-        bool hasBound(std::string bound_name){
+        bool hasBound(std::string bound_name) const {
                 if(bound_name == "xmin") {
                     return xmin!=-9999? true : false;
                 }else if(bound_name == "xmax") {
@@ -105,7 +105,7 @@ namespace PROfit{
                 }
         return false;
         };
-        float getBound(std::string bound_name){
+        float getBound(std::string bound_name) const {
                 if(bound_name == "xmin") {
                     return xmin;
                 }else if(bound_name == "xmax") {
@@ -162,6 +162,22 @@ namespace PROfit{
     void set_matrix_palette();
 
     /**
+     * @brief Plot the spectrum of the ratio between each pair of detectors, one page per channel.
+     * @param c                Canvas printing into an already-open multipage PDF.
+     * @param config           Analysis configuration.
+     * @param cv_coll          Collapsed CV prediction.
+     * @param bf_coll          Optional collapsed best-fit prediction.
+     * @param data_coll        Optional collapsed data spectrum.
+     * @param errband          Optional pre-fit error band, whose covariance propagates the inter-detector correlation.
+     * @param posterrband      Optional post-fit error band, used with bf_coll.
+     * @param channel_offsets  Collapsed bin start of each mode/detector/channel, in loop order.
+     * @param filename         Output PDF filename.
+     * @param other_index      Variable index (default 0).
+     */
+    void plot_detector_ratio_spectra(TCanvas &c, const PROconfig &config, const Eigen::VectorXf &cv_coll, const std::optional<Eigen::VectorXf> &bf_coll, const std::optional<Eigen::VectorXf> &data_coll, const std::optional<PROerrorbar> &errband, const std::optional<PROerrorbar> &posterrband, const std::vector<size_t> &channel_offsets, const std::string &filename, int other_index = 0);
+    void plot_channel_ratio_spectra(TCanvas &c, const PROconfig &config, const Eigen::VectorXf &cv_coll, const std::optional<Eigen::VectorXf> &bf_coll, const std::optional<Eigen::VectorXf> &data_coll, const std::optional<PROerrorbar> &errband, const std::optional<PROerrorbar> &posterrband, const std::vector<size_t> &channel_offsets, const std::string &filename, int other_index = 0, PlotOptions opt = PlotOptions{});
+
+    /**
      * @brief Produce a multi-panel detector ratio comparison plot.
      * @param config       Analysis configuration.
      * @param data_hists   Data histograms, one per channel.
@@ -190,11 +206,12 @@ namespace PROfit{
      * @param opt          Bitmask of PlotOptions flags.
      * @param var_index    Variable index (default 0).
      * @param ratio_bool   If true, add a ratio panel.
+     * @param plot_channel_ratios   If true, plot the ratios across different channels.
      * @param skip_stack_subchannels  Optional global subchannel indices to omit from the
      *        CV stack and legend (used by --bkg-subtract; their contents are expected to
      *        already be zero in `cv`).
      */
-    std::map<std::string, TObject *> plot_channels(const std::string &filename, const PROconfig &config, std::optional<PROspec> cv, std::optional<PROspec> best_fit, std::optional<PROdata> data, std::optional<PROerrorbar> errband, std::optional<PROerrorbar> posterrband, std::vector<TPaveText> &texts, PlotBounds &bounds, PlotOptions opt = PlotOptions::Default, int var_index = 0, bool ratio_bool = false, const std::vector<size_t> *skip_stack_subchannels = nullptr);
+    std::map<std::string, TObject *> plot_channels(const std::string &filename, const PROconfig &config, std::optional<PROspec> cv, std::optional<PROspec> best_fit, std::optional<PROdata> data, std::optional<PROerrorbar> errband, std::optional<PROerrorbar> posterrband, std::vector<TPaveText> &texts, const PlotBounds &bounds, PlotOptions opt = PlotOptions::Default, int var_index = 0, bool ratio_bool = false, bool plot_channel_ratios = false, const std::vector<size_t> *skip_stack_subchannels = nullptr, PROmetric *chi_metric = nullptr, const PROspec *chi_spec = nullptr);
 
     /**
      * @brief Return global subchannel indices whose `m_fullnames[i]` contains `pattern` as a substring.
@@ -288,9 +305,35 @@ namespace PROfit{
      * @param cvparams    CV physics parameter vector.
      * @param scale       If true, divide errors by bin width.
      * @param other_index Variable index.
+     * @param nthrows     Number of systematic throws (default 2500).
      * @return PROerrorbar with asymmetric per-bin uncertainties.
      */
-    PROerrorbar getErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const PROspec &cv_spec, const Eigen::VectorXf &cvparams,bool scale=false, int other_index=0);
+    PROerrorbar getErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const PROspec &cv_spec, const Eigen::VectorXf &cvparams,bool scale=false, int other_index=0, size_t nthrows=2500);
+
+    /**
+     * @brief Compute an error band analytically from the covariance-type systematics alone.
+     * @details Exact replacement for getMCMCErrorBand when the sampling chain has zero
+     * free parameters (no spline nuisances, or all of them --fix'd): the chain never
+     * moves, so its band reduces to Gaussian throws of the collapsed scaled covariance
+     * around a single spectrum, whose 16/84 quantiles are exactly ±sqrt(diag).  Symmetric
+     * by construction; `covariance` is the collapsed scaled covariance itself.
+     * @param config    Analysis configuration.
+     * @param prop      MC event store.
+     * @param syst      Systematic object (only covariance-type systs contribute).
+     * @param model     Physics model.
+     * @param params    Parameter vector at which to evaluate the spectrum (e.g. best fit).
+     * @param scale     If true, divide errors by bin width.
+     * @param var_index Variable index.
+     * @return PROerrorbar with symmetric per-bin uncertainties and the bin covariance.
+     */
+    /** @brief Analytic error band from the summed covariance (no MCMC). With an empty
+     *  @p data_spec this is the prior band sqrt(diag(Sigma)) about the prediction. When a
+     *  collapsed data spectrum is given, the band is the data-constrained posterior of the
+     *  covariance systematics (Putnam SBN note Eqs. 7-8): center shifted by
+     *  Sigma(C+Sigma)^-1 u and covariance Sigma - Sigma(C+Sigma)^-1 Sigma, restricted to
+     *  active bins with data>0 (PROchi convention, C = diag(max(data,1))). Exact when the
+     *  covariance systs are the only free parameters (the post-fit degenerate-chain path). */
+    PROerrorbar getCovarianceOnlyErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const Eigen::VectorXf &params, bool scale=false, int var_index=0, const Eigen::VectorXf &data_spec = Eigen::VectorXf());
 
     /**
      * @brief Result of getErrorBandBkgSubtracted: a signal-only error band plus the
@@ -311,7 +354,7 @@ namespace PROfit{
 
     /**
      * @brief Background-subtracted pre-fit error band, publication convention.
-     * @details Each of the 2500 systematic throws is split into signal and background
+     * @details Each of the nthrows (default 2500) systematic throws is split into signal and background
      * pieces (FillSystRandomThrowSplit) and the throw's OWN background is subtracted, so
      * background systematic variations cancel out of the band: the band shows
      * signal-only systematics around the subtracted CV. The background's per-bin
@@ -328,9 +371,10 @@ namespace PROfit{
      * @param bkg_subchannels Global subchannel indices to subtract (from find_subchannels_by_pattern).
      * @param scale           If true, divide band errors by bin width.
      * @param other_index     Variable index.
+     * @param nthrows         Number of systematic throws (default 2500).
      * @return PROsubtractedErrorBand (see struct docs).
      */
-    PROsubtractedErrorBand getErrorBandBkgSubtracted(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const PROspec &cv_spec, const Eigen::VectorXf &cvparams, const std::vector<size_t> &bkg_subchannels, bool scale=false, int other_index=0);
+    PROsubtractedErrorBand getErrorBandBkgSubtracted(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const PROspec &cv_spec, const Eigen::VectorXf &cvparams, const std::vector<size_t> &bkg_subchannels, bool scale=false, int other_index=0, size_t nthrows=2500);
 
     /**
      * @brief Produce a bar chart showing fractional prior uncertainty per systematic.
@@ -353,6 +397,7 @@ namespace PROfit{
      * @return 0 on success.
      */
     int plotPriorFractionalSystematicRatios(const PROconfig &config, const PROspec &spec, const PROsyst &allsplinesyst, std::string filename, int other_index);
+    int plotPriorFractionalSystematicChannelRatios(const PROconfig &config, const PROspec &spec, const PROsyst &allsplinesyst, std::string filename, int other_index);
 
     /**
      * @brief Produce a multi-page diagnostic PDF for every covariance_to_spline systematic.
@@ -392,15 +437,39 @@ namespace PROfit{
      * @param post_covar Output post-fit parameter covariance matrix (splines only).
      * @param scale      If true, divide error bars by bin width.
      * @param var_index  Variable index (default 0).
+     * @param data_spec  Optional collapsed data spectrum. When empty (default), the band
+     *                   includes prior throws of the covariance-type systematics. When given,
+     *                   each MCMC sample instead receives the data-constrained posterior pull
+     *                   of the covariance systematics (G. Putnam, "How to Obtain Pull Terms
+     *                   for Systematic Uncertainties Embedded in a Covariance Matrix", SBN
+     *                   note, May 2026), shrinking the post-fit band. center_shift then
+     *                   reports the ANALYTIC pull Sigma(C+Sigma)^-1 (d - cv) at the best
+     *                   fit (exactly 0 for Asimov), not the sample median. Pass this only
+     *                   for post-fit bands; the pre-fit/prior band must stay unconstrained.
      * @return PROerrorbar with per-bin asymmetric uncertainties and the histogram covariance.
      */
     template<class T, class P>
-        PROerrorbar getMCMCErrorBand(Metropolis<T, P> met, size_t burnin, size_t iterations, const PROconfig &config, const PROpeller &prop, PROmetric &metric, const Eigen::VectorXf &best_fit, std::vector<TH1D> &posteriors, Eigen::MatrixXf &post_covar, Eigen::VectorXf &param_err_lo, Eigen::VectorXf &param_err_hi, bool scale = false, int var_index=0, PROgressBar *pbar = nullptr) {
+        PROerrorbar getMCMCErrorBand(Metropolis<T, P> met, size_t burnin, size_t iterations, const PROconfig &config, const PROpeller &prop, PROmetric &metric, const Eigen::VectorXf &best_fit, std::vector<TH1D> &posteriors, Eigen::MatrixXf &post_covar, Eigen::VectorXf &param_err_lo, Eigen::VectorXf &param_err_hi, bool scale = false, int var_index=0, PROgressBar *pbar = nullptr, const Eigen::VectorXf &data_spec = Eigen::VectorXf()) {
             for(size_t i = 0; i < metric.GetSysts().GetNSplines(); ++i)
                 posteriors.emplace_back("", (";"+config.m_mcgen_variation_plotname_map.at(metric.GetSysts().spline_names[i])).c_str(), 60, -3, 3);
 
             Eigen::VectorXf cv = FillSpectra(config, prop, metric.GetSysts(), metric.GetModel(), best_fit, true, var_index).Spec();
+
+            for (int i = 0; i < cv.size(); ++i) {
+                if (cv(i) <= 0.0f) {
+                    cv(i) = 1e-6f; // Floor zero-count / inactive subchannels
+                }
+            }
+
             Eigen::VectorXf cv_coll = CollapseMatrix(config, cv);
+            // The data constraint only makes sense in this variable's collapsed
+            // space; a mismatched spectrum (e.g. from another variable) would
+            // index out of range below. Ignore it loudly rather than crash.
+            bool use_data = data_spec.size() != 0;
+            if(use_data && data_spec.size() != cv_coll.size()) {
+                log<LOG_ERROR>(L"%1% || data_spec has %2% bins but variable %3% has %4% collapsed bins; ignoring the data constraint.") % __func__ % data_spec.size() % var_index % cv_coll.size();
+                use_data = false;
+            }
             Eigen::MatrixXf L;
             if(metric.GetSysts().GetNCovar() > 0) L = metric.GetSysts().DecomposeFractionalCovariance(config, cv);
             else L = Eigen::MatrixXf::Zero(config.m_num_variable_bins_total_collapsed[var_index], config.m_num_variable_bins_total_collapsed[var_index]);
@@ -412,13 +481,18 @@ namespace PROfit{
             Eigen::VectorXf splines_bf = best_fit.segment(nphys, nspline);
             post_covar = Eigen::MatrixXf::Constant(nspline, nspline, 0);
             Eigen::MatrixXf post_hist_covar = Eigen::MatrixXf::Constant(cv_coll.size(), cv_coll.size(), 0);
+            Eigen::VectorXf hist_diff_sum = Eigen::VectorXf::Zero(cv_coll.size());
             size_t nsteps = 0;
             std::vector<Eigen::VectorXf> specs;
             std::vector<std::vector<float>> param_samples(nspline);
-            const auto action = [&](const Eigen::VectorXf &value) {
+
+	    std::function<void(const Eigen::VectorXf&)> action;
+	    
+            if (!use_data){
+	        action = [&](const Eigen::VectorXf &value) {
                 nsteps += 1;
-                for(size_t i = 0; i < config.m_num_variable_bins_total_collapsed[var_index]; ++i)
-                    throws(i) = nd(PROseed::global_rng);
+		for(size_t i = 0; i < config.m_num_variable_bins_total_collapsed[var_index]; ++i)
+                        throws(i) = nd(PROseed::global_rng);
                 specs.push_back(CollapseMatrix(config, FillSpectra(config, prop, metric.GetSysts(), metric.GetModel(), value, true,var_index).Spec())+L*throws);
                 for(int i = 0; i < nspline; ++i) {
                     posteriors[i].Fill(value(i+nphys));
@@ -426,14 +500,119 @@ namespace PROfit{
                 }
                 Eigen::VectorXf splines = value.segment(nphys, nspline);
                 Eigen::VectorXf diff = splines-splines_bf;
-                Eigen::VectorXf diff_hist = specs.back() - cv_coll;
                 post_covar += diff * diff.transpose();
+		Eigen::VectorXf diff_hist = specs.back() - cv_coll;
+                hist_diff_sum += diff_hist;
                 post_hist_covar += diff_hist * diff_hist.transpose();
-            };
+                };
+            }
+	    else{
+                action = [&](const Eigen::VectorXf &value) {
+                    nsteps += 1;
+                    specs.push_back(CollapseMatrix(config, FillSpectra(config, prop, metric.GetSysts(), metric.GetModel(), value, true,var_index).Spec()));
+                    for(int i = 0; i < nspline; ++i) {
+                        posteriors[i].Fill(value(i+nphys));
+                        param_samples[i].push_back(value(i+nphys));
+                    }
+		    Eigen::VectorXf splines = value.segment(nphys, nspline);
+                    Eigen::VectorXf diff = splines-splines_bf;
+                    post_covar += diff * diff.transpose();
+                };
+	    }
             met.run(burnin, iterations, action, pbar);
-            post_hist_covar /= nsteps;
-            post_covar /= nsteps;
 
+            post_covar /= nsteps;
+            // MAP-consistent covariance pull: Sigma(C+Sigma)^-1 (d - cv_bf) at the
+            // best fit, matching the analytic getCovarianceOnlyErrorBand (exactly 0
+            // for Asimov). The sample median is NOT used for center_shift — it
+            // carries the posterior-median-vs-MAP offset plus MCMC noise.
+            Eigen::VectorXf analytic_shift = Eigen::VectorXf::Zero(cv_coll.size());
+            if (use_data) {
+                // Constrained posterior pull for covariance-type systematics,
+               // the collapsed systematic covariance is
+                // Sigma = L*L^T (L = U*sqrt(S) from DecomposeFractionalCovariance)
+                // and the spectrum shift is L*alpha (matchs the note's R = L^T)
+            
+                // Mark Note: Restrict the constraint to the bins the fit metric actually
+                // used, aka the active bins PR from a while back with data > 0 (PROchi drops zero-data bins
+                // and its stat term is diag(max(data,1))). PROjector-masked or
+                // empty bins must not pull on alpha.
+                std::vector<int> contrib;
+                for(int i = 0; i < data_spec.size(); ++i)
+                    if(config.IsBinActive(var_index, i) && data_spec(i) > 0)
+                        contrib.push_back(i);
+            
+                std::vector<int> modes;
+                for(int j = 0; j < L.cols(); ++j)
+                    if(L.col(j).squaredNorm() > 0) modes.push_back(j);
+
+                if(!contrib.empty() && !modes.empty()) {
+                    const size_t k = modes.size(), nb = contrib.size();
+                    Eigen::MatrixXd L_shift(L.rows(), k);
+                    for(size_t j = 0; j < k; ++j)
+                        L_shift.col(j) = L.col(modes[j]).cast<double>();
+                    Eigen::MatrixXd L_red(nb, k);
+                    Eigen::VectorXd C_inv_red(nb);
+                    for(size_t i = 0; i < nb; ++i) {
+                        L_red.row(i) = L_shift.row(contrib[i]);
+                        C_inv_red(i) = 1.0 / std::max<double>(data_spec(contrib[i]), 1.0);
+                    }
+                    Eigen::MatrixXd inner = Eigen::MatrixXd::Identity(k, k)
+                                          + L_red.transpose() * C_inv_red.asDiagonal() * L_red;
+                    Eigen::LLT<Eigen::MatrixXd> inner_llt(inner);
+                    if(inner_llt.info() != Eigen::Success) {
+                        // inner is PD by construction. any failures here are float math noise from L. Clamp eigenvalues and retry.
+                        log<LOG_WARNING>(L"%1% || LLT of posterior pull matrix failed; clamping eigenvalues.") % __func__;
+                        Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> es(inner);
+                        inner = es.eigenvectors()
+                              * es.eigenvalues().cwiseMax(1e-12).asDiagonal()
+                              * es.eigenvectors().transpose();
+                        inner_llt.compute(inner);
+                    }
+
+                    // Conditional pull at the best fit: L*alpha_min(d - cv) equals
+                    // Sigma[:,contrib] (C+Sigma)^-1 (d - cv) by the push-through identity.
+                    Eigen::VectorXd u_bf(nb);
+                    for(size_t i = 0; i < nb; ++i)
+                        u_bf(i) = data_spec(contrib[i]) - cv_coll(contrib[i]);
+                    analytic_shift = (L_shift * inner_llt.solve(
+                        L_red.transpose() * (C_inv_red.asDiagonal() * u_bf))).cast<float>();
+
+                    Eigen::VectorXd throws_k(k), residual(nb);
+                    for(size_t ai = 0; ai < nsteps; ++ai) {
+                        for(size_t i = 0; i < k; ++i)
+                            throws_k(i) = nd(PROseed::global_rng);
+                        for(size_t i = 0; i < nb; ++i)
+                            residual(i) = data_spec(contrib[i]) - specs.at(ai)(contrib[i]);
+                        Eigen::VectorXd alpha_min =
+                            inner_llt.solve(L_red.transpose() * (C_inv_red.asDiagonal() * residual));
+                        // delta = U^-1 v with inner = U^T U has cov(delta) = inner^-1.
+                        Eigen::VectorXd alpha_hat =
+                            alpha_min + inner_llt.matrixU().solve(throws_k);
+                        specs.at(ai) += (L_shift * alpha_hat).cast<float>();
+
+                        Eigen::VectorXf diff_hist = specs.at(ai) - cv_coll;
+                        hist_diff_sum += diff_hist;
+                        post_hist_covar += diff_hist * diff_hist.transpose();
+                    }
+                } else {
+                    // Nothing to constrain , but still accumulate the band covariance
+                    // the constraint loop would otherwise have provided.
+                    for(size_t ai = 0; ai < nsteps; ++ai) {
+                        Eigen::VectorXf diff_hist = specs.at(ai) - cv_coll;
+                        hist_diff_sum += diff_hist;
+                        post_hist_covar += diff_hist * diff_hist.transpose();
+                    }
+                }
+            }
+
+            post_hist_covar /= nsteps;
+            // Make the covariance CENTRAL (about the sample mean, not the
+            // best-fit CV): the data-pull displacement lives in center_shift,
+            // and projected band widths built from this covariance must not
+            // absorb it. Matches the analytic getCovarianceOnlyErrorBand.
+            hist_diff_sum /= nsteps;
+            post_hist_covar -= hist_diff_sum * hist_diff_sum.transpose();
             param_err_lo = Eigen::VectorXf::Zero(nspline);
             param_err_hi = Eigen::VectorXf::Zero(nspline);
             for(int i = 0; i < nspline; ++i) {
@@ -446,25 +625,8 @@ namespace PROfit{
             log<LOG_INFO>(L"%1% || Acceptance rate %2%") % __func__ % ((float)met.naccept / iterations);
 
             cv = CollapseMatrix(config, cv);
-
-            std::vector<float> centers;
-            size_t global_channel_index = 0;
-            for(size_t mode = 0; mode < config.m_num_modes; ++mode) {
-                for(size_t det = 0; det < config.m_num_detectors; ++det) {
-                    for(size_t channel = 0; channel < config.m_num_channels; ++channel) {
-                        std::vector<float> tedges =  config.GetChannelVariableBins(global_channel_index, var_index).Edges();
-                        global_channel_index++;
-                        for(size_t p=0; p<tedges.size(); p++){
-                            if(p<tedges.size()-1){
-                                centers.push_back((tedges[p+1]+tedges[p])/2.0);
-                            }
-                        }
-
-                    }
-                }
-            }
-
             PROerrorbar ebar(cv.size());
+            ebar.constrained = use_data;
             for(int i = 0; i < cv.size(); ++i) {
                 std::vector<float> binconts(specs.size());
                 for(size_t j = 0; j < specs.size(); ++j) {
@@ -473,14 +635,75 @@ namespace PROfit{
                 float scale_factor = scale ? 1.0/config.collapsed_bin_widths.at(var_index)(i) :  1.0;
                 if(std::isnan(scale_factor)) scale_factor = 1;
                 std::sort(binconts.begin(), binconts.end());
-                float ehi = std::abs((binconts[int(0.840*specs.size())] - cv(i))*scale_factor);
-                float elo = std::abs((cv(i) - binconts[int(0.160*specs.size())])*scale_factor);
+                // Percentile widths about the sample MEDIAN, not cv: for the
+                // data-constrained band the sample cloud is pulled toward the
+                // data, and |quantile - cv| would fold a thin displaced band
+                // into a fat one straddling the best fit. The displacement is
+                // reported separately in center_shift; error_point stays the
+                // best-fit spectrum (plot code uses it for unit conversion).
+                float med = binconts[int(0.500*specs.size())];
+                float ehi = (binconts[int(0.840*specs.size())] - med)*scale_factor;
+                float elo = (med - binconts[int(0.160*specs.size())])*scale_factor;
                 ebar.error_up(i) =  ehi;
                 ebar.error_down(i) =  elo;
                 ebar.error_point(i) = cv(i)*scale_factor;
-                log<LOG_DEBUG>(L"%1% || ErrorBand bin %2% %3% %4% %5% %6% ") % __func__ % i % cv(i) % ehi % elo % scale_factor ;
+                ebar.center_shift(i) = use_data ? analytic_shift(i)*scale_factor
+                                                : (med - cv(i))*scale_factor;
+                log<LOG_INFO>(L"%1% || ErrorBand bin %2% %3% %4% %5% %6% shift %7%") % __func__ % i % cv(i) % ehi % elo % scale_factor % ebar.center_shift(i);
             }
             ebar.covariance = post_hist_covar;
+
+            // =========================================================================
+            //  DIAGNOSTIC SANITY CHECK LOOP
+            // =========================================================================
+            log<LOG_INFO>(L"%1% || Running pre-return sanity checks on PROerrorbar...") % __func__;
+
+            for (int i = 0; i < ebar.error_point.size(); ++i) {
+                float pt  = ebar.error_point(i);
+                float eup = ebar.error_up(i);
+                float elo = ebar.error_down(i);
+
+                if (std::isnan(pt) || std::isinf(pt)) {
+                    log<LOG_ERROR>(L"%1% || CRITICAL ERROR: error_point bin %2% is invalid (value: %3%)") % __func__ % i % pt;
+                    throw std::runtime_error("PROerrorbar error_point contains NaN or Inf at bin " + std::to_string(i));
+                }
+                if (std::isnan(eup) || std::isinf(eup)) {
+                    log<LOG_ERROR>(L"%1% || CRITICAL ERROR: error_up bin %2% is invalid (value: %3%)") % __func__ % i % eup;
+                    throw std::runtime_error("PROerrorbar error_up contains NaN or Inf at bin " + std::to_string(i));
+                }
+                if (std::isnan(elo) || std::isinf(elo)) {
+                    log<LOG_ERROR>(L"%1% || CRITICAL ERROR: error_down bin %2% is invalid (value: %3%)") % __func__ % i % elo;
+                    throw std::runtime_error("PROerrorbar error_down contains NaN or Inf at bin " + std::to_string(i));
+                }
+                float shf = ebar.center_shift(i);
+                if (std::isnan(shf) || std::isinf(shf)) {
+                    log<LOG_ERROR>(L"%1% || CRITICAL ERROR: center_shift bin %2% is invalid (value: %3%)") % __func__ % i % shf;
+                    throw std::runtime_error("PROerrorbar center_shift contains NaN or Inf at bin " + std::to_string(i));
+                }
+            }
+
+            // Check covariance matrix dimensions and values
+            if (ebar.covariance.rows() != cv.size() || ebar.covariance.cols() != cv.size()) {
+                log<LOG_ERROR>(L"%1% || CRITICAL ERROR: Covariance matrix dimension mismatch! Expected (%2%x%3%), got (%4%x%5%)") 
+                    % __func__ % cv.size() % cv.size() % ebar.covariance.rows() % ebar.covariance.cols();
+                throw std::runtime_error("PROerrorbar covariance matrix dimension mismatch!");
+            }
+
+            for (int r = 0; r < ebar.covariance.rows(); ++r) {
+                for (int c = 0; c < ebar.covariance.cols(); ++c) {
+                    float val = ebar.covariance(r, c);
+                    if (std::isnan(val) || std::isinf(val)) {
+                        log<LOG_ERROR>(L"%1% || CRITICAL ERROR: Covariance matrix element (%2%, %3%) is invalid (value: %4%)") 
+                            % __func__ % r % c % val;
+                        throw std::runtime_error("PROerrorbar covariance contains NaN or Inf at (" + std::to_string(r) + ", " + std::to_string(c) + ")");
+                    }
+                }
+            }
+
+            log<LOG_INFO>(L"%1% || Sanity check passed successfully!") % __func__;
+            // =========================================================================
+
+
             return ebar;
         }
 

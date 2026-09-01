@@ -46,7 +46,7 @@ namespace PROfit{
             const PROconfig config; ///< Analysis configuration (owned copy).
             const PROpeller peller; ///< MC event store (owned copy).
             const PROsyst *syst;    ///< Systematic object (non-owning pointer).
-            const PROmodel model;   ///< Physics model (owned copy).
+            const PROmodel &model;  ///< Physics model (non-owning reference, as in PROchi; an owned copy would slice derived models to the PROmodel base, losing their get_probs override).
             const PROdata data;     ///< Observed data spectrum (owned copy).
             EvalStrategy strat;     ///< Evaluation strategy.
             bool shape_only;        ///< If true, compute chi-squared on area-normalised spectra.
@@ -129,7 +129,7 @@ namespace PROfit{
              * @param var_index             Variable index.
              * @return CNP chi-squared for that channel.
              */
-            float getSingleChannelChi(size_t global_channel_index, const PROspec &cv, size_t var_index);
+            float getSingleChannelChi(size_t global_channel_index, const PROspec &cv, size_t var_index, const Eigen::MatrixXf &projection = Eigen::MatrixXf());
 
             /**
              * @brief Fix a spline nuisance parameter at a given value.

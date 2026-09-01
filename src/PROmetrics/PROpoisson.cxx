@@ -73,6 +73,13 @@ PROpoisson::PROpoisson(const std::string tag, const PROconfig &conin, const PROp
           prior_covariance(iB, iA) = std::get<2>(t);
         }
         prior_covariance = systin->spline_priors.asDiagonal() * prior_covariance * systin->spline_priors.asDiagonal();
+        for(size_t i = 0; i < systin->spline_prior_types.size(); ++i) {
+            if (systin->spline_prior_types[i] == SplinePriorType::Uniform) {
+                prior_covariance.row(i).setZero();
+                prior_covariance.col(i).setZero();
+                prior_covariance(i, i) = 1.0f;
+            }
+        }
         prior_covariance_inv = prior_covariance.inverse();
     }
 }
@@ -80,6 +87,9 @@ PROpoisson::PROpoisson(const std::string tag, const PROconfig &conin, const PROp
 float PROpoisson::Pull(const Eigen::VectorXf &systs) {
     // No correlations: sum of squares
     Eigen::VectorXf centered = systs - syst->spline_centers;
+    for(size_t i = 0; i < syst->spline_prior_types.size(); ++i) {
+        if(syst->spline_prior_types[i] == SplinePriorType::Uniform) centered(i) = 0.0f;
+    }
     if (!correlated_systematics) {
         return (centered.array().square() / syst->spline_priors.array().square()).sum();
     }
@@ -117,7 +127,7 @@ float PROpoisson::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &grad
     // strat != EventByEvent (not == BinnedChi2): matches the FD gradient
     // helpers so BinnedGrad uses one consistent spectrum model and keeps the
     // fill cache valid.
-    PROspec result = FillSpectra(config, peller, *syst, model, param, fs_cache, strat != EventByEvent);
+    PROspec result = FillSpectra(config, peller, *syst, model, param, fs_cache, strat != EventByEvent, config.i_prime);
 
     const Eigen::VectorXf vdata = shape_only
         ? data.Normalize(config,result)
@@ -148,7 +158,15 @@ float PROpoisson::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &grad
         // GradientOneSidedFull — but with a fixed forward stencil rather than
         // the LBFGS-direction-tracking heuristic, which was always somewhat
         // approximate.
-        const GradientMode mode = gradient_mode;
+        GradientMode mode = gradient_mode;
+        // Analytic gradient is implemented in PROchi only so far. For Poisson the
+        // linearised chain rule is already exact modulo FD truncation in dδ/dθ.
+        if (mode == GradientAnalytic) {
+            static std::atomic<bool> warned_analytic{false};
+            if(!warned_analytic.exchange(true))
+                log<LOG_WARNING>(L"%1% || Analytic gradient not implemented for PROpoisson; falling back to %2%.") % __func__ % gradientModeName(GradientFallback);
+            mode = GradientFallback;
+        }
         const bool linearised = (mode == GradientCentralLin) || (mode == GradientOneSidedLin);
         const bool one_sided  = (mode == GradientOneSidedFull) || (mode == GradientOneSidedLin);
 
@@ -168,12 +186,21 @@ float PROpoisson::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &grad
                 const float s = vmc_base(b);
                 w_base(b) = (s > 0.0f) ? 2.0f * (1.0f - vdata_base(b) / s) : 0.0f;
             }
-            const Eigen::VectorXf centered = subvector2 - syst->spline_centers;
+            Eigen::VectorXf centered = subvector2 - syst->spline_centers;
+            // Match Pull(): uniform-prior splines contribute NO pull — mask them
+            // here too, or the gradient carries a phantom Gaussian pull the value
+            // doesn't have.
+            for(size_t i = 0; i < syst->spline_prior_types.size(); ++i)
+                if(syst->spline_prior_types[i] == SplinePriorType::Uniform) centered(i) = 0.0f;
             if (!correlated_systematics) {
                 pull_grad_nuis = 2.0f * centered.array() /
                                  (syst->spline_priors.array() * syst->spline_priors.array());
             } else {
                 pull_grad_nuis = 2.0f * (prior_covariance_inv * centered);
+                // dPull/dθ_i is exactly 0 for a uniform spline; zero it in case
+                // Σ⁻¹ carries off-diagonal terms in those rows.
+                for(size_t i = 0; i < syst->spline_prior_types.size(); ++i)
+                    if(syst->spline_prior_types[i] == SplinePriorType::Uniform) pull_grad_nuis(i) = 0.0f;
             }
         }
 
@@ -184,7 +211,7 @@ float PROpoisson::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &grad
             Eigen::VectorXf phys = param_at.segment(0, nparams - nsyst);
             if(model.model_constraint && !model.model_constraint(phys)) return false;
             PROspec rl = FillSpectra(config, peller, *syst, model, param_at, fs_cache,
-                                     strat != EventByEvent);
+                                     strat != EventByEvent, config.i_prime);
             vmc_out = CollapseMatrix(config, rl.Spec());
             return true;
         };
@@ -195,7 +222,7 @@ float PROpoisson::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &grad
             Eigen::VectorXf phys = param_at.segment(0, nparams - nsyst);
             if(model.model_constraint && !model.model_constraint(phys)) return false;
             PROspec rl = FillSpectra(config, peller, *syst, model, param_at, fs_cache,
-                                     strat != EventByEvent);
+                                     strat != EventByEvent, config.i_prime);
             // vdata may depend on result in shape_only mode; preserve that
             // (shape_only re-normalises to perturbed result like the original).
             const Eigen::VectorXf vdata_l = shape_only ? data.Normalize(config, rl) : data.Spec();
@@ -306,7 +333,7 @@ float PROpoisson::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &grad
     return value;
 }
 
-float PROpoisson::getSingleChannelChi(size_t global_channel_index, const PROspec &cv, size_t var_index) {
+float PROpoisson::getSingleChannelChi(size_t global_channel_index, const PROspec &cv, size_t var_index, const Eigen::MatrixXf &projection) {
 
     // m_channel_variable_bins is indexed by LOCAL channel index (PROchi and
     // PROCNP convert the same way); using the global index breaks any config
@@ -315,15 +342,21 @@ float PROpoisson::getSingleChannelChi(size_t global_channel_index, const PROspec
     size_t startBin = config.GetCollapsedGlobalVariableBinStart(global_channel_index,var_index);
 
 
-    //const Eigen::VectorXf &vdata = data.Spec().segment(startBin, nbin);
-    const Eigen::VectorXf vdata = (shape_only
+    // const Eigen::VectorXf &vdata = data.Spec().segment(startBin, nbin);
+    Eigen::VectorXf vdata = (shape_only
         ? data.Normalize(config,cv)
         : data.Spec()).segment(startBin, nbin);
-    const Eigen::VectorXf vmc = CollapseMatrix(config, cv.Spec()).segment(startBin, nbin);
+    Eigen::VectorXf vmc = CollapseMatrix(config, cv.Spec()).segment(startBin, nbin);
     // Mask applies only to the fitting variable (mask snapshot is for i_prime);
     // startBin offsets the channel-local segment into the global mask.
     const bool masked = (var_index == (size_t)config.i_prime) && hasActiveBinMask();
-    float poisson = BakerCousinsChi2(vmc, vdata, masked ? &active_bins : nullptr, (Eigen::Index)startBin);
+    if(projection.size()) {
+        vmc = projection * vmc;
+        vdata = projection * vdata;
+    }
+    float poisson = BakerCousinsChi2(vmc, vdata,
+        projection.size() ? nullptr : (masked ? &active_bins : nullptr),
+        projection.size() ? 0 : (Eigen::Index)startBin);
     //float pull = Pull(subvector2);
     float value = poisson; //+ pull
 

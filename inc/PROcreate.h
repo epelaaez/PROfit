@@ -56,7 +56,8 @@ namespace PROfit{
      * event-by-event; afterwards PROsyst reads it to build splines or covariance matrices.
      *
      * Supported modes (stored in the `mode` field): "multisim", "minmax", "covar", "spline",
-     * "external", "flat", "norm", "hist1d", "hist2d", "spline_to_covariance".
+     * "external", "flat", "norm", "norm_to_covariance", "hist1d", "hist2d",
+     * and "spline_to_covariance".
      */
     struct SystStruct {
 
@@ -78,7 +79,7 @@ namespace PROfit{
         std::shared_ptr<PROspec> p_cv;   ///< Shared pointer to the central-value spectrum.
         std::vector<std::shared_ptr<PROspec>> p_multi_spec; ///< Shared pointers to per-universe variation spectra.
 
-        std::vector<int> norm_bins; ///< Bin indices used for shape-normalisation (empty = normalise all bins).
+        std::vector<int> norm_bins; ///< Bin indices a "norm"/"norm_to_covariance" systematic applies to (never empty: a pattern matching no subchannel is a fatal config error).
         float norm_value = 0.0f;    ///< Normalisation target integral (used in shape-only mode; only set for "norm" systematics).
         bool force_0_cv = false;    ///< If true, normalise spline shifts by the shift at knob=0.
         std::vector<int> include_only_weights; ///< 1-based indices of weight universes to include; empty = all.
@@ -89,6 +90,8 @@ namespace PROfit{
         bool has_restrict = false;  ///< If true, clamp the knob value to [restrict_lo, restrict_hi] during evaluation and fitting.
         float restrict_lo = 0.0f;   ///< Lower clamp bound (used only when has_restrict is true).
         float restrict_hi = 0.0f;   ///< Upper clamp bound (used only when has_restrict is true).
+        std::string apply_to_subchannel; ///< Unanchored-regex wildcard from XML apply_to_subchannel= (plain substrings work as-is); empty = systematic applies to every subchannel. Events in non-matching subchannels fill all universes at the CV weight (flat spline / zero covariance there).
+        std::vector<std::string> apply_to_subchannel_names; ///< Resolved subchannel fullnames matched by apply_to_subchannel (bookkeeping/logging).
 
         //boost serialization
         template<class Archive>
@@ -124,6 +127,10 @@ namespace PROfit{
             }
             if (version >= 4) {
                 ar & inflate;
+            }
+            if (version >= 5) {
+                ar & apply_to_subchannel;
+                ar & apply_to_subchannel_names;
             }
         }
 
@@ -299,7 +306,7 @@ namespace PROfit{
      *		syst_additional_weight: additional weight applied to systematic variation
      */
 
-    void process_cafana_event(const PROconfig &inconfig, const std::shared_ptr<BranchVariable>& branch, const std::map<std::string, std::vector<eweight_type>*>& eventweight_map, float mcpot, int subchannel_index, std::vector<std::vector<SystStruct>> &syst_vector, const std::vector<float>& syst_additional_weight, PROpeller& inprop);
+    void process_cafana_event(const PROconfig &inconfig, const std::shared_ptr<BranchVariable>& branch, const std::map<std::string, std::vector<eweight_type>*>& eventweight_map, float mcpot, int subchannel_index, std::vector<std::vector<SystStruct>> &syst_vector, const std::vector<float>& syst_additional_weight, const std::vector<char>& syst_applies, PROpeller& inprop);
 
     /**
      * @brief Convert a local or EOS file path to an XRootD URL.
@@ -329,6 +336,6 @@ namespace PROfit{
 
 };
 
-BOOST_CLASS_VERSION(PROfit::SystStruct, 4)
+BOOST_CLASS_VERSION(PROfit::SystStruct, 5)
 
 #endif
