@@ -3257,6 +3257,356 @@ int plotPriorFractionalSystematicChannelRatios(const PROconfig &config, const PR
         delete c;
     }
 
+    int plotCovariancePosteriorPulls(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const Eigen::VectorXf &best_fit, const Eigen::VectorXf &data_spec, const std::string &filename, int var_index, std::map<std::string, TObject*> *drawn_objs) {
+        if(syst.GetNCovar() == 0) {
+            log<LOG_INFO>(L"%1% || No covariance-type systematics; skipping the covariance posterior pull plot.") % __func__;
+            return 1;
+        }
+        const size_t nbins_coll = config.m_num_variable_bins_total_collapsed[var_index];
+        if((size_t)data_spec.size() != nbins_coll) {
+            log<LOG_ERROR>(L"%1% || data_spec has %2% bins but variable %3% has %4% collapsed bins; skipping the covariance posterior pull plot.") % __func__ % data_spec.size() % var_index % nbins_coll;
+            return 1;
+        }
+
+        // Conditional posterior of the covariance-mode pulls at the best fit
+        // (Putnam SBN note): Sigma = L L^T with L = U sqrt(S) from
+        // DecomposeFractionalCovariance, mode pulls alpha have prior N(0, I).
+        // Keep this algebra in sync with the constrained block of
+        // getMCMCErrorBand (PROplot.h) and getCovarianceOnlyErrorBand above.
+        Eigen::VectorXf cv = FillSpectra(config, prop, syst, model, best_fit, true, var_index).Spec();
+        for(int i = 0; i < cv.size(); ++i)
+            if(cv(i) <= 0.0f) cv(i) = 1e-6f; // Floor zero-count / inactive subchannels
+        Eigen::VectorXf cv_coll = CollapseMatrix(config, cv, var_index);
+        Eigen::MatrixXf L = syst.DecomposeFractionalCovariance(config, cv);
+
+        std::vector<int> contrib;
+        std::vector<char> in_fit(nbins_coll, 0);
+        for(int i = 0; i < data_spec.size(); ++i)
+            if(config.IsBinActive(var_index, i) && data_spec(i) > 0) {
+                contrib.push_back(i);
+                in_fit[i] = 1;
+            }
+        std::vector<int> modes;
+        double total_variance = 0;
+        for(int j = 0; j < L.cols(); ++j) {
+            double s = L.col(j).squaredNorm();
+            total_variance += s;
+            if(s > 0) modes.push_back(j);
+        }
+        if(contrib.empty() || modes.empty() || total_variance <= 0) {
+            log<LOG_WARNING>(L"%1% || No contributing bins or covariance modes; skipping the covariance posterior pull plot.") % __func__;
+            return 1;
+        }
+
+        const size_t k = modes.size(), nb = contrib.size();
+        Eigen::MatrixXd L_shift(L.rows(), k);
+        for(size_t j = 0; j < k; ++j)
+            L_shift.col(j) = L.col(modes[j]).cast<double>();
+        Eigen::MatrixXd L_red(nb, k);
+        Eigen::VectorXd C_inv_red(nb), u_bf(nb);
+        for(size_t i = 0; i < nb; ++i) {
+            L_red.row(i) = L_shift.row(contrib[i]);
+            C_inv_red(i) = 1.0 / std::max<double>(data_spec(contrib[i]), 1.0);
+            u_bf(i) = data_spec(contrib[i]) - cv_coll(contrib[i]);
+        }
+        Eigen::MatrixXd inner = Eigen::MatrixXd::Identity(k, k)
+                              + L_red.transpose() * C_inv_red.asDiagonal() * L_red;
+        Eigen::LLT<Eigen::MatrixXd> inner_llt(inner);
+        if(inner_llt.info() != Eigen::Success) {
+            // inner is PD by construction. any failures here are float math noise from L. Clamp eigenvalues and retry.
+            log<LOG_WARNING>(L"%1% || LLT of posterior pull matrix failed; clamping eigenvalues.") % __func__;
+            Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> es(inner);
+            inner = es.eigenvectors()
+                  * es.eigenvalues().cwiseMax(1e-12).asDiagonal()
+                  * es.eigenvectors().transpose();
+            inner_llt.compute(inner);
+        }
+
+        // Mode-space posterior: mean alpha_hat, covariance inner^-1 (prior = I).
+        Eigen::VectorXd alpha_hat = inner_llt.solve(L_red.transpose() * (C_inv_red.asDiagonal() * u_bf));
+        Eigen::MatrixXd inner_inv = inner_llt.solve(Eigen::MatrixXd::Identity(k, k));
+        Eigen::VectorXd sigma_post = inner_inv.diagonal().cwiseMax(0.0).cwiseSqrt();
+
+        // Bin-space projection: shift = L alpha_hat (identical to
+        // PROerrorbar::center_shift), prior/posterior bin sigmas from the
+        // diagonals of L L^T and L inner^-1 L^T (the latter equals the
+        // Sigma - Sigma(C+Sigma)^-1 Sigma diagonal by Woodbury).
+        Eigen::VectorXd bin_shift = L_shift * alpha_hat;
+        Eigen::VectorXd bin_prior_var = L_shift.cwiseProduct(L_shift).rowwise().sum();
+        Eigen::VectorXd bin_post_var = (L_shift * inner_inv).cwiseProduct(L_shift).rowwise().sum().cwiseMax(0.0);
+
+        log<LOG_INFO>(L"%1% || Covariance posterior pulls: %2% modes over %3% bins, max |pull| = %4%, min mode posterior sigma = %5%.")
+            % __func__ % k % nb % alpha_hat.cwiseAbs().maxCoeff() % sigma_post.minCoeff();
+
+        // ---- Drawing: paginated, fixed legible fonts ----
+        // ROOT's TPDF hardcodes the page to A4 (auto-rotated to landscape for
+        // wide canvases), so a very wide canvas just scales down to an
+        // unreadable strip. Instead keep a constant number of entries per
+        // A4-landscape-aspect page so text and bars stay full size, and let
+        // the PDF grow pages.
+        const int modes_per_page = 25;
+        const int bins_per_page  = 25;
+
+        TCanvas *c = new TCanvas((filename+"_covpulls").c_str(), (filename+"_covpulls").c_str(), 800, 560);
+        c->SetLeftMargin(0.09);
+        c->SetBottomMargin(0.30);
+        c->SetRightMargin(0.28);
+        c->SetTopMargin(0.08);
+        c->Print((filename+"[").c_str());
+
+        auto y_bounds = [](float minVal, float maxVal) {
+            minVal = std::max(std::min(minVal, -1.2f), -5.0f);
+            maxVal = std::min(std::max(maxVal,  1.2f),  5.0f);
+            return std::make_pair(minVal * 1.15f, maxVal * 1.15f);
+        };
+
+        // ---- Mode-pull pages, styled like the spline 1-sigma pull plot ----
+        {
+            // Layout constants for the fixed per-page entry count (matches the
+            // small-nBins clamps of the spline pull plots = maximum legibility).
+            const int per_page = std::min((int)k, modes_per_page);
+            const float axis_label = std::max(0.030f, std::min(0.045f, 1.8f / per_page));
+            const float x_label    = std::max(0.015f, std::min(0.030f, 1.2f / per_page));
+            const float bar_halfwidth = std::max(0.08f, std::min(0.4f, 4.0f / per_page));
+
+            // One y range over all modes so pages are directly comparable.
+            float minVal = -1.2f, maxVal = 1.2f;
+            for(int j = 0; j < (int)k; ++j) {
+                minVal = std::min(minVal, (float)(alpha_hat(j) - sigma_post(j)));
+                maxVal = std::max(maxVal, (float)(alpha_hat(j) + sigma_post(j)));
+            }
+            auto [y_min, y_max] = y_bounds(minVal, maxVal);
+            const float label_y = y_min - (y_max - y_min) * 0.04f;
+
+            const int npages = ((int)k + per_page - 1) / per_page;
+            for(int pg = 0; pg < npages; ++pg) {
+                c->Clear();
+                const int start = pg * per_page;
+                const int end = std::min(start + per_page, (int)k);
+
+                TH1F *frame = new TH1F((filename+"_frame_covmodes"+std::to_string(pg)).c_str(), "", per_page, start, start + per_page);
+                frame->SetMinimum(y_min);
+                frame->SetMaximum(y_max);
+                frame->SetStats(0);
+                frame->GetXaxis()->SetLabelSize(0);
+                frame->GetXaxis()->SetTickLength(0);
+                frame->GetYaxis()->SetTitle("Mode pull #hat{#alpha} (prior #sigma = 1)");
+                frame->GetYaxis()->SetTitleSize(axis_label);
+                frame->GetYaxis()->SetLabelSize(axis_label);
+                frame->GetYaxis()->SetTitleOffset(1.0);
+                frame->Draw("AXIS");
+
+                TBox *prior_band = new TBox((float)start, -1.0f, (float)end, 1.0f);
+                prior_band->SetFillColor(kGray);
+                prior_band->SetFillStyle(1001);
+                prior_band->SetLineColor(kGray+1);
+                prior_band->SetLineWidth(1);
+                prior_band->Draw("same");
+
+                TGraphAsymmErrors *postbars = new TGraphAsymmErrors(end - start);
+                for(int j = start; j < end; ++j) {
+                    postbars->SetPoint(j - start, j + 0.5f, alpha_hat(j));
+                    postbars->SetPointError(j - start, bar_halfwidth, bar_halfwidth, sigma_post(j), sigma_post(j));
+                }
+                postbars->SetFillColor(kBlue-7);
+                postbars->SetFillStyle(1001);
+                postbars->SetLineColor(kBlue-8);
+                postbars->SetLineWidth(1);
+                postbars->Draw("2 same");
+
+                for(float y : {0.0f, 1.0f, -1.0f}) {
+                    TLine *l = new TLine(start, y, start + per_page, y);
+                    l->SetLineStyle(y == 0.0f ? 2 : 3);
+                    l->SetLineColor(kGray+2);
+                    l->SetLineWidth(1);
+                    l->Draw();
+                }
+
+                for(int j = start; j < end; ++j) {
+                    double frac = 100.0 * L_shift.col(j).squaredNorm() / total_variance;
+                    char buf[64];
+                    snprintf(buf, sizeof(buf), "mode %d (%.1f%%)", j, frac);
+                    TLatex *t = new TLatex(j + 0.5f, label_y, buf);
+                    t->SetTextAlign(13);
+                    t->SetTextSize(x_label);
+                    t->SetTextAngle(-45);
+                    t->Draw();
+                }
+
+                TLegend *leg = new TLegend(0.73, 0.68, 0.99, 0.92);
+                leg->SetFillStyle(1001);
+                leg->SetBorderSize(1);
+                leg->SetTextSize(0.028f);
+                leg->AddEntry(prior_band, "Pre-fit #pm1#sigma (prior)", "f");
+                leg->AddEntry(postbars, "Post-fit pull #pm1#sigma", "f");
+                leg->Draw();
+
+                TLatex *pt = new TLatex();
+                pt->SetNDC();
+                pt->SetTextFont(42);
+                pt->SetTextSize(0.028f);
+                pt->SetTextAlign(13);
+                char pbuf[96];
+                snprintf(pbuf, sizeof(pbuf), "Covariance modes %d#minus%d of %d (by variance)", start, end - 1, (int)k);
+                pt->DrawLatex(0.09, 0.985, pbuf);
+
+                TText *vt = new TText();
+                vt->SetNDC();
+                vt->SetTextFont(42);
+                vt->SetTextSize(0.028f);
+                vt->SetTextAlign(33);
+                vt->DrawText(0.96, 0.985, ("PROfit v" + std::string(PROJECT_VERSION_STR)).c_str());
+
+                c->Update();
+                c->Print(filename.c_str());
+            }
+        }
+
+        // ---- Per-bin pages: conditional shift / pre-fit bin sigma ----
+        {
+            const int nBinsTot = (int)nbins_coll;
+            const int per_page = std::min(nBinsTot, bins_per_page);
+            const float axis_label = std::max(0.030f, std::min(0.045f, 1.8f / per_page));
+            const float x_label    = std::max(0.015f, std::min(0.030f, 1.2f / per_page));
+            const float bar_halfwidth = std::max(0.08f, std::min(0.4f, 4.0f / per_page));
+
+            float minVal = -1.2f, maxVal = 1.2f;
+            std::vector<float> norm_shift(nbins_coll, 0.0f), norm_sigma(nbins_coll, 0.0f);
+            for(size_t i = 0; i < nbins_coll; ++i) {
+                double prior_sigma = std::sqrt(bin_prior_var(i));
+                if(!in_fit[i] || prior_sigma <= 0) continue;
+                norm_shift[i] = bin_shift(i) / prior_sigma;
+                norm_sigma[i] = std::sqrt(bin_post_var(i)) / prior_sigma;
+                minVal = std::min(minVal, norm_shift[i] - norm_sigma[i]);
+                maxVal = std::max(maxVal, norm_shift[i] + norm_sigma[i]);
+            }
+            auto [y_min, y_max] = y_bounds(minVal, maxVal);
+            const float label_y = y_min - (y_max - y_min) * 0.04f;
+
+            const int npages = (nBinsTot + per_page - 1) / per_page;
+            for(int pg = 0; pg < npages; ++pg) {
+                c->Clear();
+                const int start = pg * per_page;
+                const int end = std::min(start + per_page, nBinsTot);
+
+                TH1F *frame = new TH1F((filename+"_frame_covbins"+std::to_string(pg)).c_str(), "", per_page, start, start + per_page);
+                frame->SetMinimum(y_min);
+                frame->SetMaximum(y_max);
+                frame->SetStats(0);
+                frame->GetXaxis()->SetLabelSize(0);
+                frame->GetXaxis()->SetTickLength(0);
+                frame->GetYaxis()->SetTitle("Bin shift / pre-fit #sigma_{bin}");
+                frame->GetYaxis()->SetTitleSize(axis_label);
+                frame->GetYaxis()->SetLabelSize(axis_label);
+                frame->GetYaxis()->SetTitleOffset(1.0);
+                frame->Draw("AXIS");
+
+                TBox *prior_band = new TBox((float)start, -1.0f, (float)end, 1.0f);
+                prior_band->SetFillColor(kGray);
+                prior_band->SetFillStyle(1001);
+                prior_band->SetLineColor(kGray+1);
+                prior_band->SetLineWidth(1);
+                prior_band->Draw("same");
+
+                TBox *masked_ref = nullptr;
+                for(int i = start; i < end; ++i) {
+                    if(in_fit[i] && bin_prior_var(i) > 0) continue;
+                    TBox *b = new TBox((float)i, y_min, (float)(i+1), y_max);
+                    b->SetFillColor(kGray);
+                    b->SetFillStyle(3004);
+                    b->SetLineWidth(0);
+                    b->Draw("same");
+                    if(!masked_ref) masked_ref = b;
+                }
+
+                TGraphAsymmErrors *binbars = new TGraphAsymmErrors();
+                for(int i = start; i < end; ++i) {
+                    if(!in_fit[i] || bin_prior_var(i) <= 0) continue;
+                    int np = binbars->GetN();
+                    binbars->SetPoint(np, i + 0.5f, norm_shift[i]);
+                    binbars->SetPointError(np, bar_halfwidth, bar_halfwidth, norm_sigma[i], norm_sigma[i]);
+                }
+                binbars->SetFillColor(kBlue-7);
+                binbars->SetFillStyle(1001);
+                binbars->SetLineColor(kBlue-8);
+                binbars->SetLineWidth(1);
+                binbars->Draw("2 same");
+
+                for(float y : {0.0f, 1.0f, -1.0f}) {
+                    TLine *l = new TLine(start, y, start + per_page, y);
+                    l->SetLineStyle(y == 0.0f ? 2 : 3);
+                    l->SetLineColor(kGray+2);
+                    l->SetLineWidth(1);
+                    l->Draw();
+                }
+
+                for(int i = start; i < end; ++i) {
+                    TLatex *t = new TLatex(i + 0.5f, label_y, std::to_string(i).c_str());
+                    t->SetTextAlign(13);
+                    t->SetTextSize(x_label);
+                    t->SetTextAngle(-45);
+                    t->Draw();
+                }
+
+                TLegend *leg = new TLegend(0.73, 0.62, 0.99, 0.92);
+                leg->SetFillStyle(1001);
+                leg->SetBorderSize(1);
+                leg->SetTextSize(0.028f);
+                leg->AddEntry(prior_band, "Pre-fit #pm1#sigma (prior)", "f");
+                leg->AddEntry(binbars, "Post-fit shift #pm1#sigma", "f");
+                if(masked_ref) leg->AddEntry(masked_ref, "Bin not in fit", "f");
+                leg->Draw();
+
+                TLatex *pt = new TLatex();
+                pt->SetNDC();
+                pt->SetTextFont(42);
+                pt->SetTextSize(0.028f);
+                pt->SetTextAlign(13);
+                char pbuf[96];
+                snprintf(pbuf, sizeof(pbuf), "Collapsed bins %d#minus%d of %d", start, end - 1, nBinsTot);
+                pt->DrawLatex(0.09, 0.985, pbuf);
+
+                TText *vt = new TText();
+                vt->SetNDC();
+                vt->SetTextFont(42);
+                vt->SetTextSize(0.028f);
+                vt->SetTextAlign(33);
+                vt->DrawText(0.96, 0.985, ("PROfit v" + std::string(PROJECT_VERSION_STR)).c_str());
+
+                c->Update();
+                c->Print(filename.c_str());
+            }
+        }
+        c->Print((filename+"]").c_str());
+        delete c;
+
+        if(drawn_objs) {
+            // Full mode list (not capped at maxShow) for the ROOT file.
+            TGraphAsymmErrors *mode_g = new TGraphAsymmErrors((int)k);
+            for(size_t j = 0; j < k; ++j) {
+                mode_g->SetPoint(j, j + 0.5, alpha_hat(j));
+                mode_g->SetPointError(j, 0.5, 0.5, sigma_post(j), sigma_post(j));
+            }
+            mode_g->SetName("covmode_pulls");
+            mode_g->SetTitle("Covariance mode posterior pulls;mode (descending variance);#hat{#alpha} (prior #sigma = 1)");
+            (*drawn_objs)["covmode_pulls"] = mode_g;
+
+            TGraphAsymmErrors *bin_g = new TGraphAsymmErrors();
+            for(size_t i = 0; i < nbins_coll; ++i) {
+                if(!in_fit[i] || bin_prior_var(i) <= 0) continue;
+                double prior_sigma = std::sqrt(bin_prior_var(i));
+                int np = bin_g->GetN();
+                bin_g->SetPoint(np, i + 0.5, bin_shift(i) / prior_sigma);
+                bin_g->SetPointError(np, 0.5, 0.5, std::sqrt(bin_post_var(i)) / prior_sigma, std::sqrt(bin_post_var(i)) / prior_sigma);
+            }
+            bin_g->SetName("covmode_bin_pulls");
+            bin_g->SetTitle("Covariance posterior bin pulls;collapsed bin;shift / pre-fit #sigma_{bin}");
+            (*drawn_objs)["covmode_bin_pulls"] = bin_g;
+        }
+
+        return 0;
+    }
+
     namespace {
         struct ChannelSpan {
             std::string label;     // subchannel plot/full name
