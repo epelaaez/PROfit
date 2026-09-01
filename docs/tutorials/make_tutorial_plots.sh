@@ -106,8 +106,8 @@ run_step plotbsub plot --bkg-subtract background
 
 # --- Section 5: global fits -----------------------------------------------------
 run_step glob1   "${INJECT[@]}" global
-run_step globcnp -c PROCNP global
-run_step globpoi -c Poisson global
+run_step globcnp -c CNP global
+run_step globpoi -c poisson global
 
 # --- Section 6: profile ---------------------------------------------------------
 run_step prof1  "${INJECT[@]}" profile

@@ -1,6 +1,6 @@
 /**
- * @file PROchi.h
- * @brief Covariance-matrix chi-squared metric for PROfit oscillation fitting.
+ * @file PROchi_neyman.h
+ * @brief Neyman covariance-matrix chi-squared metric for PROfit oscillation fitting (canonical CLI name: "neyman").
  * @author PROfit Collaboration
  *
  * @details Defines PROchi, which implements the standard covariance-matrix chi-squared:
@@ -30,8 +30,11 @@
 namespace PROfit{
 
     /**
-     * @brief Covariance-matrix (Pearson/Gaussian) chi-squared metric.
-     * @details Gathers the MC store (PROpeller), systematic object (PROsyst), and oscillation
+     * @brief Neyman (data-driven) covariance-matrix chi-squared metric (canonical CLI name: "neyman").
+     * @details The statistical covariance is diag(data) — the observed count of each bin —
+     * and zero-data bins drop out of the chi-squared (Gaussian marginalization). For the
+     * textbook Pearson statistic (stat covariance = diag(prediction)) see PROchi_pearson.
+     * Gathers the MC store (PROpeller), systematic object (PROsyst), and oscillation
      * model (PROmodel) into a single callable object whose operator() returns the chi-squared
      * value and gradient for use by PROfitter.  All heavy objects are stored as (const) references
      * or pointers to objects owned by the calling executable.

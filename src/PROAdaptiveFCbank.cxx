@@ -12,8 +12,9 @@
 #include "PROAdaptiveFCinternal.h"
 
 #include "PROlog.h"
-#include "PROmetrics/PROchi.h"
-#include "PROmetrics/PROCNP.h"
+#include "PROmetrics/PROchi_neyman.h"
+#include "PROmetrics/PROchi_pearson.h"
+#include "PROmetrics/PROchi_CNP.h"
 #include "PROmetrics/PROpoisson.h"
 #include "PROmetric.h"
 #include "PROspec.h"
@@ -315,7 +316,7 @@ struct AdaptivePEArgs {
     const PROmodel  *model;
     const Eigen::MatrixXf *L;    ///< Cholesky factor of total covariance.
     const PROfitterConfig *fitconfig;
-    std::string chi2_kind;       ///< "PROchi" | "PROCNP" | "Poisson"
+    std::string chi2_kind;       ///< "neyman" | "pearson" | "CNP" | "poisson" (legacy aliases accepted)
     bool   binned;
     size_t xaxis_idx, yaxis_idx;
     float  cell_x_model, cell_y_model; ///< Cell-center coords in *model space* (log10(phys) for log-axis params).
@@ -396,11 +397,14 @@ static PEBankRecord run_one_pe(const AdaptivePEArgs &args)
     // Build metric (unique_ptr — early-stop safe).
     PROmetric::EvalStrategy mstrat = args.binned ? PROmetric::BinnedChi2 : PROmetric::EventByEvent;
     std::unique_ptr<PROmetric> metric;
-    if (args.chi2_kind == "PROchi") {
+    const std::string chi2_kind_canon = PROmetric::canonicalizeMetricName(args.chi2_kind);
+    if (chi2_kind_canon == "neyman") {
         metric.reset(new PROchi("", config, prop, &systs, model, data, mstrat));
-    } else if (args.chi2_kind == "PROCNP") {
+    } else if (chi2_kind_canon == "pearson") {
+        metric.reset(new PROchi_pearson("", config, prop, &systs, model, data, mstrat));
+    } else if (chi2_kind_canon == "CNP") {
         metric.reset(new PROCNP("", config, prop, &systs, model, data, mstrat));
-    } else if (args.chi2_kind == "Poisson") {
+    } else if (chi2_kind_canon == "poisson") {
         metric.reset(new PROpoisson("", config, prop, &systs, model, data, mstrat));
     } else {
         log<LOG_ERROR>(L"%1% || run_one_pe: unknown chi2 kind '%2%'.") % __func__ % args.chi2_kind.c_str();
@@ -627,9 +631,11 @@ AsimovObs compute_asimov_obs(
 
     auto make_metric = [&](const PROdata &d) -> std::unique_ptr<PROmetric> {
         PROmetric::EvalStrategy mstrat = binned ? PROmetric::BinnedChi2 : PROmetric::EventByEvent;
-        if (chi2_kind == "PROchi")    return std::unique_ptr<PROmetric>(new PROchi   ("", config, prop, &systs, model, d, mstrat));
-        if (chi2_kind == "PROCNP")    return std::unique_ptr<PROmetric>(new PROCNP   ("", config, prop, &systs, model, d, mstrat));
-        if (chi2_kind == "Poisson")   return std::unique_ptr<PROmetric>(new PROpoisson("", config, prop, &systs, model, d, mstrat));
+        const std::string chi2_kind_canon = PROmetric::canonicalizeMetricName(chi2_kind);
+        if (chi2_kind_canon == "neyman")  return std::unique_ptr<PROmetric>(new PROchi   ("", config, prop, &systs, model, d, mstrat));
+        if (chi2_kind_canon == "pearson") return std::unique_ptr<PROmetric>(new PROchi_pearson("", config, prop, &systs, model, d, mstrat));
+        if (chi2_kind_canon == "CNP")     return std::unique_ptr<PROmetric>(new PROCNP   ("", config, prop, &systs, model, d, mstrat));
+        if (chi2_kind_canon == "poisson") return std::unique_ptr<PROmetric>(new PROpoisson("", config, prop, &systs, model, d, mstrat));
         log<LOG_ERROR>(L"%1% || compute_asimov_obs: unknown chi2 kind '%2%'.") % __func__ % chi2_kind.c_str();
         return nullptr;
     };

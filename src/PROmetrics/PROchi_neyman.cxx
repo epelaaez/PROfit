@@ -1,4 +1,4 @@
-#include "PROmetrics/PROchi.h"
+#include "PROmetrics/PROchi_neyman.h"
 #include "PROcess.h"
 #include "PROdata.h"
 #include "PROlog.h"

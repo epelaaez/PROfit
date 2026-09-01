@@ -1,4 +1,4 @@
-#include "PROmetrics/PROCNP.h"
+#include "PROmetrics/PROchi_CNP.h"
 #include "PROcess.h"
 #include "PROdata.h"
 #include "PROlog.h"

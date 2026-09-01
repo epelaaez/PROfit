@@ -17,6 +17,12 @@ int main(int argc, char* argv[])
     // Define options
     PROpt options(argc, argv);
 
+    // Canonicalize the metric name once, right here: every downstream consumer
+    // (metric dispatch, resolve_fit_presets, PROjector, FC/AFC workers) sees the
+    // canonical spelling (neyman/pearson/CNP/poisson); legacy aliases
+    // (PROchi/PROCNP/Poisson) warn once and map.
+    options.chi2 = PROmetric::canonicalizeMetricName(options.chi2);
+
     log<LOG_WARNING>(L" %1% ") % getIcon().c_str();
 
     // Grid submission dispatches here, BEFORE PROconfig/CAF/syst setup: it
@@ -145,14 +151,16 @@ int main(int argc, char* argv[])
     //Metric Time
     //Metrics are for i_prime only for now
     PROmetric *metric;
-    if(options.chi2 == "PROchi") {
+    if(options.chi2 == "neyman") {
         metric = new PROchi("", config, prop, &(variable_systs[config.i_prime]), *model, data, options.eventbyevent ? PROmetric::EventByEvent : PROmetric::BinnedChi2, options.shapeonly);
-    } else if(options.chi2 == "PROCNP") {
+    } else if(options.chi2 == "pearson") {
+        metric = new PROchi_pearson("", config, prop, &(variable_systs[config.i_prime]), *model, data, options.eventbyevent ? PROmetric::EventByEvent : PROmetric::BinnedChi2, options.shapeonly);
+    } else if(options.chi2 == "CNP") {
         metric = new PROCNP("", config, prop, &(variable_systs[config.i_prime]), *model, data, options.eventbyevent ? PROmetric::EventByEvent : PROmetric::BinnedChi2, options.shapeonly);
-    } else if(options.chi2 == "Poisson") {
+    } else if(options.chi2 == "poisson") {
         metric = new PROpoisson("", config, prop, &(variable_systs[config.i_prime]), *model, data, options.eventbyevent ? PROmetric::EventByEvent : PROmetric::BinnedChi2,options.shapeonly);
     } else {
-        log<LOG_ERROR>(L"%1% || Unrecognized chi2 function %2%") % __func__ % options.chi2.c_str();
+        log<LOG_ERROR>(L"%1% || Unrecognized chi2 function %2%. Options: neyman (default), pearson, CNP, poisson (legacy aliases: PROchi, PROCNP, Poisson).") % __func__ % options.chi2.c_str();
         abort();
     }
 

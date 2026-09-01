@@ -518,15 +518,16 @@ multithreaded runs are statistically equivalent but not byte-identical.
 | `--syst-only` | fix ALL physics parameters (nuisance-only fit) |
 | `--statonly` | drop systematics entirely |
 | `--shapeonly` / `--rateonly` | shape-only or single-bin-normalisation analysis |
-| `-c/--chi2 PROchi\|PROCNP\|Poisson` | χ² metric (default PROchi) |
+| `-c/--chi2 neyman\|pearson\|CNP\|poisson` | χ² metric (default `neyman`; legacy aliases `PROchi`/`PROCNP`/`Poisson`) |
 | `--grad-mode analytic` | gradient strategy: `analytic` (default, alias `exact`) / `central-full` / `one-sided-full` / `central-lin` (Gauss-Newton) / `one-sided-lin` |
 
 The **default gradient is now `analytic`** (closed-form spectrum Jacobian
 through the oscillation models and splines, *plus* the exact
 covariance-scaling term the old Gauss-Newton `-lin` modes dropped): as
 accurate as `central-full` at the cost of roughly one evaluation, so it is
-the right choice for scans *and* publication runs. It applies to PROchi's
-binned strategies; `PROCNP`, `Poisson`, and `--eventbyevent` automatically
+the right choice for scans *and* publication runs. It applies to the
+`neyman` (PROchi) binned strategies; `pearson`, `CNP`, `poisson`, and
+`--eventbyevent` automatically
 fall back to `central-lin` with a one-time warning. `central-full` remains
 the finite-difference gold standard for cross-checks (and `scale-test
 --tests gradcheck` validates every mode against it). Note the default change
@@ -872,16 +873,27 @@ failure.
 ### Metric choice matters
 
 ```bash
-PROfit -x tutorial.xml -t TUT -o globcnp --seed 405 -n 8 -c PROCNP global
-PROfit -x tutorial.xml -t TUT -o globpoi --seed 405 -n 8 -c Poisson global
+PROfit -x tutorial.xml -t TUT -o globcnp --seed 405 -n 8 -c CNP global
+PROfit -x tutorial.xml -t TUT -o globpea --seed 405 -n 8 -c pearson global
+PROfit -x tutorial.xml -t TUT -o globpoi --seed 405 -n 8 -c poisson global
 ```
 
-`PROchi` is the classic Pearson χ² (statistical + systematic covariance plus
-Gaussian pulls); `PROCNP` swaps the statistical variance for the combined
+`neyman` (the default; class `PROchi`) is the classic Neyman χ² — the
+statistical variance of each bin is the *observed data* count (zero-data
+bins drop out = Gaussian marginalization) — plus the scaled systematic
+covariance and Gaussian pulls; `pearson` is the textbook Pearson χ², with
+the statistical variance instead the *predicted* count μ at the current
+parameter point (zero-data bins are kept); `CNP` swaps the statistical
+variance for the combined
 Neyman-Pearson form `3/(1/d + 2/μ)` ([X. Ji et al.](https://arxiv.org/pdf/1903.07185))
 and is the **recommended** choice whenever bins can be low-statistics;
-`Poisson` is the Baker-Cousins likelihood-ratio sum and ignores
-covariance-type systematics entirely (it will warn you). Adding a new metric
+`poisson` is the Baker-Cousins likelihood-ratio sum and ignores
+covariance-type systematics entirely (it will warn you). The legacy
+spellings `PROchi`, `PROCNP`, and `Poisson` still work as deprecated
+aliases (mapping to `neyman`/`CNP`/`poisson` with a one-time warning).
+Only `neyman` has the closed-form analytic gradient — the other metrics
+fall back to `central-lin` and the legacy `good`/`fast` presets. Adding a
+new metric
 is deliberately easy — they all implement the same `PROmetric` interface.
 
 ---

@@ -114,6 +114,7 @@ run_test t00process process
 run_test t01global        --use-fake-data global
 run_test t02globalcnp     --use-fake-data -c PROCNP global
 run_test t03globalpoisson --use-fake-data -c Poisson global
+run_test t03bglobalpearson --use-fake-data -c pearson global
 run_test t04statonly      --use-fake-data --statonly global
 run_test t05inject        --use-fake-data -i dmsq 1 sinsq2thme 0.01 global
 run_test t06pseudoexp     --use-fake-data --pseudo-experiment global

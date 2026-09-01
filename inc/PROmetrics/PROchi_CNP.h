@@ -1,6 +1,6 @@
 /**
- * @file PROCNP.h
- * @brief Combined Neyman-Pearson (CNP) chi-squared metric for PROfit.
+ * @file PROchi_CNP.h
+ * @brief Combined Neyman-Pearson (CNP) chi-squared metric for PROfit (canonical CLI name: "CNP").
  * @author PROfit Collaboration
  *
  * @details Defines PROCNP, which implements the Combined Neyman-Pearson chi-squared statistic

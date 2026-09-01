@@ -89,7 +89,7 @@ namespace PROfit {
 
         // chi^2 metric name and binned/eventbyevent flags (passed straight through
         // to the inner per-throw fits — mirrors fc_args.chi2 / fc_args.binned).
-        std::string chi2 = "PROchi";
+        std::string chi2 = "neyman";
         bool        binned = true;
 
         // ---- PE-bank generation knobs ----

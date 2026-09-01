@@ -5,7 +5,8 @@
  *
  * @details PROmetric is the pure-virtual interface that connects the physics chi-squared
  * calculation to the PROfitter multi-start optimiser.  Concrete implementations
- * (PROchi, PROCNP, PROpoisson) compute different chi-squared statistics while sharing
+ * (PROchi (neyman), PROchi_pearson (pearson), PROCNP (CNP), PROpoisson (poisson))
+ * compute different chi-squared statistics while sharing
  * the common bounds, fixed-parameter, and call-counting infrastructure defined here.
  */
 #ifndef PROMETRIC_H
@@ -25,7 +26,7 @@ namespace PROfit {
      * @brief Abstract base class for PROfit chi-squared metrics passed to the optimiser.
      * @details Defines the interface required by PROfitter: parameter bounds, fixed-parameter
      * masking, call counting, and the functor operator() that returns chi-squared and gradient.
-     * All concrete metrics (PROchi, PROCNP, PROpoisson) derive from this class.
+     * All concrete metrics (PROchi, PROchi_pearson, PROCNP, PROpoisson) derive from this class.
      */
     class PROmetric {
         public:
@@ -73,7 +74,7 @@ namespace PROfit {
              *
              * GradientAnalytic is the default everywhere. It is implemented for
              * PROchi with the binned strategies; where it is not available
-             * (PROCNP, PROpoisson, the EventByEvent strategy) the metric falls
+             * (PROchi_pearson, PROCNP, PROpoisson, the EventByEvent strategy) the metric falls
              * back to GradientFallback = GradientCentralLin — the previous
              * default — and logs a one-time warning. --grad-mode overrides the
              * default for every fit (global, scan, FC) uniformly.
@@ -92,7 +93,7 @@ namespace PROfit {
                 GradientAnalytic,       ///< Default. Exact analytic gradient: dδ/dθ via FillSpectraGradient AND the (M⁻¹δ)ᵀ(dM/dθ)(M⁻¹δ) term in closed form. No FD truncation, no extra spectrum fills. PROchi binned strategies only.
             };
             /// Mode used when GradientAnalytic is requested but not implemented for
-            /// the metric / strategy (PROCNP, PROpoisson, EventByEvent).
+            /// the metric / strategy (PROchi_pearson, PROCNP, PROpoisson, EventByEvent).
             static constexpr GradientMode GradientFallback = GradientCentralLin;
 
             std::vector<bool> is_fixed; ///< Per-parameter flags: true if the parameter is held fixed during fitting.
@@ -250,6 +251,34 @@ namespace PROfit {
                                             || s == "one-sided-linearized")     return GradientOneSidedLin;
                 if (s == "analytic"         || s == "exact")                    return GradientAnalytic;
                 return fallback;
+            }
+
+            /**
+             * @brief Canonicalize a chi-squared metric name token.
+             * @details Canonical names (case-insensitive input): "neyman" (PROchi,
+             * stat covariance = diag(data)), "pearson" (PROchi_pearson, stat
+             * covariance = diag(prediction)), "CNP" (PROCNP), "poisson"
+             * (PROpoisson). Legacy aliases PROchi/PROCNP/Poisson map to
+             * neyman/CNP/poisson; the deprecated PRO* spellings log a one-time
+             * warning. Unrecognised input is returned UNCHANGED so callers'
+             * existing error paths still fire.
+             */
+            static std::string canonicalizeMetricName(const std::string &tok) {
+                std::string s = tok;
+                for (auto &c : s) c = (char)std::tolower((unsigned char)c);
+                std::string canon;
+                if      (s == "neyman"  || s == "prochi")     canon = "neyman";
+                else if (s == "pearson" || s == "propearson") canon = "pearson";
+                else if (s == "cnp"     || s == "procnp")     canon = "CNP";
+                else if (s == "poisson" || s == "propoisson") canon = "poisson";
+                else return tok;
+                if (s.rfind("pro", 0) == 0) {
+                    static std::atomic<bool> warned_legacy_metric{false};
+                    if(!warned_legacy_metric.exchange(true))
+                        log<LOG_WARNING>(L"%1% || Metric name '%2%' is a deprecated alias for '%3%'. Canonical names: neyman, pearson, CNP, poisson.")
+                            % __func__ % tok.c_str() % canon.c_str();
+                }
+                return canon;
             }
 
             /** @brief Human-readable label for a GradientMode (for diagnostic logging). */

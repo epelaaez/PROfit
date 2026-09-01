@@ -246,7 +246,7 @@ namespace PROfit {
         // is legal here. Poisson gets a reminder that it ignores covariance-type
         // systematics: anything left unpromoted (residual modes, --projector-keep-cov,
         // mcstat) silently drops out of a Poisson fit.
-        if(chi2_name == "Poisson") {
+        if(PROmetric::canonicalizeMetricName(chi2_name) == "poisson") {
             log<LOG_WARNING>(L"%1% || PROjector with the Poisson metric: covariance-type systematics are ignored by "
                     L"PROpoisson, so any unpromoted covariance (residual eigenmodes, --projector-keep-cov, mcstat) "
                     L"will not enter the fit. Prefer --projector-knobs -1 and no kept covariances.") % __func__;
@@ -296,7 +296,9 @@ namespace PROfit {
                     return false;
                 }
             }
-            if(c.metric_name != chi2_name) {
+            // Canonicalize both sides: legacy constraint files store "PROchi" etc.
+            // and must keep loading against the modern names (and vice versa).
+            if(PROmetric::canonicalizeMetricName(c.metric_name) != PROmetric::canonicalizeMetricName(chi2_name)) {
                 log<LOG_ERROR>(L"%1% || PROjector constraint was produced with metric %2% but this run uses %3%.")
                     % __func__ % c.metric_name.c_str() % chi2_name.c_str();
                 return false;
@@ -514,7 +516,7 @@ namespace PROfit {
 
         PROjectorConstraint c;
         c.config_hash = config.hash;
-        c.metric_name = chi2_name;
+        c.metric_name = PROmetric::canonicalizeMetricName(chi2_name);
         c.prefit_pattern = pjconf.prefit_pattern;
         c.num_decomp_knobs = pjconf.num_decomp_knobs;
         c.keep_covariance = pjconf.keep_covariance;

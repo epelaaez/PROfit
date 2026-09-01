@@ -16,7 +16,7 @@
 #include "PROcreate.h"
 #include "PROtocall.h"
 #include "PROsyst.h"
-#include "PROmetrics/PROchi.h"
+#include "PROmetrics/PROchi_neyman.h"
 #include "PROmodel.h"
 #include "PROmodels/PROmodelSimple.h"
 #include "PROmodels/PROmodelSine.h"

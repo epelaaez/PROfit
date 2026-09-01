@@ -24,7 +24,7 @@
  *   then runs as the constrained "projected" fit.
  *
  * Bin exclusion is enforced by the PROconfig fit-region (active-bin) mask, which every
- * metric (PROchi/PROCNP/PROpoisson) snapshots at construction — including the fresh
+ * metric (PROchi/PROchi_pearson/PROCNP/PROpoisson) snapshots at construction — including the fresh
  * metrics FC and adaptive-FC workers build around thrown pseudo-data, so regenerated
  * data can never leak masked bins back into a chi2. The excluded data is additionally
  * zeroed for display/blindness. The pattern must select WHOLE channels in collapsed
@@ -71,7 +71,7 @@ namespace PROfit {
      */
     struct PROjectorConstraint {
         uint32_t config_hash = 0;         ///< PROconfig hash of the pre-fit run; must match in stage 2 (unless forced).
-        std::string metric_name;          ///< chi2 metric used in the pre-fit ("PROchi").
+        std::string metric_name;          ///< chi2 metric used in the pre-fit (canonical name, e.g. "neyman"; legacy files may carry "PROchi"/"PROCNP"/"Poisson" — compared canonicalized).
         std::string prefit_pattern;       ///< Subchannel wildcard used to select the pre-fit bins.
         int num_decomp_knobs = -1;        ///< K used for the covariance->spline promotion.
         std::vector<std::string> keep_covariance;   ///< Covariance systematics that were not promoted.
