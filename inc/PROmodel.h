@@ -268,7 +268,7 @@ public:
  * "SBL_3+1_Usq", "SBL_3+1_angles", "SBL_3+1_sinsq2thee", "SBL_3+1_sinsq2thmumu",
  * "SBL_3+1_sinsq2thmue" (each also with an "_NC" version),
  * "SBL_3+1+decay_invis", "SBL_3+1+decay_vis1", "SBL_3+1+decay_vis2",
- * "SBL_3+2_Usq", "LBL_3nu-vacuum_angles".
+ * "SBL_3+2_Usq", "LBL_3nu-matter_angles".
  * Legacy pre-v3.1 tags (numudis, nueapp, 3+1, 3+1_3A, NCdisapp, LBL, nullmodel,
  * template_fit, ...) are accepted as deprecated aliases via canonicalize_model_tag
  * (src/PROmodel.cxx), which logs a one-time warning per tag.

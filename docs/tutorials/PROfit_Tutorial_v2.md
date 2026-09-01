@@ -1707,8 +1707,9 @@ regime_model_parameterization(_NC)
   `template`) carry no prefix.
 * **model** — the physics hypothesis: `2flav` (one effective two-flavour-like
   amplitude per channel), `3+1`, `3+2`, `3+1+decay` (3+1 plus sterile decay),
-  `3nu-vacuum` (standard three-flavour, vacuum). A hyphen qualifies *within*
-  a slot (`3nu-vacuum` vs a future `3nu-matter`), just as `+` does in `3+1`.
+  `3nu-matter` (standard three-flavour with Earth-matter effects). A hyphen
+  qualifies *within* a slot (`3nu-matter` vs a hypothetical `3nu-vacuum`),
+  just as `+` does in `3+1`.
 * **parameterization** — which parameter set the *same* physics is fitted in:
   `Usq` (squared mixing-matrix elements |Ue4|², |Uμ4|², …), `angles`
   (sin²2θ₁₄, sin²θ₂₄, …), or the name of the headline amplitude that becomes a
@@ -1954,10 +1955,11 @@ Rules: **0** = no osc, **1** = νμ→νμ, **2** = νμ→νe, **3** = νe→ν
 **4** = ν̄μ→ν̄e (the CP-conjugate appearance — give your antineutrino
 fullosc branch rule 4).
 
-### `LBL_3nu-vacuum_angles` *(legacy: `LBL`)* — full three-flavour long-baseline (NuFastLBL)
+### `LBL_3nu-matter_angles` *(legacy: `LBL`)* — full three-flavour long-baseline (NuFastLBL)
 
-Standard 3ν oscillations, all parameters fitted in **linear** space with
-bounds spanning the global-fit allowed ranges.
+Standard 3ν oscillations **including Earth-matter effects** (NuFastLBL's
+`Probability_Matter_LBL` with a constant-density profile), all parameters
+fitted in **linear** space with bounds spanning the global-fit allowed ranges.
 
 | # | name | meaning | bounds | default |
 |---|---|---|---|---|

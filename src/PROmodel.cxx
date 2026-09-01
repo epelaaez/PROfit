@@ -153,7 +153,7 @@ static std::string canonicalize_model_tag(const std::string &name) {
         {"3+1_decay_vis_model1", "SBL_3+1+decay_vis1"},
         {"3+1_decay_vis_model2", "SBL_3+1+decay_vis2"},
         {"3+2",                  "SBL_3+2_Usq"},
-        {"LBL",                  "LBL_3nu-vacuum_angles"},
+        {"LBL",                  "LBL_3nu-matter_angles"},
         {"nullmodel",            "null"},
         {"template_fit",         "template"},
     };
@@ -182,7 +182,7 @@ std::unique_ptr<PROmodel> get_model_from_string(const PROconfig& config, const P
         return std::unique_ptr<PROmodel>(new PRO3p1_decay_vis_model2(prop,config.m_model_parameter_map));
     } else if(name == "SBL_3+2_Usq") {
         return std::unique_ptr<PROmodel>(new PRO3p2(prop, config.m_model_parameter_map));
-    } else if(name == "LBL_3nu-vacuum_angles") {
+    } else if(name == "LBL_3nu-matter_angles") {
         return std::unique_ptr<PROmodel>(new PROLBL(prop, config.m_model_parameter_map));
     } else if(name == "template") {
         return std::unique_ptr<PROmodel>(new PROtemplate(config, prop));
@@ -192,7 +192,7 @@ std::unique_ptr<PROmodel> get_model_from_string(const PROconfig& config, const P
     if(const SineModelRecipe *recipe = find_sine_recipe(name)) {
         return std::unique_ptr<PROmodel>(new PROsineModel(prop, config.m_model_parameter_map, *recipe));
     }
-    log<LOG_ERROR>(L"%1% || Unrecognized model name %2%. Valid tags (regime_model_parameterization(_NC); legacy pre-v3.1 names are auto-mapped): null, template, SBL_2flav_(numudis,nueapp,nuedis), SBL_2flav_(numudis,nudis)_NC, SBL_3+1_(Usq,angles,sinsq2thee,sinsq2thmumu,sinsq2thmue) and their _NC versions, SBL_3+1+decay_(invis,vis1,vis2), SBL_3+2_Usq, LBL_3nu-vacuum_angles. Terminating.") % __func__ % name.c_str();
+    log<LOG_ERROR>(L"%1% || Unrecognized model name %2%. Valid tags (regime_model_parameterization(_NC); legacy pre-v3.1 names are auto-mapped): null, template, SBL_2flav_(numudis,nueapp,nuedis), SBL_2flav_(numudis,nudis)_NC, SBL_3+1_(Usq,angles,sinsq2thee,sinsq2thmumu,sinsq2thmue) and their _NC versions, SBL_3+1+decay_(invis,vis1,vis2), SBL_3+2_Usq, LBL_3nu-matter_angles. Terminating.") % __func__ % name.c_str();
     exit(EXIT_FAILURE);
 }
 
