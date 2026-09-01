@@ -543,6 +543,15 @@ std::map<std::string, TObject *> draw_fit_result(const PROconfig &config, const 
         c.Print((prefix+"_postfit_posteriors.pdf]").c_str());
     }
 
+    // Posterior pulls of the covariance-type systematics (mode + per-bin views),
+    // the analog of the spline pull plots. Only meaningful when the post-fit
+    // band was data-constrained (skipped under --legacy-postfit-error).
+    if(fitres.post_err_band && fitres.post_err_band->constrained
+            && syst.GetNCovar() > 0 && fitres.fitter.best_fit.size()) {
+        plotCovariancePosteriorPulls(config, prop, syst, model, fitres.fitter.best_fit,
+            data.Spec(), prefix+"_postfit_covariance_pulls.pdf", config.i_prime, &drawn_objs);
+    }
+
     if(fitres.spline_covariance.size()) {
         Eigen::VectorXf inv_sqrt_diag_nuis = fitres.spline_covariance.diagonal().array().abs().max(1e-10f).sqrt().inverse();
         Eigen::MatrixXf corrmat_nuis = inv_sqrt_diag_nuis.asDiagonal() * fitres.spline_covariance * inv_sqrt_diag_nuis.asDiagonal();

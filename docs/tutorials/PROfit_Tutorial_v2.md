@@ -269,7 +269,8 @@ and without re-running `process`.
 (`numudis` = 3+1 νμ disappearance with parameters `dmsq`, `sinsq2thmm`;
 `nueapp` = 3+1 νμ→νe appearance with `dmsq`, `sinsq2thme`; also available:
 `nuedis`, the full three-parameter `3+1` (|Ue4|², |Uμ4|², Δm² with a
-unitarity constraint), and several re-parameterized `3+1_*` variants — see
+unitarity constraint), several re-parameterized `3+1_*` variants, and
+NC-disappearance extensions (`*_NC`, `NCnumudisapp`, `NCdisapp`) — see
 section 7 for why those exist, and the model appendix at the bottom of this
 document for every model's parameters, bounds, and rules). Each *rule* is an
 oscillation-weight
@@ -310,10 +311,17 @@ channel, **in order**. `<friend>` trees carry the systematic weight branches
 `incl_systematics="false"` (the cosmics here) get no systematic variations
 at all.
 
-Two MCFile details worth knowing: `filename` can be a single ROOT file **or a
-plain-text filelist** of ROOT files, and the `pot` attribute is the
-*generated* POT of that file — events are scaled from it up to the detector
-`pot` declared at the top of the XML.
+Three MCFile details worth knowing: `filename` can be a single ROOT file, a
+**TChain wildcard** (any name containing `.root` is handed to `TChain::Add`,
+which expands the glob itself — a pattern matching no files is a fatal error),
+**or a plain-text filelist** of ROOT files; several `<MCFile>` blocks may share
+one `filename`/wildcard string (e.g. to split branches across blocks); and the
+`pot` attribute is the *generated* POT of that file — summed over every file
+the wildcard/filelist pulls in — from which events are scaled up to the
+detector `pot` declared at the top of the XML. One wildcard caveat: the config
+hash sees only the pattern string, so new files appearing in a globbed
+directory do not invalidate the `_prop.bin`/`_syst.bin` caches — re-`process`
+with `--force`.
 
 ### Systematics: the `<variation_list>`
 
@@ -1669,7 +1677,16 @@ holds ~GB binaries).
 
 ---
 
-# Appendix B: available physics models (`inc/PROmodel.h`)
+# Appendix B: available physics models (`inc/PROmodel.h`, `inc/PROmodels/`)
+
+> Implementation note (September 2026): every single-Δm² sine-kernel model below
+> (the 2-flavour family, all `3+1`/`3+1_*` variants except `3+1_decay_invis`,
+> and the NC-disappearance models) is defined as a *recipe* — parameter/channel
+> tables plus amplitude and analytic-gradient formulas — evaluated by one shared
+> `PROsineModel` class (`inc/PROmodels/PROmodelSine.h`). This changed no tags,
+> parameters, or numbers (verified bitwise), but it is where to look for, or add
+> to, these models' code. All of them support the default analytic-gradient fit
+> mode with closed-form derivatives.
 
 The `<model tag="...">` in your XML selects one of the models below. A few
 conventions apply to all of them:
@@ -1807,6 +1824,59 @@ contours); `xi` is the log geometric ratio ξ = ½·log(|Ue4|²/|Uμ4|²)
 | 0 | `dmsq` [eV²] | log10 | 10⁻² – 10² | 10⁻² |
 | 1 | `sinsq2thmue` | log10 | 0 – ~1 | 10⁻⁸ |
 | 2 | `xi` | **linear** | −10 – 10 | 0 |
+
+### NC-disappearance models (September 2026)
+
+NC samples measure the **total active-neutrino rate**: oscillation to ντ still
+produces NC events, so only the *sterile* fraction of the disappeared flux is a
+real NC deficit. The `_NC` variants below extend their siblings' rules 0–3 with
+four NC/tau channels:
+
+* **4** = νμ→νs (visible NC deficit, `1 − 4|Uμ4|²|Us4|² sin²Δ`) — apply to a
+  νμ-sourced NC sample; **5** = νe→νs (same for νe-sourced NC);
+* **6** = νμ→ντ appearance (`4|Uμ4|²|Uτ4|² sin²Δ`) and **7** = νe→ντ — for
+  CC-ντ samples, if you have any.
+
+Since |Us4|² + |Uτ4|² = 1 − |Ue4|² − |Uμ4|² exactly, each family fits the
+sterile/tau **split** with one extra parameter in its own language:
+
+| model | base params (identical to sibling) | split parameter | fit space | bounds | default |
+|---|---|---|---|---|---|
+| `3+1_NC` | `dmsq`, `Ue4^2`, `Um4^2` | `Uta4sq` = \|Uτ4\|² | log10 | 0 – ~1 | 10⁻⁸ |
+| `3+1_angles_NC` | `dmsq`, `sinsq2th14`, `sinsqth24` | `cosq34` = cos²θ₃₄ | **linear** | 0 – 1 | **1** |
+| `3+1_3A_NC` | `dmsq`, `sinsq2thee`, `sinsqth24` | `cosq34` | **linear** | 0 – 1 | **1** |
+| `3+1_3B_NC` | `dmsq`, `sinsq2thmumu`, `sB` | `cosq34` | **linear** | 0 – 1 | **1** |
+| `3+1_3C_NC` | `dmsq`, `sinsq2thmue`, `xi` | `Uta4sq` | log10 | 0 – ~1 | 10⁻⁸ |
+
+`cosq34 = 1` (the default) sends all of the off-diagonal strength to sterile —
+maximal NC deficit, no ντ appearance; `cosq34 = 0` is the opposite. In `3+1_NC`
+/ `3+1_3C_NC` the tau element is fitted directly and
+|Us4|² = max(0, 1 − Σ|Uα4|²); their unitarity constraints extend to include
+|Uτ4|². An `_NC` model whose XML routes **no** branch to rules 4–7 reproduces
+its non-NC sibling's spectra exactly (verified bitwise), so you can switch a
+config to the `_NC` tag before the NC sample exists without changing results —
+only the parameter count (and thus fit trajectories/seeds) differs.
+
+Two simpler **phenomenological** NC models treat the deficit amplitudes as free
+parameters (no joint unitarity between them — fine for limit plots, not an
+exact 3+1 sub-model):
+
+**`NCnumudisapp`** — single channel, P(νμ→active) = 1 − sin²2θμs·sin²Δ.
+Rules: **0** = no osc, **1** = NC deficit.
+
+| # | name | fit space | bounds | default |
+|---|---|---|---|---|
+| 0 | `dmsq` [eV²] | log10 | 10⁻² – 10² | 10⁻² |
+| 1 | `sinsq2thms` | log10 | 0 – 1 | 10⁻¹⁰ |
+
+**`NCdisapp`** — independent νμ- and νe-sourced deficits.
+Rules: **0** = no osc, **1** = νμ NC deficit, **2** = νe NC deficit.
+
+| # | name | fit space | bounds | default |
+|---|---|---|---|---|
+| 0 | `dmsq` [eV²] | log10 | 10⁻² – 10² | 10⁻² |
+| 1 | `sinsq2thms` | log10 | 0 – 1 | 10⁻¹⁰ |
+| 2 | `sinsq2thes` | log10 | 0 – 1 | 10⁻¹⁰ |
 
 ### `3+1_decay_invis` — 3+1 with invisible sterile decay
 

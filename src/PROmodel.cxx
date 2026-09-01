@@ -7,10 +7,10 @@
 #include "PROmodels/PROmodelSimple.h"
 #include "PROmodels/PROmodel2flav.h"
 #include "PROmodels/PROmodel3p1.h"
-#include "PROmodels/PROmodel3p1decayinvis.h"
 #include "PROmodels/PROmodel3p1decayvis.h"
 #include "PROmodels/PROmodel3p2.h"
 #include "PROmodels/PROmodelLBL.h"
+#include "PROmodels/PROmodelSine.h"
 
 namespace PROfit {
 
@@ -134,24 +134,8 @@ std::unique_ptr<PROmodel> get_model_from_string(const PROconfig& config, const P
 
     if(name == "nullmodel") {
         return std::unique_ptr<PROmodel>(new NullModel(prop));
-    } else if(name == "numudis") {
-        return std::unique_ptr<PROmodel>(new PROnumudis(prop,config.m_model_parameter_map));
     } else if(name == "numudisTEST") {
         return std::unique_ptr<PROmodel>(new PROnumudisTEST(prop,config.m_model_parameter_map));
-    } else if(name == "nueapp") {
-        return std::unique_ptr<PROmodel>(new PROnueapp(prop,config.m_model_parameter_map));
-    } else if(name == "nuedis") {
-        return std::unique_ptr<PROmodel>(new PROnuedis(prop,config.m_model_parameter_map));
-    } else if(name == "3+1") {
-        return std::unique_ptr<PROmodel>(new PRO3p1(prop,config.m_model_parameter_map));
-    } else if(name == "3+1_angles") {
-        return std::unique_ptr<PROmodel>(new PRO3p1_angles(prop,config.m_model_parameter_map));
-    } else if(name == "3+1_3A") {
-        return std::unique_ptr<PROmodel>(new PRO3p1_3A(prop,config.m_model_parameter_map));
-    } else if(name == "3+1_3B") {
-        return std::unique_ptr<PROmodel>(new PRO3p1_3B(prop,config.m_model_parameter_map));
-    } else if(name == "3+1_3C") {
-        return std::unique_ptr<PROmodel>(new PRO3p1_3C(prop,config.m_model_parameter_map));
     } else if(name == "3+1_decay_invis") {
         return std::unique_ptr<PROmodel>(new PRO3p1_decay_invis(prop,config.m_model_parameter_map));
     } else if(name == "3+1_decay_vis_model1") {
@@ -165,7 +149,12 @@ std::unique_ptr<PROmodel> get_model_from_string(const PROconfig& config, const P
     } else if(name == "template" || name == "template_fit") {
         return std::unique_ptr<PROmodel>(new PROtemplate(config, prop));
     }
-    log<LOG_ERROR>(L"%1% || Unrecognized model name %2%. Try numudis, nueapp, nuedis, 3+1, 3+1_angles, 3+1_3(A,B,C), 3+1_decay_invis, 3+1_decay_vis_model(1,2), 3+2, LBL, template_fit. for now. Terminating.") % __func__ % name.c_str();
+    // Sine-kernel family (numudis, nueapp, nuedis, 3+1 variants, NC-disappearance
+    // models): recipe-driven, all evaluated by PROsineModel. See PROmodelSine.h.
+    if(const SineModelRecipe *recipe = find_sine_recipe(name)) {
+        return std::unique_ptr<PROmodel>(new PROsineModel(prop, config.m_model_parameter_map, *recipe));
+    }
+    log<LOG_ERROR>(L"%1% || Unrecognized model name %2%. Try numudis, nueapp, nuedis, NCnumudisapp, NCdisapp, 3+1, 3+1_angles, 3+1_3(A,B,C), 3+1_NC, 3+1_angles_NC, 3+1_3(A,B,C)_NC, 3+1_decay_invis, 3+1_decay_vis_model(1,2), 3+2, LBL, template_fit. for now. Terminating.") % __func__ % name.c_str();
     exit(EXIT_FAILURE);
 }
 
