@@ -13,9 +13,10 @@
  * (exception: NullModel, used directly by bin/PROfit.cxx):
  *   - inc/PROmodels/PROmodelSimple.h — NullModel, PROtemplate (non-oscillation).
  *   - inc/PROmodels/PROmodelSine.h   — PROsineModel + the recipe registry for every
- *     single-Delta-m^2 sine-kernel model: numudis, nueapp, nuedis, 3+1, 3+1_angles,
- *     3+1_3A/3B/3C, and the NC-disappearance models NCnumudisapp, NCdisapp,
- *     3+1_3A/3B/3C_NC.
+ *     single-Delta-m^2 sine-kernel model: SBL_2flav_(numudis,nueapp,nuedis),
+ *     SBL_3+1_(Usq,angles,sinsq2thee,sinsq2thmumu,sinsq2thmue), and the
+ *     NC-disappearance models SBL_2flav_numudis_NC, SBL_2flav_nudis_NC and the
+ *     _NC versions of the SBL_3+1 family.
  *   - inc/PROmodels/PROmodel2flav.h  — PROnumudisTEST (two-variable L,E validation model).
  *   - inc/PROmodels/PROmodel3p1.h    — PRO3p1_decay_invis (custom damped-oscillation kernel).
  *   - inc/PROmodels/PROmodel3p1decayvis.h — PRO3p1_decay_vis_model1/2 (3+1 with visible decay).
@@ -105,7 +106,7 @@ public:
      *                             routing. When set, the column for event @p i in reco variable
      *                             @p v (whose reco bin is @p rbin) is block_fn(v, i, rbin); a
      *                             negative return drops the event. Used by normalization models
-     *                             (e.g. template_fit) that route by subchannel rather than by
+     *                             (e.g. template) that route by subchannel rather than by
      *                             model_rule. When empty, the model_rule logic above is used.
      *
      * @note Single pass over events per reco variable: each event lands in exactly one column,
@@ -260,11 +261,17 @@ public:
  * @brief Factory function: construct a PROmodel subclass by name.
  * @details Reads `config.m_model_tag` to select the appropriate model and passes
  * `config.m_model_parameter_map` for variable-index lookup.
- * Supported names: "nullmodel", "numudis", "numudisTEST", "nueapp", "nuedis",
- * "NCnumudisapp", "NCdisapp", "3+1", "3+1_angles", "3+1_3A", "3+1_3B", "3+1_3C",
- * "3+1_NC", "3+1_angles_NC", "3+1_3A_NC", "3+1_3B_NC", "3+1_3C_NC",
- * "3+1_decay_invis", "3+1_decay_vis_model1", "3+1_decay_vis_model2",
- * "3+2", "LBL", "template"/"template_fit".
+ * Canonical names follow regime_model_parameterization(_NC):
+ * "null", "template", "numudisTEST",
+ * "SBL_2flav_numudis", "SBL_2flav_nueapp", "SBL_2flav_nuedis",
+ * "SBL_2flav_numudis_NC", "SBL_2flav_nudis_NC",
+ * "SBL_3+1_Usq", "SBL_3+1_angles", "SBL_3+1_sinsq2thee", "SBL_3+1_sinsq2thmumu",
+ * "SBL_3+1_sinsq2thmue" (each also with an "_NC" version),
+ * "SBL_3+1+decay_invis", "SBL_3+1+decay_vis1", "SBL_3+1+decay_vis2",
+ * "SBL_3+2_Usq", "LBL_3nu-vacuum_angles".
+ * Legacy pre-v3.1 tags (numudis, nueapp, 3+1, 3+1_3A, NCdisapp, LBL, nullmodel,
+ * template_fit, ...) are accepted as deprecated aliases via canonicalize_model_tag
+ * (src/PROmodel.cxx), which logs a one-time warning per tag.
  * Terminates with LOG_ERROR if the name is unrecognised.
  * @param config  Parsed configuration; provides the model tag and parameter map.
  * @param prop    MC event store used to build H_combined histograms.

@@ -33,7 +33,7 @@ NullModel::NullModel(const PROpeller &prop) {
 PROtemplate::PROtemplate(const PROconfig &config, const PROpeller &prop) {
     const size_t K = config.m_model_parameter_names.size();
     if(K == 0) {
-        log<LOG_ERROR>(L"%1% || template_fit model needs at least one <parameter> naming a subchannel to float. Terminating.") % __func__;
+        log<LOG_ERROR>(L"%1% || template model needs at least one <parameter> naming a subchannel to float. Terminating.") % __func__;
         exit(EXIT_FAILURE);
     }
 
@@ -87,7 +87,7 @@ PROtemplate::PROtemplate(const PROconfig &config, const PROpeller &prop) {
     }
     build_param_index();
 
-    log<LOG_INFO>(L"%1% || template_fit model: floating %2% subchannel normalization(s).") % __func__ % K;
+    log<LOG_INFO>(L"%1% || template model: floating %2% subchannel normalization(s).") % __func__ % K;
     for(size_t k = 0; k < K; ++k)
         log<LOG_INFO>(L"%1% || Param %2% = '%3%' scale in [%4%, %5%], default 1.") % __func__ % k % param_names[k].c_str() % lb(k) % ub(k);
 }

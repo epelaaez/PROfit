@@ -9,7 +9,8 @@
  *   - PROnumudisTEST — two-variable (L, E) validation version of the numudis model.
  * The single-variable models formerly here (PROnumudis, PROnueapp, PROnuedis) are now
  * sine-kernel recipes evaluated by PROsineModel (PROmodels/PROmodelSine.h) under the
- * unchanged factory tags numudis / nueapp / nuedis.
+ * factory tags SBL_2flav_numudis / SBL_2flav_nueapp / SBL_2flav_nuedis (legacy
+ * aliases numudis / nueapp / nuedis).
  */
 #ifndef PROMODEL2FLAV_H
 #define PROMODEL2FLAV_H

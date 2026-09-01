@@ -15,7 +15,7 @@
 	<subchannel name="numuCCoverlay" plotname="#nu_{#mu}CC overlay" color="#21B1FF"/>
 </channel>
 
-<model tag="numudis">
+<model tag="SBL_2flav_numudis">
     <rule index="0" name="No Osc"/>
     <rule index="1" name="Numu Dis"/>
     <parameter name="L/E" variable_index="2"/>

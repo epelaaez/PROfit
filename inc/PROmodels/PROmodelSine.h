@@ -17,19 +17,30 @@
  * that compute the per-channel amplitudes (for get_probs) and the closed-form
  * amplitude derivatives (for get_probs_grad) once per call.
  *
- * Registered recipe tags (see find_sine_recipe / the factory in src/PROmodel.cxx):
- *   - numudis, nueapp, nuedis         — single-channel two-flavour-like models.
- *   - 3+1, 3+1_angles, 3+1_3A, 3+1_3B, 3+1_3C
- *                                     — four-channel {1, P_mumu, P_mue, P_ee} 3+1 variants.
- *   - NCnumudisapp                    — single-channel nu_mu -> nu_s NC disappearance,
+ * Registered recipe tags (see find_sine_recipe / the factory in src/PROmodel.cxx).
+ * Tags follow the regime_model_parameterization(_NC) convention; legacy pre-v3.1
+ * names in [brackets] are still accepted as deprecated aliases (mapped, with a
+ * one-time warning, by canonicalize_model_tag in src/PROmodel.cxx):
+ *   - SBL_2flav_numudis [numudis], SBL_2flav_nueapp [nueapp], SBL_2flav_nuedis [nuedis]
+ *                                     — single-channel two-flavour-like models.
+ *   - SBL_3+1_Usq [3+1]              — four-channel {1, P_mumu, P_mue, P_ee} 3+1 in
+ *                                       |U_e4|^2, |U_mu4|^2.
+ *   - SBL_3+1_angles [3+1_angles]    — the same in sin^2(2theta_14), sin^2(theta_24).
+ *   - SBL_3+1_sinsq2thee [3+1_3A], SBL_3+1_sinsq2thmumu [3+1_3B],
+ *     SBL_3+1_sinsq2thmue [3+1_3C]   — 3+1 reparameterised around one headline
+ *                                       amplitude (ee, mumu, mue respectively) plus a
+ *                                       second shape parameter (sinsqth24, sB, xi).
+ *   - SBL_2flav_numudis_NC [NCnumudisapp]
+ *                                     — single-channel nu_mu -> nu_s NC disappearance,
  *                                       P = 1 - sin^2(2theta_mus) sin^2 x.
- *   - NCdisapp                        — {1, P_mus, P_es} with independent phenomenological
+ *   - SBL_2flav_nudis_NC [NCdisapp]  — {1, P_mus, P_es} with independent phenomenological
  *                                       amplitudes sin^2(2theta_mus), sin^2(2theta_es)
  *                                       (no joint unitarity constraint between them).
- *   - 3+1_NC, 3+1_angles_NC, 3+1_3A_NC, 3+1_3B_NC, 3+1_3C_NC
+ *   - SBL_3+1_Usq_NC, SBL_3+1_angles_NC, SBL_3+1_sinsq2thee_NC,
+ *     SBL_3+1_sinsq2thmumu_NC, SBL_3+1_sinsq2thmue_NC
+ *     [3+1_NC, 3+1_angles_NC, 3+1_3A_NC, 3+1_3B_NC, 3+1_3C_NC]
  *                                     — eight-channel NC-disappearance extensions of the
- *                                       full 3+1, the angle parameterisation, and the
- *                                       3A/3B/3C variants (see channel table below).
+ *                                       five SBL_3+1 variants (see channel table below).
  *
  * Eight-channel NC models: the XML model_rule value routes each subchannel to a
  * probability column,
@@ -41,9 +52,10 @@
  * flux is a real NC deficit (channels 4/5, A = 4 |U_a4|^2 |U_s4|^2) while the tau
  * fraction still interacts (channels 6/7, A = 4 |U_a4|^2 |U_tau4|^2). The sterile/tau
  * split of |U_s4|^2 + |U_tau4|^2 = c14^2 c24^2 = 1 - |U_e4|^2 - |U_mu4|^2 is fit in
- * each family's own parameter language: 3+1_angles_NC, 3A_NC and 3B_NC use
- * cosq34 = cos^2 theta_34 (linear, [0,1], default 1 = all-sterile), while 3+1_NC and
- * 3C_NC fit Uta4sq = |U_tau4|^2 directly (log10) with
+ * each family's own parameter language: SBL_3+1_angles_NC, SBL_3+1_sinsq2thee_NC and
+ * SBL_3+1_sinsq2thmumu_NC use cosq34 = cos^2 theta_34 (linear, [0,1], default 1 =
+ * all-sterile), while SBL_3+1_Usq_NC and SBL_3+1_sinsq2thmue_NC fit
+ * Uta4sq = |U_tau4|^2 directly (log10) with
  * |U_s4|^2 = max(0, 1 - sum |U_a4|^2).
  */
 #ifndef PROMODELSINE_H

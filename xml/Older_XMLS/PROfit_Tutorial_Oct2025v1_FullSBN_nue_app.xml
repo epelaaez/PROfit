@@ -79,7 +79,7 @@
     <allowlist type="covariance" tag="Flux">kzero_Flux</allowlist> 
 </variation_list>
 
-<model tag="nueapp">
+<model tag="SBL_2flav_nueapp">
     <rule index="0" name="No Osc"/>
     <rule index="1" name="Nue App"/>
     <parameter variable_index = "1" name="L/E"/>

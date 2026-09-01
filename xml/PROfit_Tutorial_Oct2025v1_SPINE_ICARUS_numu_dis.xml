@@ -17,7 +17,7 @@
 </channel>
 
 <!-- The Physics model to fit, here numu disapearance only-->
-<model tag="numudis">
+<model tag="SBL_2flav_numudis">
     <rule index="0" name="No Osc"/>
     <rule index="1" name="Numu Dis"/>
     <parameter name="L/E" variable_index="2"/>

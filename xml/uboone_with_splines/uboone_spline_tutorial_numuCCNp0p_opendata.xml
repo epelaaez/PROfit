@@ -25,7 +25,7 @@
 	<subchannel name="numuCCoverlay" plotname="#nu_{#mu}CC overlay" color="#21B1FF"/>
 </channel>
 
-<model tag="nullmodel">
+<model tag="null">
     <rule index="0" name="No Osc"/>
 </model>
 

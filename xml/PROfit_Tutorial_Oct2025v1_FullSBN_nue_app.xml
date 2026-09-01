@@ -23,7 +23,7 @@
 </channel>
 
 <!-- The Physics model, here nue-appearance only -->
-<model tag="nueapp">
+<model tag="SBL_2flav_nueapp">
     <rule index="0" name="No Osc"/>
     <rule index="1" name="Nue App"/>
     <parameter variable_index = "2" name="L/E"/>

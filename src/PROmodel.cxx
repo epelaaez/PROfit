@@ -129,32 +129,70 @@ void PROmodel::build_param_index() {
     }
 }
 
-std::unique_ptr<PROmodel> get_model_from_string(const PROconfig& config, const PROpeller &prop) {
-    std::string name = config.m_model_tag;
+// Canonical model tags follow regime_model_parameterization(_NC); legacy tags
+// remain accepted as deprecated aliases and are mapped here (with a one-time
+// warning per tag) before any dispatch.
+static std::string canonicalize_model_tag(const std::string &name) {
+    static const std::map<std::string, std::string> legacy_aliases = {
+        {"numudis",              "SBL_2flav_numudis"},
+        {"nueapp",               "SBL_2flav_nueapp"},
+        {"nuedis",               "SBL_2flav_nuedis"},
+        {"NCnumudisapp",         "SBL_2flav_numudis_NC"},
+        {"NCdisapp",             "SBL_2flav_nudis_NC"},
+        {"3+1",                  "SBL_3+1_Usq"},
+        {"3+1_NC",               "SBL_3+1_Usq_NC"},
+        {"3+1_angles",           "SBL_3+1_angles"},
+        {"3+1_angles_NC",        "SBL_3+1_angles_NC"},
+        {"3+1_3A",               "SBL_3+1_sinsq2thee"},
+        {"3+1_3A_NC",            "SBL_3+1_sinsq2thee_NC"},
+        {"3+1_3B",               "SBL_3+1_sinsq2thmumu"},
+        {"3+1_3B_NC",            "SBL_3+1_sinsq2thmumu_NC"},
+        {"3+1_3C",               "SBL_3+1_sinsq2thmue"},
+        {"3+1_3C_NC",            "SBL_3+1_sinsq2thmue_NC"},
+        {"3+1_decay_invis",      "SBL_3+1+decay_invis"},
+        {"3+1_decay_vis_model1", "SBL_3+1+decay_vis1"},
+        {"3+1_decay_vis_model2", "SBL_3+1+decay_vis2"},
+        {"3+2",                  "SBL_3+2_Usq"},
+        {"LBL",                  "LBL_3nu-vacuum_angles"},
+        {"nullmodel",            "null"},
+        {"template_fit",         "template"},
+    };
+    auto it = legacy_aliases.find(name);
+    if(it == legacy_aliases.end()) return name;
+    static std::set<std::string> warned;
+    if(warned.insert(name).second) {
+        log<LOG_WARNING>(L"%1% || Model tag '%2%' is deprecated; use '%3%' in the XML <model tag=...>. The legacy tag keeps working as an alias.")
+            % __func__ % name.c_str() % it->second.c_str();
+    }
+    return it->second;
+}
 
-    if(name == "nullmodel") {
+std::unique_ptr<PROmodel> get_model_from_string(const PROconfig& config, const PROpeller &prop) {
+    std::string name = canonicalize_model_tag(config.m_model_tag);
+
+    if(name == "null") {
         return std::unique_ptr<PROmodel>(new NullModel(prop));
     } else if(name == "numudisTEST") {
         return std::unique_ptr<PROmodel>(new PROnumudisTEST(prop,config.m_model_parameter_map));
-    } else if(name == "3+1_decay_invis") {
+    } else if(name == "SBL_3+1+decay_invis") {
         return std::unique_ptr<PROmodel>(new PRO3p1_decay_invis(prop,config.m_model_parameter_map));
-    } else if(name == "3+1_decay_vis_model1") {
+    } else if(name == "SBL_3+1+decay_vis1") {
         return std::unique_ptr<PROmodel>(new PRO3p1_decay_vis_model1(prop,config.m_model_parameter_map));
-    } else if(name == "3+1_decay_vis_model2") {
+    } else if(name == "SBL_3+1+decay_vis2") {
         return std::unique_ptr<PROmodel>(new PRO3p1_decay_vis_model2(prop,config.m_model_parameter_map));
-    } else if(name == "3+2") {
+    } else if(name == "SBL_3+2_Usq") {
         return std::unique_ptr<PROmodel>(new PRO3p2(prop, config.m_model_parameter_map));
-    } else if(name == "LBL") {
+    } else if(name == "LBL_3nu-vacuum_angles") {
         return std::unique_ptr<PROmodel>(new PROLBL(prop, config.m_model_parameter_map));
-    } else if(name == "template" || name == "template_fit") {
+    } else if(name == "template") {
         return std::unique_ptr<PROmodel>(new PROtemplate(config, prop));
     }
-    // Sine-kernel family (numudis, nueapp, nuedis, 3+1 variants, NC-disappearance
-    // models): recipe-driven, all evaluated by PROsineModel. See PROmodelSine.h.
+    // Sine-kernel family (SBL_2flav_*, SBL_3+1_* and their _NC variants):
+    // recipe-driven, all evaluated by PROsineModel. See PROmodelSine.h.
     if(const SineModelRecipe *recipe = find_sine_recipe(name)) {
         return std::unique_ptr<PROmodel>(new PROsineModel(prop, config.m_model_parameter_map, *recipe));
     }
-    log<LOG_ERROR>(L"%1% || Unrecognized model name %2%. Try numudis, nueapp, nuedis, NCnumudisapp, NCdisapp, 3+1, 3+1_angles, 3+1_3(A,B,C), 3+1_NC, 3+1_angles_NC, 3+1_3(A,B,C)_NC, 3+1_decay_invis, 3+1_decay_vis_model(1,2), 3+2, LBL, template_fit. for now. Terminating.") % __func__ % name.c_str();
+    log<LOG_ERROR>(L"%1% || Unrecognized model name %2%. Valid tags (regime_model_parameterization(_NC); legacy pre-v3.1 names are auto-mapped): null, template, SBL_2flav_(numudis,nueapp,nuedis), SBL_2flav_(numudis,nudis)_NC, SBL_3+1_(Usq,angles,sinsq2thee,sinsq2thmumu,sinsq2thmue) and their _NC versions, SBL_3+1+decay_(invis,vis1,vis2), SBL_3+2_Usq, LBL_3nu-vacuum_angles. Terminating.") % __func__ % name.c_str();
     exit(EXIT_FAILURE);
 }
 
