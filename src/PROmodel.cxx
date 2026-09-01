@@ -7,6 +7,7 @@
 #include "PROmodels/PROmodelSimple.h"
 #include "PROmodels/PROmodel2flav.h"
 #include "PROmodels/PROmodel3p1.h"
+#include "PROmodels/PROmodel3p1decayvis.h"
 #include "PROmodels/PROmodel3p2.h"
 #include "PROmodels/PROmodelLBL.h"
 #include "PROmodels/PROmodelSine.h"
@@ -24,7 +25,9 @@ void PROmodel::build_hists_and_combined(const PROpeller &prop, bool filter_by_mo
     }
 
     size_t nvar = prop.variable_mc_stat_err.size();
-    size_t J    = model_functions.size();
+    // Decay models compute counts directly in get_counts and leave model_functions empty;
+    // for those, the number of components comes from prob_types instead.
+    size_t J    = model_functions.empty() ? prob_types.size() : model_functions.size();
     hists.resize(nvar);
     H_combined.resize(nvar);
 
@@ -62,6 +65,32 @@ void PROmodel::build_hists_and_combined(const PROpeller &prop, bool filter_by_mo
         for(size_t m = 0; m < J; ++m)
             H_combined[v].block(0, m * n_phys_bins, n_reco_v, n_phys_bins) = hists[v][m];
     }
+
+    // Store per-ivar bin counts for downstream use (e.g. decay redistribution).
+    phys_grid_sizes.assign(ivar_sizes.begin(), ivar_sizes.end());
+}
+
+Eigen::MatrixXf PROmodel::compute_N_truth(const PROpeller &prop, bool filter_by_model_rule) const {
+    size_t J = model_functions.empty() ? prob_types.size() : model_functions.size();
+    std::vector<size_t> ivar_sizes(ivars.size());
+    for(size_t k = 0; k < ivars.size(); ++k)
+        ivar_sizes[k] = prop.variable_midbin[ivars[k]].size();
+
+    Eigen::MatrixXf N = Eigen::MatrixXf::Zero(n_phys_bins, J);
+    for(size_t i = 0; i < prop.NEvent(); ++i) {
+        int j = filter_by_model_rule ? prop.model_rule[i] : 0;
+        if(j < 0 || (size_t)j >= J) continue;
+        long int flat_phys = 0;
+        bool valid = true;
+        for(size_t k = 0; k < ivars.size(); ++k) {
+            int tbin = prop.VariableBinIndex(ivars[k], i);
+            if(tbin < 0) { valid = false; break; }
+            flat_phys = flat_phys * (long int)ivar_sizes[k] + tbin;
+        }
+        if(!valid) continue;
+        N(flat_phys, j) += prop.added_weights[i];
+    }
+    return N;
 }
 
 Eigen::MatrixXf PROmodel::get_probs(const Eigen::VectorXf &phys, const std::vector<std::vector<float>> &var_arrs) const {
@@ -109,6 +138,10 @@ std::unique_ptr<PROmodel> get_model_from_string(const PROconfig& config, const P
         return std::unique_ptr<PROmodel>(new PROnumudisTEST(prop,config.m_model_parameter_map));
     } else if(name == "3+1_decay_invis") {
         return std::unique_ptr<PROmodel>(new PRO3p1_decay_invis(prop,config.m_model_parameter_map));
+    } else if(name == "3+1_decay_vis_model1") {
+        return std::unique_ptr<PROmodel>(new PRO3p1_decay_vis_model1(prop,config.m_model_parameter_map));
+    } else if(name == "3+1_decay_vis_model2") {
+        return std::unique_ptr<PROmodel>(new PRO3p1_decay_vis_model2(prop,config.m_model_parameter_map));
     } else if(name == "3+2") {
         return std::unique_ptr<PROmodel>(new PRO3p2(prop, config.m_model_parameter_map));
     } else if(name == "LBL") {
@@ -121,7 +154,7 @@ std::unique_ptr<PROmodel> get_model_from_string(const PROconfig& config, const P
     if(const SineModelRecipe *recipe = find_sine_recipe(name)) {
         return std::unique_ptr<PROmodel>(new PROsineModel(prop, config.m_model_parameter_map, *recipe));
     }
-    log<LOG_ERROR>(L"%1% || Unrecognized model name %2%. Try numudis, nueapp, nuedis, NCnumudisapp, NCdisapp, 3+1, 3+1_angles, 3+1_3(A,B,C), 3+1_NC, 3+1_angles_NC, 3+1_3(A,B,C)_NC, 3+1_decay_invis, 3+2, LBL, template_fit. for now. Terminating.") % __func__ % name.c_str();
+    log<LOG_ERROR>(L"%1% || Unrecognized model name %2%. Try numudis, nueapp, nuedis, NCnumudisapp, NCdisapp, 3+1, 3+1_angles, 3+1_3(A,B,C), 3+1_NC, 3+1_angles_NC, 3+1_3(A,B,C)_NC, 3+1_decay_invis, 3+1_decay_vis_model(1,2), 3+2, LBL, template_fit. for now. Terminating.") % __func__ % name.c_str();
     exit(EXIT_FAILURE);
 }
 
