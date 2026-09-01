@@ -195,6 +195,9 @@ public:
     /** @brief Closed-form derivatives of get_probs (see PROmodel::get_probs_grad and SineJacs). */
     std::vector<Eigen::MatrixXf> get_probs_grad(const Eigen::VectorXf &phys, const std::vector<std::vector<float>> &var_arrs) const override;
 
+    /** @brief Closed-form derivatives above, so the analytic gradient is exact here (see PROmodel::has_analytic_gradient). */
+    bool has_analytic_gradient() const override { return true; }
+
 private:
     const SineModelRecipe &recipe_;
     size_t J_ = 0;                                        ///< Number of probability columns.

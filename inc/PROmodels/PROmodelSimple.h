@@ -66,6 +66,9 @@ public:
     Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<std::vector<float>> &) const override;
     /** @brief Closed-form derivatives of get_probs (see PROmodel::get_probs_grad). */
     std::vector<Eigen::MatrixXf> get_probs_grad(const Eigen::VectorXf &phys, const std::vector<std::vector<float>> &) const override;
+
+    /** @brief Closed-form derivatives above, so the analytic gradient is exact here (see PROmodel::has_analytic_gradient). */
+    bool has_analytic_gradient() const override { return true; }
 };
 
 }

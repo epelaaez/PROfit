@@ -151,6 +151,23 @@ public:
      */
     virtual std::vector<Eigen::MatrixXf> get_probs_grad(const Eigen::VectorXf &phys, const std::vector<std::vector<float>> &var_arrs) const;
 
+    /**
+     * @brief Does get_probs_grad return CLOSED-FORM derivatives?
+     * @details Every model can be run in the analytic-gradient chi² mode — the base
+     * class supplies a central finite difference on get_probs — but only a model that
+     * overrides get_probs_grad gets the exactness and the ~1-evaluation cost the mode
+     * (and the grad-* fitter presets) are built around. A model relying on the
+     * base-class FD pays 2·nparams extra get_probs calls per gradient and carries an
+     * O(h²) truncation error, so callers that tune themselves to the analytic gradient
+     * (see the preset resolution in bin/PROfit_setup.cxx) should treat it as absent.
+     *
+     * Default: true only when there are no physics parameters at all (the physics
+     * jacobian is then empty, hence trivially exact — NullModel). Override returning
+     * true in any model with hand-written derivatives.
+     * @return true if get_probs_grad is closed-form for this model.
+     */
+    virtual bool has_analytic_gradient() const { return nparams == 0; }
+
     std::unordered_map<std::string, size_t> param_name_to_index; ///< Fast lookup: parameter name -> index in param_names.
 
     /**

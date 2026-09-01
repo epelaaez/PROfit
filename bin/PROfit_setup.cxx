@@ -242,6 +242,48 @@ void make_param_vectors(Eigen::VectorXf &fakeDataParams, Eigen::VectorXf &CVPara
     }
 }
 
+// Decide which fitter presets this run actually gets, now that both the metric
+// choice and the model are known.
+//
+// The grad-* presets are tuned FOR the analytic gradient: physics-only latin
+// hypercube, PSO effectively off, the budget spent on many cheap multistart
+// descents. That shape only pays off when a gradient really costs ~one evaluation
+// and is exact. Three things can take that away:
+//   * a metric other than PROchi (PROCNP / PROpoisson demote to central-lin),
+//   * --event-by-event (the unbinned strategy demotes too),
+//   * a model without closed-form get_probs_grad (PROmodel's base class falls back
+//     to a central finite difference on the probabilities, so every gradient costs
+//     2*nparams extra get_probs calls and carries an O(h^2) truncation error).
+// In any of those cases the legacy `good`/`fast` presets are the tuned ones, so use
+// them unless the user picked a preset themselves — an explicit -p is always honoured.
+void resolve_fit_presets(PROpt &options, const PROconfig &config, const PROmodel &model) {
+    std::vector<std::string> reasons;
+    if(options.chi2 != "PROchi")        reasons.push_back(options.chi2);
+    if(options.eventbyevent)            reasons.push_back("--event-by-event");
+    if(!model.has_analytic_gradient())  reasons.push_back("model '" + config.m_model_tag +
+                                                          "' (no closed-form get_probs_grad)");
+    if(reasons.empty()) return;
+
+    std::string why = reasons.front();
+    for(size_t i = 1; i < reasons.size(); ++i) why += " + " + reasons[i];
+
+    if(!options.preset_user_set) {
+        options.fit_preset = {"good", "fast"};
+        log<LOG_WARNING>(L"%1% || %2%: no analytic gradient available, so the grad-* preset defaults do not apply. "
+                L"Defaulting to preset `good` (global) `fast` (scan) instead. Pass -p explicitly to override.")
+            % __func__ % why.c_str();
+    } else {
+        for(const auto &fit_pre: options.fit_preset) {
+            if(fit_pre.rfind("grad-", 0) == 0) {
+                log<LOG_WARNING>(L"%1% || Preset `%2%` was requested, but %3% means no analytic gradient is available. "
+                        L"The grad-* presets are tuned for it and will be slower/weaker here; `good`/`fast`/`overkill` "
+                        L"are the tuned presets for finite-difference gradients. Honouring your explicit choice.")
+                    % __func__ % fit_pre.c_str() % why.c_str();
+            }
+        }
+    }
+}
+
 void include_or_exclude_systs(std::vector<PROsyst> &variable_systs, const PROconfig &config, const PROpt &options) {
     if(options.syst_list.size()) {
 

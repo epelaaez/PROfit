@@ -91,6 +91,10 @@ int main(int argc, char* argv[])
     make_param_vectors(fakeDataParams, CVParams, config, options, *model, variable_systs[config.i_prime], fake_data_osc_param_vector);
 
 
+    // Presets depend on the metric AND the model (analytic gradient availability), so
+    // resolve them here, once both exist, rather than at command-line parse time.
+    resolve_fit_presets(options, config, *model);
+
     log<LOG_INFO>(L"%1% || Starting from fit preset :  %2%.")% __func__ % options.fit_preset;
     for(auto &fit_pre: options.fit_preset){
         if (options.allowed_preset.find(fit_pre) == options.allowed_preset.end()) {
