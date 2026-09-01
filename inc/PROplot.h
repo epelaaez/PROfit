@@ -418,6 +418,36 @@ namespace PROfit{
     int plotCov2SplineChecks(const PROconfig &config, const PROspec &cv, const PROsyst &syst, const std::string &filename, int var_index);
 
     /**
+     * @brief Plot the data-constrained posterior pulls of the covariance-type systematics.
+     * @details Covariance-type systematics are not fit parameters — they are marginalized
+     * analytically in the chi^2 — but conditioning on data gives them a Gaussian posterior
+     * (G. Putnam, "How to Obtain Pull Terms for Systematic Uncertainties Embedded in a
+     * Covariance Matrix", SBN note, May 2026), the same conditional that shifts and shrinks
+     * the post-fit error band. This draws that posterior, putting the covariance systematics
+     * on equal footing with the spline pull plots. Two pages:
+     * page 1 shows the pull and posterior width of each SVD mode of the collapsed total
+     * covariance (the modes have prior sigma = 1 by construction, so the values are already
+     * in pre-fit sigma units; labeled by index and share of total variance, sorted
+     * descending); page 2 shows the per-bin conditional shift divided by the pre-fit bin
+     * sigma, with the posterior/pre-fit width ratio as the bar height (bins outside the fit
+     * — inactive or zero data — are hatched). Everything is evaluated analytically at the
+     * best fit, matching PROerrorbar::center_shift.
+     * @param config     Analysis configuration.
+     * @param prop       MC event store.
+     * @param syst       Systematics (must have covariance-type entries to plot anything).
+     * @param model      Physics model.
+     * @param best_fit   Full best-fit parameter vector (physics then splines).
+     * @param data_spec  Collapsed data spectrum for @p var_index.
+     * @param filename   Output PDF path (multi-page).
+     * @param var_index  Variable (binning) index.
+     * @param drawn_objs Optional map to receive named clones of the drawn graphs for
+     *                   persistence in the output ROOT file.
+     * @return 0 if the PDF was drawn, 1 if skipped (no covariance systematics, mismatched
+     *         data, or nothing to constrain).
+     */
+    int plotCovariancePosteriorPulls(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const Eigen::VectorXf &best_fit, const Eigen::VectorXf &data_spec, const std::string &filename, int var_index, std::map<std::string, TObject*> *drawn_objs = nullptr);
+
+    /**
      * @brief Compute a posterior error band using Markov Chain Monte Carlo sampling.
      * @details Runs the Metropolis algorithm for @p burnin + @p iterations steps.  At each
      * accepted step after burn-in, the corresponding spectrum is computed and accumulated;
@@ -532,6 +562,9 @@ namespace PROfit{
                // the collapsed systematic covariance is
                 // Sigma = L*L^T (L = U*sqrt(S) from DecomposeFractionalCovariance)
                 // and the spectrum shift is L*alpha (matchs the note's R = L^T)
+                // Keep this algebra in sync with plotCovariancePosteriorPulls
+                // (PROplot.cxx), which re-derives the same conditional to plot
+                // the mode pulls.
             
                 // Mark Note: Restrict the constraint to the bins the fit metric actually
                 // used, aka the active bins PR from a while back with data > 0 (PROchi drops zero-data bins
