@@ -3338,24 +3338,16 @@ int plotPriorFractionalSystematicChannelRatios(const PROconfig &config, const PR
         log<LOG_INFO>(L"%1% || Covariance posterior pulls: %2% modes over %3% bins, max |pull| = %4%, min mode posterior sigma = %5%.")
             % __func__ % k % nb % alpha_hat.cwiseAbs().maxCoeff() % sigma_post.minCoeff();
 
-        // ---- Page 1: mode pulls, styled like the spline 1-sigma pull plot ----
-        const int maxShow = 80;
-        const int nShown = std::min((int)k, maxShow);
-        const int nBinsP2 = (int)nbins_coll;
+        // ---- Drawing: paginated, fixed legible fonts ----
+        // ROOT's TPDF hardcodes the page to A4 (auto-rotated to landscape for
+        // wide canvases), so a very wide canvas just scales down to an
+        // unreadable strip. Instead keep a constant number of entries per
+        // A4-landscape-aspect page so text and bars stay full size, and let
+        // the PDF grow pages.
+        const int modes_per_page = 25;
+        const int bins_per_page  = 25;
 
-        auto page_layout = [](int n) {
-            struct { int width; float axis_label, x_label, bar_halfwidth; } l;
-            l.width          = std::max(600, std::min(5000, 50 * n));
-            l.axis_label     = std::max(0.030f, std::min(0.045f, 1.8f / n));
-            l.x_label        = std::max(0.015f, std::min(0.030f, 1.2f / n));
-            l.bar_halfwidth  = std::max(0.08f, std::min(0.4f,  4.0f / n));
-            return l;
-        };
-        const auto lay1 = page_layout(nShown);
-        const auto lay2 = page_layout(nBinsP2);
-
-        const int c_width = std::max(lay1.width, lay2.width);
-        TCanvas *c = new TCanvas((filename+"_covpulls").c_str(), (filename+"_covpulls").c_str(), c_width, 500);
+        TCanvas *c = new TCanvas((filename+"_covpulls").c_str(), (filename+"_covpulls").c_str(), 800, 560);
         c->SetLeftMargin(0.09);
         c->SetBottomMargin(0.30);
         c->SetRightMargin(0.28);
@@ -3368,98 +3360,116 @@ int plotPriorFractionalSystematicChannelRatios(const PROconfig &config, const PR
             return std::make_pair(minVal * 1.15f, maxVal * 1.15f);
         };
 
+        // ---- Mode-pull pages, styled like the spline 1-sigma pull plot ----
         {
+            // Layout constants for the fixed per-page entry count (matches the
+            // small-nBins clamps of the spline pull plots = maximum legibility).
+            const int per_page = std::min((int)k, modes_per_page);
+            const float axis_label = std::max(0.030f, std::min(0.045f, 1.8f / per_page));
+            const float x_label    = std::max(0.015f, std::min(0.030f, 1.2f / per_page));
+            const float bar_halfwidth = std::max(0.08f, std::min(0.4f, 4.0f / per_page));
+
+            // One y range over all modes so pages are directly comparable.
             float minVal = -1.2f, maxVal = 1.2f;
-            for(int j = 0; j < nShown; ++j) {
+            for(int j = 0; j < (int)k; ++j) {
                 minVal = std::min(minVal, (float)(alpha_hat(j) - sigma_post(j)));
                 maxVal = std::max(maxVal, (float)(alpha_hat(j) + sigma_post(j)));
             }
             auto [y_min, y_max] = y_bounds(minVal, maxVal);
-
-            TH1F *frame = new TH1F((filename+"_frame_covmodes").c_str(), "", nShown, 0, nShown);
-            frame->SetMinimum(y_min);
-            frame->SetMaximum(y_max);
-            frame->SetStats(0);
-            frame->GetXaxis()->SetLabelSize(0);
-            frame->GetXaxis()->SetTickLength(0);
-            frame->GetYaxis()->SetTitle("Mode pull #hat{#alpha} (prior #sigma = 1)");
-            frame->GetYaxis()->SetTitleSize(lay1.axis_label);
-            frame->GetYaxis()->SetLabelSize(lay1.axis_label);
-            frame->GetYaxis()->SetTitleOffset(1.0);
-            frame->Draw("AXIS");
-
-            TBox *prior_band = new TBox(0.0f, -1.0f, (float)nShown, 1.0f);
-            prior_band->SetFillColor(kGray);
-            prior_band->SetFillStyle(1001);
-            prior_band->SetLineColor(kGray+1);
-            prior_band->SetLineWidth(1);
-            prior_band->Draw("same");
-
-            TGraphAsymmErrors *postbars = new TGraphAsymmErrors(nShown);
-            for(int j = 0; j < nShown; ++j) {
-                postbars->SetPoint(j, j + 0.5f, alpha_hat(j));
-                postbars->SetPointError(j, lay1.bar_halfwidth, lay1.bar_halfwidth, sigma_post(j), sigma_post(j));
-            }
-            postbars->SetFillColor(kBlue-7);
-            postbars->SetFillStyle(1001);
-            postbars->SetLineColor(kBlue-8);
-            postbars->SetLineWidth(1);
-            postbars->Draw("2 same");
-
-            for(float y : {0.0f, 1.0f, -1.0f}) {
-                TLine *l = new TLine(0, y, nShown, y);
-                l->SetLineStyle(y == 0.0f ? 2 : 3);
-                l->SetLineColor(kGray+2);
-                l->SetLineWidth(1);
-                l->Draw();
-            }
-
             const float label_y = y_min - (y_max - y_min) * 0.04f;
-            for(int j = 0; j < nShown; ++j) {
-                double frac = 100.0 * L_shift.col(j).squaredNorm() / total_variance;
-                char buf[64];
-                snprintf(buf, sizeof(buf), "mode %d (%.1f%%)", j, frac);
-                TLatex *t = new TLatex(j + 0.5f, label_y, buf);
-                t->SetTextAlign(13);
-                t->SetTextSize(lay1.x_label);
-                t->SetTextAngle(-45);
-                t->Draw();
+
+            const int npages = ((int)k + per_page - 1) / per_page;
+            for(int pg = 0; pg < npages; ++pg) {
+                c->Clear();
+                const int start = pg * per_page;
+                const int end = std::min(start + per_page, (int)k);
+
+                TH1F *frame = new TH1F((filename+"_frame_covmodes"+std::to_string(pg)).c_str(), "", per_page, start, start + per_page);
+                frame->SetMinimum(y_min);
+                frame->SetMaximum(y_max);
+                frame->SetStats(0);
+                frame->GetXaxis()->SetLabelSize(0);
+                frame->GetXaxis()->SetTickLength(0);
+                frame->GetYaxis()->SetTitle("Mode pull #hat{#alpha} (prior #sigma = 1)");
+                frame->GetYaxis()->SetTitleSize(axis_label);
+                frame->GetYaxis()->SetLabelSize(axis_label);
+                frame->GetYaxis()->SetTitleOffset(1.0);
+                frame->Draw("AXIS");
+
+                TBox *prior_band = new TBox((float)start, -1.0f, (float)end, 1.0f);
+                prior_band->SetFillColor(kGray);
+                prior_band->SetFillStyle(1001);
+                prior_band->SetLineColor(kGray+1);
+                prior_band->SetLineWidth(1);
+                prior_band->Draw("same");
+
+                TGraphAsymmErrors *postbars = new TGraphAsymmErrors(end - start);
+                for(int j = start; j < end; ++j) {
+                    postbars->SetPoint(j - start, j + 0.5f, alpha_hat(j));
+                    postbars->SetPointError(j - start, bar_halfwidth, bar_halfwidth, sigma_post(j), sigma_post(j));
+                }
+                postbars->SetFillColor(kBlue-7);
+                postbars->SetFillStyle(1001);
+                postbars->SetLineColor(kBlue-8);
+                postbars->SetLineWidth(1);
+                postbars->Draw("2 same");
+
+                for(float y : {0.0f, 1.0f, -1.0f}) {
+                    TLine *l = new TLine(start, y, start + per_page, y);
+                    l->SetLineStyle(y == 0.0f ? 2 : 3);
+                    l->SetLineColor(kGray+2);
+                    l->SetLineWidth(1);
+                    l->Draw();
+                }
+
+                for(int j = start; j < end; ++j) {
+                    double frac = 100.0 * L_shift.col(j).squaredNorm() / total_variance;
+                    char buf[64];
+                    snprintf(buf, sizeof(buf), "mode %d (%.1f%%)", j, frac);
+                    TLatex *t = new TLatex(j + 0.5f, label_y, buf);
+                    t->SetTextAlign(13);
+                    t->SetTextSize(x_label);
+                    t->SetTextAngle(-45);
+                    t->Draw();
+                }
+
+                TLegend *leg = new TLegend(0.73, 0.68, 0.99, 0.92);
+                leg->SetFillStyle(1001);
+                leg->SetBorderSize(1);
+                leg->SetTextSize(0.028f);
+                leg->AddEntry(prior_band, "Pre-fit #pm1#sigma (prior)", "f");
+                leg->AddEntry(postbars, "Post-fit pull #pm1#sigma", "f");
+                leg->Draw();
+
+                TLatex *pt = new TLatex();
+                pt->SetNDC();
+                pt->SetTextFont(42);
+                pt->SetTextSize(0.028f);
+                pt->SetTextAlign(13);
+                char pbuf[96];
+                snprintf(pbuf, sizeof(pbuf), "Covariance modes %d#minus%d of %d (by variance)", start, end - 1, (int)k);
+                pt->DrawLatex(0.09, 0.985, pbuf);
+
+                TText *vt = new TText();
+                vt->SetNDC();
+                vt->SetTextFont(42);
+                vt->SetTextSize(0.028f);
+                vt->SetTextAlign(33);
+                vt->DrawText(0.96, 0.985, ("PROfit v" + std::string(PROJECT_VERSION_STR)).c_str());
+
+                c->Update();
+                c->Print(filename.c_str());
             }
-            if((int)k > nShown) {
-                double rest_var = 0;
-                for(int j = nShown; j < (int)k; ++j) rest_var += L_shift.col(j).squaredNorm();
-                char buf[96];
-                snprintf(buf, sizeof(buf), "+%d more modes (%.1f%% of total variance)", (int)k - nShown, 100.0 * rest_var / total_variance);
-                TLatex *t = new TLatex();
-                t->SetNDC();
-                t->SetTextFont(42);
-                t->SetTextSize(0.028f);
-                t->SetTextAlign(31);
-                t->DrawLatex(0.71, 0.03, buf);
-            }
-
-            TLegend *leg = new TLegend(0.73, 0.68, 0.99, 0.92);
-            leg->SetFillStyle(1001);
-            leg->SetBorderSize(1);
-            leg->SetTextSize(std::max(0.022f, std::min(0.030f, lay1.axis_label * 0.85f)));
-            leg->AddEntry(prior_band, "Pre-fit #pm1#sigma (prior)", "f");
-            leg->AddEntry(postbars, "Post-fit #hat{#alpha} #pm1#sigma (constrained)", "f");
-            leg->Draw();
-
-            TText *vt = new TText();
-            vt->SetNDC();
-            vt->SetTextFont(42);
-            vt->SetTextSize(0.028f);
-            vt->SetTextAlign(33);
-            vt->DrawText(0.96, 0.97, ("PROfit v" + std::string(PROJECT_VERSION_STR)).c_str());
-
-            c->Update();
-            c->Print(filename.c_str());
         }
 
-        // ---- Page 2: per-bin conditional shift / pre-fit bin sigma ----
-        c->Clear();
+        // ---- Per-bin pages: conditional shift / pre-fit bin sigma ----
         {
+            const int nBinsTot = (int)nbins_coll;
+            const int per_page = std::min(nBinsTot, bins_per_page);
+            const float axis_label = std::max(0.030f, std::min(0.045f, 1.8f / per_page));
+            const float x_label    = std::max(0.015f, std::min(0.030f, 1.2f / per_page));
+            const float bar_halfwidth = std::max(0.08f, std::min(0.4f, 4.0f / per_page));
+
             float minVal = -1.2f, maxVal = 1.2f;
             std::vector<float> norm_shift(nbins_coll, 0.0f), norm_sigma(nbins_coll, 0.0f);
             for(size_t i = 0; i < nbins_coll; ++i) {
@@ -3471,86 +3481,101 @@ int plotPriorFractionalSystematicChannelRatios(const PROconfig &config, const PR
                 maxVal = std::max(maxVal, norm_shift[i] + norm_sigma[i]);
             }
             auto [y_min, y_max] = y_bounds(minVal, maxVal);
-
-            TH1F *frame = new TH1F((filename+"_frame_covbins").c_str(), "", nBinsP2, 0, nBinsP2);
-            frame->SetMinimum(y_min);
-            frame->SetMaximum(y_max);
-            frame->SetStats(0);
-            frame->GetXaxis()->SetLabelSize(0);
-            frame->GetXaxis()->SetTickLength(0);
-            frame->GetYaxis()->SetTitle("Bin shift / pre-fit #sigma_{bin}");
-            frame->GetYaxis()->SetTitleSize(lay2.axis_label);
-            frame->GetYaxis()->SetLabelSize(lay2.axis_label);
-            frame->GetYaxis()->SetTitleOffset(1.0);
-            frame->Draw("AXIS");
-
-            TBox *prior_band = new TBox(0.0f, -1.0f, (float)nBinsP2, 1.0f);
-            prior_band->SetFillColor(kGray);
-            prior_band->SetFillStyle(1001);
-            prior_band->SetLineColor(kGray+1);
-            prior_band->SetLineWidth(1);
-            prior_band->Draw("same");
-
-            TBox *masked_ref = nullptr;
-            for(size_t i = 0; i < nbins_coll; ++i) {
-                if(in_fit[i] && bin_prior_var(i) > 0) continue;
-                TBox *b = new TBox((float)i, y_min, (float)(i+1), y_max);
-                b->SetFillColor(kGray);
-                b->SetFillStyle(3004);
-                b->SetLineWidth(0);
-                b->Draw("same");
-                if(!masked_ref) masked_ref = b;
-            }
-
-            TGraphAsymmErrors *binbars = new TGraphAsymmErrors();
-            for(size_t i = 0; i < nbins_coll; ++i) {
-                if(!in_fit[i] || bin_prior_var(i) <= 0) continue;
-                int np = binbars->GetN();
-                binbars->SetPoint(np, i + 0.5f, norm_shift[i]);
-                binbars->SetPointError(np, lay2.bar_halfwidth, lay2.bar_halfwidth, norm_sigma[i], norm_sigma[i]);
-            }
-            binbars->SetFillColor(kBlue-7);
-            binbars->SetFillStyle(1001);
-            binbars->SetLineColor(kBlue-8);
-            binbars->SetLineWidth(1);
-            binbars->Draw("2 same");
-
-            for(float y : {0.0f, 1.0f, -1.0f}) {
-                TLine *l = new TLine(0, y, nBinsP2, y);
-                l->SetLineStyle(y == 0.0f ? 2 : 3);
-                l->SetLineColor(kGray+2);
-                l->SetLineWidth(1);
-                l->Draw();
-            }
-
-            const int label_step = (nBinsP2 + 59) / 60;
             const float label_y = y_min - (y_max - y_min) * 0.04f;
-            for(int i = 0; i < nBinsP2; i += label_step) {
-                TLatex *t = new TLatex(i + 0.5f, label_y, std::to_string(i).c_str());
-                t->SetTextAlign(13);
-                t->SetTextSize(lay2.x_label);
-                t->SetTextAngle(-45);
-                t->Draw();
+
+            const int npages = (nBinsTot + per_page - 1) / per_page;
+            for(int pg = 0; pg < npages; ++pg) {
+                c->Clear();
+                const int start = pg * per_page;
+                const int end = std::min(start + per_page, nBinsTot);
+
+                TH1F *frame = new TH1F((filename+"_frame_covbins"+std::to_string(pg)).c_str(), "", per_page, start, start + per_page);
+                frame->SetMinimum(y_min);
+                frame->SetMaximum(y_max);
+                frame->SetStats(0);
+                frame->GetXaxis()->SetLabelSize(0);
+                frame->GetXaxis()->SetTickLength(0);
+                frame->GetYaxis()->SetTitle("Bin shift / pre-fit #sigma_{bin}");
+                frame->GetYaxis()->SetTitleSize(axis_label);
+                frame->GetYaxis()->SetLabelSize(axis_label);
+                frame->GetYaxis()->SetTitleOffset(1.0);
+                frame->Draw("AXIS");
+
+                TBox *prior_band = new TBox((float)start, -1.0f, (float)end, 1.0f);
+                prior_band->SetFillColor(kGray);
+                prior_band->SetFillStyle(1001);
+                prior_band->SetLineColor(kGray+1);
+                prior_band->SetLineWidth(1);
+                prior_band->Draw("same");
+
+                TBox *masked_ref = nullptr;
+                for(int i = start; i < end; ++i) {
+                    if(in_fit[i] && bin_prior_var(i) > 0) continue;
+                    TBox *b = new TBox((float)i, y_min, (float)(i+1), y_max);
+                    b->SetFillColor(kGray);
+                    b->SetFillStyle(3004);
+                    b->SetLineWidth(0);
+                    b->Draw("same");
+                    if(!masked_ref) masked_ref = b;
+                }
+
+                TGraphAsymmErrors *binbars = new TGraphAsymmErrors();
+                for(int i = start; i < end; ++i) {
+                    if(!in_fit[i] || bin_prior_var(i) <= 0) continue;
+                    int np = binbars->GetN();
+                    binbars->SetPoint(np, i + 0.5f, norm_shift[i]);
+                    binbars->SetPointError(np, bar_halfwidth, bar_halfwidth, norm_sigma[i], norm_sigma[i]);
+                }
+                binbars->SetFillColor(kBlue-7);
+                binbars->SetFillStyle(1001);
+                binbars->SetLineColor(kBlue-8);
+                binbars->SetLineWidth(1);
+                binbars->Draw("2 same");
+
+                for(float y : {0.0f, 1.0f, -1.0f}) {
+                    TLine *l = new TLine(start, y, start + per_page, y);
+                    l->SetLineStyle(y == 0.0f ? 2 : 3);
+                    l->SetLineColor(kGray+2);
+                    l->SetLineWidth(1);
+                    l->Draw();
+                }
+
+                for(int i = start; i < end; ++i) {
+                    TLatex *t = new TLatex(i + 0.5f, label_y, std::to_string(i).c_str());
+                    t->SetTextAlign(13);
+                    t->SetTextSize(x_label);
+                    t->SetTextAngle(-45);
+                    t->Draw();
+                }
+
+                TLegend *leg = new TLegend(0.73, 0.62, 0.99, 0.92);
+                leg->SetFillStyle(1001);
+                leg->SetBorderSize(1);
+                leg->SetTextSize(0.028f);
+                leg->AddEntry(prior_band, "Pre-fit #pm1#sigma (prior)", "f");
+                leg->AddEntry(binbars, "Post-fit shift #pm1#sigma", "f");
+                if(masked_ref) leg->AddEntry(masked_ref, "Bin not in fit", "f");
+                leg->Draw();
+
+                TLatex *pt = new TLatex();
+                pt->SetNDC();
+                pt->SetTextFont(42);
+                pt->SetTextSize(0.028f);
+                pt->SetTextAlign(13);
+                char pbuf[96];
+                snprintf(pbuf, sizeof(pbuf), "Collapsed bins %d#minus%d of %d", start, end - 1, nBinsTot);
+                pt->DrawLatex(0.09, 0.985, pbuf);
+
+                TText *vt = new TText();
+                vt->SetNDC();
+                vt->SetTextFont(42);
+                vt->SetTextSize(0.028f);
+                vt->SetTextAlign(33);
+                vt->DrawText(0.96, 0.985, ("PROfit v" + std::string(PROJECT_VERSION_STR)).c_str());
+
+                c->Update();
+                c->Print(filename.c_str());
             }
-
-            TLegend *leg = new TLegend(0.73, 0.62, 0.99, 0.92);
-            leg->SetFillStyle(1001);
-            leg->SetBorderSize(1);
-            leg->SetTextSize(std::max(0.022f, std::min(0.030f, lay2.axis_label * 0.85f)));
-            leg->AddEntry(prior_band, "Pre-fit #pm1#sigma (prior)", "f");
-            leg->AddEntry(binbars, "Shift #pm post-fit #sigma / pre-fit #sigma", "f");
-            if(masked_ref) leg->AddEntry(masked_ref, "Bin not in fit", "f");
-            leg->Draw();
-
-            TText *vt = new TText();
-            vt->SetNDC();
-            vt->SetTextFont(42);
-            vt->SetTextSize(0.028f);
-            vt->SetTextAlign(33);
-            vt->DrawText(0.96, 0.97, ("PROfit v" + std::string(PROJECT_VERSION_STR)).c_str());
-
-            c->Update();
-            c->Print(filename.c_str());
         }
         c->Print((filename+"]").c_str());
         delete c;

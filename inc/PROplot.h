@@ -424,11 +424,13 @@ namespace PROfit{
      * (G. Putnam, "How to Obtain Pull Terms for Systematic Uncertainties Embedded in a
      * Covariance Matrix", SBN note, May 2026), the same conditional that shifts and shrinks
      * the post-fit error band. This draws that posterior, putting the covariance systematics
-     * on equal footing with the spline pull plots. Two pages:
-     * page 1 shows the pull and posterior width of each SVD mode of the collapsed total
+     * on equal footing with the spline pull plots. Two sections, each paginated with a
+     * fixed number of entries per page so labels stay full-size (ROOT's TPDF hardcodes
+     * A4 pages, so a single very wide canvas would shrink to an unreadable strip):
+     * first the pull and posterior width of each SVD mode of the collapsed total
      * covariance (the modes have prior sigma = 1 by construction, so the values are already
      * in pre-fit sigma units; labeled by index and share of total variance, sorted
-     * descending); page 2 shows the per-bin conditional shift divided by the pre-fit bin
+     * descending); then the per-bin conditional shift divided by the pre-fit bin
      * sigma, with the posterior/pre-fit width ratio as the bar height (bins outside the fit
      * — inactive or zero data — are hatched). Everything is evaluated analytically at the
      * best fit, matching PROerrorbar::center_shift.
