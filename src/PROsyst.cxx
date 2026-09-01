@@ -20,6 +20,10 @@ namespace PROfit {
             if(syst.mode == "spline" || syst.mode == "norm" || syst.mode == "hist1d" || syst.mode == "hist2d" || syst.mode == "explicit_spline") {
                 bool unmirrored = config.m_mcgen_variation_unmirrored.find(syst.systname) != config.m_mcgen_variation_unmirrored.end();
                 FillSpline(syst, unmirrored);
+                bool is_flux = config.has_flux_tag(syst.systname);
+                spline_is_pre_migration.push_back(is_flux);
+                log<LOG_DEBUG>(L"%1% || Spline '%2%' classified as %3%") % __func__ % syst.systname.c_str()
+                    % (is_flux ? "pre-migration (flux)" : "post-migration");
                 spline_prior_types.back() = config.GetSplinePriorType(syst.systname);
                 ++n_splines;
             } else if(syst.mode == "spline_to_covariance") {
@@ -104,6 +108,14 @@ namespace PROfit {
                 size_t n_after = splines.size();
                 size_t n_covar_after = covar_names.size();
 
+                // Each synthesized decomposition knob inherits the parent systematic's
+                // pre/post-migration classification.  A flux covariance decomposed into knobs
+                // gives all-flux (pre-migration) knobs; this keeps spline_is_pre_migration the
+                // same length as splines, so FillSpectra's has_pre_mig_info check stays true.
+                bool is_flux = config.has_flux_tag(syst.systname);
+                for(size_t si = n_before; si < n_after; ++si)
+                    spline_is_pre_migration.push_back(is_flux);
+
                 // Propagate parent tag + plotname to the synthesized knob entries so downstream
                 // plotting code (PROplot.cxx) can group them under the same tag.
                 // The maps are populated by the XML parser; here we append entries for the
@@ -124,8 +136,8 @@ namespace PROfit {
                 for(size_t si = n_before; si < n_after; ++si) propagate(spline_names[si]);
                 for(size_t ci = n_covar_before; ci < n_covar_after; ++ci) propagate(covar_names[ci]);
             }else if(syst.mode == "flat"){
-                this->CreateFlatMatrix(config, syst); 
-                covar_names.push_back(syst.systname); 
+                this->CreateFlatMatrix(config, syst);
+                covar_names.push_back(syst.systname);
                 ++n_covar;
             }else if(syst.mode == "norm_to_covariance"){
                 this->CreateNormMatrix(config, syst);
@@ -146,6 +158,13 @@ namespace PROfit {
                 size_t n_before = splines.size();
                 FillSplinesFromCovarianceMatrix(frac_cov, syst);
                 size_t n_after = splines.size();
+
+                // Synthesized knobs inherit the parent's pre/post-migration classification,
+                // keeping spline_is_pre_migration the same length as splines (see the
+                // covariance_to_spline branch above).
+                bool is_flux_ext = config.has_flux_tag(syst.systname);
+                for(size_t si = n_before; si < n_after; ++si)
+                    spline_is_pre_migration.push_back(is_flux_ext);
 
                 // Propagate parent tag + plotname to the synthesized knob entries (see
                 // covariance_to_spline branch above for the rationale).
@@ -234,6 +253,8 @@ namespace PROfit {
                         ret.spline_restrict_hi.push_back(spline_restrict_hi[idx]);
                         ret.spline_binnings.push_back(spline_binnings[idx]);
                         ret.spline_prior_types.push_back(spline_prior_types[idx]);
+                        if(idx < spline_is_pre_migration.size())
+                            ret.spline_is_pre_migration.push_back(spline_is_pre_migration[idx]);
                         tmp_priors(ret.n_splines) = spline_priors(idx);
                         tmp_centers(ret.n_splines) = spline_centers(idx);
                         ++ret.n_splines;
@@ -286,6 +307,8 @@ namespace PROfit {
             ret.spline_restrict_hi.push_back(spline_restrict_hi[idx]);
             ret.spline_binnings.push_back(spline_binnings[idx]);
             ret.spline_prior_types.push_back(spline_prior_types[idx]);
+            if(idx < spline_is_pre_migration.size())
+                ret.spline_is_pre_migration.push_back(spline_is_pre_migration[idx]);
             tmp_priors(ret.n_splines) = spline_priors(idx);
             tmp_centers(ret.n_splines) = spline_centers(idx);
             ++ret.n_splines;

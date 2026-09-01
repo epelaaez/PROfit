@@ -701,6 +701,27 @@ namespace PROfit{
             /* Get number of DetVarSection blocks */
             size_t GetNumDetVarSections() const { return m_detvar_xml_templates.size(); }
 
+            /** @brief Returns true if the tag string, when lowercased, contains "flux".
+             *  Used to classify systematics as pre-migration (beam flux)
+             *  vs post-migration (cross-section, detector).
+             *  Used for 3+1+decay or other non-local oscillation models. */
+            static bool is_flux_tag(const std::string &tag) {
+                std::string lower = tag;
+                std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+                return lower.find("flux") != std::string::npos;
+            }
+
+            /** @brief Returns true if any tag for the named systematic contains "flux"
+             *  (case-insensitive). Returns false if the systematic has no tags. */
+            bool has_flux_tag(const std::string &syst_name) const {
+                auto it = m_mcgen_variation_tags.find(syst_name);
+                if(it == m_mcgen_variation_tags.end()) return false;
+                for(const auto &tag : it->second) {
+                    if(is_flux_tag(tag)) return true;
+                }
+                return false;
+            }
+
 
     };
 

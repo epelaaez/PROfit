@@ -18,6 +18,7 @@
  *     3+1_3A/3B/3C_NC.
  *   - inc/PROmodels/PROmodel2flav.h  — PROnumudisTEST (two-variable L,E validation model).
  *   - inc/PROmodels/PROmodel3p1.h    — PRO3p1_decay_invis (custom damped-oscillation kernel).
+ *   - inc/PROmodels/PROmodel3p1decayvis.h — PRO3p1_decay_vis_model1/2 (3+1 with visible decay).
  *   - inc/PROmodels/PROmodel3p2.h    — PRO3p2.
  *   - inc/PROmodels/PROmodelLBL.h    — PROLBL (NuFastLBL three-flavour matter oscillations).
  */
@@ -79,6 +80,10 @@ public:
 
     std::vector<size_t> prob_types; ///< Probability-type indices, matching model_functions indices.
 
+    /// Per-ivar bin counts; phys_grid_sizes[k] = number of bins for ivars[k].
+    /// Filled by build_hists_and_combined; used by decay models for the flat-grid decomposition.
+    std::vector<size_t> phys_grid_sizes;
+
     std::vector<bool> is_log10; ///< True for each parameter stored in log10 space; false for linear.
 
     /// Trivial models (e.g., NullModel) have no physics dependence: probabilities are identically 1.
@@ -120,6 +125,54 @@ public:
      *         weight for that grid point and probability type.
      */
     virtual Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<std::vector<float>> &var_arrs) const;
+
+    /**
+     * @brief Compute the truth-level MC population matrix N_truth(flat, j) = total added_weight
+     *   of model_rule-j events at physics bin flat, regardless of reco.  Shape (n_phys_bins, J).
+     * @details Only visible-decay models need this (their migration sum reads truth-level
+     *   counts at bins other than the destination), so it is not built by default. Decay
+     *   model constructors call this explicitly and store the result on their own N_truth
+     *   member. Must be called after ivars, prob_types/model_functions, and
+     *   build_hists_and_combined have been set up.
+     */
+    Eigen::MatrixXf compute_N_truth(const PROpeller &prop, bool filter_by_model_rule = true) const;
+
+    /**
+     * @brief Compute oscillated event counts for all physics-grid points and probability types.
+     * @details For models with non-local effects (e.g. visible decay energy redistribution),
+     *   this is the authoritative output; FillSpectra converts counts back to effective
+     *   probabilities via counts / N_truth before the H_combined multiplication.
+     * @param phys          Physics parameter vector in the fitter's internal space.
+     * @param var_arrs      var_arrs[k] contains the value of ivars[k] for each flat grid point.
+     * @param N_truth_vals  Truth-level event counts matrix of shape (n_phys_bins, J) to use
+     *                      in the calculation. Callers pass either the model's own N_truth
+     *                      member (for the baseline spectrum) or a pre-reweighted copy
+     *                      (for pre-migration flux systematics: multiply each row by the
+     *                      per-truth-E flux weight). Keeping this as an explicit argument —
+     *                      rather than always reading this->N_truth — lets FillSpectra apply
+     *                      a flux reweight at the parent energy before migration, without
+     *                      threading the weight through every override in the class hierarchy.
+     * @return Matrix of shape (n_phys_bins, J) of oscillated event counts.
+     * Only called when uses_get_counts() returns true (the visible-decay models).
+     */
+    virtual Eigen::MatrixXf get_counts(const Eigen::VectorXf &, const std::vector<std::vector<float>> &,
+                                       const Eigen::MatrixXf & /*N_truth_vals*/) const {
+        return {};
+    }
+
+    /** @brief Whether FillSpectra should use get_counts() (with an explicit N_truth argument)
+     *  rather than get_probs() to compute the spectrum. Returns true only for visible-decay
+     *  models, where the flat-physics-grid N_truth enters non-locally via the migration sum. */
+    virtual bool uses_get_counts() const { return false; }
+
+    /** @brief Returns the truth-level event count matrix N_truth(flat, j), required by decay
+     *  models for the migration sum and its counts -> probs normalization.
+     *  Default: empty (non-decay models do not store N_truth). Decay models override to
+     *  return their own stored matrix. Only meaningful when uses_get_counts() is true. */
+    virtual const Eigen::MatrixXf& get_N_truth() const {
+        static const Eigen::MatrixXf empty;
+        return empty;
+    }
 
     /**
      * @brief Derivatives of get_probs with respect to each physics parameter.
@@ -210,7 +263,8 @@ public:
  * Supported names: "nullmodel", "numudis", "numudisTEST", "nueapp", "nuedis",
  * "NCnumudisapp", "NCdisapp", "3+1", "3+1_angles", "3+1_3A", "3+1_3B", "3+1_3C",
  * "3+1_NC", "3+1_angles_NC", "3+1_3A_NC", "3+1_3B_NC", "3+1_3C_NC",
- * "3+1_decay_invis", "3+2", "LBL", "template"/"template_fit".
+ * "3+1_decay_invis", "3+1_decay_vis_model1", "3+1_decay_vis_model2",
+ * "3+2", "LBL", "template"/"template_fit".
  * Terminates with LOG_ERROR if the name is unrecognised.
  * @param config  Parsed configuration; provides the model tag and parameter map.
  * @param prop    MC event store used to build H_combined histograms.

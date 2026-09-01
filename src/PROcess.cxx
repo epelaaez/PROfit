@@ -50,6 +50,19 @@ namespace PROfit {
             return FillSpectra(inconfig, inprop, insyst, inmodel, params, binned, var_index);
         }
 
+        // Visible-decay models with pre-migration (flux) splines also can't be split
+        // phys/syst: the flux weight enters the physics half at the parent truth-E,
+        // BEFORE the decay migration, so systw is not a per-reco-bin factor.  Fall back
+        // to the uncached path, which pre-scales N_truth (see below).
+        if(inmodel.uses_get_counts()
+           && insyst.spline_is_pre_migration.size() == insyst.GetNSplines()
+           && std::find(insyst.spline_is_pre_migration.begin(),
+                        insyst.spline_is_pre_migration.end(), true)
+                  != insyst.spline_is_pre_migration.end()) {
+            cache.invalidate();
+            return FillSpectra(inconfig, inprop, insyst, inmodel, params, binned, var_index);
+        }
+
         Eigen::VectorXf phys = params.segment(0, inmodel.nparams);
         Eigen::VectorXf shifts = params.segment(inmodel.nparams, params.size() - inmodel.nparams);
 
@@ -338,23 +351,60 @@ namespace PROfit {
             //auto start_systw = std::chrono::high_resolution_clock::now();
 
             const size_t nbins_var = inconfig.m_num_variable_bins_total[var_index];
-            Eigen::VectorXf systw = Eigen::VectorXf::Constant(nbins_var, 1);
-            
+
+            // Whether spline_is_pre_migration has been populated (requires the full-syst constructor).
+            // If not populated, treat all splines as post-migration (backward-compatible behaviour).
+            const bool has_pre_mig_info = (insyst.spline_is_pre_migration.size() == insyst.GetNSplines());
+
+            // Only visible-decay models (which override get_counts) have truth-E migration.
+            // For non-decay models, all splines are applied at reco level as before.
+            const bool model_has_migration = inmodel.uses_get_counts();
+
+            // pre_mig_weight: per flat physics grid point, flux reweighting applied BEFORE the
+            // decay energy migration (used to pre-scale N_truth for get_counts).  Length = n_phys_bins.
+            // n_E (last phys_grid_sizes entry) = number of truth-E bins; E is the last (fastest-
+            // varying) ivar, so E_idx = flat % n_E.
+            Eigen::VectorXf pre_mig_weight = Eigen::VectorXf::Constant(inmodel.n_phys_bins, 1.0f);
+
+            // post_mig_systw: per reco bin, cross-section/detector systematic weight applied
+            // AFTER the migration.  Replaces the old monolithic systw.
+            Eigen::VectorXf post_mig_systw = Eigen::VectorXf::Constant(nbins_var, 1.0f);
+
             // Iterate up to insyst.GetNSplines(), not shifts.size(): params may be
             // over-sized when shared across variables with different spline counts.
             for(int i = 0; i < (int)insyst.GetNSplines(); ++i) {
                 size_t binning = insyst.spline_binnings[i];
 
-                if(binning == var_index) {
-                    // Case 1: Same binning - direct multiplication
+                bool is_pre_migration = has_pre_mig_info && model_has_migration
+                                        && insyst.spline_is_pre_migration[i];
+
+                if(is_pre_migration) {
+                    // Pre-migration flux spline: apply to the flat (L, E) physics grid.
+                    // The spline must be binned in the truth-E variable (the last ivar);
+                    // n_spline_bins must equal n_E (the number of truth-E bins).
+                    const size_t n_E           = inmodel.phys_grid_sizes.back();
+                    const size_t n_spline_bins = inconfig.m_num_variable_bins_total[binning];
+                    if(n_spline_bins != n_E) {
+                        log<LOG_ERROR>(L"%1% || Pre-migration flux spline '%2%' has %3% bins but "
+                            L"the model has %4% truth-E bins. The spline must be binned in the "
+                            L"truth-E variable (the last model ivar).") % __func__
+                            % insyst.spline_names[i].c_str() % n_spline_bins % n_E;
+                        exit(EXIT_FAILURE);
+                    }
+                    // Each flat bin inherits the flux weight from its truth-E index.
+                    for(long int flat = 0; flat < inmodel.n_phys_bins; ++flat) {
+                        size_t e_idx = flat % n_E;
+                        pre_mig_weight(flat) *= insyst.GetSplineShift(i, shifts(i), e_idx);
+                    }
+                } else if(binning == var_index) {
+                    // Post-migration, same binning — direct multiplication on reco bins.
                     for(size_t k = 0; k < nbins_var; ++k) {
-                        systw(k) *= insyst.GetSplineShift(i, shifts(i), k);
+                        post_mig_systw(k) *= insyst.GetSplineShift(i, shifts(i), k);
                     }
                 } else {
-                    // Case 2: Different binning - use matrix-vector multiplication
+                    // Post-migration, different binning — use matrix-vector multiplication.
                     const size_t nbins_binning = inconfig.m_num_variable_bins_total[binning];
 
-                    // Get all spline shifts for this systematic
                     Eigen::VectorXf spline_shifts(nbins_binning);
                     for(size_t j = 0; j < nbins_binning; ++j) {
                         spline_shifts(j) = insyst.GetSplineShift(i, shifts(i), j);
@@ -369,7 +419,7 @@ namespace PROfit {
                     // Apply the ratio where unweighted > 0
                     for(size_t k = 0; k < nbins_var; ++k) {
                         if(unweighted_sum(k) > 0) {
-                            systw(k) *= weighted_sum(k) / unweighted_sum(k);
+                            post_mig_systw(k) *= weighted_sum(k) / unweighted_sum(k);
                         }
                     }
                 }
@@ -405,7 +455,25 @@ namespace PROfit {
                     }
                 }
 
-                auto probs = inmodel.get_probs(phys, var_arrs);
+                // Effective per-physics-bin oscillation probabilities.  Two paths:
+                //   - Visible-decay models (uses_get_counts): pre-scale N_truth rows by
+                //     pre_mig_weight so the flux reweight is applied at the PARENT neutrino's
+                //     truth energy, then call get_counts and divide by the ORIGINAL N_truth.
+                //     Pre-scaling N_truth weights the parent in both the oscillation term (A)
+                //     at flat_dst and the decay-migration term (B) at each flat_src, since
+                //     get_counts reads the passed N_truth at exactly those bins.
+                //   - All other models: the simple get_probs path.  pre_mig_weight is always
+                //     all-ones here (model_has_migration == false), so no flux reweight is lost.
+                Eigen::MatrixXf probs;
+                if(inmodel.uses_get_counts()) {
+                    const Eigen::MatrixXf& N_truth = inmodel.get_N_truth();
+                    Eigen::MatrixXf N_weighted = N_truth.array().colwise() * pre_mig_weight.array();
+                    auto counts = inmodel.get_counts(phys, var_arrs, N_weighted);
+                    auto N_arr  = N_truth.array();
+                    probs = (N_arr > 0.0f).select(counts.array() / N_arr, 0.0f);
+                } else {
+                    probs = inmodel.get_probs(phys, var_arrs);
+                }
 
                 // Single GEMV: H_combined[var_index] has shape (n_reco, n_phys*J).
                 // probs is (n_phys, J) in column-major, so probs.data() = [col0 | col1 | ...] = probs_flat.
@@ -413,8 +481,8 @@ namespace PROfit {
                 result = inmodel.H_combined[var_index] * probs_flat;
             }
 
-            // Apply systematic weights and create spectrum
-            Eigen::VectorXf final_spec = systw.cwiseProduct(result);
+            // Apply post-migration systematic weights (cross-section, detector) at reco level.
+            Eigen::VectorXf final_spec = post_mig_systw.cwiseProduct(result);
             Eigen::VectorXf final_error = final_spec.array().abs().sqrt();
             myspectrum = PROspec(final_spec, final_error);
 

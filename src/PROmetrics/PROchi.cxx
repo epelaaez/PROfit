@@ -4,6 +4,7 @@
 #include "PROlog.h"
 #include "PROtocall.h"
 #include <Eigen/Eigen>
+#include <algorithm>
 #include <cmath>
 using namespace PROfit;
 
@@ -239,6 +240,20 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
             static std::atomic<bool> warned_ebe{false};
             if(!warned_ebe.exchange(true))
                 log<LOG_WARNING>(L"%1% || Analytic gradient not available for the EventByEvent strategy; falling back to %2%.") % __func__ % gradientModeName(GradientFallback);
+            mode = GradientFallback;
+        }
+        // Visible-decay models with pre-migration (flux) splines also break the
+        // factorisation: the flux weight enters the physics half at the parent
+        // truth-E, BEFORE the decay migration, so systw is not a per-reco-bin
+        // factor (FillSpectra takes its uncached N_truth-prescaling path there).
+        if (mode == GradientAnalytic && model.uses_get_counts()
+            && syst->spline_is_pre_migration.size() == syst->GetNSplines()
+            && std::find(syst->spline_is_pre_migration.begin(),
+                         syst->spline_is_pre_migration.end(), true)
+                   != syst->spline_is_pre_migration.end()) {
+            static std::atomic<bool> warned_premig{false};
+            if(!warned_premig.exchange(true))
+                log<LOG_WARNING>(L"%1% || Analytic gradient not available for visible-decay models with pre-migration flux splines; falling back to %2%.") % __func__ % gradientModeName(GradientFallback);
             mode = GradientFallback;
         }
         const bool analytic   = (mode == GradientAnalytic);
