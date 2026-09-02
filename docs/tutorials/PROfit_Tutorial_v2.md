@@ -43,7 +43,7 @@ export PATH=$PATH:$PWD/bin   # optional
 
 The configuration used throughout is `working_dir/Neutrino2026/fake_sbn_v2.xml`:
 a **fake** two-detector (ND + FD) SBN-style setup with a νe appearance search
-(`nueapp` model: `dmsq`, `sinsq2thme`), two channels (`nue`, `numu`), and a
+(`SBL_2flav_nueapp` model: `dmsq`, `sinsq2thme`), two channels (`nue`, `numu`), and a
 realistic mix of spline, covariance, flat-normalisation, and MC-stat
 systematics. The MC files (`fake_sbn_mc_ND.root`, `fake_sbn_mc_FD.root`, ~1 GB
 each) live alongside the XML, or ping Mark Ross-Lonergan on Slack for a
@@ -158,7 +158,7 @@ fitting variable is not part of the config hash.
 
 **The parameter vector.** A fit point is
 `[physics parameters, one parameter per spline systematic]`, in that order.
-Physics parameters are mostly in **log10 space** (for `nueapp`:
+Physics parameters are mostly in **log10 space** (for `SBL_2flav_nueapp`:
 `log10(Δm²) ∈ [-2, 2]`, `log10(sin²2θμe) ∈ [-10, 0]`); spline parameters are
 in **σ units** of their knobs. Covariance-type systematics are *not* fit
 parameters — they are marginalized analytically inside the χ² covariance
@@ -258,21 +258,24 @@ and without re-running `process`.
 ### The oscillation model
 
 ```xml
-<model tag="nueapp">
+<model tag="SBL_2flav_nueapp">
     <rule index="0" name="No Osc"/>
     <rule index="1" name="Nue Appearance"/>
     <parameter name="L/E" variable_index="1"/>
 </model>
 ```
 
-`tag` selects the physics model implemented in `inc/PROmodel.h`
-(`numudis` = 3+1 νμ disappearance with parameters `dmsq`, `sinsq2thmm`;
-`nueapp` = 3+1 νμ→νe appearance with `dmsq`, `sinsq2thme`; also available:
-`nuedis`, the full three-parameter `3+1` (|Ue4|², |Uμ4|², Δm² with a
-unitarity constraint), several re-parameterized `3+1_*` variants, and
-NC-disappearance extensions (`*_NC`, `NCnumudisapp`, `NCdisapp`) — see
+`tag` selects the physics model implemented in `inc/PROmodel.h`. Tags follow a
+fixed `regime_model_parameterization(_NC)` convention
+(`SBL_2flav_numudis` = 3+1 νμ disappearance with parameters `dmsq`, `sinsq2thmm`;
+`SBL_2flav_nueapp` = 3+1 νμ→νe appearance with `dmsq`, `sinsq2thme`; also
+available: `SBL_2flav_nuedis`, the full three-parameter `SBL_3+1_Usq`
+(|Ue4|², |Uμ4|², Δm² with a unitarity constraint), several re-parameterized
+`SBL_3+1_*` variants, and NC-disappearance extensions (`*_NC`) — see
 section 7 for why those exist, and the model appendix at the bottom of this
-document for every model's parameters, bounds, and rules). Each *rule* is an
+document for the convention itself plus every model's parameters, bounds, and
+rules; legacy pre-v3.1 tags like `nueapp` or `3+1` keep working as deprecated
+aliases). Each *rule* is an
 oscillation-weight
 function; **rule 0 always means "no oscillation" and is the default**. Every
 MC branch declares which rule applies to it, so e.g. intrinsic backgrounds
@@ -1006,7 +1009,7 @@ Selected options (run `PROfit ... surface --help` for all):
   --amr-levels-chi2 ...   Target Delta-chi^2 contours (default 5.99)
 ```
 
-**For the `nueapp` model you must set the axes** — the built-in defaults are
+**For the `SBL_2flav_nueapp` model you must set the axes** — the built-in defaults are
 for the νμ-disappearance model:
 
 ```bash
@@ -1126,8 +1129,8 @@ expensive (a 60³ grid is days of CPU where 60² is hours) and messy: many 3D
 points map to the same sin²2θμe, the grid spacing doesn't map smoothly, and
 for FC you risk the global best fit not lying on your grid at all — which
 invalidates the calibration. That's why `PROmodel.h` carries re-parameterized
-3+1 variants (`3+1_angles` and effective-amplitude parameterizations like the
-sin²2θμe-focused one): the plotted quantity becomes a direct 2D scan axis and
+3+1 variants (`SBL_3+1_angles` and headline-amplitude parameterizations like
+`SBL_3+1_sinsq2thmue`): the plotted quantity becomes a direct 2D scan axis and
 PROfit's minimizer profiles smoothly over the leftover mixing freedom at each
 point. A full 3D scan is still the right tool for *understanding* 3+1 — but
 if the end goal is a contour in an effective angle, fit in that angle.
@@ -1680,16 +1683,51 @@ holds ~GB binaries).
 # Appendix B: available physics models (`inc/PROmodel.h`, `inc/PROmodels/`)
 
 > Implementation note (September 2026): every single-Δm² sine-kernel model below
-> (the 2-flavour family, all `3+1`/`3+1_*` variants except `3+1_decay_invis`,
+> (the 2-flavour family, all `SBL_3+1_*` variants except `SBL_3+1+decay_invis`,
 > and the NC-disappearance models) is defined as a *recipe* — parameter/channel
 > tables plus amplitude and analytic-gradient formulas — evaluated by one shared
-> `PROsineModel` class (`inc/PROmodels/PROmodelSine.h`). This changed no tags,
-> parameters, or numbers (verified bitwise), but it is where to look for, or add
+> `PROsineModel` class (`inc/PROmodels/PROmodelSine.h`). This changed no
+> parameters or numbers (verified bitwise), but it is where to look for, or add
 > to, these models' code. All of them support the default analytic-gradient fit
 > mode with closed-form derivatives.
 
-The `<model tag="...">` in your XML selects one of the models below. A few
-conventions apply to all of them:
+The `<model tag="...">` in your XML selects one of the models below.
+
+### The tag naming convention
+
+Model tags follow a fixed scheme:
+
+```
+regime_model_parameterization(_NC)
+```
+
+* **regime** — the oscillation approximation the model lives in: `SBL`
+  (short-baseline, single-Δm² sine kernel, no matter effects) or `LBL`
+  (long-baseline three-flavour). Regime-free utility models (`null`,
+  `template`) carry no prefix.
+* **model** — the physics hypothesis: `2flav` (one effective two-flavour-like
+  amplitude per channel), `3+1`, `3+2`, `3+1+decay` (3+1 plus sterile decay),
+  `3nu-matter` (standard three-flavour with Earth-matter effects). A hyphen
+  qualifies *within* a slot (`3nu-matter` vs a hypothetical `3nu-vacuum`),
+  just as `+` does in `3+1`.
+* **parameterization** — which parameter set the *same* physics is fitted in:
+  `Usq` (squared mixing-matrix elements |Ue4|², |Uμ4|², …), `angles`
+  (sin²2θ₁₄, sin²θ₂₄, …), or the name of the headline amplitude that becomes a
+  direct scan axis (`sinsq2thee`, `sinsq2thmumu`, `sinsq2thmue`). For the
+  2-flavour family this slot names the channel (`numudis`, `nueapp`, `nuedis`).
+* **`_NC` suffix** — the NC-disappearance extension of the same
+  model/parameterization: extra νs/ντ probability channels (and, for the 3+1
+  family, one extra sterile/tau-split parameter).
+
+Legacy pre-v3.1 tags (`numudis`, `nueapp`, `3+1`, `3+1_angles`, `3+1_3A/3B/3C`,
+`NCnumudisapp`, `NCdisapp`, the `_NC` and decay spellings, `nullmodel`,
+`template_fit`, `LBL`, `3+2`) **keep working as deprecated aliases**: they are
+mapped to the canonical tag with a one-time warning (see
+`canonicalize_model_tag` in `src/PROmodel.cxx` for the full table). New configs
+should use the canonical names; each model section below quotes its legacy
+alias.
+
+A few conventions apply to all models:
 
 * **Parameter names** (`param_names`) are what you use everywhere on the
   command line: `-i/--inject`, `--inject-cv`, `--fix`, `--xvar/--yvar`.
@@ -1704,14 +1742,15 @@ conventions apply to all of them:
   unphysical parameter combinations (e.g. 3+1 unitarity) during the fit.
 * All oscillation models need the `<parameter name="L/E" .../>` entry in the
   model block pointing at the true-L/E variable (exception: `numudisTEST`
-  and `template_fit`, noted below).
+  and `template`, noted below).
 
-### `nullmodel`
+### `null` *(legacy: `nullmodel`)*
 
 No physics parameters at all — rule 0 only. For pure-systematics setups
-(constraint studies, template validation) where nothing oscillates.
+(constraint studies, template validation) where nothing oscillates. This is
+also the default when the `<model>` block has no `tag=` attribute.
 
-### `numudis` — 3+1 νμ disappearance
+### `SBL_2flav_numudis` *(legacy: `numudis`)* — 3+1 νμ disappearance
 
 P(νμ→νμ) = 1 − sin²2θμμ · sin²(1.267 Δm² L/E).
 
@@ -1724,12 +1763,12 @@ Rules: **0** = no osc, **1** = νμ survival (apply to your νμ-CC signal).
 
 ### `numudisTEST` — two-variable validation twin
 
-Identical physics and parameters to `numudis`, but built on two separate
+Identical physics and parameters to `SBL_2flav_numudis`, but built on two separate
 model variables `L` and `E` (both must be `<parameter>` entries) instead of
 one `L/E`. Exists to validate the machinery — the two should produce
 identical spectra.
 
-### `nueapp` — 3+1 νμ→νe appearance
+### `SBL_2flav_nueapp` *(legacy: `nueapp`)* — 3+1 νμ→νe appearance
 
 P(νμ→νe) = sin²2θμe · sin²(1.267 Δm² L/E). The model used throughout this
 tutorial.
@@ -1742,7 +1781,7 @@ tutorial.
 Rules: **0** = no osc, **1** = νμ→νe appearance (apply to the fullosc
 subchannel).
 
-### `nuedis` — 3+1 νe disappearance
+### `SBL_2flav_nuedis` *(legacy: `nuedis`)* — 3+1 νe disappearance
 
 | # | name | meaning | fit space | bounds | default |
 |---|---|---|---|---|---|
@@ -1751,7 +1790,7 @@ subchannel).
 
 Rules: **0** = no osc, **1** = νe survival.
 
-### `3+1` — full three-parameter 3+1 (mixing elements)
+### `SBL_3+1_Usq` *(legacy: `3+1`)* — full three-parameter 3+1 (mixing elements)
 
 The most physical parameterization: all three SBL channels driven
 simultaneously by the extended-PMNS elements, with the **unitarity
@@ -1767,10 +1806,10 @@ Rules: **0** = no osc, **1** = νμ→νμ, **2** = νμ→νe, **3** = νe→ν
 XML can simultaneously disappear the νμ-CC sample (rule 1), appear the
 fullosc component (rule 2), and disappear the intrinsic νe (rule 3).
 
-### `3+1_angles` — 3+1 in mixing angles
+### `SBL_3+1_angles` *(legacy: `3+1_angles`)* — 3+1 in mixing angles
 
-Same physics and rules (0–3) as `3+1`, re-parameterized in angles, with the
-unitarity constraint.
+Same physics and rules (0–3) as `SBL_3+1_Usq`, re-parameterized in angles, with
+the unitarity constraint.
 
 > ⚠️ **Results from before August 2026 are invalid for this model.** Its
 > P(νμ→νμ) was missing the factor 4 in sin²2θμμ = 4|Uμ4|²(1−|Uμ4|²), so any
@@ -1788,15 +1827,15 @@ unitarity constraint.
 | 1 | `sinsq2th14` | sin²2θ₁₄ | log10 | 0 – ~1 | 10⁻⁸ |
 | 2 | `sinsqth24` | sin²θ₂₄ | log10 | 0 – ~1 | 10⁻⁸ |
 
-### `3+1_3A` / `3+1_3B` / `3+1_3C` — effective-amplitude 3+1 variants
+### `SBL_3+1_sinsq2thee` / `SBL_3+1_sinsq2thmumu` / `SBL_3+1_sinsq2thmue` *(legacy: `3+1_3A` / `3+1_3B` / `3+1_3C`)* — headline-amplitude 3+1 variants
 
 Full 3+1 physics (rules **0–3** as above), re-parameterized so that the
-*effective amplitude you want to plot* is a direct scan axis and the
-leftover mixing freedom is a single nuisance-like third parameter that
-PROfit profiles smoothly at each grid point (see the surface-section note on
-parameterizations).
+*effective amplitude you want to plot* — the one each tag is named after —
+is a direct scan axis and the leftover mixing freedom is a single
+nuisance-like third parameter that PROfit profiles smoothly at each grid
+point (see the surface-section note on parameterizations).
 
-**`3+1_3A`** — sin²2θee-focused; ratio parameter is exactly sin²θ₂₄
+**`SBL_3+1_sinsq2thee`** — sin²2θee-focused; ratio parameter is exactly sin²θ₂₄
 (= sin²2θμe / sin²2θee). No extra constraint needed.
 
 | # | name | fit space | bounds | default |
@@ -1805,7 +1844,7 @@ parameterizations).
 | 1 | `sinsq2thee` | log10 | 0 – ~1 | 10⁻⁸ |
 | 2 | `sinsqth24` | log10 | 0 – ~1 | 10⁻⁸ |
 
-**`3+1_3B`** — sin²2θμμ-focused; `sB` is the ratio
+**`SBL_3+1_sinsq2thmumu`** — sin²2θμμ-focused; `sB` is the ratio
 sin²2θμe / sin²2θμμ (= |Ue4|² / (1−|Uμ4|²)). Unitarity constraint enforced.
 
 | # | name | fit space | bounds | default |
@@ -1814,7 +1853,7 @@ sin²2θμe / sin²2θμμ (= |Ue4|² / (1−|Uμ4|²)). Unitarity constraint en
 | 1 | `sinsq2thmumu` | log10 | 0 – ~1 | 10⁻⁸ |
 | 2 | `sB` | log10 | 0 – ~1 | 10⁻⁸ |
 
-**`3+1_3C`** — sin²2θμe-focused (the one to use for direct appearance
+**`SBL_3+1_sinsq2thmue`** — sin²2θμe-focused (the one to use for direct appearance
 contours); `xi` is the log geometric ratio ξ = ½·log(|Ue4|²/|Uμ4|²)
 (ξ = 0 ⇒ equal mixing, ξ > 0 ⇒ electron-dominated). Unitarity constraint
 √(sin²2θμe)·cosh(ξ) < 1.
@@ -1840,17 +1879,17 @@ four NC/tau channels:
 Since |Us4|² + |Uτ4|² = 1 − |Ue4|² − |Uμ4|² exactly, each family fits the
 sterile/tau **split** with one extra parameter in its own language:
 
-| model | base params (identical to sibling) | split parameter | fit space | bounds | default |
+| model *(legacy)* | base params (identical to sibling) | split parameter | fit space | bounds | default |
 |---|---|---|---|---|---|
-| `3+1_NC` | `dmsq`, `Ue4^2`, `Um4^2` | `Uta4sq` = \|Uτ4\|² | log10 | 0 – ~1 | 10⁻⁸ |
-| `3+1_angles_NC` | `dmsq`, `sinsq2th14`, `sinsqth24` | `cosq34` = cos²θ₃₄ | **linear** | 0 – 1 | **1** |
-| `3+1_3A_NC` | `dmsq`, `sinsq2thee`, `sinsqth24` | `cosq34` | **linear** | 0 – 1 | **1** |
-| `3+1_3B_NC` | `dmsq`, `sinsq2thmumu`, `sB` | `cosq34` | **linear** | 0 – 1 | **1** |
-| `3+1_3C_NC` | `dmsq`, `sinsq2thmue`, `xi` | `Uta4sq` | log10 | 0 – ~1 | 10⁻⁸ |
+| `SBL_3+1_Usq_NC` *(3+1_NC)* | `dmsq`, `Ue4^2`, `Um4^2` | `Uta4sq` = \|Uτ4\|² | log10 | 0 – ~1 | 10⁻⁸ |
+| `SBL_3+1_angles_NC` *(3+1_angles_NC)* | `dmsq`, `sinsq2th14`, `sinsqth24` | `cosq34` = cos²θ₃₄ | **linear** | 0 – 1 | **1** |
+| `SBL_3+1_sinsq2thee_NC` *(3+1_3A_NC)* | `dmsq`, `sinsq2thee`, `sinsqth24` | `cosq34` | **linear** | 0 – 1 | **1** |
+| `SBL_3+1_sinsq2thmumu_NC` *(3+1_3B_NC)* | `dmsq`, `sinsq2thmumu`, `sB` | `cosq34` | **linear** | 0 – 1 | **1** |
+| `SBL_3+1_sinsq2thmue_NC` *(3+1_3C_NC)* | `dmsq`, `sinsq2thmue`, `xi` | `Uta4sq` | log10 | 0 – ~1 | 10⁻⁸ |
 
 `cosq34 = 1` (the default) sends all of the off-diagonal strength to sterile —
-maximal NC deficit, no ντ appearance; `cosq34 = 0` is the opposite. In `3+1_NC`
-/ `3+1_3C_NC` the tau element is fitted directly and
+maximal NC deficit, no ντ appearance; `cosq34 = 0` is the opposite. In
+`SBL_3+1_Usq_NC` / `SBL_3+1_sinsq2thmue_NC` the tau element is fitted directly and
 |Us4|² = max(0, 1 − Σ|Uα4|²); their unitarity constraints extend to include
 |Uτ4|². An `_NC` model whose XML routes **no** branch to rules 4–7 reproduces
 its non-NC sibling's spectra exactly (verified bitwise), so you can switch a
@@ -1861,7 +1900,8 @@ Two simpler **phenomenological** NC models treat the deficit amplitudes as free
 parameters (no joint unitarity between them — fine for limit plots, not an
 exact 3+1 sub-model):
 
-**`NCnumudisapp`** — single channel, P(νμ→active) = 1 − sin²2θμs·sin²Δ.
+**`SBL_2flav_numudis_NC`** *(legacy: `NCnumudisapp`)* — single channel,
+P(νμ→active) = 1 − sin²2θμs·sin²Δ.
 Rules: **0** = no osc, **1** = NC deficit.
 
 | # | name | fit space | bounds | default |
@@ -1869,8 +1909,8 @@ Rules: **0** = no osc, **1** = NC deficit.
 | 0 | `dmsq` [eV²] | log10 | 10⁻² – 10² | 10⁻² |
 | 1 | `sinsq2thms` | log10 | 0 – 1 | 10⁻¹⁰ |
 
-**`NCdisapp`** — independent νμ- and νe-sourced deficits.
-Rules: **0** = no osc, **1** = νμ NC deficit, **2** = νe NC deficit.
+**`SBL_2flav_nudis_NC`** *(legacy: `NCdisapp`)* — independent νμ- and νe-sourced
+deficits. Rules: **0** = no osc, **1** = νμ NC deficit, **2** = νe NC deficit.
 
 | # | name | fit space | bounds | default |
 |---|---|---|---|---|
@@ -1878,13 +1918,16 @@ Rules: **0** = no osc, **1** = νμ NC deficit, **2** = νe NC deficit.
 | 1 | `sinsq2thms` | log10 | 0 – 1 | 10⁻¹⁰ |
 | 2 | `sinsq2thes` | log10 | 0 – 1 | 10⁻¹⁰ |
 
-### `3+1_decay_invis` — 3+1 with invisible sterile decay
+### `SBL_3+1+decay_invis` *(legacy: `3+1_decay_invis`)* — 3+1 with invisible sterile decay
 
-The `3+1` mixing-element model extended with an invisible-decay coupling;
-combined unitarity + positivity constraint (g² = 0, the pure-3+1 limit, is
-accepted since August 2026 — it was previously rejected by a strict
+The `SBL_3+1_Usq` mixing-element model extended with an invisible-decay
+coupling; combined unitarity + positivity constraint (g² = 0, the pure-3+1
+limit, is accepted since August 2026 — it was previously rejected by a strict
 inequality, which biased fits near the no-decay boundary). Rules **0–3** as
-in `3+1`.
+in `SBL_3+1_Usq`. Visible-decay variants exist as `SBL_3+1+decay_vis1`
+*(legacy: `3+1_decay_vis_model1`; coupling `g_phi`, paired osc/decay
+subchannels)* and `SBL_3+1+decay_vis2` *(legacy: `3+1_decay_vis_model2`;
+coupling `g_e`, needs separate `L` and `E` parameters)*.
 
 | # | name | meaning | fit space | bounds | default |
 |---|---|---|---|---|---|
@@ -1893,7 +1936,7 @@ in `3+1`.
 | 2 | `Um4^2` | \|Uμ4\|² | log10 | 0 – ~1 | 10⁻⁸ |
 | 3 | `g2` | decay coupling g² | **linear** | 0 – 10 | 0 |
 
-### `3+2` — two-sterile model
+### `SBL_3+2_Usq` *(legacy: `3+2`)* — two-sterile model
 
 Seven parameters with a CP phase, so ν and ν̄ appearance differ. Unitarity
 constraints |Ue4|²+|Ue5|² ≤ 1 and |Uμ4|²+|Uμ5|² ≤ 1.
@@ -1912,10 +1955,11 @@ Rules: **0** = no osc, **1** = νμ→νμ, **2** = νμ→νe, **3** = νe→ν
 **4** = ν̄μ→ν̄e (the CP-conjugate appearance — give your antineutrino
 fullosc branch rule 4).
 
-### `LBL` — full three-flavour long-baseline (NuFastLBL)
+### `LBL_3nu-matter_angles` *(legacy: `LBL`)* — full three-flavour long-baseline (NuFastLBL)
 
-Standard 3ν oscillations, all parameters fitted in **linear** space with
-bounds spanning the global-fit allowed ranges.
+Standard 3ν oscillations **including Earth-matter effects** (NuFastLBL's
+`Probability_Matter_LBL` with a constant-density profile), all parameters
+fitted in **linear** space with bounds spanning the global-fit allowed ranges.
 
 | # | name | meaning | bounds | default |
 |---|---|---|---|---|
@@ -1930,7 +1974,7 @@ Rules cover the full 3×3 matrix: **0** = no osc, **1** = Pee, **2** = Peμ,
 **3** = Peτ, **4** = Pμe, **5** = Pμμ, **6** = Pμτ, **7** = Pτe,
 **8** = Pτμ, **9** = Pττ.
 
-### `template` / `template_fit` — per-subchannel normalization fit
+### `template` *(legacy alias: `template_fit`)* — per-subchannel normalization fit
 
 Not an oscillation model: each `<parameter name="...">` in the model block
 names a **subchannel** whose normalization floats as one linear scale

@@ -156,7 +156,7 @@
 	<allowlist type="spline" binning="reco" plotname="TPCIntNoise">detector_var4_tpcintnoise_multisigma</allowlist>
 </variation_list>
 
-<model tag="numudis">
+<model tag="SBL_2flav_numudis">
 	<rule index="0" name="No Osc"/>
 	<rule index="1" name="Numu Dis"/>
 </model>

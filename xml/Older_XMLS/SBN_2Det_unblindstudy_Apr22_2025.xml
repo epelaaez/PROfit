@@ -175,7 +175,7 @@
     <!-- <allowlist type="norm" plotname="FiducialVol">nu_ICARUS:0.01</allowlist> -->
 </variation_list>
 
-<model tag="nueapp">
+<model tag="SBL_2flav_nueapp">
     <rule index="0" name="No Osc"/>
     <rule index="1" name="Nue App"/>
 </model>

@@ -93,7 +93,7 @@
     <allowlist type="norm" plotname="FiducialVol" tag="other">nu_ICARUS:0.01</allowlist>
 </variation_list>
 
-<model tag="numudis">
+<model tag="SBL_2flav_numudis">
     <rule index="0" name="No Osc"/>
     <rule index="1" name="Numu Dis"/>
     <parameter name="L/E" variable_index="1"/>

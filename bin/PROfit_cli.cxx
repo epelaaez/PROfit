@@ -17,7 +17,7 @@ PROpt::PROpt(int argc, char **argv) {
         app.add_option("--inject-cv", cv_osc_params, "Physics parameters to inject as CV. Example: dmsq 3 sinsq2thmm 0.25")->expected(-1);
         app.add_option("--fix", fixed_params, "Fix Certain Physics or Systematics parameters. Fixed to CV.");
         app.add_option("-s, --seed", global_seed, "A global seed for PROseed rng. Default to -1 for hardware rng seed.")->default_val(-1);
-        app.add_option("-p,--preset", fit_preset, "Preset fitting params. Available `fast`, `good`, `overkill`, `sensitivity`, plus the analytic-gradient presets `grad-fast`, `grad-good`, `grad-deep`, `grad-overkill`. Takes up to a vector of 2, first for global. 2nd for scan. Defaults to `grad-good` `grad-fast`.");
+        CLI::Option *preset_opt = app.add_option("-p,--preset", fit_preset, "Preset fitting params. Available `fast`, `good`, `overkill`, `sensitivity`, plus the analytic-gradient presets `grad-fast`, `grad-good`, `grad-deep`, `grad-overkill`. Takes up to a vector of 2, first for global. 2nd for scan. Defaults to `grad-good` `grad-fast` when the analytic gradient is available, and to `good` `fast` when it is not (-c PROCNP / -c Poisson, --event-by-event, or a model without closed-form get_probs_grad such as LBL).");
         app.add_option("--fit-options", global_fit_options, "Parameters for single, detailed global best fit LBFGSB. See PROfitter.h or run --fit-help for available settings.");
         app.add_option("--scan-fit-options", scan_fit_options, "Parameters for simpier, multiple best fits in PROfile/surface LBFGSB.");
         app.add_flag("--fit-help", show_fit_help, "Show detailed help for all fitting parameters (L-BFGS-B, PSO, MCMC, etc.)");
@@ -347,6 +347,12 @@ PROpt::PROpt(int argc, char **argv) {
 
             log_impl::EnableFileLogging(log_file, FILE_LEVEL);
         }
+
+        // The grad-* preset defaults only make sense when the analytic gradient is
+        // actually available; that also depends on the MODEL, which does not exist yet
+        // here, so the decision is made in resolve_fit_presets() once it does. All this
+        // records is whether the user chose a preset themselves (which is always honoured).
+        preset_user_set = preset_opt->count() > 0;
 
         if(shapeonly) area_normalized = true;
 

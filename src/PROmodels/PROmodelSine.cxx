@@ -181,7 +181,7 @@ constexpr float kInf = std::numeric_limits<float>::infinity();
 constexpr float LN10 = 2.302585093f;
 
 /// Shared maker for the single-channel two-flavour-like models
-/// (numudis / nueapp / nuedis / NCnumudisapp). sign = -1 for disappearance,
+/// (SBL_2flav_numudis / _nueapp / _nuedis / _numudis_NC). sign = -1 for disappearance,
 /// +1 for appearance; the clamp/chain-factor blocks are the legacy 2-flavour code.
 SineModelRecipe make_twoflav(const char *tag, const char *mixing_name, const char *mixing_pretty,
                              const char *channel_name, ProbForm form, float mixing_lb) {
@@ -225,7 +225,7 @@ SineModelRecipe make_twoflav(const char *tag, const char *mixing_name, const cha
 /// Uta4sq = |Utau4|^2 (log10), with |Us4|^2 = max(0, 1 - |Ue4|^2 - |Um4|^2 - |Utau4|^2).
 SineModelRecipe make_3p1(bool with_nc) {
     SineModelRecipe r;
-    r.tag = with_nc ? "3+1_NC" : "3+1";
+    r.tag = with_nc ? "SBL_3+1_Usq_NC" : "SBL_3+1_Usq";
     r.params = {
         {"dmsq", "#Deltam^{2}", "eV^{2}", true, -2.0f, 2.0f, -2.0f},
         {"Ue4^2", "|U_{e4}|^{2}", "", true, -kInf, -1e-4f, -8.0f},
@@ -333,7 +333,7 @@ SineModelRecipe make_3p1(bool with_nc) {
 /// variables (c14 = cos^2 theta_14, s24 = sin^2 theta_24).
 SineModelRecipe make_3p1_angles(bool with_nc) {
     SineModelRecipe r;
-    r.tag = with_nc ? "3+1_angles_NC" : "3+1_angles";
+    r.tag = with_nc ? "SBL_3+1_angles_NC" : "SBL_3+1_angles";
     r.params = {
         {"dmsq", "#Deltam^{2}", "eV^{2}", true, -2.0f, 2.0f, -2.0f},
         {"sinsq2th14", "sin^{2}2#theta_{14}", "", true, -kInf, -1e-4f, -8.0f},
@@ -440,7 +440,7 @@ SineModelRecipe make_3p1_angles(bool with_nc) {
 /// NC channels; channels 1-3 share the legacy-verbatim 3A expressions either way.
 SineModelRecipe make_3p1_3A(bool with_nc) {
     SineModelRecipe r;
-    r.tag = with_nc ? "3+1_3A_NC" : "3+1_3A";
+    r.tag = with_nc ? "SBL_3+1_sinsq2thee_NC" : "SBL_3+1_sinsq2thee";
     r.params = {
         {"dmsq", "#Deltam^{2}", "eV^{2}", true, -2.0f, 2.0f, -2.0f},
         {"sinsq2thee", "sin^{2}2#theta_{ee}", "", true, -kInf, -1e-3f, -8.0f},
@@ -547,7 +547,7 @@ SineModelRecipe make_3p1_3A(bool with_nc) {
 /// 3B (numu-disappearance parameterisation) and its NC-disappearance extension.
 SineModelRecipe make_3p1_3B(bool with_nc) {
     SineModelRecipe r;
-    r.tag = with_nc ? "3+1_3B_NC" : "3+1_3B";
+    r.tag = with_nc ? "SBL_3+1_sinsq2thmumu_NC" : "SBL_3+1_sinsq2thmumu";
     r.params = {
         {"dmsq", "#Deltam^{2}", "eV^{2}", true, -2.0f, 2.0f, -2.0f},
         {"sinsq2thmumu", "sin^{2}2#theta_{#mu#mu}", "", true, -kInf, -1e-3f, -8.0f},
@@ -662,7 +662,7 @@ SineModelRecipe make_3p1_3B(bool with_nc) {
 /// |Us4|^2 = max(0, 1 - |Ue4|^2 - |Um4|^2 - |Utau4|^2).
 SineModelRecipe make_3p1_3C(bool with_nc) {
     SineModelRecipe r;
-    r.tag = with_nc ? "3+1_3C_NC" : "3+1_3C";
+    r.tag = with_nc ? "SBL_3+1_sinsq2thmue_NC" : "SBL_3+1_sinsq2thmue";
     r.params = {
         {"dmsq", "#Deltam^{2}", "eV^{2}", true, -2.0f, 2.0f, -2.0f},
         {"sinsq2thmue", "sin^{2}2#theta_{#mue}", "", true, -kInf, -1e-3f, -8.0f},
@@ -777,12 +777,13 @@ SineModelRecipe make_3p1_3C(bool with_nc) {
     return r;
 }
 
-/// NCdisapp: independent phenomenological NC-deficit amplitudes for nu_mu and nu_e.
+/// SBL_2flav_nudis_NC (legacy NCdisapp): independent phenomenological NC-deficit
+/// amplitudes for nu_mu and nu_e.
 /// No joint unitarity constraint links the two amplitudes — intended for
 /// limit-setting, not as an exact 3+1 sub-model.
 SineModelRecipe make_ncdisapp() {
     SineModelRecipe r;
-    r.tag = "NCdisapp";
+    r.tag = "SBL_2flav_nudis_NC";
     r.params = {
         {"dmsq", "#Deltam^{2}", "eV^{2}", true, -2.0f, 2.0f, -2.0f},
         {"sinsq2thms", "sin^{2}2#theta_{#mus}", "", true, -kInf, 0.0f, -10.0f},
@@ -834,13 +835,13 @@ const SineModelRecipe *find_sine_recipe(const std::string &tag) {
             std::string t = rec.tag;
             reg.emplace(std::move(t), std::move(rec));
         };
-        add(make_twoflav("numudis", "sinsq2thmm", "sin^{2}2#theta_{#mu#mu}", "mumu",
+        add(make_twoflav("SBL_2flav_numudis", "sinsq2thmm", "sin^{2}2#theta_{#mu#mu}", "mumu",
                          ProbForm::Disappearance, -kInf));
-        add(make_twoflav("nueapp", "sinsq2thme", "sin^{2}2#theta_{#mue}", "mue",
+        add(make_twoflav("SBL_2flav_nueapp", "sinsq2thme", "sin^{2}2#theta_{#mue}", "mue",
                          ProbForm::Appearance, -10.0f));
-        add(make_twoflav("nuedis", "sinsq2thee", "sin^{2}2#theta_{ee}", "ee",
+        add(make_twoflav("SBL_2flav_nuedis", "sinsq2thee", "sin^{2}2#theta_{ee}", "ee",
                          ProbForm::Disappearance, -kInf));
-        add(make_twoflav("NCnumudisapp", "sinsq2thms", "sin^{2}2#theta_{#mus}", "mus",
+        add(make_twoflav("SBL_2flav_numudis_NC", "sinsq2thms", "sin^{2}2#theta_{#mus}", "mus",
                          ProbForm::Disappearance, -kInf));
         add(make_ncdisapp());
         add(make_3p1(false));

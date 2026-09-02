@@ -490,9 +490,9 @@ PYBIND11_MODULE(_profit, m) {
         .def(py::init<const PROfit::PROpeller&>())
         .def(py::init<const PROfit::NullModel&>());
 
-    // The sine-kernel oscillation models (numudis, nueapp, nuedis, the 3+1 variants,
-    // and the NC-disappearance models) are all instances of PROsineModel, selected by
-    // recipe tag; construct them from Python via get_model_from_string on a PROconfig.
+    // The sine-kernel oscillation models (SBL_2flav_*, the SBL_3+1_* variants, and
+    // their NC-disappearance _NC versions) are all instances of PROsineModel, selected
+    // by recipe tag; construct them from Python via get_model_from_string on a PROconfig.
     // (Note: this file is not wired into the CMake build; the old per-model bindings
     // it carried no longer matched the C++ constructors and were removed.)
     py::class_<PROfit::PROsineModel, PROfit::PROmodel>(m, "PROsineModel");

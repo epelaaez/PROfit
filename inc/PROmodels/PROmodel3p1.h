@@ -9,8 +9,8 @@
  *   - PRO3p1_decay_invis — 3+1 with invisible decay: (dmsq, |U_e4|^2, |U_mu4|^2, g^2).
  * The sine-kernel 3+1 variants formerly here (PRO3p1, PRO3p1_angles, PRO3p1_3A/3B/3C)
  * are now recipes evaluated by PROsineModel (PROmodels/PROmodelSine.h) under the
- * unchanged factory tags 3+1, 3+1_angles, 3+1_3A/3B/3C, plus the new NC-disappearance
- * extensions 3+1_3A_NC / 3+1_3B_NC / 3+1_3C_NC.
+ * factory tags SBL_3+1_Usq, SBL_3+1_angles, SBL_3+1_sinsq2thee/sinsq2thmumu/sinsq2thmue
+ * (legacy aliases 3+1, 3+1_angles, 3+1_3A/3B/3C) and their _NC extensions.
  */
 #ifndef PROMODEL3P1_H
 #define PROMODEL3P1_H
@@ -49,6 +49,9 @@ public:
     Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<std::vector<float>> &var_arrs) const override;
     /** @brief Closed-form derivatives of get_probs (see PROmodel::get_probs_grad). */
     std::vector<Eigen::MatrixXf> get_probs_grad(const Eigen::VectorXf &phys, const std::vector<std::vector<float>> &var_arrs) const override;
+
+    /** @brief Closed-form derivatives above, so the analytic gradient is exact here (see PROmodel::has_analytic_gradient). */
+    bool has_analytic_gradient() const override { return true; }
 };
 
 }

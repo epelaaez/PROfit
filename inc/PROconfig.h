@@ -538,7 +538,7 @@ namespace PROfit{
             std::vector<std::string> m_model_parameter_names;
             std::map<std::string,int> m_model_parameter_map;
             /// Optional per-model-parameter min/max bounds, read from the <parameter> tag's
-            /// "min"/"max" attributes. Used by normalization-style models (e.g. template_fit)
+            /// "min"/"max" attributes. Used by normalization-style models (e.g. template)
             /// where each <parameter> names a subchannel and min/max are its scale bounds.
             std::vector<float> m_model_parameter_min;
             std::vector<float> m_model_parameter_max;

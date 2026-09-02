@@ -27,7 +27,7 @@
     <allowlist>GENIEReWeight_SBN_v1_multisigma_ZExpA4CCQE</allowlist>
 </variation_list>
 
-<model tag="numudis">
+<model tag="SBL_2flav_numudis">
     <rule index="0" name="No Osc"/>
     <rule index="1" name="Numu Dis"/>
     <rule index="2" name="Nue App"/>

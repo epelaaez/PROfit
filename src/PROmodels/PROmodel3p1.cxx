@@ -1,8 +1,8 @@
 /**
  * @file PROmodel3p1.cxx
  * @brief Implementation of the 3+1 invisible-decay model. The sine-kernel 3+1 variants
- * (3+1, 3+1_angles, 3+1_3A/3B/3C and their _NC extensions) are recipes in
- * PROmodels/PROmodelSine.cxx.
+ * (SBL_3+1_Usq, SBL_3+1_angles, SBL_3+1_sinsq2th* and their _NC extensions) are
+ * recipes in PROmodels/PROmodelSine.cxx.
  * @author PROfit Collaboration
  */
 #include "PROmodels/PROmodel3p1.h"

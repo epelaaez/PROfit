@@ -31,7 +31,7 @@
      migrate to lower truth-E bins; the duplicated MCFile entries below give every
      event a rule-1/2/3 copy and a rule-4/5/6 copy so the two pieces can be plotted
      as separately-coloured subchannels. -->
-<model tag="3+1_decay_vis_model1">
+<model tag="SBL_3+1+decay_vis1">
     <rule index="0" name="No Osc"/>
     <rule index="1" name="P_mumu_osc"/>
     <rule index="2" name="P_mue_osc"/>

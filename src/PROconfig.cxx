@@ -2001,7 +2001,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
             // variable_index is optional: oscillation models require it (it maps the parameter
             // to a kinematic PROpeller variable, e.g. "L/E"), but normalization models such as
-            // template_fit name a subchannel instead and carry no kinematic variable, so a
+            // the template model name a subchannel instead and carry no kinematic variable, so a
             // missing variable_index defaults to -1 rather than being a hard error.
             const char* model_parameter_index= pModelParam->Attribute("variable_index");
             if(model_parameter_index==NULL){
@@ -2010,7 +2010,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 m_model_parameter_index.push_back(strtod(model_parameter_index, &end));
             }
 
-            // Optional scale bounds (used by template_fit-style normalization models). Default
+            // Optional scale bounds (used by template-style normalization models). Default
             // to [0, 10] when absent so a generic <parameter> tag without them is still valid.
             const char* model_parameter_min = pModelParam->Attribute("min");
             const char* model_parameter_max = pModelParam->Attribute("max");

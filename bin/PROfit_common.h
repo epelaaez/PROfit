@@ -141,6 +141,7 @@ struct PROpt {
     int global_seed = -1;
     std::string log_file = "";
     std::vector<std::string> fit_preset = {"grad-good","grad-fast"};
+    bool preset_user_set = false; ///< True if -p/--preset was given on the command line (see resolve_fit_presets).
     inline static const std::unordered_set<std::string> allowed_preset = {"good","fast","overkill","sensitivity","grad-fast","grad-good","grad-deep","grad-overkill"};
     bool with_splines = false, binwidth_scale = false, area_normalized = false, data_mc_ratio = false;
     bool with_covar = false, no_frac_syst = false;
@@ -249,6 +250,7 @@ struct PROpt {
 PROdata construct_data(std::vector<PROdata> &variable_data, bool use_real_data, const PROconfig &config, const PROpeller &prop, const PROmodel &model, const std::vector<PROsyst> &variable_systs, const Eigen::VectorXf &fakedataparams, const PROpt &options);
 Eigen::VectorXf make_fakedata_params(Eigen::VectorXf &fake_data_osc_param_vector, const PROconfig &config, const PROpt &options, const PROmodel &model, const PROsyst &systs);
 void make_param_vectors(Eigen::VectorXf &fakeDataParams, Eigen::VectorXf &CVParams, const PROconfig &config, const PROpt &options, const PROmodel &model, const PROsyst &systs, const Eigen::VectorXf &fake_data_osc_param_vector);
+void resolve_fit_presets(PROpt &options, const PROconfig &config, const PROmodel &model);
 void include_or_exclude_systs(std::vector<PROsyst> &variable_systs, const PROconfig &config, const PROpt &options);
 void empty_bin_check(const PROconfig &config, const PROpt &options, const PROpeller &prop, const PROmodel &model, const PROsyst &systs, const PROdata data, bool use_real_data);
 void set_global_bounds(Eigen::VectorXf &lb, Eigen::VectorXf &ub, std::vector<int> &fixed, const PROconfig &config, const PROpt &options, PROmodel &model, PROsyst &systs, const Eigen::VectorXf &CVParams);

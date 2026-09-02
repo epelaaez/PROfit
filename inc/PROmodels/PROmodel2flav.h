@@ -9,7 +9,8 @@
  *   - PROnumudisTEST — two-variable (L, E) validation version of the numudis model.
  * The single-variable models formerly here (PROnumudis, PROnueapp, PROnuedis) are now
  * sine-kernel recipes evaluated by PROsineModel (PROmodels/PROmodelSine.h) under the
- * unchanged factory tags numudis / nueapp / nuedis.
+ * factory tags SBL_2flav_numudis / SBL_2flav_nueapp / SBL_2flav_nuedis (legacy
+ * aliases numudis / nueapp / nuedis).
  */
 #ifndef PROMODEL2FLAV_H
 #define PROMODEL2FLAV_H
@@ -55,6 +56,9 @@ public:
     Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<std::vector<float>> &var_arrs) const override;
     /** @brief Closed-form derivatives of get_probs (see PROmodel::get_probs_grad). */
     std::vector<Eigen::MatrixXf> get_probs_grad(const Eigen::VectorXf &phys, const std::vector<std::vector<float>> &var_arrs) const override;
+
+    /** @brief Closed-form derivatives above, so the analytic gradient is exact here (see PROmodel::has_analytic_gradient). */
+    bool has_analytic_gradient() const override { return true; }
 };
 
 }
