@@ -526,9 +526,11 @@ through the oscillation models and splines, *plus* the exact
 covariance-scaling term the old Gauss-Newton `-lin` modes dropped): as
 accurate as `central-full` at the cost of roughly one evaluation, so it is
 the right choice for scans *and* publication runs. It applies to the
-`neyman` (PROchi) binned strategies; `pearson`, `CNP`, `poisson`, and
+`neyman` (PROchi) binned strategies; `CNP`, `poisson`, and
 `--eventbyevent` automatically
-fall back to `central-lin` with a one-time warning. `central-full` remains
+fall back to `central-lin`, and `pearson` to `one-sided-full` (its
+statistical variance IS the prediction, so the term Gauss-Newton drops is
+first-order and the lin modes can stall), each with a one-time warning. `central-full` remains
 the finite-difference gold standard for cross-checks (and `scale-test
 --tests gradcheck` validates every mode against it). Note the default change
 (from `central-lin`) means fits are **not bit-reproducible against
@@ -891,8 +893,9 @@ and is the **recommended** choice whenever bins can be low-statistics;
 covariance-type systematics entirely (it will warn you). The legacy
 spellings `PROchi`, `PROCNP`, and `Poisson` still work as deprecated
 aliases (mapping to `neyman`/`CNP`/`poisson` with a one-time warning).
-Only `neyman` has the closed-form analytic gradient — the other metrics
-fall back to `central-lin` and the legacy `good`/`fast` presets. Adding a
+Only `neyman` has the closed-form analytic gradient — `CNP`/`poisson`
+fall back to `central-lin`, `pearson` to `one-sided-full`, and all three
+use the legacy `good`/`fast` presets. Adding a
 new metric
 is deliberately easy — they all implement the same `PROmetric` interface.
 

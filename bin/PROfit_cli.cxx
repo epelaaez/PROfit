@@ -28,8 +28,8 @@ PROpt::PROpt(int argc, char **argv) {
                        "central-lin (central FD on delta only, M frozen at base; Gauss-Newton, ~5-10x), "
                        "one-sided-lin (forward FD on delta only, M frozen at base; ~10-20x), "
                        "analytic (DEFAULT; exact closed-form gradient incl. the dM/dtheta term; no FD truncation, "
-                       "no extra spectrum fills; neyman (PROchi) binned strategies only — pearson, CNP, poisson and the "
-                       "event-by-event strategy fall back to central-lin with a warning). "
+                       "no extra spectrum fills; neyman (PROchi) binned strategies only — CNP, poisson and the "
+                       "event-by-event strategy fall back to central-lin, pearson to one-sided-full, with a warning). "
                        "Applies to every fit (global, scan, FC).")
             ->default_str("");
 
