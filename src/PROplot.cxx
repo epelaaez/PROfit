@@ -750,6 +750,7 @@ namespace PROfit{
                 cv_ratio->GetYaxis()->SetRangeUser(0.0, 1.33* max_val);
                 cv_ratio->SetTitle(ratio_label.c_str());
                 cv_ratio->Draw("hist");
+                if(has_bf) hideFirstYLabel(cv_ratio->GetYaxis()); // err-ratio pad below covers the bottom y label
 
                 // Draw CV error band
                 if(errband) {
@@ -792,6 +793,7 @@ namespace PROfit{
                     err_ratio->GetXaxis()->SetTitleSize(0.1);
                     err_ratio->GetXaxis()->SetLabelSize(0.1);
                     err_ratio->Draw("hist");
+                    hideLastYLabel(err_ratio->GetYaxis()); // top label clips at the pad's zero top margin
                 }
 
                 // Finalize canvas
@@ -956,6 +958,13 @@ namespace PROfit{
             }
         }
 
+        // A ratio pad below will half-cover the upper frame's bottom y label.
+        if(bool(opt&PlotOptions::DataMCRatio) || bool(opt&PlotOptions::DataPostfitRatio)) {
+            if(bool(opt&PlotOptions::CVasStack) && cvstack) hideFirstYLabel(cvstack->GetYaxis());
+            else if(cv_hist) hideFirstYLabel(cv_hist->GetYaxis());
+            else if(bf_hist) hideFirstYLabel(bf_hist->GetYaxis());
+        }
+
         if(data_hist) {
             log<LOG_DEBUG>(L"%1% || Using data %2%") % __func__ % hist_titles.c_str();
             TGraphErrors *g = new TGraphErrors(data_hist->GetNbinsX());
@@ -1114,6 +1123,7 @@ namespace PROfit{
             one->GetXaxis()->SetLabelSize(0.14);
             one->GetYaxis()->SetTitleOffset(0.21);
             one->GetXaxis()->SetTitleOffset(0.85);
+            hideLastYLabel(one->GetYaxis()); // top label clips at the ratio pad's zero top margin
             ratio->SetLineColor(kBlack);
             ratio->SetLineWidth(2);
             ratio->SetLineStyle(kSolid);

@@ -50,6 +50,15 @@
 #include "TLine.h"
 namespace PROfit{
 
+    /// @brief Classic ROOT ratio-plot label fix (the same trick TRatioPlot applies
+    /// internally): with the upper pad's bottom margin at 0, its lowest y-axis label
+    /// straddles the pad boundary and is half-covered by the ratio pad drawn below;
+    /// the ratio pad's topmost label is likewise clipped at its own edge. Hide the
+    /// upper frame's FIRST y label and the ratio frame's LAST y label. Safe to call
+    /// any time after the frame-drawing object's axis exists (post-Draw for THStack).
+    inline void hideFirstYLabel(TAxis *a) { if(a) a->ChangeLabel(1, -1.f, 0.f); }
+    inline void hideLastYLabel(TAxis *a)  { if(a) a->ChangeLabel(-1, -1.f, 0.f); }
+
     /**
      * @brief Axis range control for PROfit plots.
      * @details Default value of -9999 for any field means "let ROOT auto-range that axis".

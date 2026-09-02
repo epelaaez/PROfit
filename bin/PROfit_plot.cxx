@@ -513,6 +513,7 @@ void run_plot(const PROconfig &config, const PROpeller &prop, const PROmetric &m
                     p1.SetBottomMargin(0);
                     p1.cd();
                     cv_hist->Draw("hist");
+                    hideFirstYLabel(cv_hist->GetYaxis()); // ratio pad below covers the bottom y label
                     osc_hist->Draw("hist same");
                     cv_hist->SetMaximum(std::max(cv_hist->GetMaximum(),osc_hist->GetMaximum())*1.1);
                     leg->Draw("same");
@@ -526,6 +527,7 @@ void run_plot(const PROconfig &config, const PROpeller &prop, const PROmetric &m
                     one->GetXaxis()->SetTitleSize(0.1);
                     one->GetXaxis()->SetLabelSize(0.1);
                     one->GetYaxis()->SetTitleOffset(0.5);
+                    hideLastYLabel(one->GetYaxis()); // top label clips at the pad's zero top margin
                     one->Draw("hist");
                     one->SetMaximum(rat->GetMaximum()*1.2);
                     one->SetMinimum(rat->GetMinimum()*0.8);
