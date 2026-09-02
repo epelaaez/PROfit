@@ -3320,34 +3320,51 @@ int plotPriorFractionalSystematicChannelRatios(const PROconfig &config, const PR
             ext = std::max({ext, std::abs(bf[i] - elo[i]), std::abs(bf[i] + ehi[i]), std::abs(bf[i])});
         const float X = std::min(5.0f, std::max(1.5f, std::ceil(2.0f * 1.05f * ext) / 2.0f));
 
-        // Compact fixed-height rows; canvas height grows with n.
-        const int   row_px    = 26;
-        const int   top_px    = 30, bottom_px = 65;
-        const int   c_width   = 950;
-        const int   c_height  = std::max(300, top_px + bottom_px + n * row_px);
-
+        // Compact fixed-height rows; canvas height grows with n. The top
+        // margin hosts the version watermark (~30 px of text on tall canvases,
+        // whose NDC size resolves against the 950 px width, plus its small
+        // height-relative gap above the frame) so it grows gently with n.
+        //
         // TPDF scales the whole canvas onto an (at most) A4 page, so fixed
         // pixel sizes shrink as 1/n on tall canvases. Size all text to a
         // constant PRINTED size instead: page_scale is cm-per-canvas-pixel
         // once the canvas aspect is fitted inside A4 (same fit used at
         // SaveAs below). Row-bound text (names, values) is additionally
-        // clamped by the row pitch.
+        // clamped by the row pitch, and the axis text is capped relative to
+        // it so the bottom axis doesn't dwarf dense many-parameter pages.
+        // The bottom margin must fit the axis labels+title, whose sizes
+        // depend on page_scale, which depends on the canvas height, which
+        // depends on the bottom margin -- iterate the coupled sizes to a
+        // fixed point (converges in 2-3 passes).
+        const int   row_px  = 26;
+        const int   top_px  = 44 + (int)(0.105f * (float)n);
+        const int   c_width = 950;
         const float max_w_cm = 19.0f, max_h_cm = 28.0f;
-        const float page_scale = std::min(max_w_cm / (float)c_width, max_h_cm / (float)c_height);
+        int   bottom_px = 65, c_height = 300;
+        float page_scale = 1, label_px = 1, axis_label_px = 1, axis_title_px = 1;
+        for(int pass = 0; pass < 3; ++pass) {
+            c_height      = std::max(300, top_px + bottom_px + n * row_px);
+            page_scale    = std::min(max_w_cm / (float)c_width, max_h_cm / (float)c_height);
+            label_px      = std::min(0.75f * row_px, 0.30f / page_scale);
+            axis_label_px = std::min(0.35f / page_scale, 1.2f * label_px);
+            axis_title_px = std::min(0.40f / page_scale, 1.4f * label_px);
+            bottom_px     = (int)(1.6f * axis_label_px + 2.6f * axis_title_px + 12.0f);
+        }
         auto px_for = [&](float target_cm) { return target_cm / page_scale; };
-        const float label_px = std::min(0.75f * row_px, px_for(0.30f));
-        // ROOT precision-2 text sizes are fractions of the pad height.
-        float lab_size = label_px / (float)c_height;
+        // ROOT precision-2 text sizes are fractions of the pad's SMALLER
+        // dimension (the width, on these tall canvases) — dividing by the
+        // height renders text height/width times too small.
+        const float text_basis = (float)std::min(c_width, c_height);
+        float lab_size = label_px / text_basis;
         size_t max_label_len = 1;
         for(const auto &l : labels) max_label_len = std::max(max_label_len, l.size());
         const float left_needed = 0.55f * label_px * (float)max_label_len / (float)c_width + 0.02f;
         const float left = std::max(0.10f, std::min(0.42f, left_needed));
         if(left_needed > 0.42f)   // margin capped: shrink the label font, never the frame
-            lab_size = (0.40f * c_width) / (0.55f * (float)max_label_len) / (float)c_height;
+            lab_size = (0.40f * c_width) / (0.55f * (float)max_label_len) / text_basis;
         const float value_size = lab_size;  // numeric column matches the names
-        const float value_px = value_size * (float)c_height;
+        const float value_px = value_size * text_basis;
         const float right = std::max(130.0f, 5.5f * value_px) / (float)c_width;
-        const float axis_label_px = px_for(0.35f), axis_title_px = px_for(0.40f);
 
         TCanvas *c = new TCanvas((filename + suffix).c_str(), (filename + suffix).c_str(), c_width, c_height);
         c->cd();
@@ -3360,12 +3377,17 @@ int plotPriorFractionalSystematicChannelRatios(const PROconfig &config, const PR
         TH2F *frame = new TH2F((filename + suffix + "_frame").c_str(), "", 1, -X, X, n, 0, (float)n);
         frame->SetStats(0);
         frame->SetDirectory(nullptr);
-        frame->GetXaxis()->SetTitle("(#hat{#theta} #minus #theta_{0}) / #sigma_{prior}");
+        frame->GetXaxis()->SetTitle("(#theta_{BF} #minus #theta_{0}) / #sigma_{prior}");
         frame->GetXaxis()->SetTitleFont(42);
         frame->GetXaxis()->SetLabelFont(42);
-        frame->GetXaxis()->SetTitleSize(axis_title_px / (float)c_height);
-        frame->GetXaxis()->SetLabelSize(axis_label_px / (float)c_height);
-        frame->GetXaxis()->SetTitleOffset(1.2f);
+        frame->GetXaxis()->SetTitleSize(axis_title_px / text_basis);
+        frame->GetXaxis()->SetLabelSize(axis_label_px / text_basis);
+        // The title's distance below the axis scales with offset*size in
+        // pad-HEIGHT units while the glyphs render against the smaller
+        // dimension -- compensate by basis/height (or the title walks off
+        // tall pages). The 2.15 constant was tuned empirically to clear the
+        // axis numbers at every n.
+        frame->GetXaxis()->SetTitleOffset(2.15f * text_basis / (float)c_height);
         // Tick length is a fraction of the pad height: pin it to a constant
         // printed size so the mirrored top ticks don't grow on tall canvases.
         frame->GetXaxis()->SetTickLength(px_for(0.15f) / (float)c_height);
@@ -3461,7 +3483,7 @@ int plotPriorFractionalSystematicChannelRatios(const PROconfig &config, const PR
         TLine *border_right = new TLine(X, 0, X, (float)n);
         border_right->SetLineColor(kBlack); border_right->SetLineWidth(1);
         border_right->Draw();
-        drawVersionWatermark(c, WatermarkPos::BottomRight);
+        drawVersionWatermark(c);
         c->Update();
 
         // Match the PDF page to the canvas aspect: TPDF always writes an A4
@@ -3472,7 +3494,12 @@ int plotPriorFractionalSystematicChannelRatios(const PROconfig &config, const PR
         float paper_w0, paper_h0;
         gStyle->GetPaperSize(paper_w0, paper_h0);
         gStyle->SetPaperSize((float)c_width * page_scale, (float)c_height * page_scale);
+        // Error-bar end caps 50% longer than the gStyle default (read at
+        // paint time, so set around SaveAs and restore with the paper size).
+        const float end_err0 = gStyle->GetEndErrorSize();
+        gStyle->SetEndErrorSize(1.5f * end_err0);
         c->SaveAs(outname.c_str(), "pdf");
+        gStyle->SetEndErrorSize(end_err0);
         gStyle->SetPaperSize(paper_w0, paper_h0);
         delete c;
     }
