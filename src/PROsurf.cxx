@@ -1710,7 +1710,7 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
 
         // Start of a new page (except for the first plot)
         if(i > 0 && padIdx == 1) {
-            drawVersionWatermark(c, WatermarkPos::BottomRight);
+            drawVersionWatermark(c, WatermarkPos::RightEdge);
             c->Print((filename+".pdf").c_str());
             c->Clear();
             c->Divide(nCols, nRows);
@@ -1721,7 +1721,7 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
     }
 
     // Print the last page and close the PDF
-    drawVersionWatermark(c, WatermarkPos::BottomRight);
+    drawVersionWatermark(c, WatermarkPos::RightEdge);
     c->Print((filename+".pdf").c_str());
     c->Print((filename+".pdf]").c_str());
 
