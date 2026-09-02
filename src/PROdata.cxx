@@ -1,5 +1,6 @@
 #include "PROdata.h"
 #include "PROtocall.h"
+#include "PROwatermark.h"
 
 using namespace PROfit;
 
@@ -266,6 +267,7 @@ void PROdata::plotSpectrum(const PROconfig& inconfig, const std::string& output_
         }//end det
     }//end mode
 
+    drawVersionWatermark(c, WatermarkPos::BottomRight);
     c->SaveAs(("PROplot_"+output_name+".pdf").c_str(),"pdf");
 
     delete c;

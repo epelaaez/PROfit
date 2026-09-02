@@ -184,6 +184,7 @@ void run_surface(float &global_fit_chi2, Eigen::VectorXf &global_fit_result, con
         c.SetLogz();
         gStyle->SetPalette(kViridis);
         surf.Draw("colz");
+        drawVersionWatermark(&c);
         c.Print((options.final_output_tag+"_surface.pdf").c_str());
     }
 

@@ -13,6 +13,7 @@
 
 #include "PROlog.h"
 #include "PROmeshPlot.h"
+#include "PROwatermark.h"
 
 #include <Eigen/Eigen>
 
@@ -80,6 +81,7 @@ static void plot_amr_throws_multipage_pdf(
         const std::string page_title = "AMR mesh - throw " + std::to_string(t);
         draw_amr_mesh_on_canvas(c, throws[t], model, logx, logy,
                                 xaxis_idx, yaxis_idx, page_title);
+        drawVersionWatermark(&c);
         c.Print(filename.c_str(), "pdf");
     }
     c.Print((filename + "]").c_str(), "pdf");
@@ -226,6 +228,7 @@ void plot_metamesh_pdf(const MetaMesh &mm,
     info->Draw();
 
     c.cd();
+    drawVersionWatermark(&c, WatermarkPos::BottomRight);
     c.Print(filename.c_str());
     log<LOG_INFO>(L"%1% || meta-mesh plot written to %2% (%3% cells, max level %4%).")
         % __func__ % filename.c_str() % (int)mm.cells.size() % max_lvl;
@@ -358,6 +361,7 @@ void plot_pebank_summary_pdf(const PEBank &bank,
     info->Draw();
 
     c.cd();
+    drawVersionWatermark(&c, WatermarkPos::BottomRight);
     c.Print(filename.c_str());
     log<LOG_INFO>(L"%1% || PE-bank summary written to %2% (cells=%3%, total_pes=%4%).")
         % __func__ % filename.c_str() % bank.n_cells % (long long)total_pes;
@@ -475,6 +479,7 @@ void plot_pebank_pes_multipage_pdf(const PEBank &bank,
         p3->cd(); h_dch ->Draw();
 
         c.cd();
+        drawVersionWatermark(&c, WatermarkPos::BottomRight);
         c.Print(filename.c_str(), "pdf");
         ++pages_written;
     }
@@ -765,6 +770,7 @@ void plot_asimov_verdict_pdf(
         info->Draw();
 
         c.cd();
+        drawVersionWatermark(&c, WatermarkPos::BottomRight);
         c.Print(filename.c_str(), "pdf");
     }
 
@@ -1003,6 +1009,7 @@ void plot_asimov_contour_pdf(
 
     leg->Draw();
 
+    drawVersionWatermark(&c);
     c.Print(filename.c_str());
     log<LOG_INFO>(L"%1% || asimov contour PDF written to %2% (%3% CLs).")
         % __func__ % filename.c_str() % (int)cl_targets.size();
@@ -1643,6 +1650,7 @@ void plot_brazil_band_pdf(
 
         c.RedrawAxis(); // keep axes on top of the filled regions
 
+        drawVersionWatermark(&c);
         c.Print(filename.c_str(), "pdf");
 
         delete h_incl;

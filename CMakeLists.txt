@@ -6,7 +6,13 @@ project (
     VERSION 3.0.0
     DESCRIPTION "A PROfessional PROfitable PROtractable Fitter"
     LANGUAGES CXX)
-message(STATUS "Building PROfit version: ${PROJECT_VERSION}")
+
+# Pre-release suffix: "-dev" on develop; set to "" on release branches.
+# Release flow: strip suffix -> tag vX.Y.Z -> bump VERSION above and restore "-dev".
+# (project(VERSION) only accepts numeric components, so the suffix lives here.)
+set(PROFIT_VERSION_SUFFIX "-dev")
+set(PROFIT_FULL_VERSION "${PROJECT_VERSION}${PROFIT_VERSION_SUFFIX}")
+message(STATUS "Building PROfit version: ${PROFIT_FULL_VERSION}")
 
 include(FetchContent)
 include(ExternalProject)

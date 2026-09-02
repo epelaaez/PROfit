@@ -4,6 +4,7 @@
 #include "PROmeshEval.h"
 #include "PROmeshPlot.h"
 #include "PRObe.h"
+#include "PROwatermark.h"
 
 #include <Eigen/Eigen>
 
@@ -902,6 +903,7 @@ void PROsurf::PlotAMRMesh(const PROmesh::AMRResult &amr,
     // Delegate the rendering to the shared drawer (inc/PROmeshPlot.h).
     TCanvas c("amr_mesh", "AMR Mesh", 800, 700);
     PROmesh::draw_amr_mesh_on_canvas(c, amr, model, logx, logy, xaxis_idx, yaxis_idx);
+    drawVersionWatermark(&c);
     c.Print((filename + "_amr_mesh.pdf").c_str());
 
     log<LOG_INFO>(L"%1% || AMR mesh plot written to %2%_amr_mesh.pdf (%3% leaves, max level %4%).")
@@ -1029,6 +1031,7 @@ void PROsurf::PlotCurve(const PROconfig &config, const PROmodel &model, const PR
     leg->SetLineWidth(0);
     leg->Draw();
 
+    drawVersionWatermark(&c1, WatermarkPos::BottomRight);
     c1.SaveAs((final_output_tag+"_PROcurve.pdf").c_str(), "pdf");
 
 }
@@ -1707,6 +1710,7 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
 
         // Start of a new page (except for the first plot)
         if(i > 0 && padIdx == 1) {
+            drawVersionWatermark(c, WatermarkPos::BottomRight);
             c->Print((filename+".pdf").c_str());
             c->Clear();
             c->Divide(nCols, nRows);
@@ -1717,6 +1721,7 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
     }
 
     // Print the last page and close the PDF
+    drawVersionWatermark(c, WatermarkPos::BottomRight);
     c->Print((filename+".pdf").c_str());
     c->Print((filename+".pdf]").c_str());
 
@@ -1977,16 +1982,8 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
     leg->AddEntry(leg_inj, "Injected values", "p");
     leg->Draw();
 
-    // Version label
-    TText *t = new TText();
-    t->SetNDC();
-    t->SetTextFont(42);
-    t->SetTextSize(0.028f);
-    t->SetTextAlign(33);
-    std::string pv = "PROfit v"+std::string(PROJECT_VERSION_STR);
-    t->DrawText(0.96, 0.97, pv.c_str());
-
     c2->Update();
+    drawVersionWatermark(c2);
     c2->SaveAs((filename+"_1sigma_detailed.pdf").c_str(),"pdf");
     delete c2;
     } // end _1sigma_detailed.pdf scope
@@ -2053,14 +2050,6 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
         text->SetTextAngle(-45);
         text->Draw();
     }
-    TText *t = new TText();
-    t->SetNDC();
-    t->SetTextFont(42);
-    t->SetTextSize(0.03);
-    t->SetTextAlign(33);
-    std::string pv = "PROfit v"+std::string(PROJECT_VERSION_STR);
-    t->DrawText(0.895, 0.955, pv.c_str());
-
     c2->Update();
 
     //if (twosig) {
@@ -2152,7 +2141,7 @@ void PROfile::Plot(const PROconfig &config, const PROsyst &systs, const PROmodel
 
 
 
-    t->DrawText(0.895, 0.955, pv.c_str());
+    drawVersionWatermark(c2);
     c2->SaveAs((filename+"_1sigma.pdf").c_str(),"pdf");
     delete c2;
 
