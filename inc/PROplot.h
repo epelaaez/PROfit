@@ -780,6 +780,36 @@ namespace PROfit{
      */
     void plot_mcmc_1sigma(const std::string &filename, const PROconfig &config, const PROsyst &systs, const PROmodel &model, const Eigen::VectorXf &best_fit, const Eigen::VectorXf &param_err_lo, const Eigen::VectorXf &param_err_hi, bool with_osc = false, const Eigen::VectorXf &true_params = Eigen::VectorXf());
 
+    /**
+     * @brief Publication-style vertical pull plot of the NUISANCE (spline) parameters
+     * from the profile scan.
+     * @details One compact row per spline on a single tall page: pretty plotname on the
+     * y axis, black dot at the (possibly scan-updated) global best fit with asymmetric
+     * horizontal 1σ bars whose endpoints are the Δχ²=1 crossings of that parameter's
+     * profile curve (PROfile::values1_down / values1_up). Grey ±1 prior band, dashed
+     * zero line, dotted ±1 guides, alternating row shading, and a right-hand numeric
+     * column "bf +ehi/-elo". Canvas height scales with the number of splines; error
+     * bars past the (±5-clamped) symmetric x-range get an off-scale arrow. Physics
+     * parameters are never drawn. Call it twice to get both orderings.
+     * @param filename     Output prefix; final file is @p filename +
+     *                     "_vertical_pullordered.pdf" (sort_by_pull) or
+     *                     "_vertical_xmlorder.pdf".
+     * @param config       Analysis configuration (spline pretty names).
+     * @param systs        PROsyst (spline names and count).
+     * @param model        Physics model (only nparams is used, for the offset).
+     * @param best_fit     FULL best-fit vector (nphys + nspline when with_osc) — pass
+     *                     it AFTER any newglob adoption so the dots sit at the
+     *                     genuinely lowest minimum found.
+     * @param values1_down PROfile absolute lower 1σ crossing per parameter, full-length
+     *                     ([physics..., splines...] when with_osc).
+     * @param values1_up   PROfile absolute upper 1σ crossing per parameter, ditto.
+     * @param with_osc     True when the profile vectors carry physics entries first
+     *                     (they are skipped, never plotted).
+     * @param sort_by_pull False: spline_names (XML) order. True: sorted by |best fit|
+     *                     descending, largest pull at the TOP of the page.
+     */
+    void plot_profile_vertical_pulls(const std::string &filename, const PROconfig &config, const PROsyst &systs, const PROmodel &model, const Eigen::VectorXf &best_fit, const std::vector<float> &values1_down, const std::vector<float> &values1_up, bool with_osc, bool sort_by_pull);
+
 };
 
 #endif
