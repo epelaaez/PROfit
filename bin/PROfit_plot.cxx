@@ -443,8 +443,13 @@ void run_plot(const PROconfig &config, const PROpeller &prop, const PROmetric &m
                         const auto &h = other_hists[config.i_prime][subchannel_name];
                         const auto &o = osc_hists[subchannel_name];
                         if(sc == 0) {
+                            // Clone() keeps the subchannel hist's name and re-registers it with
+                            // gDirectory; these clones are page-local, so detach them or the
+                            // later ErrorBand pages' same-named hists warn "Replacing existing TH1".
                             cv_hist = (TH1D*)h->Clone();
+                            cv_hist->SetDirectory(nullptr);
                             osc_hist = (TH1D*)o->Clone();
+                            osc_hist->SetDirectory(nullptr);
                         } else {
                             cv_hist->Add(&*h);
                             osc_hist->Add(&*o);
@@ -479,15 +484,19 @@ void run_plot(const PROconfig &config, const PROpeller &prop, const PROmetric &m
                     cv_hist->SetLineWidth(3);
                     osc_hist->SetLineWidth(3);
                     TH1D *rat = (TH1D*)osc_hist->Clone();
+                    rat->SetDirectory(nullptr);
                     rat->Divide(cv_hist);
                     rat->SetTitle("");
                     rat->GetYaxis()->SetTitle("Ratio");
                     TH1D *one = (TH1D*)rat->Clone();
+                    one->SetDirectory(nullptr);
                     one->Divide(one);
                     one->SetLineColor(kBlack);
                     one->GetYaxis()->SetTitle("Ratio");
 
-                    std::unique_ptr<TLegend> leg = std::make_unique<TLegend>(0.59,0.89,0.59,0.89);
+                    // A real box: the old zero-area (0.59,0.89,0.59,0.89) made ROOT warn
+                    // "Legend too large to be automatically placed" and pick its own spot.
+                    std::unique_ptr<TLegend> leg = std::make_unique<TLegend>(0.35,0.75,0.89,0.89);
                     leg->SetFillStyle(0);
                     leg->SetLineWidth(0);
                     leg->AddEntry(cv_hist, "No Oscillations", "l");
