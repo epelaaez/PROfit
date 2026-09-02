@@ -140,6 +140,7 @@ namespace PROfit{
         BinWidthScaled   = 1 << 2,  ///< Divide bin contents by bin width (events/unit).
         DataMCRatio      = 1 << 3,  ///< Show a data/MC ratio panel below the main plot.
         DataPostfitRatio = 1 << 4,  ///< Show a data/post-fit ratio panel below the main plot.
+        LegendCounts     = 1 << 5,  ///< Append each stacked subchannel's integrated event count to its legend entry.
     };
 
     inline PlotOptions operator|(PlotOptions a, PlotOptions b) {

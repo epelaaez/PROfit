@@ -40,6 +40,7 @@ void run_plot(const PROconfig &config, const PROpeller &prop, const PROmetric &m
     std::vector<TPaveText> notext;
     if(options.binwidth_scale) opt |= PlotOptions::BinWidthScaled;
     if(options.area_normalized) opt |= PlotOptions::AreaNormalized;
+    if(options.legend_counts) opt |= PlotOptions::LegendCounts;
     std::vector<PROspec> variable_cvs;
     std::vector<std::map<std::string, TObject *>> cv_objs;
     for(size_t io = 0; io < config.m_num_variables; ++io) {

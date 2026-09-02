@@ -22,6 +22,7 @@ void run_global(float &global_fit_chi2, Eigen::VectorXf &global_fit_result, cons
     }
     if(options.binwidth_scale) popt |= PlotOptions::BinWidthScaled;
     if(options.area_normalized) popt |= PlotOptions::AreaNormalized;
+    if(options.legend_counts) popt |= PlotOptions::LegendCounts;
 
     std::map<std::string, TObject *> drawn_objs = draw_fit_result(config, prop, metric.GetModel(), metric.GetSysts(), metric, cv, data, fitres, options.final_output_tag+"_PROglobal", popt, options.pbounds, options.plot_channel_ratios);
 
