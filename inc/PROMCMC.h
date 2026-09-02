@@ -82,6 +82,10 @@ namespace PROfit {
                         pbar->finish();
                         std::cerr << std::endl;
                     }
+                    if(naccept == 0)
+                        log<LOG_WARNING>(L"%1% || Metropolis chain accepted 0 of %2% proposals — the chain is frozen at its start"
+                                         L" point (check bounds vs start values and proposal widths); results from this chain are meaningless.")
+                            % __func__ % (burnin + steps);
                 }
 
                 void plot_autocorrelation(const std::string &filename, const std::vector<std::string> &param_names, std::optional<std::map<std::string, TObject*>*> drawn_objs, size_t max_lag = 1000) const {
@@ -113,7 +117,7 @@ namespace PROfit {
                         int n = chain.size();
                         std::vector<double> values;
                         values.reserve(n);
-                        float mean = 0;
+                        double mean = 0;
                         for(const auto &step : chain) {
                             values.push_back(step(i));
                             mean += step(i);
@@ -133,15 +137,22 @@ namespace PROfit {
                         TVirtualFFT *ifft = TVirtualFFT::FFT(1, &n, "C2R");
                         ifft->SetPointsComplex(fft_pts.data(), ims.data());
                         ifft->Transform();
-                        double lag0, klag;
-                        lag0 = ifft->GetPointReal(0);
-                        for(int k = 0; k < n && k < max_lag; ++k) {
-                            klag = ifft->GetPointReal(k);
-                            hs.back().first->SetBinContent(k+1, std::abs(klag/lag0));
-                            hs.back().second->SetBinContent(k+1, klag/lag0);
+                        double lag0 = ifft->GetPointReal(0), klag = 0;
+                        // A constant chain column gives lag0 == 0; klag/lag0 would put literal
+                        // 'nan's into the PDF stream and corrupt the page. Plot zeros instead.
+                        if(!std::isfinite(lag0) || lag0 <= 0) {
+                            log<LOG_WARNING>(L"%1% || Chain for parameter %2% is constant/degenerate (lag0 = %3%);"
+                                             L" autocorrelation undefined, plotting zeros.")
+                                % __func__ % param_names[i].c_str() % lag0;
+                        } else {
+                            for(int k = 0; k < n && k < max_lag; ++k) {
+                                klag = ifft->GetPointReal(k);
+                                hs.back().first->SetBinContent(k+1, std::abs(klag/lag0));
+                                hs.back().second->SetBinContent(k+1, klag/lag0);
+                            }
+                            log<LOG_INFO>(L"%1% || Lag %2% autocorrelation for parameter %3% is %4%.")
+                                % __func__ % std::min(max_lag, (size_t)n) % param_names[i].c_str() % (klag/lag0);
                         }
-                        log<LOG_INFO>(L"%1% || Lag %2% autocorrelation for parameter %3% is %4%.")
-                            % __func__ % std::min(max_lag, (size_t)n) % param_names[i].c_str() % (klag/lag0);
                         c.cd(1);
                         gPad->SetLogy(1);
                         hs.back().first->Draw("l");
@@ -319,7 +330,10 @@ namespace PROfit {
             for(long int i = 0; i < value.size(); ++i) {
                 if(std::find(fixed.begin(), fixed.end(), i) != std::end(fixed)) continue;
                 if(i < nparams) {
-                    if(value(i) > metric.GetModel().ub(i) || value(i) < metric.GetModel().lb(i) || value(i) < -5.0f)
+                    // A finite model bound is authoritative; the -5 floor only stops runaway
+                    // exploration of log-space params whose model lb is -inf.
+                    float lo = std::isfinite(metric.GetModel().lb(i)) ? metric.GetModel().lb(i) : -5.0f;
+                    if(value(i) > metric.GetModel().ub(i) || value(i) < lo)
                         return false;
                 } else {
                     size_t si = i - nparams;
@@ -448,8 +462,12 @@ namespace PROfit {
             for(long int i = 0; i < value.size(); ++i) {
                 if(std::find(fixed.begin(), fixed.end(), i) != std::end(fixed)) continue;
                 if(i < nparams) {
-                    if(value(i) > metric.GetModel().ub(i) || value(i) < std::max(metric.GetModel().lb(i),-5.0f))
-                    //if(value(i) > std::pow(10, metric.GetModel().ub(i)) || value(i) < std::max(std::pow(10, metric.GetModel().lb(i)),1e-5))
+                    // A finite model bound is authoritative; the -5 floor only stops runaway
+                    // exploration of log-space params whose model lb is -inf. The old
+                    // max(lb, -5) froze the whole chain when the best fit sat below -5
+                    // (e.g. Asimov no-signal fits driving a mixing angle to its bound).
+                    float lo = std::isfinite(metric.GetModel().lb(i)) ? metric.GetModel().lb(i) : -5.0f;
+                    if(value(i) > metric.GetModel().ub(i) || value(i) < lo)
                         return false;
                 } else {
                     size_t si = i - nparams;
