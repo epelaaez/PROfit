@@ -62,6 +62,7 @@ PROpt::PROpt(int argc, char **argv) {
         app.add_flag("--no-xrootd", noxrootd,"Do not use XRootD, which is enabled by default");
         app.add_flag("--syst-only", systs_only, "Force fitting over nuisance parameters only, currently just --fix's them");
         app.add_flag("--area-norm", area_normalized, "Make area normalized histograms.");
+        app.add_flag("--legend-counts", legend_counts, "Append each stacked subchannel's integrated event count to its legend entry (plot, global and profile stacks).");
 
         // PROjector: two-stage pre-fit / projected fit (see inc/PROjector.h for the scheme).
         CLI::Option *projector_prefit_opt = app.add_option("--projector-prefit", projector_config.prefit_pattern,

@@ -146,6 +146,7 @@ struct PROpt {
     bool preset_user_set = false; ///< True if -p/--preset was given on the command line (see resolve_fit_presets).
     inline static const std::unordered_set<std::string> allowed_preset = {"good","fast","overkill","sensitivity","grad-fast","grad-good","grad-deep","grad-overkill"};
     bool with_splines = false, binwidth_scale = false, area_normalized = false, data_mc_ratio = false;
+    bool legend_counts = false;
     bool with_covar = false, no_frac_syst = false;
     int band_throws = 2500;
     std::map<std::string, float> fake_data_osc_params;

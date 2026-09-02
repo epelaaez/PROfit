@@ -912,14 +912,13 @@ namespace PROfit{
 
                     TH1D* hist = dynamic_cast<TH1D*>(obj);
                     if (hist) {
-                        double integral = hist->Integral();
-
-                        std::string label_with_integral = subplots->at(sc).second;
-                        char buf[32];
-                        snprintf(buf, sizeof(buf), " (%.1f)", integral);
-                        label_with_integral += buf;
-
-                        leg->AddEntry(hist, label_with_integral.c_str(), "f");
+                        std::string label = subplots->at(sc).second;
+                        if(bool(opt&PlotOptions::LegendCounts)) {
+                            char buf[32];
+                            snprintf(buf, sizeof(buf), " (%.1f)", hist->Integral());
+                            label += buf;
+                        }
+                        leg->AddEntry(hist, label.c_str(), "f");
                     }
                     sc = sc + 1;
                 }
