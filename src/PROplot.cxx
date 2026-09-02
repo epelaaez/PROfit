@@ -4,12 +4,15 @@
 #include "TArrow.h"
 #include "TBox.h"
 #include "TH1F.h"
+#include "TH2F.h"
 #include "TLatex.h"
+#include "TLine.h"
 #include "TLegend.h"
 #include "TLegendEntry.h"
 #include "TMarker.h"
 #include "TText.h"
 #include <cmath>
+#include <numeric>
 #include <Eigen/SVD>
 
 namespace PROfit{
@@ -3269,6 +3272,208 @@ int plotPriorFractionalSystematicChannelRatios(const PROconfig &config, const PR
         drawVersionWatermark(c);
         c->Update();
         c->SaveAs((filename+"_1sigmaMCMC.pdf").c_str(), "pdf");
+        delete c;
+    }
+
+    void plot_profile_vertical_pulls(const std::string &filename, const PROconfig &config, const PROsyst &systs, const PROmodel &model, const Eigen::VectorXf &best_fit, const std::vector<float> &values1_down, const std::vector<float> &values1_up, bool with_osc, bool sort_by_pull) {
+        const std::string suffix  = sort_by_pull ? "_vertical_pullordered" : "_vertical_xmlorder";
+        const std::string outname = filename + suffix + ".pdf";
+        const size_t offset = with_osc ? model.nparams : 0;
+        const int n = (int)systs.GetNSplines();
+        if(n == 0) {
+            log<LOG_WARNING>(L"%1% || No spline parameters to plot, skipping %2%") % __func__ % outname.c_str();
+            return;
+        }
+        if(values1_down.size() < offset + n || values1_up.size() < offset + n || (size_t)best_fit.size() < offset + n) {
+            log<LOG_WARNING>(L"%1% || Profile 1sigma vectors too short (down %2%, up %3%, best_fit %4%, need %5%); skipping %6%")
+                % __func__ % values1_down.size() % values1_up.size() % best_fit.size() % (offset + n) % outname.c_str();
+            return;
+        }
+
+        // Per-spline center (adopted global best fit) and asymmetric errors from
+        // the absolute dchi2=1 crossings of that parameter's profile curve.
+        std::vector<float> bf(n), elo(n), ehi(n);
+        std::vector<std::string> labels(n);
+        for(int i = 0; i < n; ++i) {
+            bf[i] = best_fit(offset + i);
+            const float lo = values1_down[offset + i], hi = values1_up[offset + i];
+            if(bf[i] < lo || bf[i] > hi)
+                log<LOG_WARNING>(L"%1% || Spline %2% best fit %3% outside its profile 1sigma crossings [%4%, %5%]; clamping that error side to 0.")
+                    % __func__ % systs.spline_names[i].c_str() % bf[i] % lo % hi;
+            elo[i] = std::max(0.0f, bf[i] - lo);
+            ehi[i] = std::max(0.0f, hi - bf[i]);
+            auto it = config.m_mcgen_variation_plotname_map.find(systs.spline_names[i]);
+            labels[i] = it != config.m_mcgen_variation_plotname_map.end() ? it->second : systs.spline_names[i];
+        }
+
+        // Display order: row k=0 is the TOP of the page (ROOT y-axis bin n-k).
+        std::vector<int> perm(n);
+        std::iota(perm.begin(), perm.end(), 0);
+        if(sort_by_pull)
+            std::stable_sort(perm.begin(), perm.end(),
+                    [&](int a, int b){ return std::abs(bf[a]) > std::abs(bf[b]); });
+
+        // Symmetric x-range: the +-1 prior band always fully visible, runaway
+        // intervals clamped at +-5 (off-scale sides get an arrow below).
+        float ext = 1.0f;
+        for(int i = 0; i < n; ++i)
+            ext = std::max({ext, std::abs(bf[i] - elo[i]), std::abs(bf[i] + ehi[i]), std::abs(bf[i])});
+        const float X = std::min(5.0f, std::max(1.5f, std::ceil(2.0f * 1.05f * ext) / 2.0f));
+
+        // Compact fixed-height rows; canvas height grows with n.
+        const int   row_px    = 26;
+        const int   top_px    = 30, bottom_px = 65;
+        const int   c_width   = 950;
+        const int   c_height  = std::max(300, top_px + bottom_px + n * row_px);
+
+        // TPDF scales the whole canvas onto an (at most) A4 page, so fixed
+        // pixel sizes shrink as 1/n on tall canvases. Size all text to a
+        // constant PRINTED size instead: page_scale is cm-per-canvas-pixel
+        // once the canvas aspect is fitted inside A4 (same fit used at
+        // SaveAs below). Row-bound text (names, values) is additionally
+        // clamped by the row pitch.
+        const float max_w_cm = 19.0f, max_h_cm = 28.0f;
+        const float page_scale = std::min(max_w_cm / (float)c_width, max_h_cm / (float)c_height);
+        auto px_for = [&](float target_cm) { return target_cm / page_scale; };
+        const float label_px = std::min(0.75f * row_px, px_for(0.30f));
+        // ROOT precision-2 text sizes are fractions of the pad height.
+        float lab_size = label_px / (float)c_height;
+        size_t max_label_len = 1;
+        for(const auto &l : labels) max_label_len = std::max(max_label_len, l.size());
+        const float left_needed = 0.55f * label_px * (float)max_label_len / (float)c_width + 0.02f;
+        const float left = std::max(0.10f, std::min(0.42f, left_needed));
+        if(left_needed > 0.42f)   // margin capped: shrink the label font, never the frame
+            lab_size = (0.40f * c_width) / (0.55f * (float)max_label_len) / (float)c_height;
+        const float value_size = lab_size;  // numeric column matches the names
+        const float value_px = value_size * (float)c_height;
+        const float right = std::max(130.0f, 5.5f * value_px) / (float)c_width;
+        const float axis_label_px = px_for(0.35f), axis_title_px = px_for(0.40f);
+
+        TCanvas *c = new TCanvas((filename + suffix).c_str(), (filename + suffix).c_str(), c_width, c_height);
+        c->cd();
+        c->SetLeftMargin(left);
+        c->SetRightMargin(right);
+        c->SetTopMargin((float)top_px / (float)c_height);
+        c->SetBottomMargin((float)bottom_px / (float)c_height);
+        c->SetTicks(1, 0);
+
+        TH2F *frame = new TH2F((filename + suffix + "_frame").c_str(), "", 1, -X, X, n, 0, (float)n);
+        frame->SetStats(0);
+        frame->SetDirectory(nullptr);
+        frame->GetXaxis()->SetTitle("(#hat{#theta} #minus #theta_{0}) / #sigma_{prior}");
+        frame->GetXaxis()->SetTitleFont(42);
+        frame->GetXaxis()->SetLabelFont(42);
+        frame->GetXaxis()->SetTitleSize(axis_title_px / (float)c_height);
+        frame->GetXaxis()->SetLabelSize(axis_label_px / (float)c_height);
+        frame->GetXaxis()->SetTitleOffset(1.2f);
+        // Tick length is a fraction of the pad height: pin it to a constant
+        // printed size so the mirrored top ticks don't grow on tall canvases.
+        frame->GetXaxis()->SetTickLength(px_for(0.15f) / (float)c_height);
+        for(int k = 0; k < n; ++k)
+            frame->GetYaxis()->SetBinLabel(n - k, labels[perm[k]].c_str());
+        frame->GetYaxis()->SetLabelFont(42);
+        frame->GetYaxis()->SetLabelSize(lab_size);   // AFTER SetBinLabel: alphanumeric axes reset sizing
+        frame->GetYaxis()->SetTickLength(0);
+        frame->Draw("AXIS");
+
+        // Zebra stripes behind everything, to track long labels across the row.
+        // (Fully transparent line color: width 0 alone still strokes a hairline
+        // border in the PDF backend.)
+        for(int k = 1; k < n; k += 2) {
+            TBox *stripe = new TBox(-X, (float)(n - k - 1), X, (float)(n - k));
+            stripe->SetFillColor(TColor::GetColor(246, 246, 246));
+            stripe->SetLineColorAlpha(kWhite, 0.0f);
+            stripe->SetLineWidth(0);
+            stripe->Draw("same");
+        }
+
+        // +-1 prior band (translucent so the stripes stay visible beneath).
+        TBox *prior_band = new TBox(-1.0f, 0.0f, 1.0f, (float)n);
+        prior_band->SetFillColorAlpha(kGray + 1, 0.30);
+        prior_band->SetLineColorAlpha(kWhite, 0.0f);
+        prior_band->SetLineWidth(0);
+        prior_band->Draw("same");
+
+        TLine *l_zero = new TLine(0, 0, 0, (float)n);
+        l_zero->SetLineStyle(2); l_zero->SetLineColor(kGray + 3); l_zero->SetLineWidth(1);
+        l_zero->Draw();
+        for(float xl : {-1.0f, 1.0f}) {
+            TLine *l = new TLine(xl, 0, xl, (float)n);
+            l->SetLineStyle(3); l->SetLineColor(kGray + 2); l->SetLineWidth(1);
+            l->Draw();
+        }
+
+        // Black data-point-style dot + asymmetric horizontal error bars.
+        const float arrow_len = 0.05f * 2.0f * X;
+        TGraphAsymmErrors *g = new TGraphAsymmErrors(n);
+        for(int k = 0; k < n; ++k) {
+            const int i = perm[k];
+            const float y = (float)n - (float)k - 0.5f;
+            float x = bf[i], exl = elo[i], exh = ehi[i];
+            bool clamp_lo = false, clamp_hi = false;
+            if(x < -X) { x = -X + arrow_len; exl = exh = 0; clamp_lo = true; }
+            if(x >  X) { x =  X - arrow_len; exl = exh = 0; clamp_hi = true; }
+            if(x - exl < -X) { exl = x + X; clamp_lo = true; }
+            if(x + exh >  X) { exh = X - x; clamp_hi = true; }
+            if(clamp_lo || clamp_hi)
+                log<LOG_WARNING>(L"%1% || Spline %2% 1sigma interval extends past the +-%3% plot range (off-scale arrow drawn).")
+                    % __func__ % systs.spline_names[i].c_str() % X;
+            g->SetPoint(k, x, y);
+            g->SetPointError(k, exl, exh, 0, 0);
+            if(clamp_lo) {
+                TArrow *a = new TArrow(-X + arrow_len, y, -X + 0.1f * arrow_len, y, 0.008, "|>");
+                a->SetLineColor(kBlack); a->SetFillColor(kBlack); a->SetLineWidth(1); a->Draw();
+            }
+            if(clamp_hi) {
+                TArrow *a = new TArrow(X - arrow_len, y, X - 0.1f * arrow_len, y, 0.008, "|>");
+                a->SetLineColor(kBlack); a->SetFillColor(kBlack); a->SetLineWidth(1); a->Draw();
+            }
+        }
+        g->SetMarkerStyle(20);
+        // 33% bigger than the original 0.8, and growing with the label size so
+        // the dots stay visible on dense many-parameter pages.
+        g->SetMarkerSize(1.07f * label_px / 15.0f);
+        g->SetMarkerColor(kBlack);
+        g->SetLineColor(kBlack);
+        g->SetLineWidth(std::max(1, (int)std::lround(label_px / 12.0f)));
+        g->Draw("P same");
+
+        // Right-hand numeric column in the right margin (TLatex is not clipped
+        // to the frame); fixed left anchor keeps the column aligned.
+        const float value_x = X + 0.05f * 2.0f * X;
+        for(int k = 0; k < n; ++k) {
+            const int i = perm[k];
+            TLatex *t = new TLatex(value_x, (float)n - (float)k - 0.5f,
+                    TString::Format("%.2f^{#plus%.2f}_{#minus%.2f}", bf[i], ehi[i], elo[i]));
+            t->SetTextAlign(12);
+            t->SetTextFont(42);
+            t->SetTextSize(value_size);
+            t->Draw();
+        }
+
+        // Repaint the axes, then the top/right frame borders explicitly: the
+        // full-width boxes above sit on the frame border and half-erase it
+        // (axis redraws restore only the left/bottom axis lines).
+        c->RedrawAxis();
+        TLine *border_top = new TLine(-X, (float)n, X, (float)n);
+        border_top->SetLineColor(kBlack); border_top->SetLineWidth(1);
+        border_top->Draw();
+        TLine *border_right = new TLine(X, 0, X, (float)n);
+        border_right->SetLineColor(kBlack); border_right->SetLineWidth(1);
+        border_right->Draw();
+        drawVersionWatermark(c, WatermarkPos::BottomRight);
+        c->Update();
+
+        // Match the PDF page to the canvas aspect: TPDF always writes an A4
+        // MediaBox and expresses the paper size as the CropBox viewers display,
+        // so without this a tall canvas floats on a mostly-blank A4 page. Fit
+        // the canvas aspect inside A4 (save/restore the global paper size, as
+        // draw_harmonic_scan does).
+        float paper_w0, paper_h0;
+        gStyle->GetPaperSize(paper_w0, paper_h0);
+        gStyle->SetPaperSize((float)c_width * page_scale, (float)c_height * page_scale);
+        c->SaveAs(outname.c_str(), "pdf");
+        gStyle->SetPaperSize(paper_w0, paper_h0);
         delete c;
     }
 
