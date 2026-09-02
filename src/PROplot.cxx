@@ -872,14 +872,21 @@ namespace PROfit{
                 cvstack->SetMaximum(y_max);
 
                 TList* hist_list = cvstack->GetHists();
-                TIter next(hist_list); 
+                TIter next(hist_list);
                 TObject* obj;
-                size_t sc = 0; 
+                size_t sc = 0;
                 while ((obj = next())) {
 
                     TH1D* hist = dynamic_cast<TH1D*>(obj);
                     if (hist) {
-                        leg->AddEntry(hist, subplots->at(sc).second, "f");
+                        double integral = hist->Integral();
+
+                        std::string label_with_integral = subplots->at(sc).second;
+                        char buf[32];
+                        snprintf(buf, sizeof(buf), " (%.1f)", integral);
+                        label_with_integral += buf;
+
+                        leg->AddEntry(hist, label_with_integral.c_str(), "f");
                     }
                     sc = sc + 1;
                 }
