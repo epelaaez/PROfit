@@ -3,6 +3,7 @@
 
 #include "PROmetric.h"
 #include "PROgress.h"
+#include "PROwatermark.h"
 #include <Eigen/Eigen>
 
 #include <algorithm>
@@ -148,6 +149,7 @@ namespace PROfit {
                         gPad->SetLogy(0);
                         hs.back().second->Draw("l");
                         zero.Draw("l same");
+                        drawVersionWatermark(&c, WatermarkPos::BottomRight);
                         c.Print(filename.c_str());
                         if(drawn_objs) {
                             (*drawn_objs)->insert({param_names[i]+"_autocorr", hs.back().second->Clone()});
@@ -168,6 +170,7 @@ namespace PROfit {
                         leg.AddEntry(h, param_names[i++].c_str(), "l");
                     }
                     leg.Draw("same");
+                    drawVersionWatermark(&c);
                     c.Print(filename.c_str());
                     gPad->SetLogy(0);
                     i = 0;
@@ -186,6 +189,7 @@ namespace PROfit {
                         leg2.AddEntry(h, param_names[i++].c_str(), "l");
                     }
                     leg2.Draw("same");
+                    drawVersionWatermark(&c);
                     c.Print(filename.c_str());
                     c.Print((filename + "]").c_str());
                     set_matrix_palette();

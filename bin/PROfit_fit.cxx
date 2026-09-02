@@ -398,6 +398,7 @@ void draw_harmonic_scan_pdf(const GlobalFitResult &fitres, const PROfitterConfig
     float paper_w, paper_h;
     gStyle->GetPaperSize(paper_w, paper_h);
     gStyle->SetPaperSize(28.0f, 16.0f);
+    drawVersionWatermark(&c, WatermarkPos::BottomRight);
     c.Print(filename.c_str());
     gStyle->SetPaperSize(paper_w, paper_h);
     log<LOG_INFO>(L"%1% || Wrote harmonic scan summary to %2%") % __func__ % filename.c_str();
@@ -474,6 +475,7 @@ std::map<std::string, TObject *> draw_fit_result(const PROconfig &config, const 
         line.SetLineWidth(2);
         line.DrawLine(N_phys_params, 0, N_phys_params, N_params);
         line.DrawLine(0, N_phys_params, N_params, N_phys_params);
+        drawVersionWatermark(&c1);
         c1.Print((prefix+"_postfit_correlation_matrix.pdf").c_str());
         drawn_objs["post_fit_param_correlations"] = corrhist.Clone();
     }
@@ -538,6 +540,7 @@ std::map<std::string, TObject *> draw_fit_result(const PROconfig &config, const 
             TH1 *h1 = (TH1*)h.Clone();
             h1->Draw("hist");
             drawn_objs[h1->GetXaxis()->GetTitle()+std::string("_posterior")] = h1;
+            drawVersionWatermark(&c);
             c.Print((prefix+"_postfit_posteriors.pdf").c_str());
         }
         c.Print((prefix+"_postfit_posteriors.pdf]").c_str());
@@ -573,6 +576,7 @@ std::map<std::string, TObject *> draw_fit_result(const PROconfig &config, const 
         spline_cov.SetMaximum(1);
         spline_cov.SetMinimum(-1);
 
+        drawVersionWatermark(&c);
         c.Print((prefix+"_postfit_correlation_matrix_nuisance_only.pdf").c_str());
     }
 

@@ -27,6 +27,7 @@
 #include "PROtocall.h"
 #include "PROseed.h"
 #include "PROversion.h"
+#include "PROwatermark.h"
 #include "PROplot.h"
 #include "PROjector.h"
 #include "PRObench.h"

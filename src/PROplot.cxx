@@ -1,4 +1,5 @@
 #include "PROplot.h"
+#include "PROwatermark.h"
 #include "TStyle.h"
 #include "TArrow.h"
 #include "TBox.h"
@@ -793,8 +794,9 @@ namespace PROfit{
                 ratio_c->Update();
 
                 // Save with unique filename
-                std::string output_filename = "ratio_" + channel_short_labels[idx_num] + "_over_" + 
+                std::string output_filename = "ratio_" + channel_short_labels[idx_num] + "_over_" +
                     channel_short_labels[idx_den] + "_" + filename;
+                drawVersionWatermark(ratio_c);
                 ratio_c->Print(output_filename.c_str());
 
                 log<LOG_INFO>(L"%1% || Created ratio plot: %2%") % __func__ % output_filename.c_str();
@@ -1095,15 +1097,8 @@ namespace PROfit{
         p1->Draw();
         if(bool(opt&PlotOptions::DataMCRatio) || bool(opt&PlotOptions::DataPostfitRatio)) p2->Draw();
 
-        TText *t = new TText();
-        t->SetNDC();
-        t->SetTextFont(42);
-        t->SetTextSize(0.03); 
-        t->SetTextAlign(33); 
-        std::string pv = "PROfit v"+std::string(PROJECT_VERSION_STR);
-        t->DrawText(0.895, 0.955, pv.c_str()); 
-
         leg->Draw("same");
+        drawVersionWatermark(c);
         c->Print(filename.c_str());
         log<LOG_DEBUG>(L"%1% || Finishing Plotting 1D Histogram %2%") % __func__ % hist_titles.c_str();
     }
@@ -1640,6 +1635,7 @@ namespace PROfit{
                         objs[mdc+"_cv2d"] = cv_hist->Clone();
                         c.cd();
                         p2d.Draw();
+                        drawVersionWatermark(&c);
                         c.Print(filename.c_str());
 
                         TH2D* bf_hist = NULL;
@@ -1672,6 +1668,7 @@ namespace PROfit{
                             objs[mdc+"_bestfit2d"] = bf_hist->Clone();
                             c.cd();
                             pbfd.Draw();
+                            drawVersionWatermark(&c);
                             c.Print(filename.c_str());
                         }
 
@@ -1694,6 +1691,7 @@ namespace PROfit{
                             objs[mdc+"_data2d"] = data_hist->Clone();
                             c.cd();
                             pdata.Draw();
+                            drawVersionWatermark(&c);
                             c.Print(filename.c_str());
                         }
 
@@ -2429,14 +2427,6 @@ namespace PROfit{
 
                         leg->Draw();
 
-                        TText *t = new TText();
-                        t->SetNDC();                
-                        t->SetTextFont(42);                          
-                        t->SetTextSize(0.03);      
-                        t->SetTextAlign(33);        
-                        std::string pv = "PROfit v"+std::string(PROJECT_VERSION_STR);
-                        t->DrawText(0.895, 0.945, pv.c_str()); 
-
                     }//end tag
 
 
@@ -2480,14 +2470,7 @@ namespace PROfit{
                     for(auto &h:hvec) h->Draw("HIST SAME");
                     leg->Draw();
 
-                    TText *t = new TText();
-                    t->SetNDC();                
-                    t->SetTextFont(42);                          
-                    t->SetTextSize(0.03);      
-                    t->SetTextAlign(33);        
-                    std::string pv = "PROfit v"+std::string(PROJECT_VERSION_STR);
-                    t->DrawText(0.895, 0.945, pv.c_str()); 
-
+                    drawVersionWatermark(&c, WatermarkPos::BottomRight);
                     c.Update();
                     c.Print(filename.c_str());
                     global_channel_index++;
@@ -2780,14 +2763,6 @@ namespace PROfit{
 
                             leg->Draw();
 
-                            TText *t = new TText();
-                            t->SetNDC();                
-                            t->SetTextFont(42);                          
-                            t->SetTextSize(0.03);      
-                            t->SetTextAlign(33);        
-                            std::string pv = "PROfit v"+std::string(PROJECT_VERSION_STR);
-                            t->DrawText(0.895, 0.945, pv.c_str()); 
-
                         }//end tag
 
 
@@ -2831,14 +2806,7 @@ namespace PROfit{
                         for(auto &h:hvec) h->Draw("HIST SAME");
                         leg->Draw();
 
-                        TText *t = new TText();
-                        t->SetNDC();                
-                        t->SetTextFont(42);                          
-                        t->SetTextSize(0.03);      
-                        t->SetTextAlign(33);        
-                        std::string pv = "PROfit v"+std::string(PROJECT_VERSION_STR);
-                        t->DrawText(0.895, 0.945, pv.c_str()); 
-
+                        drawVersionWatermark(&c, WatermarkPos::BottomRight);
                         c.Update();
                         c.Print(filename.c_str());
                         global_channel_index++;
@@ -3018,11 +2986,6 @@ int plotPriorFractionalSystematicChannelRatios(const PROconfig &config, const PR
                 for(auto &h : hvec) h->Draw("HIST SAME");
                 leg->Draw();
 
-                TText *t = new TText();
-                t->SetNDC(); t->SetTextFont(42); t->SetTextSize(0.03); t->SetTextAlign(33);
-                std::string pv = "PROfit v"+std::string(PROJECT_VERSION_STR);
-                t->DrawText(0.895, 0.945, pv.c_str());
-
             }//end tag
 
             //and each sum of sums to wrap it off!
@@ -3063,11 +3026,7 @@ int plotPriorFractionalSystematicChannelRatios(const PROconfig &config, const PR
             for(auto &h : hvec) h->Draw("HIST SAME");
             leg->Draw();
 
-            TText *t = new TText();
-            t->SetNDC(); t->SetTextFont(42); t->SetTextSize(0.03); t->SetTextAlign(33);
-            std::string pv = "PROfit v"+std::string(PROJECT_VERSION_STR);
-            t->DrawText(0.895, 0.945, pv.c_str());
-
+            drawVersionWatermark(&c, WatermarkPos::BottomRight);
             c.Update();
             c.Print(filename.c_str());
         }}}}
@@ -3244,14 +3203,7 @@ int plotPriorFractionalSystematicChannelRatios(const PROconfig &config, const PR
         }
         leg->Draw();
 
-        TText *vt = new TText();
-        vt->SetNDC();
-        vt->SetTextFont(42);
-        vt->SetTextSize(0.028f);
-        vt->SetTextAlign(33);
-        std::string pv = "PROfit v" + std::string(PROJECT_VERSION_STR);
-        vt->DrawText(0.96, 0.97, pv.c_str());
-
+        drawVersionWatermark(c);
         c->Update();
         c->SaveAs((filename+"_1sigmaMCMC.pdf").c_str(), "pdf");
         delete c;
@@ -3450,13 +3402,7 @@ int plotPriorFractionalSystematicChannelRatios(const PROconfig &config, const PR
                 snprintf(pbuf, sizeof(pbuf), "Covariance modes %d#minus%d of %d (by variance)", start, end - 1, (int)k);
                 pt->DrawLatex(0.09, 0.985, pbuf);
 
-                TText *vt = new TText();
-                vt->SetNDC();
-                vt->SetTextFont(42);
-                vt->SetTextSize(0.028f);
-                vt->SetTextAlign(33);
-                vt->DrawText(0.96, 0.985, ("PROfit v" + std::string(PROJECT_VERSION_STR)).c_str());
-
+                drawVersionWatermark(c);
                 c->Update();
                 c->Print(filename.c_str());
             }
@@ -3566,13 +3512,7 @@ int plotPriorFractionalSystematicChannelRatios(const PROconfig &config, const PR
                 snprintf(pbuf, sizeof(pbuf), "Collapsed bins %d#minus%d of %d", start, end - 1, nBinsTot);
                 pt->DrawLatex(0.09, 0.985, pbuf);
 
-                TText *vt = new TText();
-                vt->SetNDC();
-                vt->SetTextFont(42);
-                vt->SetTextSize(0.028f);
-                vt->SetTextAlign(33);
-                vt->DrawText(0.96, 0.985, ("PROfit v" + std::string(PROJECT_VERSION_STR)).c_str());
-
+                drawVersionWatermark(c);
                 c->Update();
                 c->Print(filename.c_str());
             }
@@ -3663,13 +3603,7 @@ int plotPriorFractionalSystematicChannelRatios(const PROconfig &config, const PR
             // Bottom-right of the master canvas so the stamp never sits over a sub-pad's
             // histogram title on multi-panel pages (top-right NDC lies inside the top-right
             // sub-pad and overlaps its title there).
-            TText *t = new TText();
-            t->SetNDC();
-            t->SetTextFont(42);
-            t->SetTextSize(0.022f);
-            t->SetTextAlign(31); // bottom-right anchor
-            std::string pv = "PROfit v" + std::string(PROJECT_VERSION_STR);
-            t->DrawText(0.995, 0.005, pv.c_str());
+            drawVersionWatermark(gPad, WatermarkPos::BottomRight);
         }
 
         std::string cov2spline_display_name(const PROconfig &config, const std::string &systname) {

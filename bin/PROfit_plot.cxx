@@ -299,6 +299,7 @@ void run_plot(const PROconfig &config, const PROpeller &prop, const PROmetric &m
                                     }
                                     leg->Draw("same");
 
+                                    drawVersionWatermark(&detvar_canvas);
                                     detvar_canvas.Print(detvar_pdf.c_str(), "pdf");
 
                                     delete cv_total;
@@ -402,6 +403,7 @@ void run_plot(const PROconfig &config, const PROpeller &prop, const PROmetric &m
 
                                         ov_leg->Draw("same");
 
+                                        drawVersionWatermark(&ov_canvas);
                                         ov_canvas.Print(ov_pdf.c_str(), "pdf");
 
                                         delete cv_total_ov;
@@ -524,6 +526,7 @@ void run_plot(const PROconfig &config, const PROpeller &prop, const PROmetric &m
                     p1.Draw();
                     p2.Draw();
 
+                    drawVersionWatermark(&c);
                     c.Print((options.final_output_tag+"_PROplot_Osc.pdf").c_str(), "pdf");
 
                     delete cv_hist;
@@ -546,13 +549,7 @@ void run_plot(const PROconfig &config, const PROpeller &prop, const PROmetric &m
         for(const auto &name: first_plots){
             auto &mat = matrices.at(name);
             mat->Draw("colz");
-            TText *t = new TText();
-            t->SetNDC();
-            t->SetTextFont(42);
-            t->SetTextSize(0.03);
-            t->SetTextAlign(33);
-            std::string pv = "PROfit v"+std::string(PROJECT_VERSION_STR);
-            t->DrawText(0.895, 0.955, pv.c_str());
+            drawVersionWatermark(&c);
             c.Print((options.final_output_tag+"_PROplot_Covar.pdf").c_str(), "pdf");
         }
 
@@ -560,13 +557,7 @@ void run_plot(const PROconfig &config, const PROpeller &prop, const PROmetric &m
         for(const auto &[name, mat]: matrices) {
             if (std::find(first_plots.begin(), first_plots.end(), name) != first_plots.end())continue;
             mat->Draw("colz");
-            TText *t = new TText();
-            t->SetNDC();
-            t->SetTextFont(42);
-            t->SetTextSize(0.03);
-            t->SetTextAlign(33);
-            std::string pv = "PROfit v"+std::string(PROJECT_VERSION_STR);
-            t->DrawText(0.895, 0.955, pv.c_str());
+            drawVersionWatermark(&c);
             c.Print((options.final_output_tag+"_PROplot_Covar.pdf").c_str(), "pdf");
         }
         c.Print((options.final_output_tag+"_PROplot_Covar.pdf" + "]").c_str(), "pdf");
@@ -723,14 +714,17 @@ void run_plot(const PROconfig &config, const PROpeller &prop, const PROmetric &m
                 curve->Draw("C same");
                 ++bin;
                 if(bin % 16 == 0) {
+                    drawVersionWatermark(&c, WatermarkPos::BottomRight);
                     c.Print((options.final_output_tag+"_PROplot_Spline.pdf").c_str(), "pdf");
                     c.Clear();
                     c.Divide(4,4);
                     unprinted = false;
                 }
             }
-            if(unprinted)
+            if(unprinted) {
+                drawVersionWatermark(&c, WatermarkPos::BottomRight);
                 c.Print((options.final_output_tag+"_PROplot_Spline.pdf").c_str(), "pdf");
+            }
         }
 
         c.Print((options.final_output_tag+"_PROplot_Spline.pdf" + "]").c_str(), "pdf");

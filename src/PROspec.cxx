@@ -1,5 +1,6 @@
 #include "PROspec.h"
 #include "PROtocall.h"
+#include "PROwatermark.h"
 #include <cstdint>
 #include <random>
 
@@ -474,6 +475,7 @@ void PROspec::plotSpectrum(const PROconfig& inconfig, const std::string& output_
         }//end det
     }//end mode
 
+    drawVersionWatermark(c, WatermarkPos::BottomRight);
     c->SaveAs(("PROplot_"+output_name+".pdf").c_str(),"pdf");
 
     delete c;
