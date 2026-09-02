@@ -13,8 +13,9 @@
 
 #include "PROlog.h"
 #include "PROmeshEval.h"
-#include "PROmetrics/PROchi.h"
-#include "PROmetrics/PROCNP.h"
+#include "PROmetrics/PROchi_neyman.h"
+#include "PROmetrics/PROchi_pearson.h"
+#include "PROmetrics/PROchi_CNP.h"
 #include "PROmetrics/PROpoisson.h"
 #include "PROmetric.h"
 #include "PROspec.h"
@@ -83,9 +84,11 @@ static ThrowGlobalFit run_throw_global_fit(
 
     PROmetric::EvalStrategy strat = binned ? PROmetric::BinnedChi2 : PROmetric::EventByEvent;
     std::unique_ptr<PROmetric> metric;
-    if      (chi2_kind == "PROchi")    metric.reset(new PROchi   ("", config, prop, &systs, model, data, strat));
-    else if (chi2_kind == "PROCNP")    metric.reset(new PROCNP   ("", config, prop, &systs, model, data, strat));
-    else if (chi2_kind == "Poisson")   metric.reset(new PROpoisson("", config, prop, &systs, model, data, strat));
+    const std::string chi2_kind_canon = PROmetric::canonicalizeMetricName(chi2_kind);
+    if      (chi2_kind_canon == "neyman")  metric.reset(new PROchi   ("", config, prop, &systs, model, data, strat));
+    else if (chi2_kind_canon == "pearson") metric.reset(new PROchi_pearson("", config, prop, &systs, model, data, strat));
+    else if (chi2_kind_canon == "CNP")     metric.reset(new PROCNP   ("", config, prop, &systs, model, data, strat));
+    else if (chi2_kind_canon == "poisson") metric.reset(new PROpoisson("", config, prop, &systs, model, data, strat));
     else {
         log<LOG_ERROR>(L"%1% || run_throw_global_fit: unknown chi2 kind '%2%'.") % __func__ % chi2_kind.c_str();
         return res;
@@ -181,11 +184,14 @@ static PROmesh::AMRResult run_wilks_prepass(
             // workers before run_amr returns.
             PROmetric::EvalStrategy strat = eventbyevent
                 ? PROmetric::EventByEvent : PROmetric::BinnedChi2;
-            if (chi2_kind == "PROchi") {
+            const std::string chi2_kind_canon = PROmetric::canonicalizeMetricName(chi2_kind);
+            if (chi2_kind_canon == "neyman") {
                 tls_metric.reset(new PROchi("", config, prop, &systs, model, data, strat));
-            } else if (chi2_kind == "PROCNP") {
+            } else if (chi2_kind_canon == "pearson") {
+                tls_metric.reset(new PROchi_pearson("", config, prop, &systs, model, data, strat));
+            } else if (chi2_kind_canon == "CNP") {
                 tls_metric.reset(new PROCNP("", config, prop, &systs, model, data, strat));
-            } else if (chi2_kind == "Poisson") {
+            } else if (chi2_kind_canon == "poisson") {
                 tls_metric.reset(new PROpoisson("", config, prop, &systs, model, data, strat));
             } else {
                 log<LOG_ERROR>(L"%1% || run_wilks_prepass: unknown chi2 kind '%2%'.")

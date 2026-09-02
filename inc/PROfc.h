@@ -19,8 +19,9 @@
 #include "PROmetric.h"
 #include "PROcess.h"
 #include "PROtocall.h"
-#include "PROmetrics/PROchi.h"
-#include "PROmetrics/PROCNP.h"
+#include "PROmetrics/PROchi_neyman.h"
+#include "PROmetrics/PROchi_pearson.h"
+#include "PROmetrics/PROchi_CNP.h"
 #include "PROmetrics/PROpoisson.h"
 
 #include <Eigen/Eigen>
@@ -54,7 +55,7 @@ namespace PROfit {
         const PROconfig config;          ///< Analysis configuration (copied per thread).
         const PROpeller prop;            ///< MC event store (copied per thread).
         const PROsyst systs;             ///< Systematic object (copied per thread).
-        std::string chi2;                ///< Name of the chi-squared type to use ("PROchi", "PROCNP", or "Poisson").
+        std::string chi2;                ///< Name of the chi-squared type to use ("neyman", "pearson", "CNP", or "poisson"; legacy aliases accepted).
         const Eigen::VectorXf phy_params;///< True physics parameter point at which the FC test is evaluated.
         const Eigen::MatrixXf L;         ///< Cholesky factor of the total covariance for correlated systematic throws.
         PROfitterConfig fitconfig;       ///< Fitter configuration.

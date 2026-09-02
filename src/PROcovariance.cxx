@@ -1,18 +1,18 @@
-#include "PROmetrics/PROchi.h"
+#include "PROcovariance.h"
 #include "PROcess.h"
 #include "PROdata.h"
 #include "PROlog.h"
 #include "PROtocall.h"
 #include <Eigen/Eigen>
-#include <algorithm>
 #include <cmath>
 using namespace PROfit;
 
-
-PROchi::PROchi(const std::string tag, const PROconfig &conin, const PROpeller &pin, const PROsyst *systin, const PROmodel &modelin, const PROdata &datain, EvalStrategy strat, bool shape_only, std::vector<float> physics_param_fixed) : PROmetric(), model_tag(tag), config(conin), peller(pin), syst(systin), model(modelin), data(datain), strat(strat), shape_only(shape_only), physics_param_fixed(physics_param_fixed), correlated_systematics(false) {
-    last_value = 0.0; last_param = Eigen::VectorXf::Zero(model.nparams+syst->GetNSplines());
-    fixed_index = -999;
-
+PROcovariance::PROcovariance(const std::string tag, const PROconfig &conin, const PROpeller &pin, const PROsyst *systin, const PROmodel &modelin, const PROdata &datain, EvalStrategy strat, bool shape_only, std::vector<float> physics_param_fixed, bool own_config_and_peller)
+    : PROmetric(tag, conin, systin, modelin, datain, strat, shape_only, physics_param_fixed),
+      owned_config(own_config_and_peller ? std::optional<PROconfig>(conin) : std::nullopt),
+      owned_peller(own_config_and_peller ? std::optional<PROpeller>(pin) : std::nullopt),
+      config(owned_config ? *owned_config : conin),
+      peller(owned_peller ? *owned_peller : pin) {
     // An externally supplied posterior (PROjector projected mode) takes precedence over
     // any XML-configured prior correlations: it already IS the full prior covariance.
     if (systin->has_external_prior_cov) {
@@ -64,59 +64,36 @@ PROchi::PROchi(const std::string tag, const PROconfig &conin, const PROpeller &p
         prior_covariance_inv = prior_covariance.inverse();
     }
 
-    // GP: What do you do if the MC has 0 events in a bin?
-    //     Proposed solution (hack?) here. Set the error to 1. This will return
-    //     the correct answer if there are no data events in the bin. It is a bit
-    //     iffier if there are data events in the bin, we may want to implement some
-    //     error handling there.
-    collapsed_stat_covariance = data.Spec().array().cwiseMax(1).matrix().asDiagonal();
-
-    // Snapshot the config's fit-region mask (if any): bins outside it never enter the
-    // chi2, independent of their data content. See PROmetric::snapshotActiveBins.
-    snapshotActiveBins(conin);
-
-    // Default-mode cache: in non-shape_only mode normdata == data.Spec() is constant
-    // across all operator() invocations, so non_empty_indices and the reduced stat
-    // covariance are constant. Build them once here and reuse them.
-    if(!shape_only) {
-        const Eigen::VectorXf &nd = data.Spec();
-        for(Eigen::Index i = 0; i < nd.size(); ++i)
-            if(nd(i) > 0 && binActive(i)) nec_indices.push_back(i);
-        if(!nec_indices.empty()) {
-            Eigen::VectorXf reduced_diag(nec_indices.size());
-            for(size_t k = 0; k < nec_indices.size(); ++k)
-                reduced_diag(k) = nd(nec_indices[k]);
-            nec_reduced_stat_cov = Eigen::MatrixXf(reduced_diag.asDiagonal());
-            nec_valid = true;
-        }
-        // If empty, leave nec_valid=false; operator() will throw on first call.
-    }
 }
 
-float PROchi::Pull(const Eigen::VectorXf &systs) {
-    // No correlations: sum of squares
-    Eigen::VectorXf centered = systs - syst->spline_centers;
-    for(size_t i = 0; i < syst->spline_prior_types.size(); ++i) {
-        if(syst->spline_prior_types[i] == SplinePriorType::Uniform) centered(i) = 0.0f;
-    }
-    if (!correlated_systematics) {
-        return (centered.array().square() / syst->spline_priors.array().square()).sum();
-    }
-
-    // Otherwise dot onto covariance (prior_covariance_inv was computed in the ctor).
-    return centered.dot(prior_covariance_inv * centered);
+void PROcovariance::buildConstantStatCache(const Eigen::VectorXf &variances) {
+    nec_indices.clear();
+    nec_reduced_stat_cov.resize(0, 0);
+    nec_valid = false;
+    for(Eigen::Index i = 0; i < variances.size(); ++i)
+        if(variances(i) > 0 && binActive(i)) nec_indices.push_back(i);
+    // If nothing survives, leave the cache invalid: operator() rebuilds per call and
+    // throws there, where the error can name the offending evaluation.
+    if(nec_indices.empty()) return;
+    const Eigen::Map<const Eigen::Matrix<Eigen::Index, Eigen::Dynamic, 1>>
+        idx(nec_indices.data(), (Eigen::Index)nec_indices.size());
+    nec_reduced_stat_cov = Eigen::MatrixXf(variances(idx).asDiagonal());
+    nec_valid = true;
 }
 
-void PROchi::fixSpline(int fix, float valin){
-    fixed_index=fix;
-    fixed_val=valin;
-    return;
-}
-float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient){
-    return PROchi::operator()(param, gradient, true);
+void PROcovariance::reset() {
+    physics_param_fixed.clear();
+    last_value = 0;
+    last_param = Eigen::VectorXf::Constant(last_param.size(), 0);
+    fs_cache.invalidate();
 }
 
-float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient, bool rungradient){
+Eigen::VectorXf PROcovariance::singleChannelStatVariances(
+        const Eigen::VectorXf &collapsed_cv, const Eigen::VectorXf &comparison) const {
+    return statisticalVariances(collapsed_cv, comparison, nullptr);
+}
+
+float PROcovariance::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient, bool rungradient){
     call_count++;
     size_t nparams = nParams();
     size_t nsyst = syst->GetNSplines();
@@ -148,30 +125,33 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
         ? data.Normalize(config,result)
         : data.Spec();
 
+    // Collapse once and reuse for the variance hook, the delta, and the diagnostics
+    // below. PROpearson's variance IS the collapsed prediction, so handing the hook an
+    // already-collapsed vector removes a second CollapseMatrix from every evaluation.
+    const Eigen::VectorXf collapsed_mc_spec = CollapseMatrix(config, result.Spec());
+    const Eigen::VectorXf stat_variances = statisticalVariances(collapsed_mc_spec, normdata, &param);
+
     // Collapsed systematic covariance computed as S^T F S with S = diag(spec)*T
     // kept sparse — the full-binning dense diag(s)*F*diag(s) is never
-    // materialized (this runs on every evaluation). Note the
-    // collapsed_stat_covariance member is deliberately NOT overwritten here:
-    // it keeps the ctor's cwiseMax(1)-guarded form for getSingleChannelChi
-    // (the per-call overwrite dropped that zero-bin guard and was only read
-    // by the NaN diagnostics below).
+    // materialized (this runs on every evaluation).
     Eigen::MatrixXf collapsed_full_covariance = CollapsedScaledCovariance(config, syst->fractional_covariance, result.Spec());
 
-    // non_empty_indices and reduced_collapsed_stat_covariance are constant in default
-    // (non-shape_only) mode and were precomputed in the ctor; in shape_only mode
-    // normdata depends on `result` so we must rebuild them per call.
+    // non_empty_indices and reduced_collapsed_stat_covariance are precomputed once
+    // (PROcovariance::buildConstantStatCache) only when the concrete metric guarantees
+    // that neither the selected bins nor their variances move with the prediction.
+    // Otherwise they are rebuilt here on every call.
     std::vector<Eigen::Index> nei_local;
     Eigen::MatrixXf rstat_local;
     if(!nec_valid) {
         for(Eigen::Index i = 0; i < normdata.size(); ++i)
-            if(normdata(i) > 0 && binActive(i)) nei_local.push_back(i);
+            if(stat_variances(i) > 0 && binActive(i)) nei_local.push_back(i);
         if(nei_local.empty()) {
-            log<LOG_ERROR>(L"%1% || ERROR: All (active) data bins are empty!") % __func__;
-            throw std::runtime_error("All data bins are empty in PROchi.");
+            log<LOG_ERROR>(L"%1% || ERROR: No active bin has a positive statistical variance!") % __func__;
+            throw std::runtime_error("No usable bins in PROcovariance.");
         }
         const Eigen::Map<const Eigen::Matrix<Eigen::Index, Eigen::Dynamic, 1>>
             idx_local(nei_local.data(), (Eigen::Index)nei_local.size());
-        rstat_local = Eigen::MatrixXf(normdata(idx_local).asDiagonal());
+        rstat_local = Eigen::MatrixXf(stat_variances(idx_local).asDiagonal());
     }
     const std::vector<Eigen::Index> &non_empty_indices = nec_valid ? nec_indices : nei_local;
     const Eigen::MatrixXf &reduced_collapsed_stat_covariance = nec_valid ? nec_reduced_stat_cov : rstat_local;
@@ -188,7 +168,6 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
     Eigen::MatrixXf M = reduced_collapsed_stat_covariance + reduced_collapsed_full_covariance;
 
     // Create reduced delta vector
-    Eigen::VectorXf collapsed_mc_spec = CollapseMatrix(config, result.Spec());
     Eigen::VectorXf delta = collapsed_mc_spec(idx) - normdata(idx);
 
     float pull = Pull(subvector2);
@@ -197,10 +176,10 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
     float value = covar_portion + pull;
 
     if(std::isnan(value) || value!=value) {
-        log<LOG_ERROR>(L"%1% || ERROR: PROchi chi2 is NaN (%2%). This is very bad.\n"
+        log<LOG_ERROR>(L"%1% || ERROR: PROcovariance chi2 is NaN (%2%). This is very bad.\n"
                 L"covar_portion: %3%\npull: %4%\ndelta: %5%\n"
                 L"mc spec: %6%\ndata spec: %7%")
-            % __func__ % value % covar_portion % pull % delta % CollapseMatrix(config, result.Spec())
+            % __func__ % value % covar_portion % pull % delta % collapsed_mc_spec
             % data.Spec();
         // stat covariance diagonal (normdata) for diagnostics
         for (Eigen::Index i = 0; i < normdata.size(); ++i) {
@@ -212,10 +191,15 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
 
     if(rungradient){
         // ----- Gradient mode dispatch -----
-        // Four configurations driven by PROmetric::gradient_mode:
-        //   GradientCentralFull  (default): central FD on full chi² (each FD
+        // Five configurations driven by PROmetric::gradient_mode:
+        //   GradientAnalytic     (default): fully analytic — dδ/dθ from
+        //                          FillSpectraGradient plus the closed-form
+        //                          uᵀ(dM/dθ)u term. See the analytic block
+        //                          below for the derivation and its two
+        //                          validity requirements.
+        //   GradientCentralFull:   central FD on full chi² (each FD
         //                          rebuilds covariance + Cholesky). Most
-        //                          accurate, slowest.
+        //                          accurate FD mode, slowest.
         //   GradientOneSidedFull: forward FD on full chi² using base value.
         //                         ~2× faster, O(h) vs O(h²).
         //   GradientCentralLin:   central FD on δ only. M held at base; the
@@ -225,7 +209,7 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
         //                         (M⁻¹δ)^T (dM/dθ) (M⁻¹δ) term — exact at the
         //                         minimum, very small far from it.
         //   GradientOneSidedLin:  forward FD on δ only + Gauss-Newton chain.
-        //                         Fastest mode.
+        //                         Fastest FD mode.
         //
         // Boundary handling is preserved across all modes: any FD step that
         // would land on a parameter bound is downgraded to a one-sided
@@ -233,28 +217,22 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
         // bounce" is applied (zero the gradient when it would push further
         // out of the box).
         GradientMode mode = gradient_mode;
-        // The analytic gradient needs the binned factorised spectrum
-        // (spec = systw .* H*probs); the event-by-event fill mixes physics and
-        // systematics per event, so use the FD fallback mode there.
-        if (mode == GradientAnalytic && strat == EventByEvent) {
-            static std::atomic<bool> warned_ebe{false};
-            if(!warned_ebe.exchange(true))
-                log<LOG_WARNING>(L"%1% || Analytic gradient not available for the EventByEvent strategy; falling back to %2%.") % __func__ % gradientModeName(GradientFallback);
-            mode = GradientFallback;
-        }
-        // Visible-decay models with pre-migration (flux) splines also break the
-        // factorisation: the flux weight enters the physics half at the parent
-        // truth-E, BEFORE the decay migration, so systw is not a per-reco-bin
-        // factor (FillSpectra takes its uncached N_truth-prescaling path there).
-        if (mode == GradientAnalytic && model.uses_get_counts()
-            && syst->spline_is_pre_migration.size() == syst->GetNSplines()
-            && std::find(syst->spline_is_pre_migration.begin(),
-                         syst->spline_is_pre_migration.end(), true)
-                   != syst->spline_is_pre_migration.end()) {
-            static std::atomic<bool> warned_premig{false};
-            if(!warned_premig.exchange(true))
-                log<LOG_WARNING>(L"%1% || Analytic gradient not available for visible-decay models with pre-migration flux splines; falling back to %2%.") % __func__ % gradientModeName(GradientFallback);
-            mode = GradientFallback;
+        // The analytic gradient requires (a) the binned factorised spectrum
+        // (spec = systw .* H*probs) for FillSpectraGradient — the event-by-event
+        // fill mixes physics and systematics per event — and (b) a statistical
+        // covariance that does not move with the parameters, since the closed-form
+        // dM/dθ term below only differentiates the systematic part of M. Metrics
+        // whose statisticalVariances depend on the prediction (PROchi_pearson, PROCNP)
+        // would need an extra diag(dvar/dθ) term that is not wired up yet, so they
+        // fall back to the mode chosen by analyticFallbackMode() — Gauss-Newton
+        // central-lin by default (exact at the minimum); PROchi_pearson overrides to
+        // one-sided-full because its dM/dθ term is first-order and the lin mode stalls.
+        if (mode == GradientAnalytic &&
+            (strat == EventByEvent || statisticalVariancesDependOnPrediction())) {
+            mode = analyticFallbackMode();
+            static std::atomic<bool> warned_fallback{false};
+            if(!warned_fallback.exchange(true))
+                log<LOG_WARNING>(L"%1% || Analytic gradient not available for this metric/strategy (EventByEvent, or prediction-dependent statistical variance); falling back to %2%.") % __func__ % gradientModeName(mode);
         }
         const bool analytic   = (mode == GradientAnalytic);
         const bool linearised = (mode == GradientCentralLin) || (mode == GradientOneSidedLin);
@@ -272,7 +250,7 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
             Eigen::VectorXf centered = subvector2 - syst->spline_centers;
             // Match Pull(): uniform-prior splines contribute NO pull — mask them
             // here too, or the gradient carries a phantom Gaussian pull the value
-            // doesn't have.
+            // doesn't have (2026-08-31 fix, re-applied on the PROcovariance port).
             for(size_t i = 0; i < syst->spline_prior_types.size(); ++i)
                 if(syst->spline_prior_types[i] == SplinePriorType::Uniform) centered(i) = 0.0f;
             if (!correlated_systematics) {
@@ -281,9 +259,8 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
                                  (syst->spline_priors.array() * syst->spline_priors.array());
             } else {
                 pull_grad_nuis = 2.0f * (prior_covariance_inv * centered);
-                // dPull/dθ_i is exactly 0 for a uniform spline (its centered entry
-                // is identically 0 in the value); zero it in case Σ⁻¹ carries
-                // off-diagonal terms in those rows.
+                // dPull/dθ_i is exactly 0 for a uniform spline; zero it in case
+                // Σ⁻¹ carries off-diagonal terms in those rows.
                 for(size_t i = 0; i < syst->spline_prior_types.size(); ++i)
                     if(syst->spline_prior_types[i] == SplinePriorType::Uniform) pull_grad_nuis(i) = 0.0f;
             }
@@ -294,10 +271,16 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
             // Notation (θ = all parameters, physics + nuisance):
             //   s(θ)  full-binning MC spectrum (result.Spec(), N bins)
             //   T     collapsing matrix (N × n_c, sparse): collapsed spectrum c = Tᵀ s
-            //   d     data spectrum (collapsed), idx = non-empty active bins
+            //   d     comparison spectrum (collapsed), idx = usable active bins.
+            //         In shape_only mode d is the area-normalised data held FIXED at
+            //         the base point — the same frozen-normdata convention every FD
+            //         mode below uses (see compute_delta_at) — so d is θ-independent
+            //         here in all modes.
             //   δ(θ)  = c(idx) − d(idx)                                  (reduced residual)
             //   F     fractional systematic covariance (N × N, symmetric)
-            //   M(θ)  = diag(d(idx)) + [Tᵀ diag(s) F diag(s) T](idx,idx)   (stat + syst)
+            //   M(θ)  = diag(var(idx)) + [Tᵀ diag(s) F diag(s) T](idx,idx) (stat + syst)
+            //         with var θ-independent (guaranteed by the dispatch gate above:
+            //         prediction-dependent variances fall back to FD).
             //   P(θ)  nuisance pull penalty
             //   χ²(θ) = δᵀ M⁻¹ δ + P
             //
@@ -315,7 +298,7 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
             //
             // Step 3 — covariance term uᵀ (dM/dθ) u (this is the term the linearised
             // FD modes drop). Work one parameter θ_j at a time, and write ṡ = ds/dθ_j
-            // (= G(:,j), a full-binning vector). The stat part diag(d) does not depend
+            // (= G(:,j), a full-binning vector). The stat part diag(var) does not depend
             // on θ, so only M_sys = [Tᵀ diag(s) F diag(s) T](idx,idx) contributes;
             // the product rule on diag(s) F diag(s) gives
             //   dM_sys/dθ_j = [Tᵀ ( diag(ṡ) F diag(s) + diag(s) F diag(ṡ) ) T](idx,idx).
@@ -405,8 +388,14 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
             PROspec rl = FillSpectra(config, peller, *syst, model, param_at, fs_cache,
                                      strat != EventByEvent, config.i_prime);
             Eigen::MatrixXf cfcl  = CollapsedScaledCovariance(config, syst->fractional_covariance, rl.Spec());
-            Eigen::MatrixXf gM_lo = reduced_collapsed_stat_covariance + cfcl(idx, idx);
             Eigen::VectorXf cmcl  = CollapseMatrix(config, rl.Spec());
+            Eigen::MatrixXf gM_lo;
+            if(statisticalVariancesDependOnPrediction()) {
+                const Eigen::VectorXf varied_stat = statisticalVariances(cmcl, normdata, &param_at);
+                gM_lo = Eigen::MatrixXf(varied_stat(idx).asDiagonal()) + cfcl(idx, idx);
+            } else {
+                gM_lo = reduced_collapsed_stat_covariance + cfcl(idx, idx);
+            }
             Eigen::VectorXf dl    = cmcl(idx) - normdata(idx);
             Eigen::VectorXf nuis  = param_at.segment(model.nparams, syst->GetNSplines());
             chi2_out = dl.dot(gM_lo.llt().solve(dl)) + Pull(nuis);
@@ -532,8 +521,6 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
         }
     }
 
-
-
     //Update last param
     last_param = param;
     last_value = value;
@@ -541,13 +528,20 @@ float PROchi::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &gradient
     return value;
 }
 
-float PROchi::getSingleChannelChi(size_t global_channel_index, const PROspec &cv, size_t var_index, const Eigen::MatrixXf &projection) {
+float PROcovariance::getSingleChannelChi(size_t global_channel_index, const PROspec &cv, size_t var_index, const Eigen::MatrixXf &projection) {
 
     size_t nbin = config.m_channel_variable_bins[config.GetLocalChannelIndexFromGlobalChannelIndex(global_channel_index)][var_index].NBins();
     size_t startBin = config.GetCollapsedGlobalVariableBinStart(global_channel_index, var_index);
 
+    const Eigen::VectorXf collapsed_cv = CollapseMatrix(config, cv.Spec());
+    const Eigen::VectorXf comparison = shape_only ? data.Normalize(config, cv) : data.Spec();
+    const Eigen::VectorXf stat_variances = singleChannelStatVariances(collapsed_cv, comparison);
+
     // Restrict to this channel's active bins. Only meaningful for the fitting variable
-    // (the mask snapshot is for i_prime); other variables see every bin active.
+    // (the mask snapshot is for i_prime); other variables see every bin active. Bins are
+    // NOT additionally filtered on a positive variance here: this per-channel diagnostic
+    // has always reported every masked-in bin, and each metric's
+    // singleChannelStatVariances is responsible for keeping its own variances usable.
     const bool masked = (var_index == (size_t)config.i_prime) && hasActiveBinMask();
     std::vector<Eigen::Index> local_idx;
     for(size_t b = 0; b < nbin; ++b)
@@ -557,18 +551,13 @@ float PROchi::getSingleChannelChi(size_t global_channel_index, const PROspec &cv
     const Eigen::Map<const Eigen::Matrix<Eigen::Index, Eigen::Dynamic, 1>>
         idx(local_idx.data(), (Eigen::Index)local_idx.size());
 
-    if(shape_only)
-        collapsed_stat_covariance = (data.Normalize(config,cv)).matrix().asDiagonal();
-
-    Eigen::MatrixXf M;
+    Eigen::MatrixXf M = Eigen::MatrixXf(stat_variances(idx).asDiagonal());
     if(syst->GetNCovar()){
         Eigen::MatrixXf collapsed_full_covariance = CollapsedScaledCovariance(config, syst->fractional_covariance, cv.Spec());
-        M = collapsed_full_covariance(idx, idx) + collapsed_stat_covariance(idx, idx);
-    } else {
-        M = collapsed_stat_covariance(idx, idx);
+        M += collapsed_full_covariance(idx, idx);
     }
 
-    Eigen::VectorXf delta = (CollapseMatrix(config, cv.Spec()) - (shape_only ? data.Normalize(config,cv) : data.Spec()))(idx);
+    Eigen::VectorXf delta = (collapsed_cv - comparison)(idx);
     if(projection.size()) {
         Eigen::MatrixXf active_projection(projection.rows(), idx.size());
         for(Eigen::Index col = 0; col < idx.size(); ++col) {
@@ -583,7 +572,7 @@ float PROchi::getSingleChannelChi(size_t global_channel_index, const PROspec &cv
     return value;
 }
 
-void PROchi::print([[maybe_unused]] const Eigen::VectorXf &param){
+void PROcovariance::print([[maybe_unused]] const Eigen::VectorXf &param){
 
 
 return;

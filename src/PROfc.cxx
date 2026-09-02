@@ -58,14 +58,19 @@ void fc_worker(fc_args args, MultiPROgressBar &progress) {
         PROdata data(newSpec.Spec(), newSpec.Error());
         //Metric Time
         PROmetric *metric;
-        if(args.chi2 == "PROchi") {
+        // Defensive canonicalization: idempotent for PROfit-binary callers (main
+        // already canonicalized), protects direct library callers.
+        const std::string chi2_kind_canon = PROmetric::canonicalizeMetricName(args.chi2);
+        if(chi2_kind_canon == "neyman") {
             metric = new PROchi("", args.config, args.prop, &args.systs, *model, data, !args.binned ? PROmetric::EventByEvent : PROmetric::BinnedChi2);
-        } else if(args.chi2 == "PROCNP") {
+        } else if(chi2_kind_canon == "pearson") {
+            metric = new PROchi_pearson("", args.config, args.prop, &args.systs, *model, data, !args.binned ? PROmetric::EventByEvent : PROmetric::BinnedChi2);
+        } else if(chi2_kind_canon == "CNP") {
             metric = new PROCNP("", args.config, args.prop, &args.systs, *model, data, !args.binned ? PROmetric::EventByEvent : PROmetric::BinnedChi2);
-        } else if(args.chi2 == "Poisson") {
+        } else if(chi2_kind_canon == "poisson") {
             metric = new PROpoisson("", args.config, args.prop, &args.systs, *model, data, !args.binned ? PROmetric::EventByEvent : PROmetric::BinnedChi2);
         } else {
-            log<LOG_ERROR>(L"%1% || Unrecognized chi2 function %2%") % __func__ % args.chi2.c_str();
+            log<LOG_ERROR>(L"%1% || Unrecognized chi2 function %2%. Options: neyman, pearson, CNP, poisson.") % __func__ % args.chi2.c_str();
             abort();
         }
 

@@ -25,7 +25,7 @@ short, seeded (`--seed 405 -n 1 --preset fast fast`) instance of each workflow:
 | Tests | Coverage |
 |---|---|
 | t00 | `process` (MC → `_prop.bin`/`_syst.bin`) |
-| t01–t06 | `global` with PROchi / PROCNP / Poisson / `--statonly` / `--inject` / `--pseudo-experiment` |
+| t01–t06 | `global` with neyman (PROchi) / CNP (t02, legacy spelling `-c PROCNP` — covers the alias path) / poisson (t03, legacy `-c Poisson`) / pearson (t03b) / `--statonly` / `--inject` / `--pseudo-experiment` |
 | t07 | `profile` (all parameters) |
 | t08–t09 | `surface` dense grid and `--surface-amr` |
 | t10–t12 | `plot` with `--with-splines`, `--scale-by-width`, `--bkg-subtract` |

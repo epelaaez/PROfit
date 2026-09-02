@@ -15,7 +15,7 @@
  *   (vary_nuis) nuisance randomised, physics held at central value
  *
  * The benchmark uses the live PROmetric instance constructed by the main
- * PROfit chain (PROchi / PROCNP / PROpoisson — chosen by the existing
+ * PROfit chain (PROchi / PROchi_pearson / PROCNP / PROpoisson — chosen by the existing
  * `--chi2` style argument). It does not build its own metric.
  *
  * Results are emitted via the standard PROlog `log` facility on a single
@@ -127,7 +127,7 @@ namespace PRObench {
     /**
      * @brief Run the requested scaling benchmarks and emit greppable LOG lines.
      * @details Uses the caller-provided PROmetric instance as-is — same
-     * concrete class (PROchi / PROCNP / PROpoisson) and same configuration
+     * concrete class (PROchi / PROchi_pearson / PROCNP / PROpoisson) and same configuration
      * the rest of the PROfit chain is using. The bench mutates internal
      * metric state (last_param, last_value, fs_cache, call_count) so the
      * caller should not rely on those after run_scale_test returns.

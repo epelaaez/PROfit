@@ -3,7 +3,7 @@
 #include "PROlog.h"
 #include "PROdata.h"
 #include "PROmetric.h"
-#include "PROmetrics/PROchi.h"
+#include "PROmetrics/PROchi_neyman.h"
 #include "PROmodel.h"
 #include "PROsyst.h"
 #include "PROpeller.h"
