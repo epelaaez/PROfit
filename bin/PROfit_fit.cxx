@@ -338,7 +338,10 @@ void draw_harmonic_scan_pdf(const GlobalFitResult &fitres, const PROfitterConfig
 
     TLegend leg(0.55, 0.72, 0.89, 0.89);
     leg.SetBorderSize(0);
-    leg.SetFillStyle(0);
+    // Opaque: the y-gridlines and the seed/best-fit vertical lines otherwise
+    // strike through the legend text.
+    leg.SetFillStyle(1001);
+    leg.SetFillColor(kWhite);
     leg.AddEntry(&curve, "Harmonic scan #Delta#chi^{2}", "l");
     if(!seed_x.empty()) leg.AddEntry(&seeds, "Kept seed points", "p");
     if(have_bf) leg.AddEntry(&bf_line, "Global best fit", "l");
@@ -510,7 +513,7 @@ std::map<std::string, TObject *> draw_fit_result(const PROconfig &config, const 
 
     if(fitres.fitter.best_fit.size()) {
         // NActiveBins == total bins unless a fit-region mask (e.g. PROjector) is installed.
-        std::string hname = "#chi^{2}/nbins = " + to_string(fitres.chi2) + "/" + to_string(config.NActiveBins(config.i_prime));
+        std::string hname = "#chi^{2}/nbins = " + chi2LabelValue(fitres.chi2) + "/" + to_string(config.NActiveBins(config.i_prime));
         PROspec bf = FillSpectra(config, prop, syst, model, fitres.fitter.best_fit, true, config.i_prime);
         // Concatenated bins across all channels share no common x-axis, so use bin-index axis.
         TH1D post_hist("ph", hname.c_str(), config.m_num_variable_bins_total_collapsed[config.i_prime], 0, config.m_num_variable_bins_total_collapsed[config.i_prime]);

@@ -527,6 +527,7 @@ void run_plot(const PROconfig &config, const PROpeller &prop, const PROmetric &m
                     one->GetXaxis()->SetTitleSize(0.1);
                     one->GetXaxis()->SetLabelSize(0.1);
                     one->GetYaxis()->SetTitleOffset(0.5);
+                    one->GetYaxis()->SetNdivisions(505); // tiny ratio ranges otherwise smear ~8 overlapping labels
                     hideLastYLabel(one->GetYaxis()); // top label clips at the pad's zero top margin
                     one->Draw("hist");
                     one->SetMaximum(rat->GetMaximum()*1.2);
@@ -604,7 +605,7 @@ void run_plot(const PROconfig &config, const PROpeller &prop, const PROmetric &m
                         double chival = allcov_metric->getSingleChannelChi(global_channel_index, variable_cvs[io], io);
                         int ndf = config.m_channel_variable_bins[ic][io].NBinsAlong(0) - bool(opt&PlotOptions::AreaNormalized);
                         log<LOG_INFO>(L"%1% || -- the datamc chi^2/ndof is %2%/%3% .") % __func__ % chival % ndf;
-                        chi2text.AddText(("#chi^{2}/ndf = "+to_string_prec(chival,2)+"/"+std::to_string(ndf)).c_str());
+                        chi2text.AddText(("#chi^{2}/ndf = "+chi2LabelValue(chival)+"/"+std::to_string(ndf)).c_str());
                         chi2text.SetFillColor(0);
                         chi2text.SetBorderSize(0);
                         chi2text.SetTextAlign(12);
@@ -711,21 +712,34 @@ void run_plot(const PROconfig &config, const PROpeller &prop, const PROmetric &m
                 fixed_pts->GetXaxis()->SetTitle("#sigma");
                 fixed_pts->GetYaxis()->SetTitle("Weight");
                 fixed_pts->SetTitle(("#splitline{"+spline_label+"}{#splitline{"+nsubchannel+" bin "+std::to_string(local_bin)+"}{"+bin_detail+"}}").c_str());
-                double xlo = curve->GetX()[0];
-                double xhi = curve->GetX()[curve->GetN()-1];
+                double xlo = curve->GetN() > 0 ? curve->GetX()[0] : -3.0;
+                double xhi = curve->GetN() > 0 ? curve->GetX()[curve->GetN()-1] : 3.0;
                 double xpad = 0.05 * (xhi - xlo);
                 fixed_pts->GetXaxis()->SetLimits(xlo - xpad, xhi + xpad);
                 fixed_pts->Draw("PA");
-                double max_y = std::max(TMath::MaxElement(fixed_pts->GetN(), fixed_pts->GetY()), TMath::MaxElement(curve->GetN(), curve->GetY()));
-                double min_y = std::min(TMath::MinElement(fixed_pts->GetN(), fixed_pts->GetY()), TMath::MinElement(curve->GetN(), curve->GetY()));
+                double max_y = 1.0, min_y = 1.0;
+                if(fixed_pts->GetN() > 0 && curve->GetN() > 0) {
+                    max_y = std::max(TMath::MaxElement(fixed_pts->GetN(), fixed_pts->GetY()), TMath::MaxElement(curve->GetN(), curve->GetY()));
+                    min_y = std::min(TMath::MinElement(fixed_pts->GetN(), fixed_pts->GetY()), TMath::MinElement(curve->GetN(), curve->GetY()));
+                }
                 double range = max_y - min_y;
+                // Flat splines (e.g. norm systs on non-matching subchannels) give
+                // max_y == min_y; a zero-height axis makes ROOT emit 'nan' PDF
+                // coordinates and whole pages render blank. Pad the range so a flat
+                // response draws as a visible horizontal line at its weight.
+                if(!std::isfinite(range) || range <= 0) {
+                    const double center = std::isfinite(max_y) ? max_y : 1.0;
+                    max_y = center + 0.1;
+                    min_y = center - 0.1;
+                    range = max_y - min_y;
+                }
                 fixed_pts->SetMaximum(max_y + 0.2 * range);
                 fixed_pts->SetMinimum(min_y);
 
                 curve->Draw("C same");
                 ++bin;
                 if(bin % 16 == 0) {
-                    drawVersionWatermark(&c, WatermarkPos::BottomRight);
+                    drawVersionWatermark(&c, WatermarkPos::RightEdge);
                     c.Print((options.final_output_tag+"_PROplot_Spline.pdf").c_str(), "pdf");
                     c.Clear();
                     c.Divide(4,4);
@@ -733,7 +747,7 @@ void run_plot(const PROconfig &config, const PROpeller &prop, const PROmetric &m
                 }
             }
             if(unprinted) {
-                drawVersionWatermark(&c, WatermarkPos::BottomRight);
+                drawVersionWatermark(&c, WatermarkPos::RightEdge);
                 c.Print((options.final_output_tag+"_PROplot_Spline.pdf").c_str(), "pdf");
             }
         }

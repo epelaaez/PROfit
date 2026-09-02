@@ -59,6 +59,15 @@ namespace PROfit{
     inline void hideFirstYLabel(TAxis *a) { if(a) a->ChangeLabel(1, -1.f, 0.f); }
     inline void hideLastYLabel(TAxis *a)  { if(a) a->ChangeLabel(-1, -1.f, 0.f); }
 
+    /// @brief Format a chi^2 value for plot labels: ~4 significant figures, so an
+    /// exact zero prints "0" and tiny values keep their magnitude ("3.1e-05")
+    /// instead of the old fixed decimals rendering them as "0.000000".
+    inline std::string chi2LabelValue(double chi2) {
+        char buf[32];
+        snprintf(buf, sizeof buf, "%.4g", chi2);
+        return buf;
+    }
+
     /**
      * @brief Axis range control for PROfit plots.
      * @details Default value of -9999 for any field means "let ROOT auto-range that axis".

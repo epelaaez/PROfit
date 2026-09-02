@@ -792,6 +792,7 @@ namespace PROfit{
                     err_ratio->GetYaxis()->SetLabelSize(0.1);
                     err_ratio->GetXaxis()->SetTitleSize(0.1);
                     err_ratio->GetXaxis()->SetLabelSize(0.1);
+                    err_ratio->GetYaxis()->SetNdivisions(505); // tiny ratio ranges otherwise smear ~8 overlapping labels
                     err_ratio->Draw("hist");
                     hideLastYLabel(err_ratio->GetYaxis()); // top label clips at the pad's zero top margin
                 }
@@ -1123,6 +1124,7 @@ namespace PROfit{
             one->GetXaxis()->SetLabelSize(0.14);
             one->GetYaxis()->SetTitleOffset(0.21);
             one->GetXaxis()->SetTitleOffset(0.85);
+            one->GetYaxis()->SetNdivisions(505); // tiny ratio ranges otherwise smear ~8 overlapping labels
             hideLastYLabel(one->GetYaxis()); // top label clips at the ratio pad's zero top margin
             ratio->SetLineColor(kBlack);
             ratio->SetLineWidth(2);
@@ -1626,7 +1628,7 @@ namespace PROfit{
                         auto chi_label = [&](const Eigen::MatrixXf &projection) {
                             if(!chi_metric || !chi_spec || projection.rows() == 0) return std::string();
                             const float chi2 = chi_metric->getSingleChannelChi(global_channel_index, *chi_spec, other_index, projection);
-                            return std::string("#chi^{2}/nbins = ") + to_string_prec(chi2, 2) + "/" + std::to_string(projection.rows());
+                            return std::string("#chi^{2}/nbins = ") + chi2LabelValue(chi2) + "/" + std::to_string(projection.rows());
                         };
                         auto draw_chi_label = [&](const std::string &label) {
                             if(label.empty()) return;
@@ -2525,7 +2527,7 @@ namespace PROfit{
                     for(auto &h:hvec) h->Draw("HIST SAME");
                     leg->Draw();
 
-                    drawVersionWatermark(&c, WatermarkPos::BottomRight);
+                    drawVersionWatermark(&c, WatermarkPos::RightEdge);
                     c.Update();
                     c.Print(filename.c_str());
                     global_channel_index++;
@@ -2861,7 +2863,7 @@ namespace PROfit{
                         for(auto &h:hvec) h->Draw("HIST SAME");
                         leg->Draw();
 
-                        drawVersionWatermark(&c, WatermarkPos::BottomRight);
+                        drawVersionWatermark(&c, WatermarkPos::RightEdge);
                         c.Update();
                         c.Print(filename.c_str());
                         global_channel_index++;
@@ -3081,7 +3083,7 @@ int plotPriorFractionalSystematicChannelRatios(const PROconfig &config, const PR
             for(auto &h : hvec) h->Draw("HIST SAME");
             leg->Draw();
 
-            drawVersionWatermark(&c, WatermarkPos::BottomRight);
+            drawVersionWatermark(&c, WatermarkPos::RightEdge);
             c.Update();
             c.Print(filename.c_str());
         }}}}
@@ -3658,7 +3660,7 @@ int plotPriorFractionalSystematicChannelRatios(const PROconfig &config, const PR
             // Bottom-right of the master canvas so the stamp never sits over a sub-pad's
             // histogram title on multi-panel pages (top-right NDC lies inside the top-right
             // sub-pad and overlaps its title there).
-            drawVersionWatermark(gPad, WatermarkPos::BottomRight);
+            drawVersionWatermark(gPad, WatermarkPos::RightEdge);
         }
 
         std::string cov2spline_display_name(const PROconfig &config, const std::string &systname) {
