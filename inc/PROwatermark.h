@@ -54,14 +54,28 @@ namespace PROfit {
                 }
             }
             // colz pages draw the z-palette's exponent (x10^n) just above the frame's
-            // top-right corner; lift the stamp clear of it when the frame holds a TH2.
-            bool has_th2 = false;
-            TIter pit(frame_pad->GetListOfPrimitives());
-            while(TObject *o = pit()) if(dynamic_cast<TH2*>(o)) { has_th2 = true; break; }
-            const double gap = has_th2 ? 0.024 : 0.004;
+            // top-right corner; lift the stamp clear of it when a TH2 is drawn WITH a
+            // palette (draw option containing 'z') -- a TH2 used as a bare "AXIS"
+            // frame has no exponent and needs no lift.
+            bool has_palette = false;
+            for(TObjLink *lnk = frame_pad->GetListOfPrimitives()->FirstLink(); lnk; lnk = lnk->Next()) {
+                if(dynamic_cast<TH2*>(lnk->GetObject())) {
+                    std::string opt = lnk->GetOption() ? lnk->GetOption() : "";
+                    std::transform(opt.begin(), opt.end(), opt.begin(), ::tolower);
+                    if(opt.find('z') != std::string::npos) { has_palette = true; break; }
+                }
+            }
+            const double gap = has_palette ? 0.024 : 0.004;
             t.SetTextSize(0.032f);
             t.SetTextAlign(31); // right-bottom anchor
-            t.DrawText(x, std::min(y + gap, 0.97), pv.c_str()); // DrawText clones; the pad owns the clone
+            // Keep the stamp on-canvas: the glyphs render against the pad's
+            // SMALLER pixel dimension while y is a height fraction, so on tall
+            // canvases the text is a small height fraction and the frame top
+            // sits near 1.0 -- a fixed 0.97 cap would drag the stamp down into
+            // the frame there. Cap at (1 - text height) instead.
+            const double wh = std::max(1.0, (double)pad->GetWh());
+            const double txt_h_ndc = 0.032 * std::min((double)pad->GetWw(), wh) / wh;
+            t.DrawText(x, std::min(y + gap, 1.0 - txt_h_ndc - 0.002), pv.c_str()); // DrawText clones; the pad owns the clone
         } else if(pos == WatermarkPos::BottomRight) {
             t.SetTextSize(0.025f);
             t.SetTextAlign(31); // right-bottom anchor

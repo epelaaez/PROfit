@@ -65,6 +65,18 @@ void run_profile(float &global_fit_chi2, Eigen::VectorXf &global_fit_result, con
             options.final_output_tag+"_PROfile", !options.systs_only, fitres.fitter.best_fit,
             fakedataparams, fitres.spline_covariance, fitres.post_param_lo, fitres.post_param_hi);
 
+    // Compact vertical publication pull plots (splines only), centered on the
+    // adopted global best fit with the profile-scan dchi2=1 errors; one PDF in
+    // XML order and one sorted by |pull|.
+    plot_profile_vertical_pulls(options.final_output_tag+"_PROfile", config,
+            metric.GetSysts(), metric.GetModel(), fitres.fitter.best_fit,
+            profile.values1_down, profile.values1_up, !options.systs_only,
+            /*sort_by_pull=*/false);
+    plot_profile_vertical_pulls(options.final_output_tag+"_PROfile", config,
+            metric.GetSysts(), metric.GetModel(), fitres.fitter.best_fit,
+            profile.values1_down, profile.values1_up, !options.systs_only,
+            /*sort_by_pull=*/true);
+
     TFile fout((options.final_output_tag+"_PROfile.root").c_str(), "RECREATE");
     profile.onesig.Write("one_sigma_errs");
     for(const auto &[name, obj] : drawn_objs)
