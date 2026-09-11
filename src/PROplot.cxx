@@ -1642,7 +1642,8 @@ namespace PROfit{
                         auto chi_label = [&](const Eigen::MatrixXf &projection) {
                             if(!chi_metric || !chi_spec || projection.rows() == 0) return std::string();
                             const float chi2 = chi_metric->getSingleChannelChi(global_channel_index, *chi_spec, other_index, projection);
-                            return std::string("#chi^{2}/nbins = ") + chi2LabelValue(chi2) + "/" + std::to_string(projection.rows());
+                            // Fixed-point, pull-free comparison with no free parameters: ndf = displayed bins.
+                            return std::string("#chi^{2}/ndf = ") + chi2LabelValue(chi2) + "/" + std::to_string(projection.rows());
                         };
                         auto draw_chi_label = [&](const std::string &label) {
                             if(label.empty()) return;
