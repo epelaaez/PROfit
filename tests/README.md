@@ -34,6 +34,11 @@ short, seeded (`--seed 405 -n 1 --preset fast fast`) instance of each workflow:
 | t15–t16 | `mcmc` (1 chain), `scale-test` benchmark smoke |
 | t17–t19 | PROjector: ND pre-fit → projected `global` → projected `fc` |
 | t20–t21 | PROjector negative tests (partial-channel and match-everything patterns must be refused) |
+| t22–t26 | `apply_to_subchannel`: process/plot/global with a spline restricted to ND, a covariance to FD, a flat to FD and a norm_to_covariance to ND numu; t25 refuses a zero-match pattern; t26 asserts exact zero blocks / flat splines (`check_applyto.C`) |
+| t26b–d | every systematic (incl. mcstat, norm, flat, norm_to_covariance) restricted to FD ⇒ total fractional covariance ND block exactly zero |
+| t26e–g | DetVar systematic (same ND file as CV and half-POT variation) restricted to the ND nue channel |
+| t26h–j | branch-order regression: an `incl_systematics="false"` branch first in a systematics-carrying MCFile must process and give the identical global fit |
+| t27–t30 | regex patterns: alternation accepted; invalid regex and zero-match patterns refused |
 
 Outputs land in `tests/runs/<TAG>/` with per-test logs in `logs/` and a
 PASS/FAIL `summary.txt`. Exit code = number of failures.
