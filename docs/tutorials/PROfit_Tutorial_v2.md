@@ -389,16 +389,29 @@ The `<allowlist>` attributes:
 * `mode="covariance_to_spline"` with `num_decomp_knobs=` promotes a
   covariance to its leading eigenmode splines (the same machinery PROjector
   uses — see section 9). `restrict` bounds a spline's allowed range.
-* `apply_to_subchannel="pattern"` — restrict a weight-based systematic
-  (`spline`, `covariance`, `covariance_to_spline`, `hist1d/2d`, ...) to the
+* `apply_to_subchannel="pattern"` — restrict ANY systematic to the
   subchannels whose fullname matches the pattern (same unanchored-regex
   matching as `norm`/`flat` — plain substrings work as-is, e.g.
   `apply_to_subchannel="nu_SBND"` or `"_ND_"`, and regex like
-  `"nu_(ND|FD)"` too). Non-matching subchannels get exactly no response (flat spline
-  at 1 / zero covariance block), and the systematic's weight branch is only
-  required — or even looked for — in MCFiles that fill a matching
-  subchannel. This is how per-detector systematics work in multi-detector
-  fits where each detector's MC carries a different set of weight branches.
+  `"nu_(ND|FD)"` too). Non-matching subchannels get exactly no response (flat
+  spline at 1 / zero covariance rows and columns). It is honoured by every
+  type: weight/universe-based ones (`spline`, `covariance`,
+  `covariance_to_spline`, `spline_to_covariance`, `hist1d/2d`,
+  `explicit_spline`, `norm`) are scoped while the MC is read — non-matching
+  events fill every universe at the CV weight, and the weight branch is only
+  required (or even looked for) in MCFiles that fill a matching subchannel —
+  and, independently of how a systematic was built, PROsyst re-asserts the
+  scope after ALL systematics exist (`PROsyst::ApplySubchannelScopes`), which
+  is what makes it work for `flat`, `norm_to_covariance`, `external_covariance`,
+  `external_covariance_to_spline`, `mcstat`, DetVar (`<DetVarFiles>`) and
+  HistVar systematics too. Notes: for `norm`/`flat` the `NAME:percent` pattern
+  and `apply_to_subchannel` intersect; a `<HistVarSection><subchannel>` list is
+  an exact-name scope that is ANDed with the regex; `incl_systematics="false"`
+  on a branch overrides it; the pattern is keyed by subchannel, so it cannot
+  exempt one of two MCFiles that fill the same subchannel (use
+  `incl_systematics="false"` on that branch). This is how per-detector
+  systematics work in multi-detector fits where each detector's MC carries a
+  different set of weight branches.
 * `scale_range="lo, hi"` — `binned_unconstrained` only: the multiplicative
   range every free bin may take (default `0, 10`; must contain 1).
 
@@ -652,7 +665,7 @@ multithreaded runs are statistically equivalent but not byte-identical.
 | `--fix dmsq Flux1` | fix parameters at CV (physics or splines) |
 | `--syst-only` | fix ALL physics parameters (nuisance-only fit) |
 | `--statonly` | drop systematics entirely |
-| `--shapeonly` / `--rateonly` | shape-only or single-bin-normalisation analysis |
+| `--shapeonly` (alias `--shape-only`) / `--rateonly` | shape-only or single-bin-normalisation analysis. Shape-only (v3.1 convention): in every collapsed channel the *prediction* is rescaled onto the data's integral before the χ² (the data is never touched, so the statistical term is fixed and the χ² is exactly invariant under an overall rate change); every spline knob and every covariance source (incl. flat/norm/mcstat/external) is projected onto per-channel shape; one dof per channel is lost; `fc`/brazil/`fc-adaptive` inherit the flag. Implies `--area-norm` for plots. |
 | `-c/--chi2 neyman\|pearson\|CNP\|poisson` | χ² metric (default `neyman`; legacy aliases `PROchi`/`PROCNP`/`Poisson`) |
 | `--grad-mode analytic` | gradient strategy: `analytic` (default, alias `exact`) / `central-full` / `one-sided-full` / `central-lin` (Gauss-Newton) / `one-sided-lin` |
 

@@ -305,6 +305,14 @@ void run_process(PROpeller &prop, std::vector<std::vector<SystStruct>> &systsstr
                     SystStruct ss(varName, specs.size(), systType, "1",
                                   knobvals, knobvals, 0);
                     ss.binning = binningIndex;
+                    // apply_to_subchannel: carry the XML pattern so PROsyst scopes this DetVar
+                    // systematic exactly like a weight-based one (CV outside the match).
+                    auto apply_it = config.m_mcgen_variation_apply_to_subchannel.find(varName);
+                    if(apply_it != config.m_mcgen_variation_apply_to_subchannel.end()) {
+                        ss.apply_to_subchannel = apply_it->second;
+                        ss.apply_to_subchannel_names = MatchNames(config.m_fullnames, apply_it->second, "apply_to_subchannel of DetVar systematic " + varName);
+                        log<LOG_INFO>(L"%1% || DetVar '%2%' restricted by apply_to_subchannel='%3%' to %4% subchannel(s).") % __func__ % varName.c_str() % apply_it->second.c_str() % ss.apply_to_subchannel_names.size();
+                    }
                     ss.CreateSpecs(matchedCvSpec.Spec().size());
                     ss.p_cv = std::make_shared<PROspec>(matchedCvSpec);
                     for(const auto &[kv, spec] : specs) {

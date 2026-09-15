@@ -266,10 +266,16 @@ namespace PROfit {
             }
             auto type_it = inconfig.m_mcgen_variation_type_map.find(sys_name);
             const std::string sys_type = (type_it != inconfig.m_mcgen_variation_type_map.end()) ? type_it->second : "";
-            const std::vector<std::string> apply_to_supported = {"spline", "spline_to_covariance", "covariance", "covariance_to_spline", "norm", "hist1d", "hist2d", "explicit_spline", "binned_unconstrained", "spline_cross_quad"};
-            if(std::find(apply_to_supported.begin(), apply_to_supported.end(), sys_type) == apply_to_supported.end()){
-                log<LOG_WARNING>(L"%1% || apply_to_subchannel is not supported for systematic %2% (type '%3%'); it will be IGNORED. (flat/norm already carry their own NAME:percent wildcard; external/mcstat/detvar are not per-event.)") % __func__ % sys_name.c_str() % sys_type.c_str();
-            }
+            // Every type honours the pattern. Weight/universe-based types (and hist1d/2d,
+            // explicit_spline, norm) are scoped here at fill time (non-matching events fill
+            // all universes at the CV weight, and the weight branch is not read where no
+            // subchannel matches); flat, norm_to_covariance, external covariances, mcstat and
+            // DetVar systematics are scoped by PROsyst::ApplySubchannelScopes after they are
+            // built. For norm/flat the NAME:percent pattern and apply_to_subchannel intersect.
+            const std::vector<std::string> per_event_types = {"spline", "spline_to_covariance", "covariance", "covariance_to_spline", "norm", "hist1d", "hist2d", "explicit_spline", "binned_unconstrained", "spline_cross_quad"};
+            const bool per_event = std::find(per_event_types.begin(), per_event_types.end(), sys_type) != per_event_types.end();
+            log<LOG_INFO>(L"%1% || apply_to_subchannel='%2%' for systematic %3% (type '%4%') will be applied %5%.") % __func__ % pattern.c_str() % sys_name.c_str() % sys_type.c_str()
+                % (per_event ? "at fill time and re-asserted after the systematic is built" : "after the systematic is built (PROsyst::ApplySubchannelScopes)");
         }
 
         // True if any subchannel filled by this MCFile matches the systematic's
@@ -298,6 +304,14 @@ namespace PROfit {
             f_event_weights[fid].resize(1);//was num_branch
             f_knob_vals[fid].resize(1);//was num_brach
             bool gotWeights = false;
+            // The weight-branch setup below runs ONCE per file (first branch iteration).
+            // It used to consult that first branch's incl_systematics flag for the whole
+            // file, so a file whose FIRST <branch> was incl_systematics="false" (cosmics
+            // first, beam after) bound no friend-tree weight branches at all and every
+            // later systematics-carrying branch died at fill time. Decide per FILE instead.
+            bool file_has_syst_branch = false;
+            for(const auto &bv: inconfig.m_branch_variables[fid])
+                if(bv->GetIncludeSystematics()) { file_has_syst_branch = true; break; }
 
             for(int ib = 0; ib != num_branch; ++ib) {
 
@@ -387,7 +401,7 @@ namespace PROfit {
                                 log<LOG_DEBUG>(L"%1% || Checking if branch %2% is in allowlist") % __func__ %  branch->GetName();
 
                                 if (std::find(inconfig.m_mcgen_variation_allowlist.begin(), inconfig.m_mcgen_variation_allowlist.end(), branch->GetName()) != inconfig.m_mcgen_variation_allowlist.end()) {
-                                    if(branch_variable->GetIncludeSystematics()){
+                                    if(file_has_syst_branch){
                                         if(!file_has_matching_subchannel(fid, branch->GetName())){
                                             log<LOG_INFO>(L"%1% || NOT setting up eventweight map for friend branch %2% in fid %3%: no subchannel in this file matches its apply_to_subchannel wildcard.") % __func__ % branch->GetName() % fid;
                                         } else {
@@ -410,7 +424,7 @@ namespace PROfit {
                         }
                     }
                     gotWeights = true;
-                    if(branch_variable->GetIncludeSystematics()){
+                    if(file_has_syst_branch){
                         for(const auto &variation: inconfig.m_mcgen_variation_allowlist){
                             std::string type = inconfig.m_mcgen_variation_type_map.at(variation);
                             if (std::find(allowlist_check.begin(), allowlist_check.end(), variation  ) == allowlist_check.end() && (type=="covariance" || type=="covariance_to_spline" || type=="spline" || type=="spline_to_covariance")) {
@@ -686,6 +700,10 @@ namespace PROfit {
                     log<LOG_INFO>(L"%1% || Systematic variation %2% is a match for a covariance_to_spline systematic. Processing as such. ") % __func__ % sys_name.c_str();
                 }
                 if(sys_mode == "flat"){
+                    // binning defaults to -1; without setting it, process_cafana_event's
+                    // var_bin_indices[binning] at the "spline_bin" line reads out of bounds
+                    // and aborts. external_covariance below sets it for the same reason.
+                    sv.back().binning = binningindex;
                     log<LOG_INFO>(L"%1% || Systematic variation %2% is a match for a flat covariance systematic. Processing a such. ") % __func__ % sys_name.c_str();
                 }
                 if(sys_mode == "external_covariance"){
@@ -1657,13 +1675,15 @@ namespace PROfit {
                         if(var_syst_objs.front()->knobval[u] == var_syst_objs.front()->knob_index[is]) break;
                     
                     float w = inconfig.m_mcgen_explicit_weights.at(var_syst_objs.front()->systname)[is];
+                    // explicit_spline has no weight-branch entry, so map_iter may be end():
+                    // name the systematic from the struct, never through map_iter.
                     if(std::isnan(w) || std::isinf(w)) {
                         log<LOG_WARNING>(L"%1% || Encountered a bad weight (%2%) for syst %3%. Setting to 1 instead.")
-                            % __func__ % w % map_iter->first.c_str();
+                            % __func__ % w % var_syst_objs.front()->systname.c_str();
                         w = 1;
                     } else if(w > 30) {
                         log<LOG_WARNING>(L"%1% || Encountered a very large weight (%2%) for syst %3%. Setting to 1 instead.")
-                            % __func__ % w % map_iter->first.c_str();
+                            % __func__ % w % var_syst_objs.front()->systname.c_str();
                         w = 1;
                     }
                     for(auto so: var_syst_objs){
