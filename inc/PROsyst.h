@@ -204,6 +204,42 @@ namespace PROfit {
              */
             static Eigen::MatrixXf ShapeProjector(const std::vector<std::pair<size_t,size_t>> &blocks, const Eigen::VectorXf &cv);
 
+            // ----- apply_to_subchannel scoping (post-build, type-agnostic) -----
+            //
+            // A systematic's XML apply_to_subchannel= pattern is honoured in two layers:
+            // PROcreate fills non-matching events at the CV weight (so the weight branch is
+            // never read where it is not needed), and — independently of how the
+            // systematic was built (weight universes, DetVar, HistVar, flat, norm, external
+            // matrix, mcstat) — the ctor finishes with ApplySubchannelScopes(), which
+            // flattens every spline and zeroes every covariance row/column outside the
+            // matched subchannels. The second layer is idempotent on the first, so the
+            // guarantee "non-matching subchannels get exactly no response" holds for every
+            // systematic type, including ones whose spectra never pass through PROcreate.
+
+            /** @brief Per-uncollapsed-bin scope mask (1 = bin belongs to a subchannel matching
+             *  @p pattern, 0 otherwise) for binning index @p binning. All 1 when the pattern is empty. */
+            static std::vector<char> SubchannelScopeMask(const PROconfig &config, int binning, const std::string &pattern);
+
+            /** @brief Zero every row and column of the (fractional or absolute) matrix @p M whose
+             *  bin lies outside the pattern's scope in @p binning. No-op for an empty pattern. */
+            static void ScopeMatrixToSubchannels(const PROconfig &config, int binning, const std::string &pattern, Eigen::MatrixXf &M);
+
+            /** @brief Normalise a SystStruct's own spectra to its apply_to_subchannel: every
+             *  universe/knob spectrum gets the CV value on out-of-scope bins (ratio exactly 1,
+             *  deviation exactly 0). Idempotent; a no-op without a pattern or without spectra.
+             *  The spectra are shared (shared_ptr) so the caller's struct is updated too.
+             *  @p spectra_binning is the binning the struct's spectra actually live in: the
+             *  systematic's own binning for spline-type modes, but the PROsyst's variable
+             *  index for mode "covariance" (each variable's copy is filled in its own bins). */
+            static void ScopeSystStructSpectra(const PROconfig &config, const SystStruct &syst, int spectra_binning);
+
+            /** @brief Post-build stage: for every spline and covariance whose systematic (or,
+             *  for `<name>_decomp_knob_i` / `<name>_resid_cov` children, whose parent) carries an
+             *  apply_to_subchannel pattern — from @p systs or from the config map (mcstat,
+             *  DetVar) — flatten the spline / zero the covariance outside the matched
+             *  subchannels and rebuild the correlation matrix. Called at the end of the ctor. */
+            void ApplySubchannelScopes(const PROconfig &config, const std::vector<SystStruct> &systs);
+
             //----- Spline and Covariance matrix related ---
             //----- Spline and Covariance matrix related ---
 

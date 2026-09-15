@@ -388,16 +388,29 @@ The `<allowlist>` attributes:
 * `mode="covariance_to_spline"` with `num_decomp_knobs=` promotes a
   covariance to its leading eigenmode splines (the same machinery PROjector
   uses — see section 9). `restrict` bounds a spline's allowed range.
-* `apply_to_subchannel="pattern"` — restrict a weight-based systematic
-  (`spline`, `covariance`, `covariance_to_spline`, `hist1d/2d`, ...) to the
+* `apply_to_subchannel="pattern"` — restrict ANY systematic to the
   subchannels whose fullname matches the pattern (same unanchored-regex
   matching as `norm`/`flat` — plain substrings work as-is, e.g.
   `apply_to_subchannel="nu_SBND"` or `"_ND_"`, and regex like
-  `"nu_(ND|FD)"` too). Non-matching subchannels get exactly no response (flat spline
-  at 1 / zero covariance block), and the systematic's weight branch is only
-  required — or even looked for — in MCFiles that fill a matching
-  subchannel. This is how per-detector systematics work in multi-detector
-  fits where each detector's MC carries a different set of weight branches.
+  `"nu_(ND|FD)"` too). Non-matching subchannels get exactly no response (flat
+  spline at 1 / zero covariance rows and columns). It is honoured by every
+  type: weight/universe-based ones (`spline`, `covariance`,
+  `covariance_to_spline`, `spline_to_covariance`, `hist1d/2d`,
+  `explicit_spline`, `norm`) are scoped while the MC is read — non-matching
+  events fill every universe at the CV weight, and the weight branch is only
+  required (or even looked for) in MCFiles that fill a matching subchannel —
+  and, independently of how a systematic was built, PROsyst re-asserts the
+  scope after ALL systematics exist (`PROsyst::ApplySubchannelScopes`), which
+  is what makes it work for `flat`, `norm_to_covariance`, `external_covariance`,
+  `external_covariance_to_spline`, `mcstat`, DetVar (`<DetVarFiles>`) and
+  HistVar systematics too. Notes: for `norm`/`flat` the `NAME:percent` pattern
+  and `apply_to_subchannel` intersect; a `<HistVarSection><subchannel>` list is
+  an exact-name scope that is ANDed with the regex; `incl_systematics="false"`
+  on a branch overrides it; the pattern is keyed by subchannel, so it cannot
+  exempt one of two MCFiles that fill the same subchannel (use
+  `incl_systematics="false"` on that branch). This is how per-detector
+  systematics work in multi-detector fits where each detector's MC carries a
+  different set of weight branches.
 * `scale_range="lo, hi"` — `binned_unconstrained` only: the multiplicative
   range every free bin may take (default `0, 10`; must contain 1).
 

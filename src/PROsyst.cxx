@@ -46,6 +46,120 @@ namespace PROfit {
         return R;
     }
 
+    std::vector<char> PROsyst::SubchannelScopeMask(const PROconfig &config, int binning, const std::string &pattern) {
+        std::vector<char> mask(config.m_num_variable_bins_total[binning], 1);
+        if(pattern.empty()) return mask;
+        std::fill(mask.begin(), mask.end(), 0);
+        const std::vector<std::string> names = MatchNames(config.m_fullnames, pattern, "apply_to_subchannel scope");
+        for(const auto &name: names) {
+            const size_t is = config.GetSubchannelIndex(name);
+            const size_t ic = config.GetLocalChannelIndexFromGlobalSubchannelIndex(is);
+            const size_t start = config.GetGlobalVariableBinStart(is, binning);
+            const size_t nb = config.m_channel_variable_bins[ic][binning].NBins();
+            for(size_t b = 0; b < nb && start + b < mask.size(); ++b) mask[start + b] = 1;
+        }
+        return mask;
+    }
+
+    void PROsyst::ScopeMatrixToSubchannels(const PROconfig &config, int binning, const std::string &pattern, Eigen::MatrixXf &M) {
+        if(pattern.empty()) return;
+        const std::vector<char> mask = SubchannelScopeMask(config, binning, pattern);
+        if((Eigen::Index)mask.size() != M.rows() || M.rows() != M.cols()) {
+            log<LOG_WARNING>(L"%1% || apply_to_subchannel='%2%': matrix is %3%x%4% but binning %5% has %6% bins; not scoped.") % __func__ % pattern.c_str() % M.rows() % M.cols() % binning % mask.size();
+            return;
+        }
+        for(size_t b = 0; b < mask.size(); ++b) {
+            if(mask[b]) continue;
+            M.row((Eigen::Index)b).setZero();
+            M.col((Eigen::Index)b).setZero();
+        }
+    }
+
+    void PROsyst::ScopeSystStructSpectra(const PROconfig &config, const SystStruct &syst, int spectra_binning) {
+        if(syst.apply_to_subchannel.empty() || !syst.p_cv || syst.p_multi_spec.empty()) return;
+        const int binning = spectra_binning < 0 ? config.i_prime : spectra_binning;
+        const std::vector<char> mask = SubchannelScopeMask(config, binning, syst.apply_to_subchannel);
+        const Eigen::VectorXf &cv = syst.p_cv->Spec();
+        if((size_t)cv.size() != mask.size()) {
+            log<LOG_WARNING>(L"%1% || apply_to_subchannel='%2%' for %3%: CV has %4% bins but binning %5% has %6%; spectra not scoped.") % __func__ % syst.apply_to_subchannel.c_str() % syst.systname.c_str() % cv.size() % binning % mask.size();
+            return;
+        }
+        size_t nfixed = 0;
+        for(const auto &spec: syst.p_multi_spec) {
+            if(!spec || spec->Spec().size() != cv.size()) continue;
+            // The spectra live behind shared_ptr: this normalises the caller's struct too.
+            Eigen::VectorXf &v = spec->Spec();
+            Eigen::VectorXf &e = spec->Error();
+            for(size_t b = 0; b < mask.size(); ++b) {
+                if(mask[b]) continue;
+                if(v((Eigen::Index)b) != cv((Eigen::Index)b)) { v((Eigen::Index)b) = cv((Eigen::Index)b); ++nfixed; }
+                if(e.size() == cv.size()) e((Eigen::Index)b) = syst.p_cv->Error()((Eigen::Index)b);
+            }
+        }
+        if(nfixed)
+            log<LOG_INFO>(L"%1% || apply_to_subchannel='%2%': reset %3% out-of-scope universe bins of %4% to the CV.") % __func__ % syst.apply_to_subchannel.c_str() % nfixed % syst.systname.c_str();
+    }
+
+    void PROsyst::ApplySubchannelScopes(const PROconfig &config, const std::vector<SystStruct> &systs) {
+        // name -> pattern: the structs' own field first, then the XML map (covers mcstat,
+        // DetVar-built systematics and anything else with no SystStruct field set).
+        std::map<std::string, std::string> patterns;
+        for(const auto &syst: systs)
+            if(!syst.apply_to_subchannel.empty()) patterns[syst.systname] = syst.apply_to_subchannel;
+        for(const auto &[name, pattern]: config.m_mcgen_variation_apply_to_subchannel)
+            if(!pattern.empty() && !patterns.count(name)) patterns[name] = pattern;
+        if(patterns.empty()) return;
+
+        // Children synthesized by covariance_to_spline / external_covariance_to_spline /
+        // PROjector (`_decomp_knob_i`, `_resid_cov`) and binned_unconstrained (`_bin<j>`)
+        // inherit the parent's scope (idempotent where the child was built scoped already).
+        auto lookup = [&](const std::string &name) -> std::string {
+            auto it = patterns.find(name);
+            if(it != patterns.end()) return it->second;
+            for(const char *suffix: {"_decomp_knob_", "_resid_cov", "_bin"}) {
+                const size_t pos = name.rfind(suffix);
+                if(pos != std::string::npos) {
+                    auto pit = patterns.find(name.substr(0, pos));
+                    if(pit != patterns.end()) return pit->second;
+                }
+            }
+            return std::string();
+        };
+
+        size_t n_splines_scoped = 0, n_covs_scoped = 0;
+        for(size_t j = 0; j < splines.size(); ++j) {
+            const std::string pattern = lookup(spline_names[j]);
+            if(pattern.empty()) continue;
+            const int binning = j < spline_binnings.size() && spline_binnings[j] >= 0 ? spline_binnings[j] : other_index;
+            const std::vector<char> mask = SubchannelScopeMask(config, binning, pattern);
+            Spline &sp = splines[j];
+            if((size_t)sp.bins != mask.size()) {
+                log<LOG_WARNING>(L"%1% || apply_to_subchannel='%2%': spline %3% has %4% bins but binning %5% has %6%; not scoped.") % __func__ % pattern.c_str() % spline_names[j].c_str() % sp.bins % binning % mask.size();
+                continue;
+            }
+            for(int b = 0; b < sp.bins; ++b) {
+                if(mask[(size_t)b]) continue;
+                for(int s = 0; s < sp.segments_per_bin; ++s) {
+                    SplineSegment &seg = sp.segments[(size_t)(b * sp.segments_per_bin + s)];
+                    seg.coeffs = {1.0f, 0.0f, 0.0f, 0.0f};   // exactly flat at 1: no response
+                }
+            }
+            ++n_splines_scoped;
+        }
+        // Walk syst_map, not covar_names: the mcstat covariance is registered in
+        // syst_map/covmat only (never in covar_names), and it must be scoped too.
+        for(const auto &[name, entry]: syst_map) {
+            if(entry.second != SystType::Covariance || entry.first >= covmat.size()) continue;
+            const std::string pattern = lookup(name);
+            if(pattern.empty()) continue;
+            const size_t idx = entry.first;
+            ScopeMatrixToSubchannels(config, other_index, pattern, covmat[idx]);
+            if(idx < corrmat.size()) corrmat[idx] = GenerateCorrMatrix(covmat[idx]);
+            ++n_covs_scoped;
+        }
+        log<LOG_INFO>(L"%1% || apply_to_subchannel post-build scope applied to %2% spline(s) and %3% covariance matrix(es) for variable %4%.") % __func__ % n_splines_scoped % n_covs_scoped % other_index;
+    }
+
     PROsyst::PROsyst( const PROpeller &prop, const PROconfig &config, const std::vector<SystStruct>& systs, bool shapeonly, int other_index, const PROmodel* model, const Eigen::VectorXf* params) : other_index(other_index) {
         shape_only = shapeonly;
         if(shape_only) {
@@ -79,6 +193,11 @@ namespace PROfit {
         }
         for(const auto& syst: systs) {
             log<LOG_DEBUG>(L"%1% || syst mode: %2%") % __func__ % syst.mode.c_str();
+            // Layer 2 of apply_to_subchannel (see PROsyst.h): make the input spectra exactly
+            // CV outside the scope before anything is derived from them. Idempotent on
+            // structs PROcreate already CV-filled; the only real work is for DetVar/HistVar
+            // structs and any other producer that does not know about the pattern.
+            ScopeSystStructSpectra(config, syst, syst.mode == "covariance" ? other_index : syst.binning);
             if(syst.mode == "spline" || syst.mode == "norm" || syst.mode == "hist1d" || syst.mode == "hist2d" || syst.mode == "explicit_spline") {
                 bool unmirrored = config.m_mcgen_variation_unmirrored.find(syst.systname) != config.m_mcgen_variation_unmirrored.end();
                 FillSpline(syst, unmirrored);
@@ -302,6 +421,10 @@ namespace PROfit {
             corrmat.push_back(mcstat_corr);
             ++n_covar;
         }
+
+        // Layer 2 of apply_to_subchannel, matrix/spline side: flat, norm_to_covariance,
+        // external covariances, mcstat, cov->spline children — every type, uniformly.
+        ApplySubchannelScopes(config, systs);
 
         if(shape_only && covmat.size()) {
             // Shape-only: project EVERY covariance source (flat, norm_to_covariance,
