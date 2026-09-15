@@ -266,7 +266,7 @@ namespace PROfit {
             }
             auto type_it = inconfig.m_mcgen_variation_type_map.find(sys_name);
             const std::string sys_type = (type_it != inconfig.m_mcgen_variation_type_map.end()) ? type_it->second : "";
-            const std::vector<std::string> apply_to_supported = {"spline", "spline_to_covariance", "covariance", "covariance_to_spline", "norm", "hist1d", "hist2d", "explicit_spline", "binned_unconstrained"};
+            const std::vector<std::string> apply_to_supported = {"spline", "spline_to_covariance", "covariance", "covariance_to_spline", "norm", "hist1d", "hist2d", "explicit_spline", "binned_unconstrained", "spline_cross_quad"};
             if(std::find(apply_to_supported.begin(), apply_to_supported.end(), sys_type) == apply_to_supported.end()){
                 log<LOG_WARNING>(L"%1% || apply_to_subchannel is not supported for systematic %2% (type '%3%'); it will be IGNORED. (flat/norm already carry their own NAME:percent wildcard; external/mcstat/detvar are not per-event.)") % __func__ % sys_name.c_str() % sys_type.c_str();
             }
@@ -616,7 +616,7 @@ namespace PROfit {
                     sv.back().inflate = inconfig.m_mcgen_variation_inflate.at(sys_name);
                     log<LOG_INFO>(L"%1% || Setting inflate=%2% for systematic %3%") % __func__ % sv.back().inflate % sys_name.c_str();
                 }
-                if(sys_mode == "spline" || sys_mode == "spline_to_covariance" || sys_mode == "explicit_spline") {
+                if(sys_mode == "spline" || sys_mode == "spline_to_covariance" || sys_mode == "explicit_spline" || sys_mode == "spline_cross_quad") {
                     bool override_knobs = inconfig.m_mcgen_variation_knobval_override.find(sys_name) != inconfig.m_mcgen_variation_knobval_override.end();
                     if(!override_knobs && map_systematic_knob_vals.find(sys_name) == map_systematic_knob_vals.end()) {
                         log<LOG_WARNING>(L"%1% || Expected %2% to have knob vals associated with it, but couldn't find any. Will use -3 to +3 as default.") % __func__ % sys_name.c_str();
@@ -1397,7 +1397,7 @@ namespace PROfit {
             // Non-applying systematics never dereference it, and their weight branch
             // may legitimately be absent from this file.
             const std::string &sys_mode = var_syst_objs.front()->mode;
-            const bool needs_weights = (sys_mode == "spline" || sys_mode == "spline_to_covariance" ||
+            const bool needs_weights = (sys_mode == "spline" || sys_mode == "spline_to_covariance" || sys_mode == "spline_cross_quad" ||
                                         sys_mode == "covariance" || sys_mode == "covariance_to_spline");
             if(needs_weights && applies && map_iter == eventweight_map.end()){
                 log<LOG_ERROR>(L"%1% || ERROR: systematic '%2%' (mode %3%) has no entry in the event weight map. "
@@ -1432,7 +1432,7 @@ namespace PROfit {
                                 var_syst_objs[io]->FillUniverse(iuni, var_bin_indices[io], mc_weight);
                         }
                     }
-                } else if(sys_mode == "spline" || sys_mode == "spline_to_covariance" || sys_mode == "covariance_to_spline" ||
+                } else if(sys_mode == "spline" || sys_mode == "spline_to_covariance" || sys_mode == "covariance_to_spline" || sys_mode == "spline_cross_quad" ||
                           sys_mode == "norm" || sys_mode == "hist1d" || sys_mode == "hist2d" || sys_mode == "explicit_spline"){
                     if(spline_bin >= 0){
                         for(auto so: var_syst_objs){
@@ -1446,7 +1446,7 @@ namespace PROfit {
                 continue;
             }
 
-            if(var_syst_objs.front()->mode == "spline" || var_syst_objs.front()->mode == "spline_to_covariance") {
+            if(var_syst_objs.front()->mode == "spline" || var_syst_objs.front()->mode == "spline_to_covariance" || var_syst_objs.front()->mode == "spline_cross_quad") {
                 if(spline_bin < 0) continue;
                 for(auto so: var_syst_objs)
                     so->FillCV(spline_bin, mc_weight);

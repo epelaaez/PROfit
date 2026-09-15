@@ -1463,7 +1463,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 }
 
                 //check for known attributes
-                const std::vector<std::string> expected_attrs = {"name", "type", "plotname", "binning", "knobvals", "tag", "prior", "center", "prior_type", "force_0_cv", "include_only_weights", "scale","filename", "xvar", "yvar", "restrict", "mirror", "num_decomp_knobs", "include_resid_cov", "inflate", "weights", "apply_to_subchannel", "scale_range", "sources"};
+                const std::vector<std::string> expected_attrs = {"name", "type", "plotname", "binning", "knobvals", "tag", "prior", "center", "prior_type", "force_0_cv", "include_only_weights", "scale","filename", "xvar", "yvar", "restrict", "mirror", "num_decomp_knobs", "include_resid_cov", "inflate", "weights", "apply_to_subchannel", "scale_range", "sources", "splines"};
                 for (const tinyxml2::XMLAttribute* attr = pAllowList->FirstAttribute(); attr; attr = attr->Next()) {
                     std::string name = attr->Name();
                     if (std::find(expected_attrs.begin(), expected_attrs.end(), name) == expected_attrs.end()) {
@@ -1496,6 +1496,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 const char *apply_to_subchannel = pAllowList->Attribute("apply_to_subchannel");
                 const char *scale_range = pAllowList->Attribute("scale_range");
                 const char *sources = pAllowList->Attribute("sources");
+                const char *splines = pAllowList->Attribute("splines");
 
                 if(!variation_type) {
                     throw std::invalid_argument(std::string("<allowlist>/<systematic> entry '") + wt + "' has no type= attribute");
@@ -1579,6 +1580,38 @@ int PROconfig::LoadFromXML(const std::string &filename){
                         % __func__ % wt.c_str() % pattern.c_str() % atoi(num_decomp_knobs) % m_mcgen_variation_restrict[wt].first % m_mcgen_variation_restrict[wt].second;
                 } else if(sources) {
                     throw std::invalid_argument(std::string("sources is only supported for type='covariance_to_spline_uniform' systematics; got type '") +
+                        variation_type + "' for '" + wt + "'");
+                }
+                if(std::string(variation_type) == "spline_cross_quad") {
+                    // Reads a weight branch whose entry 0 is the CV point and entry 1+p the joint +1 sigma
+                    // shift of the p-th pair (i<j) of the splines= list. PROsyst turns those into the
+                    // eta_i eta_j response coefficients that a product of the members' splines lacks.
+                    if(!splines) {
+                        throw std::invalid_argument(std::string("spline_cross_quad systematic '") + wt +
+                            "' requires splines=\"A, B, ...\" naming its member type=\"spline\" entries in pair order");
+                    }
+                    if(knobs || prior || center || prior_type || restrict_str || filename || xvar || yvar || mirrored || num_decomp_knobs || include_resid_cov || weights || scale_range || inflate) {
+                        throw std::invalid_argument(std::string("spline_cross_quad systematic '") + wt +
+                            "' only supports the attributes type, plotname, tag, binning, force_0_cv, include_only_weights, scale, apply_to_subchannel and splines (its knob values are derived from the pair count)");
+                    }
+                    std::vector<std::string> members;
+                    std::string tok;
+                    std::istringstream ss(splines);
+                    while(std::getline(ss, tok, ',')) {
+                        size_t b = tok.find_first_not_of(" \t"), e = tok.find_last_not_of(" \t");
+                        if(b != std::string::npos) members.push_back(tok.substr(b, e - b + 1));
+                    }
+                    if(members.size() < 2) {
+                        throw std::invalid_argument(std::string("spline_cross_quad systematic '") + wt + "' needs at least two names in splines=");
+                    }
+                    const size_t npairs = members.size() * (members.size() - 1) / 2;
+                    std::vector<double> kv(1 + npairs);
+                    for(size_t k = 0; k < kv.size(); ++k) kv[k] = (double)k;
+                    m_mcgen_variation_knobval_override[wt] = kv;
+                    m_mcgen_variation_cross_quad_splines[wt] = members;
+                    log<LOG_INFO>(L"%1% || spline_cross_quad systematic %2%: %3% member splines, %4% pair universes") % __func__ % wt.c_str() % members.size() % npairs;
+                } else if(splines) {
+                    throw std::invalid_argument(std::string("splines is only supported for type='spline_cross_quad' systematics; got type '") +
                         variation_type + "' for '" + wt + "'");
                 }
                 if(prior_type) {
@@ -2162,6 +2195,8 @@ int PROconfig::LoadFromXML(const std::string &filename){
             m_num_variation_type_binned_unconstrained+=1;
         } else if(m_mcgen_variation_type[i] == "covariance_to_spline_uniform"){
             // Built in PROsyst from its source covariance entries; nothing to count here.
+        } else if(m_mcgen_variation_type[i] == "spline_cross_quad"){
+            // Universes are read like a spline's; PROsyst folds them into its member splines' group.
         } else {
             log<LOG_ERROR>(L"%1% || Unrecognized variation type %2%") % __func__ % m_mcgen_variation_type[i].c_str();
         }
@@ -2195,6 +2230,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
     // Needs the subchannel fullnames and per-channel binnings that CalcTotalBins just built.
     this->RegisterBinnedUnconstrainedChildren();
+    this->ResolveSplineCrossQuadMembersb();
     this->ResolveCovarianceToSplineUniformSources();
 
     log<LOG_INFO>(L"%1% || Checking number of Mode/Detector/Channel/Subchannels and BINs") % __func__;
@@ -2906,6 +2942,35 @@ void PROconfig::ResolveCovarianceToSplineUniformSources(){
             exit(EXIT_FAILURE);
         }
         log<LOG_INFO>(L"%1% || covariance_to_spline_uniform systematic '%2%' will decompose the sum of %3% covariance entries: %4%") % __func__ % parent.c_str() % matched.size() % matched;
+    }
+}
+
+void PROconfig::ResolveSplineCrossQuadMembersb(){
+    for(const auto &[parent, members] : m_mcgen_variation_cross_quad_splines){
+        const int binning = m_mcgen_variation_binning_map.at(parent);
+        std::vector<std::string> seen;
+        for(const std::string &name : members){
+            auto type_it = m_mcgen_variation_type_map.find(name);
+            if(type_it == m_mcgen_variation_type_map.end() || type_it->second != "spline"){
+                log<LOG_ERROR>(L"%1% || ERROR: splines= of spline_cross_quad systematic '%2%' names '%3%', which is not a type=\"spline\" entry in the variation list.") % __func__ % parent.c_str() % name.c_str();
+                log<LOG_ERROR>(L"Terminating.");
+                exit(EXIT_FAILURE);
+            }
+            if(m_mcgen_variation_binning_map.at(name) != binning){
+                log<LOG_ERROR>(L"%1% || ERROR: spline_cross_quad systematic '%2%' (binning var%3%) and its member '%4%' (binning var%5%) must share a binning.") % __func__ % parent.c_str() % binning % name.c_str() % m_mcgen_variation_binning_map.at(name);
+                log<LOG_ERROR>(L"Terminating.");
+                exit(EXIT_FAILURE);
+            }
+            if(std::find(seen.begin(), seen.end(), name) != seen.end()){
+                log<LOG_ERROR>(L"%1% || ERROR: spline_cross_quad systematic '%2%' lists member '%3%' twice.") % __func__ % parent.c_str() % name.c_str();
+                log<LOG_ERROR>(L"Terminating.");
+                exit(EXIT_FAILURE);
+            }
+            seen.push_back(name);
+        }
+        // Never a PROsyst entry of its own, so --syst-list/--exclude-systs resolve it to its members.
+        m_mcgen_variation_children[parent] = members;
+        log<LOG_INFO>(L"%1% || spline_cross_quad systematic '%2%' couples splines %3%") % __func__ % parent.c_str() % members;
     }
 }
 

@@ -342,6 +342,12 @@ namespace PROfit{
              * and may be claimed by one pattern only). */
             void ResolveCovarianceToSplineUniformSources();
 
+            /** @brief Validate every spline_cross_quad entry's splines= list (each name must be a type="spline"
+             * entry on the same binning, listed once) and register the entry in m_mcgen_variation_children
+             * with its members as children, so --syst-list/--exclude-systs resolve it to names PROsyst
+             * registers. Needs the allowlist and binning map, so it runs after the systematics are parsed. */
+            void ResolveSplineCrossQuadMembersb();
+
             SplinePriorType GetSplinePriorType(const std::string &systematic) const {
                 auto it = m_mcgen_variation_prior_types.find(systematic);
                 return it == m_mcgen_variation_prior_types.end()
@@ -554,6 +560,7 @@ namespace PROfit{
             std::map<std::string, std::vector<std::string>> m_mcgen_variation_children; //parent XML name -> the derived PROsyst names it expands to: "<parent>_bin<j>" (binned_unconstrained, filled at parse time) or "<parent>_decomp_knob_<k>"/"<parent>_resid_cov" (covariance_to_spline[_uniform], filled when PROsyst is built)
             std::map<std::string, std::string> m_mcgen_variation_sources; //covariance_to_spline_uniform: sources="<regex>" (unanchored) selecting the type="covariance" entries whose fractional matrices are summed and decomposed
             std::map<std::string, std::string> m_mcgen_variation_source_parent; //type="covariance" entry name -> the covariance_to_spline_uniform entry that decomposes it (such an entry is never built as a covariance of its own)
+            std::map<std::string, std::vector<std::string>> m_mcgen_variation_cross_quad_splines; //spline_cross_quad: splines="A, B, ..." -> the member type="spline" entries, in the order the CROSS branch enumerates pairs (i<j over this list)
 
             //FIX skepic
             std::vector<std::string> systematic_name;
