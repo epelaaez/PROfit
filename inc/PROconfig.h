@@ -343,10 +343,12 @@ namespace PROfit{
             void ResolveCovarianceToSplineUniformSources();
 
             /** @brief Validate every spline_cross_quad entry's splines= list (each name must be a type="spline"
-             * entry on the same binning, listed once) and register the entry in m_mcgen_variation_children
-             * with its members as children, so --syst-list/--exclude-systs resolve it to names PROsyst
-             * registers. Needs the allowlist and binning map, so it runs after the systematics are parsed. */
-            void ResolveSplineCrossQuadMembersb();
+             * entry on the same binning, listed once, all with the same apply_to_subchannel pattern or
+             * none; the entry must match that pattern or, when it has none, inherits it) and register
+             * the entry in m_mcgen_variation_children with its members as children, so
+             * --syst-list/--exclude-systs resolve it to names PROsyst registers. Needs the allowlist
+             * and binning map, so it runs after the systematics are parsed. */
+            void ResolveSplineCrossQuadMembers();
 
             SplinePriorType GetSplinePriorType(const std::string &systematic) const {
                 auto it = m_mcgen_variation_prior_types.find(systematic);

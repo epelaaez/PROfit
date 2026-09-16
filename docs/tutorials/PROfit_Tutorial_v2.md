@@ -499,10 +499,12 @@ PROsyst on its own. Its name is a shorthand for its members:
 group's members, the coupling is dropped and the survivors are combined
 multiplicatively as ordinary splines (PROfit warns when this happens). Members
 must be `type="spline"` on the same `binning`, carry no `inflate=`, use evenly
-spaced `knobvals`, and belong to no other group. The additive form is exact only
-when the response is at most quadratic in the group's parameters, which holds
-for the `F_A²` case above; PROfit checks each member against a quadratic at its
-knots and warns if the departure is large.
+spaced `knobvals`, belong to no other group, and all carry the same
+`apply_to_subchannel` pattern or none. The entry itself inherits that pattern
+when it has none. The additive form is exact only when the response is at most
+quadratic in the group's parameters, which holds for the `F_A²` case above; 
+PROfit checks each member against a quadratic at its knots and warns if the 
+departure is large.
 
 ### Freeing the leading modes of a covariance: `covariance_to_spline_uniform`
 

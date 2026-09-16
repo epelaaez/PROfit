@@ -2230,7 +2230,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
     // Needs the subchannel fullnames and per-channel binnings that CalcTotalBins just built.
     this->RegisterBinnedUnconstrainedChildren();
-    this->ResolveSplineCrossQuadMembersb();
+    this->ResolveSplineCrossQuadMembers();
     this->ResolveCovarianceToSplineUniformSources();
 
     log<LOG_INFO>(L"%1% || Checking number of Mode/Detector/Channel/Subchannels and BINs") % __func__;
@@ -2954,7 +2954,7 @@ void PROconfig::ResolveCovarianceToSplineUniformSources(){
     }
 }
 
-void PROconfig::ResolveSplineCrossQuadMembersb(){
+void PROconfig::ResolveSplineCrossQuadMembers(){
     for(const auto &[parent, members] : m_mcgen_variation_cross_quad_splines){
         const int binning = m_mcgen_variation_binning_map.at(parent);
         std::vector<std::string> seen;
@@ -2977,6 +2977,37 @@ void PROconfig::ResolveSplineCrossQuadMembersb(){
             }
             seen.push_back(name);
         }
+
+        // apply_to_subchannel: the cross entry only couples its members, so it cannot carry a
+        // scope of its own. So: every member must carry the same pattern (or none), and the
+        // entry either matches it or, when it has none, inherits it.
+        auto pattern_of = [&](const std::string &name) -> const std::string* {
+            auto it = m_mcgen_variation_apply_to_subchannel.find(name);
+            return it == m_mcgen_variation_apply_to_subchannel.end() ? nullptr : &it->second;
+        };
+        const std::string *member_pattern = pattern_of(members.front());
+        for(const std::string &name : members){
+            const std::string *pat = pattern_of(name);
+            const bool same = (pat == nullptr && member_pattern == nullptr) || (pat && member_pattern && *pat == *member_pattern);
+            if(!same){
+                log<LOG_ERROR>(L"%1% || ERROR: spline_cross_quad systematic '%2%': members '%3%' (apply_to_subchannel='%4%') and '%5%' (apply_to_subchannel='%6%') must carry the same apply_to_subchannel pattern, or none.")
+                    % __func__ % parent.c_str() % members.front().c_str() % (member_pattern ? member_pattern->c_str() : "") % name.c_str() % (pat ? pat->c_str() : "");
+                log<LOG_ERROR>(L"Terminating.");
+                exit(EXIT_FAILURE);
+            }
+        }
+        const std::string *parent_pattern = pattern_of(parent);
+        if(parent_pattern && !(member_pattern && *parent_pattern == *member_pattern)){
+            log<LOG_ERROR>(L"%1% || ERROR: spline_cross_quad systematic '%2%' has apply_to_subchannel='%3%' but its members have '%4%'. The entry must match its members' pattern, or omit apply_to_subchannel to inherit it.")
+                % __func__ % parent.c_str() % parent_pattern->c_str() % (member_pattern ? member_pattern->c_str() : "");
+            log<LOG_ERROR>(L"Terminating.");
+            exit(EXIT_FAILURE);
+        }
+        if(!parent_pattern && member_pattern){
+            m_mcgen_variation_apply_to_subchannel[parent] = *member_pattern;
+            log<LOG_INFO>(L"%1% || spline_cross_quad systematic '%2%' inherits apply_to_subchannel='%3%' from its members.") % __func__ % parent.c_str() % member_pattern->c_str();
+        }
+
         // Never a PROsyst entry of its own, so --syst-list/--exclude-systs resolve it to its members.
         m_mcgen_variation_children[parent] = members;
         log<LOG_INFO>(L"%1% || spline_cross_quad systematic '%2%' couples splines %3%") % __func__ % parent.c_str() % members;
