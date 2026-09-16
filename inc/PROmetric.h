@@ -261,8 +261,8 @@ namespace PROfit {
                 }
 
                 if(shape_only) {
-                    // PROdata::Normalize rescales the data to the prediction per channel block,
-                    // so each block with at least one contributing bin loses one dof.
+                    // Shape-only rescales the prediction onto the data integral per channel
+                    // block, so each block with at least one contributing bin loses one dof.
                     const PROconfig &c = GetConfig();
                     std::vector<char> contributing(data.Spec().size(), 0);
                     for(Eigen::Index i : bins) contributing[(size_t)i] = 1;

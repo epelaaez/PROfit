@@ -557,8 +557,8 @@ std::vector<Eigen::Index> PROcovariance::contributingBins() const {
     const Eigen::VectorXf &d = data.Spec();
     // Same predicate as operator(): variance > 0 AND active. The data stands in for the
     // prediction; for the prediction-valued (pearson) variance every bin is floored positive,
-    // so the set is exactly the active bins. In shape_only mode the normalised data is zero
-    // iff the raw data is zero, so raw data gives the same set.
+    // so the set is exactly the active bins. Shape-only rescales the prediction, never the
+    // data, so the same predicate applies there.
     const Eigen::VectorXf var = statisticalVariancesDependOnPrediction()
         ? Eigen::VectorXf::Ones(d.size())
         : statisticalVariances(d, d, nullptr);
