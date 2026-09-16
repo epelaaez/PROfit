@@ -8,15 +8,196 @@
 #include <Eigen/Eigen>
 #include <mutex>
 #include <random>
+#include <set>
 
 namespace PROfit {
 
-    bool PROsyst::shape_only = false;
+    std::vector<std::pair<size_t,size_t>> PROsyst::ChannelBlocks(const PROconfig &config, int binning) {
+        std::vector<std::pair<size_t,size_t>> blocks;
+        size_t global_subchannel_index = 0, global_channel_index = 0;
+        for(size_t im = 0; im < config.m_num_modes; ++im)
+            for(size_t id = 0; id < config.m_num_detectors; ++id)
+                for(size_t ic = 0; ic < config.m_num_channels; ++ic) {
+                    const size_t start = config.GetGlobalVariableBinStart(global_subchannel_index, binning);
+                    const size_t len = config.m_num_subchannels[ic] * config.GetChannelVariableBins(global_channel_index, binning).NBins();
+                    blocks.emplace_back(start, len);
+                    global_subchannel_index += config.m_num_subchannels[ic];
+                    ++global_channel_index;
+                }
+        return blocks;
+    }
+
+    void PROsyst::ShapeRescaleUniverse(const std::vector<std::pair<size_t,size_t>> &blocks, const Eigen::VectorXf &cv, Eigen::VectorXf &var) {
+        for(const auto &[start, len]: blocks) {
+            const float sv = var.segment(start, len).sum();
+            if(sv == 0.0f || !std::isfinite(sv)) continue;
+            var.segment(start, len) *= cv.segment(start, len).sum() / sv;
+        }
+    }
+
+    Eigen::MatrixXf PROsyst::ShapeProjector(const std::vector<std::pair<size_t,size_t>> &blocks, const Eigen::VectorXf &cv) {
+        Eigen::MatrixXf R = Eigen::MatrixXf::Identity(cv.size(), cv.size());
+        for(const auto &[start, len]: blocks) {
+            const float na = cv.segment(start, len).sum();
+            if(na == 0.0f || !std::isfinite(na)) continue;   // empty channel: nothing to project
+            // B_ij = N_j / N_a on the block: every row of the block gets the same row vector.
+            R.block(start, start, len, len).rowwise() -= (cv.segment(start, len) / na).transpose();
+        }
+        return R;
+    }
+
+    std::vector<char> PROsyst::SubchannelScopeMask(const PROconfig &config, int binning, const std::string &pattern) {
+        std::vector<char> mask(config.m_num_variable_bins_total[binning], 1);
+        if(pattern.empty()) return mask;
+        std::fill(mask.begin(), mask.end(), 0);
+        const std::vector<std::string> names = MatchNames(config.m_fullnames, pattern, "apply_to_subchannel scope");
+        for(const auto &name: names) {
+            const size_t is = config.GetSubchannelIndex(name);
+            const size_t ic = config.GetLocalChannelIndexFromGlobalSubchannelIndex(is);
+            const size_t start = config.GetGlobalVariableBinStart(is, binning);
+            const size_t nb = config.m_channel_variable_bins[ic][binning].NBins();
+            for(size_t b = 0; b < nb && start + b < mask.size(); ++b) mask[start + b] = 1;
+        }
+        return mask;
+    }
+
+    void PROsyst::ScopeMatrixToSubchannels(const PROconfig &config, int binning, const std::string &pattern, Eigen::MatrixXf &M) {
+        if(pattern.empty()) return;
+        const std::vector<char> mask = SubchannelScopeMask(config, binning, pattern);
+        if((Eigen::Index)mask.size() != M.rows() || M.rows() != M.cols()) {
+            log<LOG_WARNING>(L"%1% || apply_to_subchannel='%2%': matrix is %3%x%4% but binning %5% has %6% bins; not scoped.") % __func__ % pattern.c_str() % M.rows() % M.cols() % binning % mask.size();
+            return;
+        }
+        for(size_t b = 0; b < mask.size(); ++b) {
+            if(mask[b]) continue;
+            M.row((Eigen::Index)b).setZero();
+            M.col((Eigen::Index)b).setZero();
+        }
+    }
+
+    void PROsyst::ScopeSystStructSpectra(const PROconfig &config, const SystStruct &syst, int spectra_binning) {
+        if(syst.apply_to_subchannel.empty() || !syst.p_cv || syst.p_multi_spec.empty()) return;
+        const int binning = spectra_binning < 0 ? config.i_prime : spectra_binning;
+        const std::vector<char> mask = SubchannelScopeMask(config, binning, syst.apply_to_subchannel);
+        const Eigen::VectorXf &cv = syst.p_cv->Spec();
+        if((size_t)cv.size() != mask.size()) {
+            log<LOG_WARNING>(L"%1% || apply_to_subchannel='%2%' for %3%: CV has %4% bins but binning %5% has %6%; spectra not scoped.") % __func__ % syst.apply_to_subchannel.c_str() % syst.systname.c_str() % cv.size() % binning % mask.size();
+            return;
+        }
+        size_t nfixed = 0;
+        for(const auto &spec: syst.p_multi_spec) {
+            if(!spec || spec->Spec().size() != cv.size()) continue;
+            // The spectra live behind shared_ptr: this normalises the caller's struct too.
+            Eigen::VectorXf &v = spec->Spec();
+            Eigen::VectorXf &e = spec->Error();
+            for(size_t b = 0; b < mask.size(); ++b) {
+                if(mask[b]) continue;
+                if(v((Eigen::Index)b) != cv((Eigen::Index)b)) { v((Eigen::Index)b) = cv((Eigen::Index)b); ++nfixed; }
+                if(e.size() == cv.size()) e((Eigen::Index)b) = syst.p_cv->Error()((Eigen::Index)b);
+            }
+        }
+        if(nfixed)
+            log<LOG_INFO>(L"%1% || apply_to_subchannel='%2%': reset %3% out-of-scope universe bins of %4% to the CV.") % __func__ % syst.apply_to_subchannel.c_str() % nfixed % syst.systname.c_str();
+    }
+
+    void PROsyst::ApplySubchannelScopes(const PROconfig &config, const std::vector<SystStruct> &systs) {
+        // name -> pattern: the structs' own field first, then the XML map (covers mcstat,
+        // DetVar-built systematics and anything else with no SystStruct field set).
+        std::map<std::string, std::string> patterns;
+        for(const auto &syst: systs)
+            if(!syst.apply_to_subchannel.empty()) patterns[syst.systname] = syst.apply_to_subchannel;
+        for(const auto &[name, pattern]: config.m_mcgen_variation_apply_to_subchannel)
+            if(!pattern.empty() && !patterns.count(name)) patterns[name] = pattern;
+        if(patterns.empty()) return;
+
+        // Children synthesized by covariance_to_spline / external_covariance_to_spline /
+        // PROjector (`_decomp_knob_i`, `_resid_cov`) and binned_unconstrained (`_bin<j>`)
+        // inherit the parent's scope (idempotent where the child was built scoped already).
+        auto lookup = [&](const std::string &name) -> std::string {
+            auto it = patterns.find(name);
+            if(it != patterns.end()) return it->second;
+            for(const char *suffix: {"_decomp_knob_", "_resid_cov", "_bin"}) {
+                const size_t pos = name.rfind(suffix);
+                if(pos != std::string::npos) {
+                    auto pit = patterns.find(name.substr(0, pos));
+                    if(pit != patterns.end()) return pit->second;
+                }
+            }
+            return std::string();
+        };
+
+        size_t n_splines_scoped = 0, n_covs_scoped = 0;
+        for(size_t j = 0; j < splines.size(); ++j) {
+            const std::string pattern = lookup(spline_names[j]);
+            if(pattern.empty()) continue;
+            const int binning = j < spline_binnings.size() && spline_binnings[j] >= 0 ? spline_binnings[j] : other_index;
+            const std::vector<char> mask = SubchannelScopeMask(config, binning, pattern);
+            Spline &sp = splines[j];
+            if((size_t)sp.bins != mask.size()) {
+                log<LOG_WARNING>(L"%1% || apply_to_subchannel='%2%': spline %3% has %4% bins but binning %5% has %6%; not scoped.") % __func__ % pattern.c_str() % spline_names[j].c_str() % sp.bins % binning % mask.size();
+                continue;
+            }
+            for(int b = 0; b < sp.bins; ++b) {
+                if(mask[(size_t)b]) continue;
+                for(int s = 0; s < sp.segments_per_bin; ++s) {
+                    SplineSegment &seg = sp.segments[(size_t)(b * sp.segments_per_bin + s)];
+                    seg.coeffs = {1.0f, 0.0f, 0.0f, 0.0f};   // exactly flat at 1: no response
+                }
+            }
+            ++n_splines_scoped;
+        }
+        // Walk syst_map, not covar_names: the mcstat covariance is registered in
+        // syst_map/covmat only (never in covar_names), and it must be scoped too.
+        for(const auto &[name, entry]: syst_map) {
+            if(entry.second != SystType::Covariance || entry.first >= covmat.size()) continue;
+            const std::string pattern = lookup(name);
+            if(pattern.empty()) continue;
+            const size_t idx = entry.first;
+            ScopeMatrixToSubchannels(config, other_index, pattern, covmat[idx]);
+            if(idx < corrmat.size()) corrmat[idx] = GenerateCorrMatrix(covmat[idx]);
+            ++n_covs_scoped;
+        }
+        log<LOG_INFO>(L"%1% || apply_to_subchannel post-build scope applied to %2% spline(s) and %3% covariance matrix(es) for variable %4%.") % __func__ % n_splines_scoped % n_covs_scoped % other_index;
+    }
 
     PROsyst::PROsyst( const PROpeller &prop, const PROconfig &config, const std::vector<SystStruct>& systs, bool shapeonly, int other_index, const PROmodel* model, const Eigen::VectorXf* params) : other_index(other_index) {
         shape_only = shapeonly;
+        if(shape_only) {
+            // Per-channel blocks and a nominal spectrum for every binning any systematic
+            // lives in (splines keep their own binning) plus this PROsyst's own.
+            std::set<int> binnings{other_index};
+            for(const auto &syst: systs) if(syst.binning >= 0) binnings.insert(syst.binning);
+            for(int b: binnings) {
+                shape_blocks[b] = ChannelBlocks(config, b);
+                const Eigen::Index nb = config.m_num_variable_bins_total[b];
+                Eigen::VectorXf nominal;
+                // Prefer the nominal MC carried by any weight-based systematic in this
+                // binning (it is exactly the CV every fractional matrix is normalised to).
+                for(const auto &syst: systs) {
+                    const int sb = syst.binning < 0 ? other_index : syst.binning;
+                    if(sb == b && syst.p_cv && syst.p_cv->GetNbins() == nb) { nominal = syst.p_cv->Spec(); break; }
+                }
+                if(nominal.size() == 0) {
+                    // No weight-based systematic in this binning (e.g. flat/norm/external only):
+                    // bin the CV event weights directly.
+                    nominal = Eigen::VectorXf::Zero(nb);
+                    if(b < (int)prop.variable_bin_indices.size())
+                        for(size_t ev = 0; ev < prop.NEvent(); ++ev) {
+                            const int bin = prop.variable_bin_indices[b][ev];
+                            if(bin >= 0 && bin < nb) nominal(bin) += prop.added_weights[ev];
+                        }
+                }
+                shape_nominal[b] = nominal;
+            }
+            log<LOG_INFO>(L"%1% || Shape-only mode: systematics for variable %2% will be projected onto per-channel shape (%3% channel blocks).") % __func__ % other_index % shape_blocks.at(other_index).size();
+        }
         for(const auto& syst: systs) {
             log<LOG_DEBUG>(L"%1% || syst mode: %2%") % __func__ % syst.mode.c_str();
+            // Layer 2 of apply_to_subchannel (see PROsyst.h): make the input spectra exactly
+            // CV outside the scope before anything is derived from them. Idempotent on
+            // structs PROcreate already CV-filled; the only real work is for DetVar/HistVar
+            // structs and any other producer that does not know about the pattern.
+            ScopeSystStructSpectra(config, syst, syst.mode == "covariance" ? other_index : syst.binning);
             if(syst.mode == "spline" || syst.mode == "norm" || syst.mode == "hist1d" || syst.mode == "hist2d" || syst.mode == "explicit_spline") {
                 bool unmirrored = config.m_mcgen_variation_unmirrored.find(syst.systname) != config.m_mcgen_variation_unmirrored.end();
                 FillSpline(syst, unmirrored);
@@ -26,6 +207,8 @@ namespace PROfit {
                     % (is_flux ? "pre-migration (flux)" : "post-migration");
                 spline_prior_types.back() = config.GetSplinePriorType(syst.systname);
                 ++n_splines;
+            } else if(syst.mode == "binned_unconstrained") {
+                FillBinnedUnconstrainedSplines(config, syst);
             } else if(syst.mode == "spline_to_covariance") {
                 if(model == nullptr){
                     log<LOG_ERROR>(L"%1% || spline_to_covariance requires a PROmodel to use spline2cov. "
@@ -98,6 +281,12 @@ namespace PROfit {
                 covar_names.push_back(syst.systname);
                 ++n_covar;
             } else if(syst.mode == "covariance") {
+                if(config.m_mcgen_variation_source_parent.count(syst.systname)) {
+                    // Summed and decomposed by a covariance_to_spline_uniform entry below; never a
+                    // covariance of its own.
+                    log<LOG_DEBUG>(L"%1% || covariance '%2%' is a source of '%3%'; not built separately") % __func__ % syst.systname.c_str() % config.m_mcgen_variation_source_parent.at(syst.systname).c_str();
+                    continue;
+                }
                 this->CreateMatrix(syst);
                 covar_names.push_back(syst.systname);
                 ++n_covar;
@@ -106,7 +295,6 @@ namespace PROfit {
                 size_t n_covar_before = covar_names.size();
                 FillSplinesFromCovariance(syst);
                 size_t n_after = splines.size();
-                size_t n_covar_after = covar_names.size();
 
                 // Each synthesized decomposition knob inherits the parent systematic's
                 // pre/post-migration classification.  A flux covariance decomposed into knobs
@@ -115,26 +303,7 @@ namespace PROfit {
                 bool is_flux = config.has_flux_tag(syst.systname);
                 for(size_t si = n_before; si < n_after; ++si)
                     spline_is_pre_migration.push_back(is_flux);
-
-                // Propagate parent tag + plotname to the synthesized knob entries so downstream
-                // plotting code (PROplot.cxx) can group them under the same tag.
-                // The maps are populated by the XML parser; here we append entries for the
-                // dynamically-generated decomposition knobs and the optional residual covariance.
-                PROconfig& mut_config = const_cast<PROconfig&>(config);
-                auto parent_tags_it = mut_config.m_mcgen_variation_tags.find(syst.systname);
-                auto parent_plotname_it = mut_config.m_mcgen_variation_plotname_map.find(syst.systname);
-                auto propagate = [&](const std::string& child_name) {
-                    if(parent_tags_it != mut_config.m_mcgen_variation_tags.end()) {
-                        mut_config.m_mcgen_variation_tags[child_name] = parent_tags_it->second;
-                    }
-                    if(parent_plotname_it != mut_config.m_mcgen_variation_plotname_map.end()) {
-                        // Append the "_decomp_knob_<i>" / "_resid_cov" suffix onto the parent plotname.
-                        const std::string suffix = child_name.substr(syst.systname.size());
-                        mut_config.m_mcgen_variation_plotname_map[child_name] = parent_plotname_it->second + suffix;
-                    }
-                };
-                for(size_t si = n_before; si < n_after; ++si) propagate(spline_names[si]);
-                for(size_t ci = n_covar_before; ci < n_covar_after; ++ci) propagate(covar_names[ci]);
+                PropagateDerivedNames(config, syst.systname, n_before, n_covar_before);
             }else if(syst.mode == "flat"){
                 this->CreateFlatMatrix(config, syst);
                 covar_names.push_back(syst.systname);
@@ -184,6 +353,44 @@ namespace PROfit {
             }
         }
 
+        // covariance_to_spline_uniform: sum the fractional covariances of the source entries (the
+        // same matrices CreateMatrix would have built, inflate included) and decompose the sum in
+        // THIS PROsyst's bin space (other_index), so the free modes are the ones the chi2 sees.
+        for(const auto &[parent, pattern] : config.m_mcgen_variation_sources) {
+            Eigen::MatrixXf summed;
+            std::vector<std::string> source_names;
+            for(const auto &s_src : systs) {
+                if(s_src.mode != "covariance") continue;
+                auto it = config.m_mcgen_variation_source_parent.find(s_src.systname);
+                if(it == config.m_mcgen_variation_source_parent.end() || it->second != parent) continue;
+                Eigen::MatrixXf m = PROsyst::GenerateFracCovarMatrix(s_src) * (s_src.inflate * s_src.inflate);
+                if(source_names.empty()) summed = m; else summed += m;
+                source_names.push_back(s_src.systname);
+            }
+            if(source_names.empty()) {
+                log<LOG_ERROR>(L"%1% || covariance_to_spline_uniform systematic '%2%': none of its sources ('%3%') are present in this PROsyst (variable %4%).")
+                    % __func__ % parent.c_str() % pattern.c_str() % other_index;
+                log<LOG_ERROR>(L"Terminating.");
+                exit(EXIT_FAILURE);
+            }
+            log<LOG_INFO>(L"%1% || covariance_to_spline_uniform systematic '%2%': decomposing the sum of %3% covariance entries %4% (%5%x%5%, variable %6%)")
+                % __func__ % parent.c_str() % source_names.size() % source_names % summed.rows() % other_index;
+
+            SystStruct local(parent, 0);
+            local.binning = other_index;
+            local.num_decomp_knobs = config.m_mcgen_variation_num_decomp_knobs.at(parent);
+            auto rc = config.m_mcgen_variation_include_resid_cov.find(parent);
+            if(rc != config.m_mcgen_variation_include_resid_cov.end()) local.include_resid_cov = rc->second;
+            const auto &box = config.m_mcgen_variation_restrict.at(parent);
+            const size_t n_before = splines.size();
+            const size_t n_covar_before = covar_names.size();
+            FillSplinesFromCovarianceMatrix(summed, local, SplinePriorType::Uniform, box.first, box.second);
+            const bool is_flux = config.has_flux_tag(parent);
+            for(size_t si = n_before; si < splines.size(); ++si)
+                spline_is_pre_migration.push_back(is_flux);
+            PropagateDerivedNames(config, parent, n_before, n_covar_before);
+        }
+
         spline_priors = Eigen::VectorXf::Constant(n_splines, 1);
         spline_centers = Eigen::VectorXf::Constant(n_splines, 0);
         for(const auto &[name, prior]: config.m_mcgen_variation_prior) {
@@ -213,6 +420,30 @@ namespace PROfit {
             covmat.push_back(fractional_mcstat_cov);
             corrmat.push_back(mcstat_corr);
             ++n_covar;
+        }
+
+        // Layer 2 of apply_to_subchannel, matrix/spline side: flat, norm_to_covariance,
+        // external covariances, mcstat, cov->spline children — every type, uniformly.
+        ApplySubchannelScopes(config, systs);
+
+        if(shape_only && covmat.size()) {
+            // Shape-only: project EVERY covariance source (flat, norm_to_covariance,
+            // external, mcstat, covariance_to_spline residual, ...) onto per-channel shape.
+            // Universe-built matrices are already shape (R is idempotent on them); the
+            // parametric sources carry full normalisation until projected here.
+            const Eigen::MatrixXf R = ShapeProjector(shape_blocks.at(other_index), shape_nominal.at(other_index));
+            size_t nproj = 0;
+            for(size_t i = 0; i < covmat.size(); ++i) {
+                if(covmat[i].rows() != R.rows() || covmat[i].cols() != R.cols()) {
+                    log<LOG_WARNING>(L"%1% || Shape-only: covariance %2% is %3%x%4%, expected %5%; not projected.") % __func__ % i % covmat[i].rows() % covmat[i].cols() % R.rows();
+                    continue;
+                }
+                Eigen::MatrixXf proj = R * covmat[i] * R.transpose();
+                covmat[i] = 0.5f * (proj + proj.transpose());
+                if(i < corrmat.size()) corrmat[i] = GenerateCorrMatrix(covmat[i]);
+                ++nproj;
+            }
+            log<LOG_INFO>(L"%1% || Shape-only: projected %2% covariance source(s) onto per-channel shape for variable %3%.") % __func__ % nproj % other_index;
         }
 
         if(covmat.size()==0){
@@ -277,6 +508,7 @@ namespace PROfit {
         ret.fractional_covariance = ret.covmat.size() ? ret.SumMatrices()
             : Eigen::MatrixXf::Constant(fractional_covariance.rows(), fractional_covariance.cols(), 0.0f);
         ret.other_index = other_index;
+        ret.shape_only = shape_only;
         ret.cov2spline_debug_info = cov2spline_debug_info;
         log<LOG_DEBUG>(L"%1% | Done Subset.") % __func__ ;
         return ret;
@@ -327,6 +559,7 @@ namespace PROfit {
         ret.fractional_covariance = ret.covmat.size() ? ret.SumMatrices()
             : Eigen::MatrixXf::Constant(fractional_covariance.rows(), fractional_covariance.cols(), 0.0f);
         ret.other_index = other_index;
+        ret.shape_only = shape_only;
         ret.cov2spline_debug_info = cov2spline_debug_info;
         return ret;
     }
@@ -362,6 +595,7 @@ namespace PROfit {
         ret.fractional_covariance = ret.covmat.size() ? ret.SumMatrices()
             : Eigen::MatrixXf::Constant(fractional_covariance.rows(), fractional_covariance.cols(), 0.0f);
         ret.other_index = other_index;
+        ret.shape_only = shape_only;
         return ret;
     }
 
@@ -391,8 +625,35 @@ namespace PROfit {
         Eigen::MatrixXf cv_inverse = cv.asDiagonal().inverse();
         Eigen::MatrixXf frac_covar_matrix = cv_inverse * mat * cv_inverse;
         PROsyst::toFiniteMatrix(frac_covar_matrix);
+        if(shape_only) {
+            // Products of several shape-only spline ratios preserve each channel's
+            // integral only to first order; project the throw covariance exactly.
+            const Eigen::MatrixXf R = ShapeProjector(ChannelBlocks(config, other_index), cv);
+            frac_covar_matrix = R * frac_covar_matrix * R.transpose();
+        }
 
         return frac_covar_matrix;
+    }
+
+    void PROsyst::PropagateDerivedNames(const PROconfig& config, const std::string& parent, size_t n_spl_before, size_t n_cov_before) {
+        // The maps are populated by the XML parser for the parent only; append entries for the
+        // dynamically generated names so tag grouping, plot labels and name lookups all resolve.
+        PROconfig& mut_config = const_cast<PROconfig&>(config);
+        auto parent_tags_it = mut_config.m_mcgen_variation_tags.find(parent);
+        auto parent_plotname_it = mut_config.m_mcgen_variation_plotname_map.find(parent);
+        std::vector<std::string> &children = mut_config.m_mcgen_variation_children[parent];
+        auto propagate = [&](const std::string& child_name) {
+            if(parent_tags_it != mut_config.m_mcgen_variation_tags.end())
+                mut_config.m_mcgen_variation_tags[child_name] = parent_tags_it->second;
+            if(parent_plotname_it != mut_config.m_mcgen_variation_plotname_map.end()) {
+                // Append the "_decomp_knob_<i>" / "_resid_cov" suffix onto the parent plotname.
+                const std::string suffix = child_name.substr(parent.size());
+                mut_config.m_mcgen_variation_plotname_map[child_name] = parent_plotname_it->second + suffix;
+            }
+            if(std::find(children.begin(), children.end(), child_name) == children.end()) children.push_back(child_name);
+        };
+        for(size_t si = n_spl_before; si < spline_names.size(); ++si) propagate(spline_names[si]);
+        for(size_t ci = n_cov_before; ci < covar_names.size(); ++ci) propagate(covar_names[ci]);
     }
 
     Eigen::MatrixXf PROsyst::SumMatrices() const{
@@ -449,7 +710,7 @@ namespace PROfit {
 
         //generate matrix only if it's not already in the map
         if(syst_map.find(sysname) == syst_map.end()){
-            std::pair<Eigen::MatrixXf, Eigen::MatrixXf> matrices = PROsyst::GenerateCovarMatrices(syst);
+            std::pair<Eigen::MatrixXf, Eigen::MatrixXf> matrices = PROsyst::GenerateCovarMatrices(syst, shape_only ? &shapeBlocksFor(syst) : nullptr);
 
             // If inflate is set, scale the covariance by inflate^2 (uncertainty scales by inflate).
             // The correlation matrix is unchanged by a constant scaling.
@@ -620,9 +881,9 @@ namespace PROfit {
         return;
     }
 
-    std::pair<Eigen::MatrixXf, Eigen::MatrixXf>  PROsyst::GenerateCovarMatrices(const SystStruct& sys_obj){
+    std::pair<Eigen::MatrixXf, Eigen::MatrixXf>  PROsyst::GenerateCovarMatrices(const SystStruct& sys_obj, const std::vector<std::pair<size_t,size_t>> *shape_blocks){
         //get fractional covar
-        Eigen::MatrixXf frac_covar_matrix = PROsyst::GenerateFracCovarMatrix(sys_obj);
+        Eigen::MatrixXf frac_covar_matrix = PROsyst::GenerateFracCovarMatrix(sys_obj, shape_blocks);
 
         //get fractional covariance matrix
         Eigen::MatrixXf corr_covar_matrix = PROsyst::GenerateCorrMatrix(frac_covar_matrix);
@@ -630,34 +891,39 @@ namespace PROfit {
         return std::pair<Eigen::MatrixXf, Eigen::MatrixXf>({frac_covar_matrix, corr_covar_matrix});
     }
 
-    Eigen::MatrixXf PROsyst::GenerateFullCovarMatrix(const SystStruct& sys_obj){
+    Eigen::MatrixXf PROsyst::GenerateFullCovarMatrix(const SystStruct& sys_obj, const std::vector<std::pair<size_t,size_t>> *shape_blocks){
         int n_universe = sys_obj.GetNUniverse(); 
         std::string sys_name = sys_obj.GetSysName();
 
         const PROspec& cv_spec = sys_obj.CV();
         int nbins = cv_spec.GetNbins();
-        float cv_integral = cv_spec.Spec().sum(); 
 
         //build full covariance matrix 
         Eigen::MatrixXf full_covar_matrix = Eigen::MatrixXf::Zero(nbins, nbins);
         for(int i = 0; i != n_universe; ++i){
 
-            PROspec spec_diff;
-            if(shape_only){
-                spec_diff = cv_spec - sys_obj.Variation(i)*(cv_integral/sys_obj.Variation(i).Spec().sum());
+            if(shape_blocks){
+                // Shape-only: rescale the universe to the CV integral PER CHANNEL, the same
+                // domain the metric's per-channel prediction/data rescale uses. (A global
+                // integral would leave channel-to-channel normalisation modes in the matrix
+                // that the residual can never see.)
+                Eigen::VectorXf var = sys_obj.Variation(i).Spec();
+                ShapeRescaleUniverse(*shape_blocks, cv_spec.Spec(), var);
+                const Eigen::VectorXf spec_diff = cv_spec.Spec() - var;
+                full_covar_matrix += (spec_diff * spec_diff.transpose()) / static_cast<float>(n_universe);
             }else{
-                spec_diff = cv_spec - sys_obj.Variation(i);
+                PROspec spec_diff = cv_spec - sys_obj.Variation(i);
+                full_covar_matrix += (spec_diff.Spec() * spec_diff.Spec().transpose() ) / static_cast<float>(n_universe);
             }
-            full_covar_matrix += (spec_diff.Spec() * spec_diff.Spec().transpose() ) / static_cast<float>(n_universe);
         }
 
         return full_covar_matrix;
     }
 
-    Eigen::MatrixXf PROsyst::GenerateFracCovarMatrix(const SystStruct& sys_obj){
+    Eigen::MatrixXf PROsyst::GenerateFracCovarMatrix(const SystStruct& sys_obj, const std::vector<std::pair<size_t,size_t>> *shape_blocks){
 
         //build full covariance matrix 
-        Eigen::MatrixXf full_covar_matrix = PROsyst::GenerateFullCovarMatrix(sys_obj);
+        Eigen::MatrixXf full_covar_matrix = PROsyst::GenerateFullCovarMatrix(sys_obj, shape_blocks);
 
         //build fractional covariance matrix 
         //first, get the matrix with diagonal being reciprocal of CV spectrum prdiction
@@ -811,7 +1077,6 @@ namespace PROfit {
     void PROsyst::FillSpline(const SystStruct& syst, bool unmirrored) {
         std::vector<PROspec> ratios;
         ratios.reserve(syst.p_multi_spec.size());
-        float cv_integral = syst.p_cv->Spec().sum();
 
         bool found0 = false;
         int knob0_index = -1;  // Index of knobval=0 in ratios vector
@@ -829,15 +1094,15 @@ namespace PROfit {
                 knob0_index = ratios.size();  // Will be set after push_back below
             }
 
-            float mod = shape_only ? cv_integral / syst.p_multi_spec[i]->Spec().sum() : 1.0;
-            /*
-               if (mod < 0) {
-               log<LOG_ERROR>(L"%1% || Spline shift weight is negative with value %2% for systematic %3%") % __func__ % mod % syst.systname.c_str();
-               log<LOG_ERROR>(L"Terminating.");
-               exit(EXIT_FAILURE);
-               }
-               */
-            ratios.push_back(((*syst.p_multi_spec[i]) * mod) / *syst.p_cv);
+            if(shape_only) {
+                // Shape-only: each knob's spectrum is rescaled to the CV integral PER
+                // CHANNEL before the ratio is taken, so the spline moves shape only.
+                PROspec var = *syst.p_multi_spec[i];
+                ShapeRescaleUniverse(shapeBlocksFor(syst), syst.p_cv->Spec(), var.Spec());
+                ratios.push_back(var / *syst.p_cv);
+            } else {
+                ratios.push_back((*syst.p_multi_spec[i]) / *syst.p_cv);
+            }
             knobvals.push_back(syst.knobval[i]);
         }
         if (!found0) {
@@ -966,12 +1231,109 @@ namespace PROfit {
 
     }
 
+    void PROsyst::FillBinnedUnconstrainedSplines(const PROconfig& config, const SystStruct& syst) {
+        const int binning = syst.binning;
+        if(binning < 0 || binning >= (int)config.m_num_variable_bins_total.size()) {
+            log<LOG_ERROR>(L"%1% || binned_unconstrained systematic '%2%' has invalid binning index %3%.") % __func__ % syst.systname.c_str() % binning;
+            log<LOG_ERROR>(L"Terminating.");
+            exit(EXIT_FAILURE);
+        }
+        const int nbins = (int)config.m_num_variable_bins_total[binning];
+        if(!syst.has_restrict || !(syst.restrict_lo < 0.0f && syst.restrict_hi > 0.0f)) {
+            log<LOG_ERROR>(L"%1% || binned_unconstrained systematic '%2%' needs a parameter range that contains 0 (CV), got [%3%, %4%].")
+                % __func__ % syst.systname.c_str() % syst.restrict_lo % syst.restrict_hi;
+            log<LOG_ERROR>(L"Terminating.");
+            exit(EXIT_FAILURE);
+        }
+        const float theta_lo = syst.restrict_lo;
+        const float theta_hi = syst.restrict_hi;
+
+        // Group the free global bins by their LOCAL bin index within their subchannel: one
+        // parameter per local bin, shared by every matched subchannel.
+        std::map<int, std::vector<int>> bins_by_local;
+        for(int g : syst.norm_bins) {
+            if(g < 0 || g >= nbins) {
+                log<LOG_ERROR>(L"%1% || binned_unconstrained systematic '%2%' lists global bin %3% outside variable %4% (%5% bins).") % __func__ % syst.systname.c_str() % g % binning % nbins;
+                log<LOG_ERROR>(L"Terminating.");
+                exit(EXIT_FAILURE);
+            }
+            size_t is = config.GetSubchannelIndexFromVariableGlobalBin((size_t)g, (size_t)binning);
+            size_t start = config.GetGlobalVariableBinStart(is, (size_t)binning);
+            bins_by_local[g - (int)start].push_back(g);
+        }
+        if(bins_by_local.empty()) {
+            log<LOG_ERROR>(L"%1% || binned_unconstrained systematic '%2%' frees no bins at all.") % __func__ % syst.systname.c_str();
+            log<LOG_ERROR>(L"Terminating.");
+            exit(EXIT_FAILURE);
+        }
+        const int nlocal = bins_by_local.rbegin()->first + 1;
+
+        // Knots: roughly unit spacing on both sides of 0, with 0 itself always a knot and the
+        // outermost knots exactly at the parameter range. The response is exactly linear, so
+        // the knot placement only matters for GetSplineShift's per-segment normalisation (which
+        // assumes a following knot) and for keeping the segment containing 0 away from the last
+        // one, whose width is read from spline_hi and can be rewritten by --fix.
+        const int n_lo = std::max(1, (int)std::lround(-theta_lo));
+        const int n_hi = std::max(2, (int)std::lround(theta_hi));
+        std::vector<float> knots;
+        knots.reserve(n_lo + n_hi + 1);
+        for(int k = 0; k < n_lo; ++k) knots.push_back(theta_lo + k * (-theta_lo) / n_lo);
+        knots.push_back(0.0f);
+        for(int k = 1; k < n_hi; ++k) knots.push_back(k * theta_hi / n_hi);
+        knots.push_back(theta_hi);
+        const int nseg = (int)knots.size() - 1;
+
+        for(int j = 0; j < nlocal; ++j) {
+            auto it = bins_by_local.find(j);
+            const std::vector<int> owned = it == bins_by_local.end() ? std::vector<int>{} : it->second;
+            std::vector<char> is_owned(nbins, 0);
+            for(int g : owned) is_owned[g] = 1;
+
+            Spline spline;
+            spline.bins = nbins;
+            spline.segments_per_bin = nseg;
+            spline.segments.reserve((size_t)nbins * nseg);
+            for(int b = 0; b < nbins; ++b) {
+                for(int s = 0; s < nseg; ++s) {
+                    const float knot = knots[s];
+                    const float width = knots[s + 1] - knots[s];
+                    if(is_owned[b]) spline.segments.push_back(SplineSegment{knot, {1.0f + knot, width, 0.0f, 0.0f}});
+                    else            spline.segments.push_back(SplineSegment{knot, {1.0f, 0.0f, 0.0f, 0.0f}});
+                }
+            }
+
+            const std::string child = syst.systname + "_bin" + std::to_string(j);
+            syst_map[child] = {splines.size(), SystType::Spline};
+            splines.push_back(std::move(spline));
+            spline_names.push_back(child);
+            spline_lo.push_back(theta_lo);
+            spline_hi.push_back(theta_hi);
+            spline_has_restrict.push_back(true);
+            spline_restrict_lo.push_back(theta_lo);
+            spline_restrict_hi.push_back(theta_hi);
+            spline_binnings.push_back(binning);
+            spline_prior_types.push_back(SplinePriorType::Uniform);
+            spline_is_pre_migration.push_back(config.has_flux_tag(child));
+            ++n_splines;
+            log<LOG_DEBUG>(L"%1% || binned_unconstrained: spline '%2%' frees %3% global bins of variable %4%, parameter range [%5%, %6%], %7% segments per bin")
+                % __func__ % child.c_str() % owned.size() % binning % theta_lo % theta_hi % nseg;
+        }
+        log<LOG_INFO>(L"%1% || binned_unconstrained systematic '%2%' expanded into %3% free per-bin splines (%2%_bin0..%2%_bin%4%) in binning %5%")
+            % __func__ % syst.systname.c_str() % nlocal % (nlocal - 1) % binning;
+    }
+
     void PROsyst::FillSplinesFromCovariance(const SystStruct& syst) {
-        Eigen::MatrixXf frac_cov = PROsyst::GenerateFracCovarMatrix(syst);
+        Eigen::MatrixXf frac_cov = PROsyst::GenerateFracCovarMatrix(syst, shape_only ? &shapeBlocksFor(syst) : nullptr);
         FillSplinesFromCovarianceMatrix(frac_cov, syst);
     }
 
-    void PROsyst::FillSplinesFromCovarianceMatrix(Eigen::MatrixXf frac_cov, const SystStruct& syst) {
+    void PROsyst::FillSplinesFromCovarianceMatrix(Eigen::MatrixXf frac_cov, const SystStruct& syst, SplinePriorType prior, float knob_lo, float knob_hi) {
+        if(shape_only && shape_blocks.count(syst.binning < 0 ? other_index : syst.binning)) {
+            // Shape-only: decompose the per-channel SHAPE part of the matrix (exact projector;
+            // idempotent on a matrix whose universes were already rescaled per channel).
+            const Eigen::MatrixXf R = ShapeProjector(shapeBlocksFor(syst), shapeNominalFor(syst));
+            frac_cov = R * frac_cov * R.transpose();
+        }
         // Capture pre-symmetrization asymmetry as a sanity number for debug plots.
         const float pre_symm_asymmetry = (frac_cov - frac_cov.transpose()).norm();
         // symmetrize to kill any float-asymmetry before eigendecomposition
@@ -1010,8 +1372,31 @@ namespace PROfit {
         log<LOG_INFO>(L"%1% || covariance_to_spline %2%: keeping %3% of %4% eigenvectors as splines (largest eigenvalue=%5%, smallest kept=%6%), %7% residual mode(s)")
             % __func__ % syst.systname.c_str() % K % nbins % eigvals(nbins - 1) % eigvals(kept_indices[K - 1]) % static_cast<int>(residual_indices.size());
 
-        const float lo = -3.0f, hi = 3.0f;
-        const int n_segments = 6; // knots at -3, -2, -1, 0, 1, 2
+        // Knob range and knots. Gaussian (covariance_to_spline): the historical unit knots at
+        // -3..2 with box [-3, 3]. Uniform (covariance_to_spline_uniform): the knob floats freely
+        // inside [knob_lo, knob_hi] (sigma units of the mode), so the knots span that box with
+        // roughly unit spacing, 0 always a knot and the segment containing 0 never the last one
+        // (whose width is read from spline_hi, which --fix may rewrite).
+        const bool uniform = (prior == SplinePriorType::Uniform);
+        if(uniform && !(knob_lo < 0.0f && knob_hi > 0.0f)) {
+            log<LOG_ERROR>(L"%1% || covariance_to_spline_uniform systematic %2% needs a knob range containing 0 (CV), got [%3%, %4%].") % __func__ % syst.systname.c_str() % knob_lo % knob_hi;
+            log<LOG_ERROR>(L"Terminating.");
+            exit(EXIT_FAILURE);
+        }
+        const float lo = uniform ? knob_lo : -3.0f;
+        const float hi = uniform ? knob_hi :  3.0f;
+        std::vector<float> knots;
+        if(uniform) {
+            const int n_lo = std::max(1, (int)std::lround(-lo));
+            const int n_hi = std::max(2, (int)std::lround(hi));
+            for(int k = 0; k < n_lo; ++k) knots.push_back(lo + k * (-lo) / n_lo);
+            knots.push_back(0.0f);
+            for(int k = 1; k < n_hi; ++k) knots.push_back(k * hi / n_hi);
+        } else {
+            for(int s = 0; s < 6; ++s) knots.push_back(static_cast<float>(s - 3)); // -3..2
+        }
+        const int n_segments = (int)knots.size();
+        auto seg_width = [&](int s) { return (s + 1 < n_segments ? knots[s + 1] : hi) - knots[s]; };
 
         Cov2SplineDebugInfo dbg;
         dbg.original_frac_cov = frac_cov;
@@ -1030,7 +1415,8 @@ namespace PROfit {
 
             // Per-bin fractional response to knob x is: alpha_b * x, where alpha_b = sqrt(lambda) * vec[b].
             // Full ratio: f_b(x) = 1 + alpha_b * x.
-            // Represent as 6 unit-width linear segments with knots at -3..2 so GetSplineShift's clamp works.
+            // Represent as linear segments over the knots above; GetSplineShift normalises each
+            // segment to unit width, so the slope coefficient is alpha * width.
             Spline spline;
             spline.bins = nbins;
             spline.segments_per_bin = n_segments;
@@ -1038,9 +1424,9 @@ namespace PROfit {
             for(int b = 0; b < nbins; ++b) {
                 const float alpha = sqrt_lambda * vec(b);
                 for(int s = 0; s < n_segments; ++s) {
-                    const float knot = static_cast<float>(s - 3); // -3..2
+                    const float knot = knots[s];
                     const float c0 = 1.0f + alpha * knot;
-                    const float c1 = alpha;
+                    const float c1 = alpha * seg_width(s);
                     spline.segments.push_back(SplineSegment{knot, {c0, c1, 0.0f, 0.0f}});
                 }
             }
@@ -1049,12 +1435,13 @@ namespace PROfit {
             syst_map[knob_name] = {splines.size(), SystType::Spline};
             splines.push_back(std::move(spline));
             spline_names.push_back(knob_name);
-            spline_prior_types.push_back(SplinePriorType::Gaussian);
+            spline_prior_types.push_back(prior);
             spline_lo.push_back(lo);
             spline_hi.push_back(hi);
             // Keep the restrict bookkeeping vectors the SAME length as splines/spline_lo,
-            // otherwise per-spline loops (e.g. pseudo-experiment throws) read OOB.
-            spline_has_restrict.push_back(false);
+            // otherwise per-spline loops (e.g. pseudo-experiment throws) read OOB. Uniform knobs
+            // are bounded by their box (fitter and throws both honour restrict).
+            spline_has_restrict.push_back(uniform);
             spline_restrict_lo.push_back(lo);
             spline_restrict_hi.push_back(hi);
             spline_binnings.push_back(syst.binning);
