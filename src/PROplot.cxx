@@ -17,6 +17,31 @@
 
 namespace PROfit{
 
+    std::vector<int> colors = {
+        kAzure+1,      // Light blue
+        kRed+1,        // Bright red
+        kGreen+3,      // Medium green
+        kOrange+7,      // Deep orange
+        kBlue+2,        // Darker blue
+        kViolet+2,      // Purple/violet
+        kGray+1,         // Light gray
+        kYellow+2,      // Golden yellow
+        kTeal+3,        // Teal
+        kPink+2,        // Pink
+        kMagenta+2,     // Magenta
+        kSpring+5,      // Blue-green
+        kMagenta - 3,   // Rich purple-violet
+        kCyan + 2,      // Vivid sky blue
+        kOrange - 3,    // Deep amber / warm yellow
+        kGreen - 2,     // Forest / dark green
+        kPink - 3,      // Soft rose
+        kYellow - 7,    // Mustard / olive-gold
+        kViolet - 6,    // Deep indigo
+        kSpring - 1,    // Bright lime green
+        kRed - 7,       // Crimson / maroon
+        kAzure - 4      // Slate blue
+    };
+
     void set_matrix_palette() {
         //Covariance colors, move this eslewher
         const Int_t NCont = 255;
@@ -2098,7 +2123,7 @@ namespace PROfit{
                             // cv_hist is assembled from getCV1DHists output, which is
                             // already width-scaled when BinWidthScaled: normalise by
                             // the RAW integral (sum of counts), never by the sum of densities.
-                            const double integral = applyDrawScaling(&cv_hist, opt, /*already_width_scaled=*/true);
+                            const double integral = applyDrawScaling(&cv_hist, opt, /*already_width_scaled=*/bool(opt & PlotOptions::BinWidthScaled));
                             if(bool(opt&PlotOptions::CVasStack)) {
                                 TList *stlists = (TList*)cvstack->GetHists();
                                 for(const auto&& obj: *stlists){
@@ -2267,21 +2292,6 @@ namespace PROfit{
 
     int plotPriorFractionalSystematicBreakdown(const PROconfig &config, const PROspec &spec, const PROsyst &allsplinesyst, std::string filename, int other_index) {
         //Input PROsyst needs to be the allsplinesyst for now
-
-        std::vector<int> colors = {
-            kAzure+1,      // Light blue
-            kRed+1,        // Bright red
-            kGreen+3,      // Medium green
-            kOrange+7,      // Deep orange
-            kBlue+2,        // Darker blue
-            kViolet+2,      // Purple/violet
-            kGray+1,         // Light gray
-            kYellow+2,      // Golden yellow
-            kTeal+3,        // Teal
-            kPink+2,        // Pink
-            kMagenta+2,     // Magenta
-            kSpring+5      // Blue-green
-        };
 
         std::vector<int> line_styles = {
             1,  // Solid (base style)
@@ -2612,20 +2622,6 @@ namespace PROfit{
     int plotPriorFractionalSystematicRatios(const PROconfig &config, const PROspec &spec, const PROsyst &allsplinesyst, std::string filename, int other_index) {
         //Input PROsyst needs to be the allsplinesyst for now
 
-        std::vector<int> colors = {
-            kAzure+1,      // Light blue
-            kRed+1,        // Bright red
-            kGreen+3,      // Medium green
-            kOrange+7,      // Deep orange
-            kBlue+2,        // Darker blue
-            kViolet+2,      // Purple/violet
-            kGray+1,         // Light gray
-            kYellow+2,      // Golden yellow
-            kTeal+3,        // Teal
-            kPink+2,        // Pink
-            kMagenta+2,     // Magenta
-            kSpring+5      // Blue-green
-        };
 
         std::vector<int> line_styles = {
             1,  // Solid (base style)
@@ -2957,10 +2953,6 @@ int plotPriorFractionalSystematicChannelRatios(const PROconfig &config, const PR
             return 1;
         }
 
-        std::vector<int> colors = {
-            kAzure+1, kRed+1, kGreen+3, kOrange+7, kBlue+2, kViolet+2,
-            kGray+1, kYellow+2, kTeal+3, kPink+2, kMagenta+2, kSpring+5
-        };
         std::vector<int> line_styles = {1, 1};
 
         std::map<std::string,std::vector<std::string>> used_tags;
