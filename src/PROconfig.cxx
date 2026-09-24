@@ -3,6 +3,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
 #include <ctype.h>
 #include <numeric>
 #include <sstream>
@@ -53,6 +54,47 @@ namespace {
         }
         label_out = s;
         unit_out = "";
+    }
+
+    // tinyxml2 hands back attribute/text values with entities already decoded (&lt; -> <,
+    // &amp; -> &), so any such value written back into a hand-built child XML (data and
+    // DetVar configs) must be re-escaped or the child fails to parse.
+    std::string XmlEscape(const std::string &s) {
+        std::string out;
+        out.reserve(s.size());
+        for(char c : s) {
+            switch(c) {
+                case '&': out += "&amp;"; break;
+                case '<': out += "&lt;"; break;
+                case '>': out += "&gt;"; break;
+                case '"': out += "&quot;"; break;
+                default: out += c;
+            }
+        }
+        return out;
+    }
+
+    // Exact inverse of XmlEscape, single left-to-right pass so "&amp;lt;" -> "&lt;".
+    std::string XmlUnescape(const std::string &s) {
+        static const std::pair<const char*, char> entities[] = {
+            {"&amp;", '&'}, {"&lt;", '<'}, {"&gt;", '>'}, {"&quot;", '"'}};
+        std::string out;
+        out.reserve(s.size());
+        for(size_t i = 0; i < s.size(); ) {
+            bool matched = false;
+            if(s[i] == '&') {
+                for(const auto &[ent, ch] : entities) {
+                    if(s.compare(i, std::strlen(ent), ent) == 0) {
+                        out += ch;
+                        i += std::strlen(ent);
+                        matched = true;
+                        break;
+                    }
+                }
+            }
+            if(!matched) out += s[i++];
+        }
+        return out;
     }
 
     // The `use` attribute on <mode>/<detector>/<channel>/<subchannel> is
@@ -1240,32 +1282,32 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
                 // Mode(s) - use m_mode_names.size() since m_num_modes isn't set yet
                 for(size_t im = 0; im < m_mode_names.size(); im++) {
-                    dvXml << "<mode name=\"" << m_mode_names[im] << "\" />\n";
+                    dvXml << "<mode name=\"" << XmlEscape(m_mode_names[im]) << "\" />\n";
                 }
                 dvXml << "\n";
 
                 // Detector(s) - use m_detector_names.size() since m_num_detectors isn't set yet
                 for(size_t id = 0; id < m_detector_names.size(); id++) {
-                    dvXml << "<detector name=\"" << m_detector_names[id] << "\" pot=\"";
+                    dvXml << "<detector name=\"" << XmlEscape(m_detector_names[id]) << "\" pot=\"";
                     dvXml << std::scientific << m_det_pot[id] << "\" />\n";
                 }
                 dvXml << "\n";
 
                 // Channels with same subchannels as main config
                 for(size_t ic = 0; ic < m_channel_names.size(); ic++) {
-                    dvXml << "<channel name=\"" << m_channel_names[ic] << "\"";
+                    dvXml << "<channel name=\"" << XmlEscape(m_channel_names[ic]) << "\"";
                     if(!m_channel_plotnames[ic].empty()) {
-                        dvXml << " plotname=\"" << m_channel_plotnames[ic] << "\"";
+                        dvXml << " plotname=\"" << XmlEscape(m_channel_plotnames[ic]) << "\"";
                     }
                     dvXml << ">\n";
                     dvXml << m_channel_bins_xml_strings[ic];
                     for(size_t sc = 0; sc < m_subchannel_names[ic].size(); sc++) {
-                        dvXml << "\t<subchannel name=\"" << m_subchannel_names[ic][sc] << "\"";
+                        dvXml << "\t<subchannel name=\"" << XmlEscape(m_subchannel_names[ic][sc]) << "\"";
                         if(!m_subchannel_plotnames[ic][sc].empty()) {
-                            dvXml << " plotname=\"" << m_subchannel_plotnames[ic][sc] << "\"";
+                            dvXml << " plotname=\"" << XmlEscape(m_subchannel_plotnames[ic][sc]) << "\"";
                         }
                         if(!m_subchannel_colors[ic][sc].empty()) {
-                            dvXml << " color=\"" << m_subchannel_colors[ic][sc] << "\"";
+                            dvXml << " color=\"" << XmlEscape(m_subchannel_colors[ic][sc]) << "\"";
                         }
                         dvXml << "/>\n";
                     }
@@ -1310,7 +1352,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                             found_any = true;
                             // Reconstruct <branch> XML from stored data
                             std::ostringstream brXml;
-                            brXml << "\t<branch associated_subchannel=\"" << sc_name << "\"";
+                            brXml << "\t<branch associated_subchannel=\"" << XmlEscape(sc_name) << "\"";
                             if(m_branch_variables[fi][bi]->model_rule >= 0) {
                                 brXml << " model_rule=\"" << m_branch_variables[fi][bi]->model_rule << "\"";
                             }
@@ -1322,16 +1364,16 @@ int PROconfig::LoadFromXML(const std::string &filename){
                             int out_wi = 1;
                             for(size_t wi = 0; wi < m_mcgen_weight_names[fi][bi].size(); wi++) {
                                 if(!sec_iow.empty() && std::find(sec_iow.begin(), sec_iow.end(), (int)(wi+1)) == sec_iow.end()) continue;
-                                brXml << " weight_" << out_wi++ << "=\"" << m_mcgen_weight_names[fi][bi][wi] << "\"";
+                                brXml << " weight_" << out_wi++ << "=\"" << XmlEscape(m_mcgen_weight_names[fi][bi][wi]) << "\"";
                             }
                             // Append extra weights defined only for this DetVarSection
                             for(const auto& ew : m_detvar_extra_weights_per_section[section_idx]) {
-                                brXml << " weight_" << out_wi++ << "=\"" << ew << "\"";
+                                brXml << " weight_" << out_wi++ << "=\"" << XmlEscape(ew) << "\"";
                             }
                             brXml << ">\n";
                             // Variables
                             for(const auto& vname : m_branch_variables[fi][bi]->variable_names) {
-                                brXml << "\t\t<variable>" << vname << "</variable>\n";
+                                brXml << "\t\t<variable>" << XmlEscape(vname) << "</variable>\n";
                             }
                             brXml << "\t</branch>\n";
 
@@ -2221,22 +2263,22 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
         // Mode(s)
         for(size_t im = 0; im < m_num_modes; im++) {
-            dataXml << "<mode name=\"" << m_mode_names[im] << "\" />\n";
+            dataXml << "<mode name=\"" << XmlEscape(m_mode_names[im]) << "\" />\n";
         }
         dataXml << "\n";
 
         // Detector(s) — format pot in scientific notation to preserve precision
         for(size_t id = 0; id < m_num_detectors; id++) {
-            dataXml << "<detector name=\"" << m_detector_names[id] << "\" pot=\"";
+            dataXml << "<detector name=\"" << XmlEscape(m_detector_names[id]) << "\" pot=\"";
             dataXml << std::scientific << m_det_pot[id] << "\" />\n";
         }
         dataXml << "\n";
 
         // Channels with a single "data" subchannel, reusing the original bins XML
         for(size_t ic = 0; ic < m_num_channels; ic++) {
-            dataXml << "<channel name=\"" << m_channel_names[ic] << "\"";
+            dataXml << "<channel name=\"" << XmlEscape(m_channel_names[ic]) << "\"";
             if(!m_channel_plotnames[ic].empty()) {
-                dataXml << " plotname=\"" << m_channel_plotnames[ic] << "\"";
+                dataXml << " plotname=\"" << XmlEscape(m_channel_plotnames[ic]) << "\"";
             }
             dataXml << ">\n";
             dataXml << m_channel_bins_xml_strings[ic];
@@ -3012,8 +3054,11 @@ uint32_t PROconfig::CalcDetVarHash() const{
     for(const auto& dv : m_detvar_files) {
         unique_string << dv.section_index << dv.name << dv.filename << dv.pot << dv.is_cv;
     }
+    // Hash the unescaped form: templates built before XmlEscape existed carried raw values, so
+    // this keeps existing _detvar_props.bin valid (unless a copied <bins>/<model>/<friend>
+    // attribute itself holds an escaped character).
     for(const auto& tmpl : m_detvar_xml_templates)
-        unique_string << tmpl;
+        unique_string << XmlUnescape(tmpl);
 
     // Include matching vars so that adding/removing cv_variation_matching_vars forces reprocessing
     for(const auto& sec_vars : m_detvar_matching_vars_per_section)
@@ -3069,13 +3114,13 @@ PROconfig PROconfig::BuildDetVarConfig(size_t file_index) const {
         std::string fn_placeholder = "__DETVAR_FILENAME__";
         auto pos = xml_str.find(fn_placeholder);
         if(pos != std::string::npos) {
-            xml_str.replace(pos, fn_placeholder.size(), dvfile.filename);
+            xml_str.replace(pos, fn_placeholder.size(), XmlEscape(dvfile.filename));
         }
 
         std::string tr_placeholder = "__DETVAR_TREENAME__";
         pos = xml_str.find(tr_placeholder);
         if(pos != std::string::npos) {
-            xml_str.replace(pos, tr_placeholder.size(), dvfile.treename);
+            xml_str.replace(pos, tr_placeholder.size(), XmlEscape(dvfile.treename));
         }
 
         std::string pot_placeholder = "__DETVAR_POT__";
