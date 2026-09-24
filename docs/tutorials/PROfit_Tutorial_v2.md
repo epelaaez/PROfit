@@ -74,6 +74,7 @@ Appendices:
 * [Appendix A: regenerating every plot in this tutorial](#appendix-a-regenerating-every-plot-in-this-tutorial)
 * [Appendix B: available physics models](#appendix-b-available-physics-models-incpromodelh)
 * [Appendix C: the pre-fit and post-fit error bands, in full](#appendix-c-the-pre-fit-and-post-fit-error-bands-in-full)
+* [Appendix D: shape-only fits (`--shapeonly`), in full](#appendix-d-shape-only-fits---shapeonly-in-full)
 
 ---
 
@@ -611,7 +612,7 @@ multithreaded runs are statistically equivalent but not byte-identical.
 | `--fix dmsq Flux1` | fix parameters at CV (physics or splines) |
 | `--syst-only` | fix ALL physics parameters (nuisance-only fit) |
 | `--statonly` | drop systematics entirely |
-| `--shapeonly` (alias `--shape-only`) / `--rateonly` | shape-only or single-bin-normalisation analysis. Shape-only (v3.1 convention): in every collapsed channel the *prediction* is rescaled onto the data's integral before the χ² (the data is never touched, so the statistical term is fixed and the χ² is exactly invariant under an overall rate change); every spline knob and every covariance source (incl. flat/norm/mcstat/external) is projected onto per-channel shape; one dof per channel is lost; `fc`/brazil/`fc-adaptive` inherit the flag. Implies `--area-norm` for plots. |
+| `--shapeonly` (alias `--shape-only`) / `--rateonly` | shape-only or single-bin-normalisation analysis. Shape-only: in every collapsed channel (per mode × detector × channel) the *prediction* is rescaled onto the data's integral before the χ² (the data is never touched, so the statistical term is fixed and the χ² is exactly invariant under an overall rate change); that rescale removes the normalisation part of every spline, and the covariance systematics are projected onto shape (the MiniBooNE M_shape) about the current prediction at every evaluation. The systematics themselves stay physical. One dof per channel is lost; `fc`/brazil/`fc-adaptive` inherit the flag. Implies `--area-norm` for plots. Full details: [Appendix D](#appendix-d-shape-only-fits---shapeonly-in-full). |
 | `-c/--chi2 neyman\|pearson\|CNP\|poisson` | χ² metric (default `neyman`; legacy aliases `PROchi`/`PROCNP`/`Poisson`) |
 | `--grad-mode analytic` | gradient strategy: `analytic` (default, alias `exact`) / `central-full` / `one-sided-full` / `central-lin` (Gauss-Newton) / `one-sided-lin` |
 
@@ -2526,6 +2527,203 @@ prediction barely moves. The posterior width `Σ − Σ(C+Σ)⁻¹Σ` is the pri
 width minus what the data pinned down — always smaller, shrinking to the
 statistical floor in the high-statistics limit. Everything the post-fit band
 does is these two lines, evaluated once per MCMC sample.
+
+---
+
+# Appendix D: shape-only fits (`--shapeonly`), in full
+
+A shape-only analysis asks: *does the data have the right spectral shape,
+whatever its overall rate?* Every channel's normalisation is thrown away, and
+only the distribution of events across bins is compared.
+
+```bash
+PROfit -x cfg.xml -t TUT --shapeonly global     # also profile / surface / fc / fc-adaptive / plot
+```
+
+The short version: **the systematics stay physical, and two operations inside
+the fit do the shape-only work.**
+1. The prediction is rescaled onto the data in every channel. This handles the
+   splines and the physics.
+2. The covariance is projected onto shape (the MiniBooNE M_shape). This handles
+   the covariance systematics.
+
+Both are recomputed at every χ² evaluation, about the prediction being tested.
+
+### D.0 What "normalisation" means here
+
+- **Per collapsed channel.** Normalisation is removed separately for every
+  (mode, detector, channel) block, the same blocks the χ² is built from. Each
+  block has its own free normalisation.
+- **ND and FD are separate blocks.** Their relative rate therefore carries no
+  information in a shape-only fit. In SBN that ratio is most of the
+  νμ-disappearance power, so decide whether that is what you want. The same
+  applies between channels: the νe/νμ rate ratio is discarded too.
+- **Everything in a channel counts.** That includes beam subchannels,
+  cosmic/offbeam subchannels (`incl_systematics="false"`), and oscillated
+  samples at their *current* oscillated weight. A systematic that moves only
+  the beam events still changes the beam-vs-cosmic *mix*, and that mix is
+  shape.
+- **One degree of freedom is lost per normalised channel.**
+
+### D.1 The χ², step by step
+
+Notation:
+
+```
+s(θ)      the uncollapsed prediction at parameters θ (physics + spline knobs)
+P = Tᵀs   the collapsed prediction;  d = data;  c = one channel
+D_c = Σ_{b∈c} d_b      the data total in channel c
+S_c = Σ_{b∈c} P_b      the prediction total in channel c
+```
+
+1. **Predict.** `s(θ)` = event weights × oscillation probability × the product
+   of every spline's response `S_k(θ_k, bin)`. This is exactly the non-shape
+   prediction.
+2. **Rescale onto the data** (`ShapeRescaleToData`, `inc/PROtocall.h`). Every
+   bin of channel c, in every subchannel, is multiplied by the same factor:
+   `s̃ = s · D_c / S_c`. The data is never touched.
+3. **Covariance** (D.2). `M = stat + R·Σ(s̃)·Rᵀ`, where `Σ(s̃)` is the usual
+   systematic covariance scaled by the rescaled prediction.
+4. **χ²** `= (P̃ − d)ᵀ M⁻¹ (P̃ − d) + Σ_k ((θ_k − c_k)/σ_k)²`. The second term
+   is the spline pulls.
+
+Consequences:
+- The χ² is **exactly** invariant under s → k·s, so the overall rate is
+  invisible.
+- The statistical term never moves with the fit.
+- The analytic gradient carries both the rescale and the projector derivatives,
+  and is checked against finite differences by `scale-test --tests gradcheck`.
+
+### D.2 Covariance systematics: the MiniBooNE decomposition
+
+A covariance matrix M can be split into normalisation, mixed and shape parts:
+`M = M_shape + M_mixed + M_norm`. Shape-only keeps only `M_shape`. With
+`R = I − P̃·1ᵀ/S_c` on each channel block (`ShapeProjectorCollapsed`):
+
+```
+(R M Rᵀ)_ij = M_ij − (P_i/S) Σ_k M_kj − (P_j/S) Σ_k M_ik + (P_i P_j/S²) Σ_kl M_kl  =  M_shape
+```
+
+It is rebuilt about the **current** rescaled prediction at every evaluation, as
+MiniBooNE rebuilt it at each oscillation point. The projection covers every
+covariance source: universes, flat, `norm_to_covariance`, external, MC-stat,
+and the residuals of covariance→spline decompositions.
+
+The statistical term is *not* projected, and it does not need to be. The
+residual `P̃ − d` sums to zero in every channel, and the conditional-Gaussian
+identity then makes `stat + M_shape` give the correct χ² for the renormalised
+comparison. For `-c pearson` (and `poisson`) this is exact: the multinomial
+statistics. For `neyman` it is the usual approximation.
+
+### D.3 Spline systematics: the rescale does it
+
+Splines are **never projected**. They act on the prediction in step 1, and the
+rescale in step 2 removes their normalisation part, exactly and at every knob
+value. To first order in a knob change,
+
+```
+δs̃ = (D/S) · R · δs        (R = I − s·1ᵀ/S)
+```
+
+This is the same projector D.2 applies to the covariance. So splines and
+covariances get one consistent definition of "shape"; for splines it is simply
+exact rather than linearised.
+
+| Knob kind | What the fit sees |
+|---|---|
+| Pure normalisation of a whole channel (cosmics included) | Nothing: `s̃` does not move. Only its pull acts, so it sits at its prior. |
+| Scales the beam events only | The beam-vs-cosmic mix shifts. That is kept as shape. |
+| Normalisation + shape | The shape part is kept exactly; the normalisation part is gone. |
+| Restricted to some subchannels (`apply_to_subchannel`) | The composition shift is kept. |
+
+A worked example. Take one channel with bin 1 = 90 beam events and bin 2 = 10
+cosmic events, and a data total of 100.
+
+| Knob | Raw prediction | After rescale to 100 | Effect vs CV (90, 10) |
+|---|---|---|---|
+| beam +10% | (99, 10) | (90.8, 9.2) | 0.8 events move into bin 1: shape, kept |
+| everything +10% | (99, 11) | (90, 10) | none: pure normalisation |
+
+### D.4 Error bands under shape-only (and `--area-norm`)
+
+An area-normalised plot has no normalisation freedom, so its band must carry
+shape uncertainty only. `--shapeonly` implies `--area-norm`, and the band
+builders then do the following.
+
+- **Pre-fit band** (`getErrorBand`):
+  1. Throw every knob `θ_k ~ N(c_k, σ_k)`, build the spectrum, and add a
+     correlated covariance throw.
+  2. **Rescale that throw per channel onto the CV's channel totals.**
+  3. Take the 16/84% quantiles per bin as usual (Appendix C).
+
+  A knob that only scales a whole channel contributes no width; its shape
+  effect contributes.
+- **Post-fit band, Constrained Best-Fit, covariance-pull plot**
+  (`getMCMCErrorBand`, `getCovarianceOnlyErrorBand`,
+  `plotCovariancePosteriorPulls`). They condition *exactly as the fit does*:
+  - the best fit and every posterior sample are rescaled onto the data;
+  - the covariance is taken at that scale and projected onto shape;
+  - the conditioning residual is `d − P̃`.
+
+  Each finished sample is then renormalised for display.
+- **`--area-norm` without `--shapeonly`.** The fit is absolute, but the plot is
+  area-normalised. The bands are shape bands as above, and the χ² label, which
+  is still the absolute χ², gets a small grey **"absolute χ²"** tag. Under
+  `--shapeonly` the tag reads **"shape-only"**.
+
+### D.5 What the systematics object does, and what it used to do
+
+The `PROsyst` is built **physical**, identical to a non-shape run, with one
+exception. When a covariance is decomposed into spline knobs
+(`covariance_to_spline`, `_uniform`, external, PROjector promotion), it is
+first projected onto shape about the physical null prediction: every event,
+cosmics included, at the model's default oscillation. Knobs are then never
+spent on, or left free along, a normalisation the fit cannot see.
+
+History, in case you meet old numbers:
+
+- **Before 2026-09-11.** The *data* was rescaled, and a global-integral
+  covariance renormalisation was used. Both were biased.
+- **2026-09-11 to 2026-09-24.** Every universe and spline knob was renormalised
+  when the systematics were built, against a reference spectrum that omitted
+  `incl_systematics="false"` subchannels and counted full-oscillation samples at
+  P = 1. That erased the beam-vs-cosmic composition uncertainty. On the test
+  configuration, the ND νe shape band in its most cosmic-rich bin came out 9.0%
+  instead of 12.6%.
+- **Since 2026-09-24.** The systematics stay physical; the fit and the band
+  builders do all of the shape-only work, as described above.
+
+### D.6 Everything else that follows the flag
+
+- **`fc`, brazil, `fc-adaptive`.** Every pseudo-experiment fit uses the same
+  shape-only metric. The pseudo-data are thrown from the **physical**
+  systematics, normalisation included, just as real data would fluctuate.
+- **PROjector.** The constraint file records whether stage 1 was shape-only,
+  and stage 2 refuses a mismatch. Files written before this was recorded load
+  as "not shape-only".
+- **`--rateonly`** cannot be combined with `--shapeonly`: one bin per channel
+  leaves no shape.
+
+### D.7 Caveats
+
+- **Regenerate old artifacts.** Any `--shapeonly` result, `FC.root`, fc-adaptive
+  mesh/bank/brazil or PROjector constraint from before 2026-09-24 was built
+  under an earlier convention (D.5). The caches (`_prop.bin` / `_syst.bin`)
+  are fine.
+- **Flat directions.** A knob that only changes a whole channel's
+  normalisation is unconstrained by the data. A Gaussian prior holds it at its
+  centre; a `prior_type="uniform"` knob is completely flat. The same goes for a
+  `template`-model scale covering a whole channel.
+- **Labels.** The per-channel plot labels read χ²/nbins; they do not subtract
+  the lost degree of freedom.
+- **Post-fit band statistics.** The post-fit conditional uses
+  C = diag(max(d,1)), the Neyman convention, whatever `-c` you chose.
+- **Band throws** draw knobs from an untruncated Gaussian: `restrict` is
+  ignored, and uniform-prior knobs are thrown as Gaussian.
+- **Background subtraction.** With `--bkg-subtract`, the subtracted band is
+  not shape-normalised.
+- **2D slices.** Slices are area-normalised one slice at a time, whereas the fit
+  normalises the whole channel.
 
 ---
 
