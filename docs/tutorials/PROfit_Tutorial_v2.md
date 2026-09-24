@@ -606,14 +606,20 @@ multithreaded runs are statistically equivalent but not byte-identical.
 
 | Option | What it does |
 |---|---|
-| `--syst-list Flux1 Flux2` | use ONLY these systematics |
-| `--exclude-systs RPA_CCQE` | use everything except these |
+| `--syst-list Flux1 Flux2` | use ONLY these systematics (the MC-stat covariance too only if its XML name is listed) |
+| `--exclude-systs RPA_CCQE` | use everything except these (MC-stat stays unless its XML name, e.g. `MCStat`, is listed) |
 | `--fix dmsq Flux1` | fix parameters at CV (physics or splines) |
 | `--syst-only` | fix ALL physics parameters (nuisance-only fit) |
 | `--statonly` | drop systematics entirely |
 | `--shapeonly` (alias `--shape-only`) / `--rateonly` | shape-only or single-bin-normalisation analysis. Shape-only (v3.1 convention): in every collapsed channel the *prediction* is rescaled onto the data's integral before the χ² (the data is never touched, so the statistical term is fixed and the χ² is exactly invariant under an overall rate change); every spline knob and every covariance source (incl. flat/norm/mcstat/external) is projected onto per-channel shape; one dof per channel is lost; `fc`/brazil/`fc-adaptive` inherit the flag. Implies `--area-norm` for plots. |
 | `-c/--chi2 neyman\|pearson\|CNP\|poisson` | χ² metric (default `neyman`; legacy aliases `PROchi`/`PROCNP`/`Poisson`) |
 | `--grad-mode analytic` | gradient strategy: `analytic` (default, alias `exact`) / `central-full` / `one-sided-full` / `central-lin` (Gauss-Newton) / `one-sided-lin` |
+
+`--syst-list` and `--exclude-systs` accept XML names, plotnames or tags (a tag
+selects every systematic that carries it), and a `covariance_to_spline` /
+`external_covariance_to_spline` / `binned_unconstrained` parent name selects all
+of its derived parameters. A name that matches nothing is fatal, so a typo cannot
+silently fit the full set.
 
 The **default gradient is now `analytic`** (closed-form spectrum Jacobian
 through the oscillation models and splines, *plus* the exact

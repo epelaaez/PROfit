@@ -33,6 +33,7 @@ short, seeded (`--seed 405 -n 1 --preset fast fast`) instance of each workflow:
 | t13 | `fc` (2 universes) |
 | t14 (×5) | full `fc-adaptive` chain: build-mesh → init-bank → print-bank → asimov → brazil |
 | t15–t16 | `mcmc` (1 chain), `scale-test` benchmark smoke |
+| t40–t42 | systematic selection: `--exclude-systs` by name+tag (MC-stat kept) and by plotname (MC-stat dropped), a tag-based `--syst-list`, and a typo'd name refused |
 | t17–t19 | PROjector: ND pre-fit → projected `global` → projected `fc` |
 | t20–t21 | PROjector negative tests (partial-channel and match-everything patterns must be refused) |
 | t22–t26 | `apply_to_subchannel`: process/plot/global with a spline restricted to ND, a covariance to FD, a flat to FD and a norm_to_covariance to ND numu; t25 refuses a zero-match pattern; t26 asserts exact zero blocks / flat splines (`check_applyto.C`) |

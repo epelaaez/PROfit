@@ -72,7 +72,10 @@ int main(int argc, char* argv[])
 
     // Leave this after creating fake data so we can make fake data using systs that aren't
     // included in the fit.
+    const std::vector<std::string> all_spline_names = variable_systs[config.i_prime].spline_names;
     include_or_exclude_systs(variable_systs, config, options);
+    // fakedataparams (the profile's injected-truth markers) must follow the fitted layout.
+    fakedataparams = remap_spline_params(fakedataparams, model->nparams, all_spline_names, variable_systs[config.i_prime].spline_names);
 
     //***********************************************************************
     //******************** PROjector pre-fit / projected fit ****************

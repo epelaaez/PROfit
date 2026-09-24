@@ -161,6 +161,14 @@ run_test t14afcbrazil --use-fake-data "${AFC[@]}" --mode brazil --n-brazil-throw
 run_test t15mcmc          --use-fake-data mcmc --nchains 1
 run_test t16scaletest     --use-fake-data scale-test -N 50 --tests fillspectra,metric
 
+# --- 7b. Systematic selection (--exclude-systs / --syst-list) -----------------
+# By name + tag (MC-stat must stay in the fit), by plotname (drops MC-stat on
+# request), a tag-based --syst-list, and a typo'd name, which must be refused.
+run_test t40exclude       --use-fake-data --poisson-throw --exclude-systs RPA_CCQE flux global
+run_test t40bexclmcstat   --use-fake-data --poisson-throw --exclude-systs "MC Stats" global
+run_test t41systlist      --use-fake-data --poisson-throw --syst-list xsec MCStat global
+expect_fail t42excltypo   --use-fake-data --exclude-systs NotASyst global
+
 # --- 8. PROjector two-stage pre-fit / projected fit ---------------------------
 run_test t17pjprefit      --use-fake-data --projector-prefit "_ND_" global
 CONSTRAINT="${TAG}_t17pjprefit_PROjector_constraint.bin"

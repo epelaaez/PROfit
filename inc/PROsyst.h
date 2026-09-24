@@ -120,6 +120,8 @@ namespace PROfit {
 
             /**
              * @brief Return a new PROsyst containing only the named systematics.
+             * @details The mcstat covariance is included only if its name is in @p systs.
+             * Every name must be registered (see HasSyst()); an unknown one throws.
              * @param systs  List of systematic names to include.
              * @return Subset PROsyst.
              */
@@ -127,10 +129,16 @@ namespace PROfit {
 
             /**
              * @brief Return a new PROsyst with the named systematics removed.
+             * @details The mcstat covariance (registered only internally, not in covar_names)
+             * is kept unless its name is in @p systs. Unknown names are ignored — callers
+             * validate with HasSyst().
              * @param systs  List of systematic names to exclude.
              * @return Complement PROsyst.
              */
             PROsyst excluding(const std::vector<std::string> &systs) const;
+
+            /** @brief True if @p name is a registered spline or covariance (incl. mcstat). */
+            bool HasSyst(const std::string &name) const { return syst_map.count(name) > 0; }
 
             /**
              * @brief Convert all spline systematics to covariance matrices and return the result.
