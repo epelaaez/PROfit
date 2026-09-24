@@ -134,6 +134,17 @@ run_test t10plot          --use-fake-data plot --with-splines --with-covar
 run_test t11plotwidth     --use-fake-data --scale-by-width plot
 run_test t12plotbkgsub    --use-fake-data plot --bkg-subtract background
 
+# --- 4b. Shape-only (prediction rescaled onto the data per channel; every
+# systematic shape-projected). Covers all three chi2 families that differ in
+# their statistical term, the scan warm-start path, FC (flag must reach the
+# per-universe metrics), and the width+area plot combination.
+run_test t12sglobal       --use-fake-data --shapeonly global
+run_test t12sglobalcnp    --use-fake-data --shapeonly -c CNP global
+run_test t12sglobalpois   --use-fake-data --shapeonly -c poisson global
+run_test t12sprofile      --use-fake-data --shapeonly profile
+run_test t12sfc           --use-fake-data --shapeonly fc -u 2
+run_test t12splotwidth    --use-fake-data --shapeonly --scale-by-width plot
+
 # --- 5. Feldman-Cousins -------------------------------------------------------
 run_test t13fc            --use-fake-data fc -u 2
 
@@ -170,9 +181,14 @@ expect_fail t21pjall      --use-fake-data --projector-prefit "nu_" global
 # process must not require (or read) their weight branches in non-matching
 # files; outside the match splines are flat at 1 and covariance blocks exactly
 # zero — asserted numerically by check_applyto.C on the t23 plot output.
+# Also: a flat systematic restricted to FD and a norm_to_covariance restricted to
+# the ND numu channel (both matrix-only types, scoped by the post-build stage
+# PROsyst::ApplySubchannelScopes rather than at fill time).
 sed -e 's|plotname="DetSys1" tag="det"|plotname="DetSys1" tag="det" apply_to_subchannel="_ND_"|' \
     -e 's|plotname="RPA_CCQE" tag="QE-MEC"|plotname="RPA_CCQE" tag="QE-MEC" apply_to_subchannel="_FD_"|' \
-    local_test.xml > local_applyto.xml
+    local_test.xml \
+  | awk '{print} /FiducialVol_FD/ && !d {print "    <allowlist type=\"flat\" plotname=\"FlatFD\" tag=\"other\" apply_to_subchannel=\"_FD_\">nu_:0.05</allowlist>"; print "    <allowlist type=\"norm_to_covariance\" plotname=\"NormCovNDnumu\" tag=\"other\" apply_to_subchannel=\"_ND_numu\">nu_:0.03</allowlist>"; d=1}' \
+  > local_applyto.xml
 SAVED_COMMON=("${COMMON[@]}")
 COMMON=(-x local_applyto.xml -t "${TAG}apt" -n 1 -v 2 --seed 405 --preset fast)
 run_test t22aptprocess process
@@ -189,7 +205,8 @@ COMMON=("${SAVED_COMMON[@]}")
 ROOTEXE="${ROOTEXE:-$(command -v root || true)}"
 [ -z "$ROOTEXE" ] && [ -x /usr/local/root/root/bin/root ] && ROOTEXE=/usr/local/root/root/bin/root
 if [ -n "$ROOTEXE" ]; then
-    if "$ROOTEXE" -l -b -q "$REPO/tests/check_applyto.C(\"${TAG}apt_t23aptplot_PROplot.root\")" > logs/t26aptzero.log 2>&1; then
+    # ND numu block = bins [64,166): nue 4x16 then numu 3x34 in the ND half.
+    if "$ROOTEXE" -l -b -q "$REPO/tests/check_applyto.C(\"${TAG}apt_t23aptplot_PROplot.root\",\"RPA_CCQE;cov;FD,DetSys1;spline;ND,nu_:0.05;cov;FD,nu_:0.03;cov;64-166\")" > logs/t26aptzero.log 2>&1; then
         note "PASS  t26aptzero  (non-matching cov blocks zero, splines flat)"
         PASS=$((PASS+1))
     else
@@ -199,6 +216,80 @@ if [ -n "$ROOTEXE" ]; then
 else
     note "SKIP  t26aptzero  (no root executable for the numeric assertion)"
 fi
+
+# --- 9b. apply_to_subchannel: every type, DetVar, and branch order --------------
+# (a) EVERY systematic (splines, covariances, mcstat, norm, flat, norm_to_covariance)
+#     restricted to _FD_: the TOTAL fractional covariance must have an exactly-zero
+#     ND block. mcstat is not plotted on its own, so this is what covers it.
+sed 's|\(<allowlist [^>]*\)>|\1 apply_to_subchannel="_FD_">|' local_test.xml \
+  | awk '{print} /FiducialVol_FD/ && !d {print "    <allowlist type=\"flat\" plotname=\"FlatFD\" tag=\"other\" apply_to_subchannel=\"_FD_\">nu_:0.05</allowlist>"; print "    <allowlist type=\"norm_to_covariance\" plotname=\"NormCovFD\" tag=\"other\" apply_to_subchannel=\"_FD_\">nu_:0.03</allowlist>"; d=1}' \
+  > local_applyto_fd.xml
+COMMON=(-x local_applyto_fd.xml -t "${TAG}aptfd" -n 1 -v 2 --seed 405 --preset fast)
+run_test t26bfdprocess process
+run_test t26cfdplot    --use-fake-data plot --with-splines --with-covar
+if [ -n "$ROOTEXE" ]; then
+    if "$ROOTEXE" -l -b -q "$REPO/tests/check_applyto.C(\"${TAG}aptfd_t26cfdplot_PROplot.root\",\"total_frac_cov;total;FD,nu_:0.05;cov;FD,nu_:0.03;cov;FD,Flux1;spline;FD\")" > logs/t26dfdzero.log 2>&1; then
+        note "PASS  t26dfdzero  (all-FD scope: total covariance ND block exactly zero)"
+        PASS=$((PASS+1))
+    else
+        note "FAIL  t26dfdzero -- see logs/t26dfdzero.log"
+        FAIL=$((FAIL+1))
+    fi
+fi
+# (b) DetVar systematic: the same ND file as CV and as a variation at half the POT
+#     (ratio 2 everywhere the section covers), restricted to the ND nue channel via
+#     apply_to_subchannel: spline varying only in bins [0,64), flat everywhere else.
+awk -v mc="$MCDIR" '
+  /<variation_list>/ && !dv {
+    print "<DetVarFiles>";
+    print "  <DetVarSection treename=\"events/selected\" scale=\"1.0\">";
+    print "    <cv filename=\"" mc "/fake_sbn_mc_ND.root\" pot=\"1e+21\"/>";
+    print "    <variation name=\"DetVarTest\" filename=\"" mc "/fake_sbn_mc_ND.root\" pot=\"5e+20\"/>";
+    print "    <subchannel>nu_ND_nue_intrinsic</subchannel>";
+    print "    <subchannel>nu_ND_nue_background</subchannel>";
+    print "    <subchannel>nu_ND_nue_fullosc</subchannel>";
+    print "    <subchannel>nu_ND_numu_signal</subchannel>";
+    print "    <subchannel>nu_ND_numu_background</subchannel>";
+    print "  </DetVarSection>";
+    print "</DetVarFiles>";
+    dv=1 }
+  {print}
+  /FiducialVol_FD/ && !sy { print "    <allowlist type=\"spline\" name=\"DetVarTest\" plotname=\"DetVarTest\" tag=\"det\" apply_to_subchannel=\"_ND_nue_\"/>"; sy=1 }
+' local_applyto.xml > local_applyto_detvar.xml
+COMMON=(-x local_applyto_detvar.xml -t "${TAG}aptdv" -n 1 -v 2 --seed 405 --preset fast)
+run_test t26edvprocess process
+run_test t26fdvplot    --use-fake-data plot --with-splines --with-covar
+if [ -n "$ROOTEXE" ]; then
+    if "$ROOTEXE" -l -b -q "$REPO/tests/check_applyto.C(\"${TAG}aptdv_t26fdvplot_PROplot.root\",\"DetVarTest;spline;0-64,RPA_CCQE;cov;FD\")" > logs/t26gdvzero.log 2>&1; then
+        note "PASS  t26gdvzero  (DetVar systematic scoped to the ND nue channel)"
+        PASS=$((PASS+1))
+    else
+        note "FAIL  t26gdvzero -- see logs/t26gdvzero.log"
+        FAIL=$((FAIL+1))
+    fi
+fi
+# (c) Branch order: an incl_systematics="false" branch listed FIRST in a file whose
+#     later branches carry systematics (zero-weight, so the physics is unchanged).
+#     The friend-tree weight binding used to be decided by that first branch and
+#     every later branch then died at fill time; the fit must match t24aptglobal.
+awk '/<friend treename="events\/variationTree" \/>/ && !d { print;
+       print "    <branch associated_subchannel=\"nu_ND_nue_cosmic\" incl_systematics=\"false\" model_rule=\"0\" additional_weight=\"0.0*mcweight\">";
+       print "        <variable>reco_visible_energy</variable>";
+       print "        <variable>true_baseline/(1000*true_neutrino_energy)</variable>";
+       print "        <variable>true_neutrino_energy</variable>";
+       print "        <variable>random_value</variable>";
+       print "    </branch>"; d=1; next } {print}' local_applyto.xml > local_applyto_order.xml
+COMMON=(-x local_applyto_order.xml -t "${TAG}aptord" -n 1 -v 2 --seed 405 --preset fast)
+run_test t26hordprocess process
+run_test t26iordglobal  --use-fake-data global
+if cmp -s "${TAG}aptord_t26iordglobal_global_fit.txt" "${TAG}apt_t24aptglobal_global_fit.txt"; then
+    note "PASS  t26jordsame  (cosmic-first branch order gives the identical global fit)"
+    PASS=$((PASS+1))
+else
+    note "FAIL  t26jordsame  (global fit differs from t24aptglobal)"
+    FAIL=$((FAIL+1))
+fi
+COMMON=("${SAVED_COMMON[@]}")
 
 # --- 10. regex wildcards (patterns are unanchored ECMAScript regexes) ---------
 # Plain substrings keep their old meaning (every test above covers that); here
