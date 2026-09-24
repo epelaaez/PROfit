@@ -569,7 +569,7 @@ void run_plot(const PROconfig &config, const PROpeller &prop, const PROmetric &m
         if(options.with_subcovar){
             std::vector<std::string> first_plots = {"collapsed_total_cor", "collapsed_total_frac_cov", "total_cor", "total_frac_cov"};
             plot_filters = {};
-        else{
+        }else{
             std::vector<std::string> first_plots = {"collapsed_total_cor", "collapsed_total_frac_cov"};
             // Any other matrix is printed only if its name contains one of these
             // (the full-resolution matrices make the PDF huge). Candidate for a command-line option.
