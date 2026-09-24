@@ -310,6 +310,48 @@ COMMON=(-x local_regex_none.xml -t "${TAG}rgxnone" -n 1 -v 2 --seed 405 --preset
 expect_fail t30nomatch    process
 COMMON=("${SAVED_COMMON[@]}")
 
+# --- 11. LBL 3nu models (matter + vacuum) -------------------------------------
+# Matter needs per-event L and E <parameter>s, so its XML replaces the L/E
+# variable with a true-baseline one (hash changes -> own tag + process). The
+# L/E and E binnings are cut down hard: the model grid is n_L x n_E GLOBAL bins
+# x 10 components x every variable's reco bins, which OOMs at the base 200x20.
+# Vacuum's single signed L/E swaps only the model block (not hashed) and reuses
+# the t00 caches. Binaries predating the vacuum tag fail t31c by design.
+sed -e 's|<bins unit="True L/E \[km/GeV\]" min="0" max="2.5" nbins="200" plot="false"/>|<bins unit="True Baseline [km]" min="0" max="1" nbins="4" plot="false"/>|' \
+    -e 's|<bins unit="True Neutrino Energy \[GeV\]" min="0" max="3" nbins="20" />|<bins unit="True Neutrino Energy [GeV]" min="0" max="3" nbins="5" />|' \
+    -e 's|<variable>true_baseline/(1000\*true_neutrino_energy)</variable>|<variable>true_baseline/1000</variable>|' \
+    -e 's|<model tag="nueapp">|<model tag="LBL_3nu-matter_angles">|' \
+    -e 's|<parameter name="L/E" variable_index="1"/>|<parameter name="L" variable_index="1"/><parameter name="E" variable_index="2"/>|' \
+    local_test.xml > local_lbl_matter.xml
+sed 's|tag="LBL_3nu-matter_angles"|tag="LBL_3nu-matter_angles" density="3" electron_fraction="0.5" n_newton="0"|' local_lbl_matter.xml > local_lbl_explicit.xml
+sed 's|<model tag="nueapp">|<model tag="LBL_3nu-vacuum_angles">|' local_test.xml > local_lbl_vacuum.xml
+sed -e 's|<model tag="nueapp">|<model tag="LBL_3nu-matter_angles" baseline="1300">|' \
+    -e 's|<parameter name="L/E" variable_index="1"/>|<parameter name="E" variable_index="2"/>|' \
+    local_test.xml > local_lbl_eonly.xml
+sed 's|<model tag="nueapp">|<model tag="nueapp" density="3">|'    local_test.xml > local_lbl_sblopt.xml
+COMMON=(-x local_lbl_matter.xml -t "${TAG}lbl" -n 1 -v 2 --seed 405 --preset fast)
+run_test t31lblprocess process
+run_test t31almatter   --use-fake-data global
+COMMON=(-x local_lbl_explicit.xml -t "${TAG}lbl" -n 1 -v 2 --seed 405 --preset fast)
+run_test t31blexplicit --use-fake-data global
+# Explicit legacy-default attributes must be bitwise identical to no attributes.
+if cmp -s "${TAG}lbl_t31almatter_global_fit.txt" "${TAG}lbl_t31blexplicit_global_fit.txt"; then
+    note "PASS  t31dlbldefault  (explicit default attributes bitwise-identical)"
+    PASS=$((PASS+1))
+else
+    note "FAIL  t31dlbldefault  (explicit LBL defaults changed the fit)"
+    FAIL=$((FAIL+1))
+fi
+COMMON=(-x local_lbl_vacuum.xml -t "$TAG" -n 1 -v 2 --seed 405 --preset fast)
+run_test t31clvacuum   --use-fake-data global
+# E-only + baseline= (fixed-baseline mode, 1D grid; also reuses the t00 caches).
+COMMON=(-x local_lbl_eonly.xml -t "$TAG" -n 1 -v 2 --seed 405 --preset fast)
+run_test t31eleonly    --use-fake-data global
+# Model options on a non-LBL tag must be refused loudly.
+COMMON=(-x local_lbl_sblopt.xml -t "$TAG" -n 1 -v 2 --seed 405 --preset fast)
+expect_fail t32lbadopt  --use-fake-data global
+COMMON=("${SAVED_COMMON[@]}")
+
 note "----------------------------------------------------------------------"
 note "RESULT: $PASS passed, $FAIL failed  (outputs in $RUNDIR)"
 exit "$FAIL"

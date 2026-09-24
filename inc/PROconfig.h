@@ -572,6 +572,9 @@ namespace PROfit{
             /// where each <parameter> names a subchannel and min/max are its scale bounds.
             std::vector<float> m_model_parameter_min;
             std::vector<float> m_model_parameter_max;
+            /// Numeric <model> attributes (density=, electron_fraction=, n_newton=);
+            /// consumed by PROLBL, fatal on non-LBL tags, not hashed.
+            std::map<std::string, double> m_model_options;
 
             bool m_bool_rate_only;
             //----- PUBLIC FUNCTIONS ------

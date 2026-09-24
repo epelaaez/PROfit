@@ -2,6 +2,7 @@
 #include "PROlog.h"
 #include <cctype>
 #include <cmath>
+#include <limits>
 #include <cstdlib>
 #include <ctype.h>
 #include <numeric>
@@ -2041,12 +2042,36 @@ int PROconfig::LoadFromXML(const std::string &filename){
         // Read in how many bins this channel uses
 
         const std::vector<std::string> expected_attrs = {"tag","name","index"};
+        // Numeric model options, range-checked at parse time (before any long `process`).
+        struct ModelOptionAttr { const char* name; double lo; double hi; bool integer; const char* allowed; };
+        const std::vector<ModelOptionAttr> model_option_attrs = {
+            {"baseline",          std::nextafter(0.0, 1.0), std::numeric_limits<double>::max(), false, "a number > 0 (km)"},
+            {"density",           0.0,                      std::numeric_limits<double>::max(), false, "a number >= 0 (g/cm^3)"},
+            {"electron_fraction", std::nextafter(0.0, 1.0), 1.0,                                false, "a number in (0, 1]"},
+            {"n_newton",          0.0,                      10.0,                               true,  "an integer in [0, 10]"},
+        };
         for (const tinyxml2::XMLAttribute* attr = pModel->FirstAttribute(); attr; attr = attr->Next()) {
             std::string name = attr->Name();
+            auto opt = std::find_if(model_option_attrs.begin(), model_option_attrs.end(),
+                    [&name](const ModelOptionAttr &o){ return name == o.name; });
+            if (opt != model_option_attrs.end()) {
+                const char* sval = attr->Value();
+                char* opt_end = NULL;
+                double val = strtod(sval, &opt_end);
+                if (opt_end == sval || *opt_end != '\0' || !std::isfinite(val)
+                        || val < opt->lo || val > opt->hi
+                        || (opt->integer && val != std::floor(val))) {
+                    log<LOG_ERROR>(L"%1% || ERROR! <model> attribute %2%=\"%3%\" is not a valid value (must be %4%).")
+                        % __func__ % name.c_str() % sval % opt->allowed;
+                    throw std::invalid_argument(std::string("<model> attribute ") + name + " has invalid value: " + sval);
+                }
+                m_model_options[name] = val;
+                continue;
+            }
             if (std::find(expected_attrs.begin(), expected_attrs.end(), name) == expected_attrs.end()) {
-                log<LOG_ERROR>(L"%1% || ERROR! Attribute [%2%] in the <variation> element is not expected.") % __func__ % name.c_str()  ;
-                log<LOG_ERROR>(L"%1% || -- Check spelling: allowed attributes are %2%") % __func__ % expected_attrs ;
-                throw std::invalid_argument(std::string("<variation> attribute not allowed : ") + name);
+                log<LOG_ERROR>(L"%1% || ERROR! Attribute [%2%] in the <model> element is not expected.") % __func__ % name.c_str()  ;
+                log<LOG_ERROR>(L"%1% || -- Check spelling: allowed attributes are %2% plus the model options baseline, density, electron_fraction, n_newton") % __func__ % expected_attrs ;
+                throw std::invalid_argument(std::string("<model> attribute not allowed : ") + name);
             }
         }
 
