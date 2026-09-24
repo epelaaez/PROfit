@@ -141,8 +141,12 @@ PROpt::PROpt(int argc, char **argv) {
         //PROplot, plot things
         proplot_command = app.add_subcommand("plot", "Make plots of CV, or injected point with error bars and covariance.");
         proplot_command->add_flag("--with-splines", with_splines, "Include graphs of splines in output.");
+        proplot_command->add_flag("--with-subcovar", with_subcovar,
+            "Generate the uncollapsed covariance/correlation matrix plots (<tag>_PROplot_Covar.pdf and the "
+            "Covariance directory in the ROOT output). Off by default: with many "
+            "bins/systematics these are slow to build and produce very large PDFs.");
         proplot_command->add_flag("--with-covar", with_covar,
-            "Generate the covariance/correlation matrix plots (<tag>_PROplot_Covar.pdf and the "
+            "Generate the collapsed covariance/correlation matrix plots (<tag>_PROplot_Covar.pdf and the "
             "Covariance directory in the ROOT output). Off by default: with many "
             "bins/systematics these are slow to build and produce very large PDFs.");
         proplot_command->add_flag("--no-frac-syst", no_frac_syst,
