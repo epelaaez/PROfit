@@ -109,6 +109,28 @@ namespace PROfit{
         return full_spec.cwiseProduct(Eigen::VectorXf(T * r));
     }
 
+    Eigen::SparseMatrix<float> ShapeProjectorCollapsed(const PROconfig &inconfig, const Eigen::VectorXf &collapsed_pred, int other_index){
+        std::vector<Eigen::Triplet<float>> trips;
+        size_t global_channel_index = 0;
+        for(size_t im = 0; im < inconfig.m_num_modes; ++im)
+            for(size_t id = 0; id < inconfig.m_num_detectors; ++id)
+                for(size_t ic = 0; ic < inconfig.m_num_channels; ++ic){
+                    const size_t nbin  = inconfig.GetChannelVariableBins(global_channel_index, other_index).NBins();
+                    const size_t start = inconfig.GetCollapsedGlobalVariableBinStart(global_channel_index, other_index);
+                    const float sp = collapsed_pred.segment(start, nbin).sum();
+                    const bool project = sp > 0.0f && std::isfinite(sp);
+                    for(size_t i = 0; i < nbin; ++i)
+                        for(size_t j = 0; j < nbin; ++j) {
+                            const float v = (i == j ? 1.0f : 0.0f) - (project ? collapsed_pred(start + i) / sp : 0.0f);
+                            if(v != 0.0f) trips.emplace_back(start + i, start + j, v);
+                        }
+                    ++global_channel_index;
+                }
+        Eigen::SparseMatrix<float> R(collapsed_pred.size(), collapsed_pred.size());
+        R.setFromTriplets(trips.begin(), trips.end());
+        return R;
+    }
+
     Eigen::MatrixXf CollapseMatrix(const PROconfig &inconfig, const Eigen::MatrixXf& full_matrix, int other_index){
         const Eigen::SparseMatrix<float>& T = inconfig.GetCollapsingMatrixSparse(other_index);
         const Eigen::Index num_bin_before_collapse = T.rows();

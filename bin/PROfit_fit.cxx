@@ -176,6 +176,7 @@ GlobalFitResult run_global_fit(const PROconfig &config, const PROpeller &prop, c
 
     bool preerr = (opt & GlobalFitOptions::PrefitErrorBand) != GlobalFitOptions::Default;
     bool mcmcpre = (opt & GlobalFitOptions::MCMCPrefitErrorBand) != GlobalFitOptions::Default;
+    const bool shape_norm = (opt & GlobalFitOptions::AreaNormalized) != GlobalFitOptions::Default;
     // Error bands are built in raw counts; --scale-by-width / --area-norm are applied at
     // draw time (PlotOptions), so GlobalFitOptions::BinWidthScaled is not consulted here.
 
@@ -205,20 +206,20 @@ GlobalFitResult run_global_fit(const PROconfig &config, const PROpeller &prop, c
         log<LOG_INFO>(L"%1% || Starting global getErrorBand() ") % __func__;
         if(mcmcpre && errband_chain_degenerate) {
             log<LOG_INFO>(L"%1% || No free nuisance parameters; computing the pre-fit error band analytically from the covariance instead of MCMC.") % __func__;
-            res.err_band = getCovarianceOnlyErrorBand(config, prop, metric.GetSysts(), metric.GetModel(), best_fit, config.i_prime);
+            res.err_band = getCovarianceOnlyErrorBand(config, prop, metric.GetSysts(), metric.GetModel(), best_fit, config.i_prime, Eigen::VectorXf(), shape_norm);
             degenerate_mcmc_params(res.priors, res.prior_covariance, res.prior_param_lo, res.prior_param_hi);
         } else if(mcmcpre) {
             Metropolis mh_pre(prior_only_target{metric}, adaptive_proposal(metric, dseed(PROseed::global_rng), errband_fixed_pars), best_fit, dseed(PROseed::global_rng));
             std::optional<PROgressBar> errband_pre_pbar;
             if(progress_bar) errband_pre_pbar.emplace(int(fit_config.MCMCburn + fit_config.MCMCiter), 30, "MCMC prefit");
-            res.err_band = getMCMCErrorBand(mh_pre, fit_config.MCMCburn, fit_config.MCMCiter, config, prop, metric, best_fit, res.priors, res.prior_covariance, res.prior_param_lo, res.prior_param_hi, config.i_prime, errband_pre_pbar ? &*errband_pre_pbar : nullptr);
+            res.err_band = getMCMCErrorBand(mh_pre, fit_config.MCMCburn, fit_config.MCMCiter, config, prop, metric, best_fit, res.priors, res.prior_covariance, res.prior_param_lo, res.prior_param_hi, config.i_prime, errband_pre_pbar ? &*errband_pre_pbar : nullptr, Eigen::VectorXf(), shape_norm);
         } else {
             // Keep the global RNG stream where existing seeded runs expect it:
             // this branch used to construct an unused prefit Metropolis chain,
             // consuming two seed draws before getErrorBand's own throws.
             dseed(PROseed::global_rng);
             dseed(PROseed::global_rng);
-            res.err_band = getErrorBand(config, prop, metric.GetSysts(), metric.GetModel(), cv ,CVParams, config.i_prime);
+            res.err_band = getErrorBand(config, prop, metric.GetSysts(), metric.GetModel(), cv ,CVParams, config.i_prime, 2500, shape_norm);
         }
     }
 
@@ -234,7 +235,7 @@ GlobalFitResult run_global_fit(const PROconfig &config, const PROpeller &prop, c
         const Eigen::VectorXf band_data = legacy_post ? Eigen::VectorXf() : data.Spec();
         if(errband_chain_degenerate) {
             log<LOG_INFO>(L"%1% || No free nuisance parameters; computing the post-fit error band analytically from the %2% covariance instead of MCMC.") % __func__ % (legacy_post ? "prior" : "data-constrained");
-            res.post_err_band = getCovarianceOnlyErrorBand(config, prop, metric.GetSysts(), metric.GetModel(), best_fit, config.i_prime, band_data);
+            res.post_err_band = getCovarianceOnlyErrorBand(config, prop, metric.GetSysts(), metric.GetModel(), best_fit, config.i_prime, band_data, shape_norm);
             degenerate_mcmc_params(res.posteriors, res.spline_covariance, res.post_param_lo, res.post_param_hi);
         } else {
             Metropolis mh_post(simple_target{metric}, adaptive_proposal(metric, dseed(PROseed::global_rng), errband_fixed_pars), best_fit, dseed(PROseed::global_rng));
@@ -243,7 +244,7 @@ GlobalFitResult run_global_fit(const PROconfig &config, const PROpeller &prop, c
             // data.Spec() enables the data-constrained posterior pull of the
             // covariance-type systematics (post-fit band only; the pre-fit call
             // above stays unconstrained). Lost in merge 7078697, restored.
-            res.post_err_band = getMCMCErrorBand(mh_post, fit_config.MCMCburn, fit_config.MCMCiter, config, prop, metric, best_fit, res.posteriors, res.spline_covariance, res.post_param_lo, res.post_param_hi, config.i_prime, errband_post_pbar ? &*errband_post_pbar : nullptr, band_data);
+            res.post_err_band = getMCMCErrorBand(mh_post, fit_config.MCMCburn, fit_config.MCMCiter, config, prop, metric, best_fit, res.posteriors, res.spline_covariance, res.post_param_lo, res.post_param_hi, config.i_prime, errband_post_pbar ? &*errband_post_pbar : nullptr, band_data, shape_norm);
         }
         // Legacy plots drew the band centered on the raw best-fit spectrum: drop
         // the unconstrained branch's median-vs-cv center_shift so nothing folds

@@ -159,6 +159,7 @@ namespace PROfit{
         DataMCRatio      = 1 << 3,  ///< Show a data/MC ratio panel below the main plot.
         DataPostfitRatio = 1 << 4,  ///< Show a data/post-fit ratio panel below the main plot.
         LegendCounts     = 1 << 5,  ///< Append each stacked subchannel's integrated event count to its legend entry.
+        ShapeOnly        = 1 << 6,  ///< Shape-only fit: tag the chi^2 label with a small grey "shape-only".
     };
 
     inline PlotOptions operator|(PlotOptions a, PlotOptions b) {
@@ -324,12 +325,14 @@ namespace PROfit{
      * @param cvparams    CV physics parameter vector.
      * @param other_index Variable index.
      * @param nthrows     Number of systematic throws (default 2500).
+     * @param shape_norm  Area-normalised plots: rescale every throw per channel onto the CV's
+     *                    channel integral, so the band carries shape uncertainty only.
      * @return PROerrorbar with asymmetric per-bin uncertainties. Every field (error_up/down,
      *         error_point, center_shift AND covariance) is in RAW collapsed counts; bin-width
      *         and area-normalisation conversion happens at draw time inside plot_channels
      *         (drawnUnitConversion), so all consumers see one unit.
      */
-    PROerrorbar getErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const PROspec &cv_spec, const Eigen::VectorXf &cvparams, int other_index=0, size_t nthrows=2500);
+    PROerrorbar getErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const PROspec &cv_spec, const Eigen::VectorXf &cvparams, int other_index=0, size_t nthrows=2500, bool shape_norm=false);
 
     /**
      * @brief Compute an error band analytically from the covariance-type systematics alone.
@@ -352,8 +355,10 @@ namespace PROfit{
      *  covariance systematics (Putnam SBN note Eqs. 7-8): center shifted by
      *  Sigma(C+Sigma)^-1 u and covariance Sigma - Sigma(C+Sigma)^-1 Sigma, restricted to
      *  active bins with data>0 (PROchi convention, C = diag(max(data,1))). Exact when the
-     *  covariance systs are the only free parameters (the post-fit degenerate-chain path). */
-    PROerrorbar getCovarianceOnlyErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const Eigen::VectorXf &params, int var_index=0, const Eigen::VectorXf &data_spec = Eigen::VectorXf());
+     *  covariance systs are the only free parameters (the post-fit degenerate-chain path).
+     *  @p shape_norm (area-normalised plots) projects Sigma onto per-channel shape about the
+     *  prediction (ShapeProjectorCollapsed) before anything else. */
+    PROerrorbar getCovarianceOnlyErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const Eigen::VectorXf &params, int var_index=0, const Eigen::VectorXf &data_spec = Eigen::VectorXf(), bool shape_norm=false);
 
     /**
      * @brief Result of getErrorBandBkgSubtracted: a signal-only error band plus the
@@ -495,10 +500,13 @@ namespace PROfit{
      *                   reports the ANALYTIC pull Sigma(C+Sigma)^-1 (d - cv) at the best
      *                   fit (exactly 0 for Asimov), not the sample median. Pass this only
      *                   for post-fit bands; the pre-fit/prior band must stay unconstrained.
+     * @param shape_norm Area-normalised plots: every sample is rescaled per channel onto the
+     *                   best-fit spectrum's channel integral and the covariance factor is
+     *                   projected onto per-channel shape about it (ShapeProjectorCollapsed).
      * @return PROerrorbar with per-bin asymmetric uncertainties and the histogram covariance.
      */
     template<class T, class P>
-        PROerrorbar getMCMCErrorBand(Metropolis<T, P> met, size_t burnin, size_t iterations, const PROconfig &config, const PROpeller &prop, PROmetric &metric, const Eigen::VectorXf &best_fit, std::vector<TH1D> &posteriors, Eigen::MatrixXf &post_covar, Eigen::VectorXf &param_err_lo, Eigen::VectorXf &param_err_hi, int var_index=0, PROgressBar *pbar = nullptr, const Eigen::VectorXf &data_spec = Eigen::VectorXf()) {
+        PROerrorbar getMCMCErrorBand(Metropolis<T, P> met, size_t burnin, size_t iterations, const PROconfig &config, const PROpeller &prop, PROmetric &metric, const Eigen::VectorXf &best_fit, std::vector<TH1D> &posteriors, Eigen::MatrixXf &post_covar, Eigen::VectorXf &param_err_lo, Eigen::VectorXf &param_err_hi, int var_index=0, PROgressBar *pbar = nullptr, const Eigen::VectorXf &data_spec = Eigen::VectorXf(), bool shape_norm = false) {
             for(size_t i = 0; i < metric.GetSysts().GetNSplines(); ++i)
                 posteriors.emplace_back("", (";"+config.m_mcgen_variation_plotname_map.at(metric.GetSysts().spline_names[i])).c_str(), 60, -3, 3);
 
@@ -522,6 +530,12 @@ namespace PROfit{
             Eigen::MatrixXf L;
             if(metric.GetSysts().GetNCovar() > 0) L = metric.GetSysts().DecomposeFractionalCovariance(config, cv);
             else L = Eigen::MatrixXf::Zero(config.m_num_variable_bins_total_collapsed[var_index], config.m_num_variable_bins_total_collapsed[var_index]);
+            if(shape_norm) L = Eigen::MatrixXf(ShapeProjectorCollapsed(config, cv_coll, var_index) * L);
+            auto sample_spec = [&](const Eigen::VectorXf &value) {
+                Eigen::VectorXf s = CollapseMatrix(config, FillSpectra(config, prop, metric.GetSysts(), metric.GetModel(), value, true,var_index).Spec());
+                if(shape_norm) s = s.cwiseProduct(ChannelNormFactors(config, s, cv_coll, var_index));
+                return s;
+            };
             std::normal_distribution<float> nd;
             Eigen::VectorXf throws = Eigen::VectorXf::Constant(config.m_num_variable_bins_total_collapsed[var_index], 0);
 
@@ -542,7 +556,7 @@ namespace PROfit{
                 nsteps += 1;
 		for(size_t i = 0; i < config.m_num_variable_bins_total_collapsed[var_index]; ++i)
                         throws(i) = nd(PROseed::global_rng);
-                specs.push_back(CollapseMatrix(config, FillSpectra(config, prop, metric.GetSysts(), metric.GetModel(), value, true,var_index).Spec())+L*throws);
+                specs.push_back(sample_spec(value)+L*throws);
                 for(int i = 0; i < nspline; ++i) {
                     posteriors[i].Fill(value(i+nphys));
                     param_samples[i].push_back(value(i+nphys));
@@ -558,7 +572,7 @@ namespace PROfit{
 	    else{
                 action = [&](const Eigen::VectorXf &value) {
                     nsteps += 1;
-                    specs.push_back(CollapseMatrix(config, FillSpectra(config, prop, metric.GetSysts(), metric.GetModel(), value, true,var_index).Spec()));
+                    specs.push_back(sample_spec(value));
                     for(int i = 0; i < nspline; ++i) {
                         posteriors[i].Fill(value(i+nphys));
                         param_samples[i].push_back(value(i+nphys));

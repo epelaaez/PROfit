@@ -40,6 +40,7 @@ void run_plot(const PROconfig &config, const PROpeller &prop, const PROmetric &m
     std::vector<TPaveText> notext;
     if(options.binwidth_scale) opt |= PlotOptions::BinWidthScaled;
     if(options.area_normalized) opt |= PlotOptions::AreaNormalized;
+    if(options.shapeonly) opt |= PlotOptions::ShapeOnly;
     if(options.legend_counts) opt |= PlotOptions::LegendCounts;
     std::vector<PROspec> variable_cvs;
     std::vector<std::map<std::string, TObject *>> cv_objs;
@@ -657,7 +658,7 @@ void run_plot(const PROconfig &config, const PROpeller &prop, const PROmetric &m
                                        + sub.bkg_mcstat_var_collapsed.array()).sqrt();
             data_plot = PROdata(Eigen::VectorXf(data_plot.Spec() - sub.bkg_cv_collapsed), new_err);
         } else {
-            other_err_bands.push_back(getErrorBand(config, prop, variable_systs[io], model, variable_cvs[io], CVParams, io, (size_t)options.band_throws));
+            other_err_bands.push_back(getErrorBand(config, prop, variable_systs[io], model, variable_cvs[io], CVParams, io, (size_t)options.band_throws, options.area_normalized));
         }
         auto objs = plot_channels(options.final_output_tag+"_PROplot_Variable_"+std::to_string(io)+"_ErrorBand.pdf", config, cv_plot, {}, data_plot,
                 other_err_bands.back(), {}, other_channel_chitexts[io], options.pbounds, opt | PlotOptions::DataMCRatio, io,

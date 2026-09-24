@@ -252,7 +252,7 @@ namespace PROfit{
 
             return spline_graphs;
         }
-    PROerrorbar getErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const PROspec &cv_spec, const Eigen::VectorXf &cvparams, int other_index, size_t nthrows) {
+    PROerrorbar getErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const PROspec &cv_spec, const Eigen::VectorXf &cvparams, int other_index, size_t nthrows, bool shape_norm) {
 
         Eigen::VectorXf cv = CollapseMatrix(config, cv_spec.Spec(), other_index);
 
@@ -288,6 +288,7 @@ namespace PROfit{
         //Fills already collapsed
         for(size_t i = 0; i < nerrorsample; ++i){
             Eigen::VectorXf var = FillSystRandomThrow(config, prop, syst, model,cv_spec, cvparams, dseed(PROseed::global_rng), other_index).Spec();
+            if(shape_norm) var = var.cwiseProduct(ChannelNormFactors(config, var, cv, other_index));
             specs.push_back(var);
             delta = cv - var;
             cov += delta  * delta.transpose();
@@ -310,7 +311,7 @@ namespace PROfit{
         return ebar;
     }
 
-    PROerrorbar getCovarianceOnlyErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const Eigen::VectorXf &params, int var_index, const Eigen::VectorXf &data_spec) {
+    PROerrorbar getCovarianceOnlyErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const Eigen::VectorXf &params, int var_index, const Eigen::VectorXf &data_spec, bool shape_norm) {
         Eigen::VectorXf cv = FillSpectra(config, prop, syst, model, params, true, var_index).Spec();
         Eigen::VectorXf cv_coll = CollapseMatrix(config, cv, var_index);
 
@@ -318,6 +319,10 @@ namespace PROfit{
         if(syst.GetNCovar() > 0) {
             Eigen::MatrixXf L = syst.DecomposeFractionalCovariance(config, cv);
             cov = L * L.transpose();
+            if(shape_norm) {
+                const Eigen::SparseMatrix<float> R = ShapeProjectorCollapsed(config, cv_coll, var_index);
+                cov = Eigen::MatrixXf(R * cov * R.transpose());
+            }
         } else {
             cov = Eigen::MatrixXf::Zero(cv_coll.size(), cv_coll.size());
         }
@@ -462,6 +467,17 @@ namespace PROfit{
             conv[bin] = f;
         }
         return conv;
+    }
+
+    // Small grey "shape-only" tag, top-left aligned at NDC (x, y) of the current pad.
+    static void drawShapeOnlyTag(double x, double y) {
+        TLatex tag;
+        tag.SetNDC();
+        tag.SetTextFont(42);
+        tag.SetTextSize(0.025);
+        tag.SetTextColor(kGray+1);
+        tag.SetTextAlign(13);
+        tag.DrawLatex(x, y, "shape-only");
     }
 
     Eigen::VectorXf make_1d_spec(Eigen::VectorXf input_spec, size_t nbinsx, size_t nbinsy=1, int offset = 0, int dims=1){
@@ -1207,6 +1223,12 @@ namespace PROfit{
         if(bool(opt&PlotOptions::DataMCRatio) || bool(opt&PlotOptions::DataPostfitRatio)) p2->Draw();
 
         leg->Draw("same");
+        if(!text.empty() && bool(opt&PlotOptions::ShapeOnly)) {
+            // Under the chi^2 line: the legend's last entry (entries fill row-major).
+            const double lx1 = stack_legend ? 0.38 : 0.32, colw = ((stack_legend ? 0.89 : 0.90) - lx1) / leg->GetNColumns();
+            const int col = (leg->GetListOfPrimitives()->GetSize() - 1) % leg->GetNColumns();
+            drawShapeOnlyTag(lx1 + (col + leg->GetMargin()) * colw, 0.735);
+        }
         drawVersionWatermark(c);
         c->Print(filename.c_str());
         log<LOG_DEBUG>(L"%1% || Finishing Plotting 1D Histogram %2%") % __func__ % hist_titles.c_str();
@@ -1691,6 +1713,7 @@ namespace PROfit{
                         text.SetTextFont(42);
                         text.SetTextSize(0.03);
                         text.DrawClone();
+                        if(bool(opt&PlotOptions::ShapeOnly)) drawShapeOnlyTag(0.63, 0.905);
                     };
                     std::string projected_x_chi_label; // We want to pass this to the 1d plotter outside the 2d plotting
                     if(config.m_channel_variable_dims[channel][other_index] == 2){
