@@ -138,6 +138,8 @@ GlobalFitResult run_global_fit(const PROconfig &config, const PROpeller &prop, c
 
     {
         Eigen::VectorXf bf_spec_full = FillSpectra(config, prop, metric.GetSysts(), metric.GetModel(), best_fit, true, config.i_prime).Spec();
+        // Shape-only compares the per-channel rescaled prediction, so check that.
+        if(metric.ShapeOnly()) bf_spec_full = ShapeRescaleToData(config, bf_spec_full, data.Spec(), config.i_prime);
         Eigen::VectorXf bf_spec_coll = CollapseMatrix(config, bf_spec_full);
         logLowPredictionBins(config, bf_spec_coll, data.Spec(), 1.0f, config.i_prime);
     }
@@ -235,7 +237,7 @@ GlobalFitResult run_global_fit(const PROconfig &config, const PROpeller &prop, c
         const Eigen::VectorXf band_data = legacy_post ? Eigen::VectorXf() : data.Spec();
         if(errband_chain_degenerate) {
             log<LOG_INFO>(L"%1% || No free nuisance parameters; computing the post-fit error band analytically from the %2% covariance instead of MCMC.") % __func__ % (legacy_post ? "prior" : "data-constrained");
-            res.post_err_band = getCovarianceOnlyErrorBand(config, prop, metric.GetSysts(), metric.GetModel(), best_fit, config.i_prime, band_data, shape_norm);
+            res.post_err_band = getCovarianceOnlyErrorBand(config, prop, metric.GetSysts(), metric.GetModel(), best_fit, config.i_prime, band_data, shape_norm, metric.ShapeOnly());
             degenerate_mcmc_params(res.posteriors, res.spline_covariance, res.post_param_lo, res.post_param_hi);
         } else {
             Metropolis mh_post(simple_target{metric}, adaptive_proposal(metric, dseed(PROseed::global_rng), errband_fixed_pars), best_fit, dseed(PROseed::global_rng));
@@ -517,6 +519,9 @@ std::map<std::string, TObject *> draw_fit_result(const PROconfig &config, const 
         // NActiveBins == total bins unless a fit-region mask (e.g. PROjector) is installed.
         std::string hname = "#chi^{2}/nbins = " + chi2LabelValue(fitres.chi2) + "/" + to_string(config.NActiveBins(config.i_prime));
         PROspec bf = FillSpectra(config, prop, syst, model, fitres.fitter.best_fit, true, config.i_prime);
+        // Shape-only: the best fit IS the prediction rescaled onto the data; the post-fit
+        // band's error_point/center_shift live on that scale too.
+        if(metric.ShapeOnly()) bf.Spec() = ShapeRescaleToData(config, bf.Spec(), data.Spec(), config.i_prime);
         // Concatenated bins across all channels share no common x-axis, so use bin-index axis.
         TH1D post_hist("ph", hname.c_str(), config.m_num_variable_bins_total_collapsed[config.i_prime], 0, config.m_num_variable_bins_total_collapsed[config.i_prime]);
         TH1D pre_hist("prh", hname.c_str(), config.m_num_variable_bins_total_collapsed[config.i_prime], 0, config.m_num_variable_bins_total_collapsed[config.i_prime]);
@@ -557,7 +562,7 @@ std::map<std::string, TObject *> draw_fit_result(const PROconfig &config, const 
     if(fitres.post_err_band && fitres.post_err_band->constrained
             && syst.GetNCovar() > 0 && fitres.fitter.best_fit.size()) {
         plotCovariancePosteriorPulls(config, prop, syst, model, fitres.fitter.best_fit,
-            data.Spec(), prefix+"_postfit_covariance_pulls.pdf", config.i_prime, &drawn_objs);
+            data.Spec(), prefix+"_postfit_covariance_pulls.pdf", config.i_prime, &drawn_objs, metric.ShapeOnly());
     }
 
     if(fitres.spline_covariance.size()) {

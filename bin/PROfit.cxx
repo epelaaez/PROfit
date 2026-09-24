@@ -82,6 +82,7 @@ int main(int argc, char* argv[])
     // is in place before CVParams sizing, the bounds/--fix section, and the metric
     // construction below. See inc/PROjector.h for the scheme.
     options.projector_config.force = options.force;
+    options.projector_config.shape_only = options.shapeonly;
     if(options.projector_config.active()) {
         if(!PROjectorSetup(options.projector_config, config, variable_systs[config.i_prime],
                     variable_data, data, fakedataparams, options.fixed_params, *model, options.chi2))

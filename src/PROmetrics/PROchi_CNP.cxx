@@ -81,17 +81,19 @@ Eigen::VectorXf PROCNP::statisticalVariances(const Eigen::VectorXf &collapsed_pr
 
 Eigen::VectorXf PROCNP::singleChannelStatVariances(const Eigen::VectorXf &collapsed_cv,
                                                    const Eigen::VectorXf &comparison) const {
-    // This per-channel diagnostic has always differed from the fit path above in two
-    // ways, both preserved here: mu is the *shifted* prediction handed in by the caller
-    // rather than the physics-only CV, and mu is not floored. (The comparison is the
-    // observed data in every mode.) Doubles match the historical promotion of the
-    // 1.0/2.0/3.0 literals.
+    // This per-channel diagnostic differs from the fit path above: mu is the *shifted*
+    // prediction handed in by the caller rather than the physics-only CV. It is floored
+    // like the fit path, so a zero-prediction bin (e.g. a shape-only channel with no data,
+    // r = 0) cannot make M singular. (The comparison is the observed data in every mode.)
+    // Doubles match the historical promotion of the 1.0/2.0/3.0 literals.
     const Eigen::VectorXf &obs = data.Spec();
     Eigen::VectorXf variances(obs.size());
-    for(Eigen::Index i = 0; i < obs.size(); ++i)
+    for(Eigen::Index i = 0; i < obs.size(); ++i) {
+        const float mu = std::max(collapsed_cv(i), kMinCNPMu);
         variances(i) = obs(i) == 0.0f
-            ? collapsed_cv(i) / 2.0f
-            : (float)(3.0 / (1.0 / comparison(i) + 2.0 / collapsed_cv(i)));
+            ? mu / 2.0f
+            : (float)(3.0 / (1.0 / comparison(i) + 2.0 / mu));
+    }
     return variances;
 }
 

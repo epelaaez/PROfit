@@ -59,6 +59,7 @@ namespace PROfit {
         std::vector<std::string> keep_covariance; ///< Covariance systematics NOT promoted (stay as unconstrained covariance).
         bool float_physics = false;   ///< Pre-fit: float physics parameters and save the marginal nuisance covariance (default: fix at CV).
         bool force = false;           ///< Skip config-hash consistency check when loading a constraint.
+        bool shape_only = false;      ///< This run is --shapeonly; must match the constraint's (stage 2).
 
         bool prefit_mode() const { return !prefit_pattern.empty(); }
         bool projector_mode() const { return !constraint_file.empty(); }
@@ -82,9 +83,10 @@ namespace PROfit {
         Eigen::VectorXf physics_best_fit; ///< Pre-fit physics point (fixed CV values or floated best fit).
         bool physics_were_fixed = true;   ///< True if physics parameters were held fixed during the pre-fit.
         float prefit_chi2 = 0;            ///< Pre-fit best-fit chi2 (record keeping).
+        bool shape_only = false;          ///< Pre-fit ran --shapeonly (class version >= 1; older files load as false).
 
         template<class Archive>
-        void serialize(Archive &ar, [[maybe_unused]] const unsigned int version) {
+        void serialize(Archive &ar, const unsigned int version) {
             ar & config_hash;
             ar & metric_name;
             ar & prefit_pattern;
@@ -97,6 +99,7 @@ namespace PROfit {
             ar & physics_best_fit;
             ar & physics_were_fixed;
             ar & prefit_chi2;
+            if(version >= 1) ar & shape_only;
         }
 
         void save(const std::string &filename) const;
@@ -181,5 +184,7 @@ namespace PROfit {
                                  const std::string &chi2_name);
 
 }
+
+BOOST_CLASS_VERSION(PROfit::PROjectorConstraint, 1)
 
 #endif

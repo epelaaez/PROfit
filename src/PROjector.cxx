@@ -303,6 +303,11 @@ namespace PROfit {
                     % __func__ % c.metric_name.c_str() % chi2_name.c_str();
                 return false;
             }
+            if(c.shape_only != pjconf.shape_only) {
+                log<LOG_ERROR>(L"%1% || PROjector constraint was produced %2% --shapeonly but this run is %3%; the nuisance posterior is not transferable.")
+                    % __func__ % (c.shape_only ? "with" : "without") % (pjconf.shape_only ? "shape-only" : "not shape-only");
+                return false;
+            }
 
             std::vector<size_t> matched_channels;
             if(!PROjectorSelectChannels(config, c.prefit_pattern, matched_channels)) return false;
@@ -527,6 +532,7 @@ namespace PROfit {
         c.physics_best_fit = best_fit.head(nphys);
         c.physics_were_fixed = !pjconf.float_physics;
         c.prefit_chi2 = chi2;
+        c.shape_only = metric.ShapeOnly();
 
         log<LOG_INFO>(L"%1% || ############ PROjector pre-fit posterior summary ############") % __func__;
         for(size_t i = 0; i < nsplines; ++i) {

@@ -105,10 +105,12 @@ namespace PROfit {
              * @param prop        MC event store (used for spline building).
              * @param config      Analysis configuration.
              * @param systs       Vector of SystStruct objects; one per systematic variation.
-             * @param shapeonly   Shape-only mode: every spline variation and every covariance
-             *                    source is projected onto per-channel SHAPE (each collapsed
-             *                    channel's normalisation removed) — see ShapeProjector /
-             *                    ShapeRescaleUniverse. Must match the metric's shape_only flag.
+             * @param shapeonly   Shape-only mode. The systematics stay PHYSICAL: shape-only is done
+             *                    by the metric (per-channel rescale onto data + ShapeProjectorCollapsed
+             *                    about the current prediction, i.e. MiniBooNE's M_shape) and by the
+             *                    band builders. Here it only projects covariances onto per-channel
+             *                    shape, about the physical null prediction, before they are
+             *                    decomposed into spline knobs (FillSplinesFromCovarianceMatrix).
              * @param other_index Variable index for which to build systematics (-1 = primary).
              * @param model       Physics model (used when converting splines to covariance).
              * @param params      Physics parameter vector for CV spectrum evaluation.
