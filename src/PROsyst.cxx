@@ -1196,11 +1196,26 @@ namespace PROfit {
             }
         }
 
+        const Eigen::VectorXf& cv_spec = syst.p_cv->Spec();  // used to skip bins with no MC
+
+        // The additive form 1 + sum(s_i - 1) + ... assumes s_i(0) = 1 for every member
+        for(int m : grp.members) {
+            for(int k = 0; k < nbins; ++k) {
+                if(cv_spec(k) <= 0) continue;
+                const float s0 = GetSplineShift(m, 0.0f, k);
+                if(std::abs(s0 - 1.0f) > 1e-5f) {
+                    log<LOG_ERROR>(L"%1% || spline_cross_quad '%2%': member '%3%' gives s(0) = %4% (not 1) in bin %5%. The additive group response assumes s_i(0) = 1; set force_0_cv=\"true\" on the member.")
+                        % __func__ % syst.systname.c_str() % spline_names[m].c_str() % s0 % k;
+                    log<LOG_ERROR>(L"Terminating.");
+                    exit(EXIT_FAILURE);
+                }
+            }
+        }
+
         // The additive group response is exact only if each member's per-bin response really is
         // quadratic in its parameter. The on-axis knots over-determine that: b and d are fixed by
         // the +-1 knots alone, so every knot beyond them is a prediction. Check it. 
         constexpr float quad_tol = 1e-3f;                    // relative departure above which the group is flagged approximate
-        const Eigen::VectorXf& cv_spec = syst.p_cv->Spec();  // only used to skip bins with no MC
 
         // Track the single worst offender across all members, bins and knots for the log message.
         float worst = 0.0f;

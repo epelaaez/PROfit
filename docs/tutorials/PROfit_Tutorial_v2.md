@@ -501,7 +501,9 @@ multiplicatively as ordinary splines (PROfit warns when this happens). Members
 must be `type="spline"` on the same `binning`, carry no `inflate=`, use evenly
 spaced `knobvals`, belong to no other group, and all carry the same
 `apply_to_subchannel` pattern or none. The entry itself inherits that pattern
-when it has none. The additive form is exact only when the response is at most
+when it has none. Members must also have `force_0_cv="true"` (or no `0` in
+their `knobvals`) so that `sᵢ(0) = 1`, which the additive form assumes. 
+The additive form is exact only when the response is at most
 quadratic in the group's parameters, which holds for the `F_A²` case above; 
 PROfit checks each member against a quadratic at its knots and warns if the 
 departure is large.

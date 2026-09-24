@@ -2975,6 +2975,17 @@ void PROconfig::ResolveSplineCrossQuadMembers(){
                 log<LOG_ERROR>(L"Terminating.");
                 exit(EXIT_FAILURE);
             }
+            // The additive group factor 1 + sum(s_i - 1) + sum e_ij eta_i eta_j assumes s_i(0) = 1.
+            auto kv_it = m_mcgen_variation_knobval_override.find(name);
+            const bool explicit_zero = kv_it != m_mcgen_variation_knobval_override.end()
+                && std::any_of(kv_it->second.begin(), kv_it->second.end(), [](double k){ return k == 0.0; });
+            auto f0_it = m_mcgen_variation_force_0_cv.find(name);
+            const bool forced = f0_it != m_mcgen_variation_force_0_cv.end() && f0_it->second;
+            if(explicit_zero && !forced){
+                log<LOG_ERROR>(L"%1% || ERROR: spline_cross_quad systematic '%2%': member '%3%' has an explicit 0 in knobvals but no force_0_cv=\"true\". The additive group response assumes s_i(0) = 1, add it to the member.") % __func__ % parent.c_str() % name.c_str();
+                log<LOG_ERROR>(L"Terminating.");
+                exit(EXIT_FAILURE);
+            }
             seen.push_back(name);
         }
 
