@@ -501,7 +501,11 @@ multiplicatively as ordinary splines (PROfit warns when this happens). Members
 must be `type="spline"` on the same `binning`, carry no `inflate=`, use evenly
 spaced `knobvals`, belong to no other group, and all carry the same
 `apply_to_subchannel` pattern or none. The entry itself inherits that pattern
-when it has none. Members must also have `force_0_cv="true"` (or no `0` in
+when it has none. The entry and its members must carry the same
+`include_only_weights` (or none), since `eᵢⱼ` is extracted from ratios of
+universes that have to be filled with the same event weights. The group is not
+supported with `--shape-only`, where the per-channel normalised response is no
+longer quadratic. Members must also have `force_0_cv="true"` (or no `0` in
 their `knobvals`) so that `sᵢ(0) = 1`, which the additive form assumes. 
 The additive form is exact only when the response is at most
 quadratic in the group's parameters, which holds for the `F_A²` case above; 

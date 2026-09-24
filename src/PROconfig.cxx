@@ -2986,6 +2986,18 @@ void PROconfig::ResolveSplineCrossQuadMembers(){
                 log<LOG_ERROR>(L"Terminating.");
                 exit(EXIT_FAILURE);
             }
+            // R(e_i+e_j) and s_i(1) are ratios of per-bin sums; the subtraction e_ij = R - s_i - s_j + 1
+            // is only meaningful if the cross entry and its members fill their universes under the
+            // same event weighting, i.e. the same include_only_weights (or none on both).
+            auto iow_of = [&](const std::string &n) -> std::vector<int> {
+                auto it = m_mcgen_variation_include_only_weights.find(n);
+                return it == m_mcgen_variation_include_only_weights.end() ? std::vector<int>{} : it->second;
+            };
+            if(iow_of(name) != iow_of(parent)){
+                log<LOG_ERROR>(L"%1% || ERROR: spline_cross_quad systematic '%2%' and its member '%3%' must carry the same include_only_weights (or none on both); the cross coefficients are extracted from ratios of universes that must be filled with the same event weights.") % __func__ % parent.c_str() % name.c_str();
+                log<LOG_ERROR>(L"Terminating.");
+                exit(EXIT_FAILURE);
+            }
             seen.push_back(name);
         }
 

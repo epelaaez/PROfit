@@ -1131,6 +1131,15 @@ namespace PROfit {
     }
 
     void PROsyst::FillSplineCrossQuad(const SystStruct& syst, const PROconfig& config) {
+        // Shape-only rescales every member knob spectrum to the CV integral per channel before the
+        // ratio; a per-channel normalised response is a ratio of quadratics, not a quadratic, so the
+        // additive group form is not exact there and the raw CROSS universes would not match the
+        // rescaled member splines anyway.
+        if(shape_only) {
+            log<LOG_ERROR>(L"%1% || spline_cross_quad '%2%' is not supported with --shape-only: the additive cross-term response assumes an unnormalised, degree-2 response.") % __func__ % syst.systname.c_str();
+            log<LOG_ERROR>(L"Terminating.");
+            exit(EXIT_FAILURE);
+        }
         const std::vector<std::string>& names = config.m_mcgen_variation_cross_quad_splines.at(syst.systname);
         QuadraticSplineGroup grp;
         for(const std::string& name : names) {
