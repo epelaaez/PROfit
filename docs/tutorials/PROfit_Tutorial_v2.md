@@ -2680,50 +2680,6 @@ first projected onto shape about the physical null prediction: every event,
 cosmics included, at the model's default oscillation. Knobs are then never
 spent on, or left free along, a normalisation the fit cannot see.
 
-History, in case you meet old numbers:
-
-- **Before 2026-09-11.** The *data* was rescaled, and a global-integral
-  covariance renormalisation was used. Both were biased.
-- **2026-09-11 to 2026-09-24.** Every universe and spline knob was renormalised
-  when the systematics were built, against a reference spectrum that omitted
-  `incl_systematics="false"` subchannels and counted full-oscillation samples at
-  P = 1. That erased the beam-vs-cosmic composition uncertainty. On the test
-  configuration, the ND νe shape band in its most cosmic-rich bin came out 9.0%
-  instead of 12.6%.
-- **Since 2026-09-24.** The systematics stay physical; the fit and the band
-  builders do all of the shape-only work, as described above.
-
-### D.6 Everything else that follows the flag
-
-- **`fc`, brazil, `fc-adaptive`.** Every pseudo-experiment fit uses the same
-  shape-only metric. The pseudo-data are thrown from the **physical**
-  systematics, normalisation included, just as real data would fluctuate.
-- **PROjector.** The constraint file records whether stage 1 was shape-only,
-  and stage 2 refuses a mismatch. Files written before this was recorded load
-  as "not shape-only".
-- **`--rateonly`** cannot be combined with `--shapeonly`: one bin per channel
-  leaves no shape.
-
-### D.7 Caveats
-
-- **Regenerate old artifacts.** Any `--shapeonly` result, `FC.root`, fc-adaptive
-  mesh/bank/brazil or PROjector constraint from before 2026-09-24 was built
-  under an earlier convention (D.5). The caches (`_prop.bin` / `_syst.bin`)
-  are fine.
-- **Flat directions.** A knob that only changes a whole channel's
-  normalisation is unconstrained by the data. A Gaussian prior holds it at its
-  centre; a `prior_type="uniform"` knob is completely flat. The same goes for a
-  `template`-model scale covering a whole channel.
-- **Labels.** The per-channel plot labels read χ²/nbins; they do not subtract
-  the lost degree of freedom.
-- **Post-fit band statistics.** The post-fit conditional uses
-  C = diag(max(d,1)), the Neyman convention, whatever `-c` you chose.
-- **Band throws** draw knobs from an untruncated Gaussian: `restrict` is
-  ignored, and uniform-prior knobs are thrown as Gaussian.
-- **Background subtraction.** With `--bkg-subtract`, the subtracted band is
-  not shape-normalised.
-- **2D slices.** Slices are area-normalised one slice at a time, whereas the fit
-  normalises the whole channel.
 
 ---
 
