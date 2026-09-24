@@ -63,6 +63,12 @@ void run_plot(const PROconfig &config, const PROpeller &prop, const PROmetric &m
         cv_objs.push_back(objs);
     }
 
+    // Shape-only: the fractional breakdowns and covariance plots show the per-channel shape
+    // part of every systematic (MiniBooNE M_shape) about the CV, as the fit sees them. The
+    // chi^2 labels (allcov_metric) are unaffected: the metric re-projects at evaluation.
+    if(options.shapeonly && need_allcov)
+        allcovsyst.ProjectCovariancesOntoShape(config, variable_cvs[config.i_prime].Spec());
+
     if(!options.no_frac_syst) {
         std::string filename = options.final_output_tag+"_fractional_systematics.pdf";
         plotPriorFractionalSystematicBreakdown(config, variable_cvs[config.i_prime], allcovsyst, filename,config.i_prime);
@@ -568,6 +574,7 @@ void run_plot(const PROconfig &config, const PROpeller &prop, const PROmetric &m
         for(const auto &name: first_plots){
             auto &mat = matrices.at(name);
             mat->Draw("colz");
+            if(options.shapeonly) drawShapeOnlyNote(&c);
             drawVersionWatermark(&c);
             c.Print((options.final_output_tag+"_PROplot_Covar.pdf").c_str(), "pdf");
         }
@@ -576,6 +583,7 @@ void run_plot(const PROconfig &config, const PROpeller &prop, const PROmetric &m
         for(const auto &[name, mat]: matrices) {
             if (std::find(first_plots.begin(), first_plots.end(), name) != first_plots.end())continue;
             mat->Draw("colz");
+            if(options.shapeonly) drawShapeOnlyNote(&c);
             drawVersionWatermark(&c);
             c.Print((options.final_output_tag+"_PROplot_Covar.pdf").c_str(), "pdf");
         }

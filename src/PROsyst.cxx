@@ -46,6 +46,20 @@ namespace PROfit {
         return R;
     }
 
+    void PROsyst::ProjectCovariancesOntoShape(const PROconfig &config, const Eigen::VectorXf &cv) {
+        const Eigen::MatrixXf R = ShapeProjector(ChannelBlocks(config, other_index), cv);
+        for(size_t i = 0; i < covmat.size(); ++i) {
+            if(covmat[i].rows() != R.rows() || covmat[i].cols() != R.cols()) {
+                log<LOG_WARNING>(L"%1% || Covariance %2% is %3%x%4%, expected %5%; not projected onto shape.") % __func__ % i % covmat[i].rows() % covmat[i].cols() % R.rows();
+                continue;
+            }
+            const Eigen::MatrixXf proj = R * covmat[i] * R.transpose();
+            covmat[i] = 0.5f * (proj + proj.transpose());
+            if(i < corrmat.size()) corrmat[i] = GenerateCorrMatrix(covmat[i]);
+        }
+        if(covmat.size()) fractional_covariance = SumMatrices();
+    }
+
     std::vector<char> PROsyst::SubchannelScopeMask(const PROconfig &config, int binning, const std::string &pattern) {
         std::vector<char> mask(config.m_num_variable_bins_total[binning], 1);
         if(pattern.empty()) return mask;

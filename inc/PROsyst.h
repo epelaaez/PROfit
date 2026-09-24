@@ -206,6 +206,17 @@ namespace PROfit {
              */
             static Eigen::MatrixXf ShapeProjector(const std::vector<std::pair<size_t,size_t>> &blocks, const Eigen::VectorXf &cv);
 
+            /**
+             * @brief In place: project every covariance matrix onto per-channel shape about @p cv.
+             * @details Applies ShapeProjector (blocks of this PROsyst's binning) to each covmat,
+             * refreshes the correlation matrices and fractional_covariance. For shape-only
+             * DISPLAYS (fractional breakdowns, covariance plots) of a physical PROsyst; the
+             * chi^2 never needs it (the metric projects about the current prediction).
+             * @param config Analysis configuration.
+             * @param cv     Uncollapsed spectrum (binning other_index) to project about.
+             */
+            void ProjectCovariancesOntoShape(const PROconfig &config, const Eigen::VectorXf &cv);
+
             // ----- apply_to_subchannel scoping (post-build, type-agnostic) -----
             //
             // A systematic's XML apply_to_subchannel= pattern is honoured in two layers:

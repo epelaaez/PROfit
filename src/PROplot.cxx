@@ -2635,6 +2635,7 @@ namespace PROfit{
                     leg->Draw();
 
                     drawVersionWatermark(&c, WatermarkPos::RightEdge);
+                    if(allsplinesyst.ShapeOnly()) drawShapeOnlyNote(&c, WatermarkPos::RightEdge);
                     c.Update();
                     c.Print(filename.c_str());
                     global_channel_index++;
@@ -2971,6 +2972,7 @@ namespace PROfit{
                         leg->Draw();
 
                         drawVersionWatermark(&c, WatermarkPos::RightEdge);
+                        if(allsplinesyst.ShapeOnly()) drawShapeOnlyNote(&c, WatermarkPos::RightEdge);
                         c.Update();
                         c.Print(filename.c_str());
                         global_channel_index++;
@@ -3191,6 +3193,7 @@ int plotPriorFractionalSystematicChannelRatios(const PROconfig &config, const PR
             leg->Draw();
 
             drawVersionWatermark(&c, WatermarkPos::RightEdge);
+            if(allsplinesyst.ShapeOnly()) drawShapeOnlyNote(&c, WatermarkPos::RightEdge);
             c.Update();
             c.Print(filename.c_str());
         }}}}
