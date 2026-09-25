@@ -176,6 +176,7 @@ namespace PROfit {
 
     PROsyst::PROsyst( const PROpeller &prop, const PROconfig &config, const std::vector<SystStruct>& systs, bool shapeonly, int other_index, const PROmodel* model, const Eigen::VectorXf* params) : other_index(other_index) {
         shape_only = shapeonly;
+        std::vector<const SystStruct*> cross_systs;  // need every member spline built first: second pass below
         if(shape_only) {
             // The systematics themselves stay physical: the metric's per-channel rescale and
             // its evaluation-time projector (ShapeProjectorCollapsed) do shape-only. Here we
@@ -220,6 +221,8 @@ namespace PROfit {
                     % (is_flux ? "pre-migration (flux)" : "post-migration");
                 spline_prior_types.back() = config.GetSplinePriorType(syst.systname);
                 ++n_splines;
+            } else if(syst.mode == "spline_cross_quad") {
+                cross_systs.push_back(&syst);
             } else if(syst.mode == "binned_unconstrained") {
                 FillBinnedUnconstrainedSplines(config, syst);
             } else if(syst.mode == "spline_to_covariance") {
@@ -338,6 +341,7 @@ namespace PROfit {
                 // unconditionally (keyed to syst.binning), matching covariance_to_spline.
                 Eigen::MatrixXf frac_cov = LoadExternalFractionalCovariance(config, syst);
                 size_t n_before = splines.size();
+                size_t n_covar_before = covar_names.size();
                 FillSplinesFromCovarianceMatrix(frac_cov, syst);
                 size_t n_after = splines.size();
 
@@ -347,22 +351,7 @@ namespace PROfit {
                 bool is_flux_ext = config.has_flux_tag(syst.systname);
                 for(size_t si = n_before; si < n_after; ++si)
                     spline_is_pre_migration.push_back(is_flux_ext);
-
-                // Propagate parent tag + plotname to the synthesized knob entries (see
-                // covariance_to_spline branch above for the rationale).
-                PROconfig& mut_config = const_cast<PROconfig&>(config);
-                auto parent_tags_it = mut_config.m_mcgen_variation_tags.find(syst.systname);
-                auto parent_plotname_it = mut_config.m_mcgen_variation_plotname_map.find(syst.systname);
-                for(size_t si = n_before; si < n_after; ++si) {
-                    const std::string& knob_name = spline_names[si];
-                    if(parent_tags_it != mut_config.m_mcgen_variation_tags.end()) {
-                        mut_config.m_mcgen_variation_tags[knob_name] = parent_tags_it->second;
-                    }
-                    if(parent_plotname_it != mut_config.m_mcgen_variation_plotname_map.end()) {
-                        const std::string suffix = knob_name.substr(syst.systname.size());
-                        mut_config.m_mcgen_variation_plotname_map[knob_name] = parent_plotname_it->second + suffix;
-                    }
-                }
+                PropagateDerivedNames(config, syst.systname, n_before, n_covar_before);
             }
         }
 
@@ -403,6 +392,9 @@ namespace PROfit {
                 spline_is_pre_migration.push_back(is_flux);
             PropagateDerivedNames(config, parent, n_before, n_covar_before);
         }
+
+        quadratic_group_of.assign(splines.size(), -1);
+        for(const SystStruct *cs : cross_systs) FillSplineCrossQuad(*cs, config);
 
         spline_priors = Eigen::VectorXf::Constant(n_splines, 1);
         spline_centers = Eigen::VectorXf::Constant(n_splines, 0);
@@ -455,6 +447,7 @@ namespace PROfit {
         log<LOG_DEBUG>(L"%1% | Creating a subset with a list of %2% systematics.") % __func__ % systs.size();
         Eigen::VectorXf tmp_priors = spline_priors;
         Eigen::VectorXf tmp_centers = spline_centers;
+        std::vector<int> new_index(splines.size(), -1);
         for(const std::string &name: systs) {
             log<LOG_DEBUG>(L"%1% | Looking up systematic %2% from subset list.") % __func__ % name.c_str();
             const auto &[idx, stype] = syst_map.at(name);
@@ -463,6 +456,7 @@ namespace PROfit {
             switch(stype) {
                 case SystType::Spline:
                     {
+                        new_index[idx] = (int)ret.splines.size();
                         ret.syst_map[name] = std::make_pair(ret.splines.size(), SystType::Spline);
                         ret.spline_names.push_back(name);
                         Spline spline_copy;//Create explicit deep copy of the Spline
@@ -503,6 +497,7 @@ namespace PROfit {
         ret.other_index = other_index;
         ret.shape_only = shape_only;
         ret.cov2spline_debug_info = cov2spline_debug_info;
+        CopyQuadraticGroups(ret, new_index);
         log<LOG_DEBUG>(L"%1% | Done Subset.") % __func__ ;
         return ret;
     }
@@ -515,9 +510,11 @@ namespace PROfit {
         // alphabetical order: spline position defines the parameter-vector
         // layout, so a reordered copy would silently misalign any parameter or
         // seed vector built against this object.
+        std::vector<int> new_index(splines.size(), -1);
         for(size_t idx = 0; idx < spline_names.size(); ++idx) {
             const std::string &name = spline_names[idx];
             if(std::find(systs.begin(), systs.end(), name) != systs.end()) continue;
+            new_index[idx] = (int)ret.splines.size();
             ret.syst_map[name] = std::make_pair(ret.splines.size(), SystType::Spline);
             ret.spline_names.push_back(name);
             Spline spline_copy;//Create explicit deep copy of the Spline
@@ -547,6 +544,18 @@ namespace PROfit {
             ret.corrmat.push_back(corrmat[idx]);
             ++ret.n_covar;
         }
+        // Covariances registered only in syst_map (the mcstat matrix, never in covar_names)
+        // are kept unless named explicitly. Appended last, as in the ctor, so the summation
+        // order of fractional_covariance is unchanged.
+        for(const auto &[name, entry]: syst_map) {
+            if(entry.second != SystType::Covariance) continue;
+            if(std::find(covar_names.begin(), covar_names.end(), name) != covar_names.end()) continue;
+            if(std::find(systs.begin(), systs.end(), name) != systs.end()) continue;
+            ret.syst_map[name] = std::make_pair(ret.covmat.size(), SystType::Covariance);
+            ret.covmat.push_back(covmat[entry.first]);
+            ret.corrmat.push_back(corrmat[entry.first]);
+            ++ret.n_covar;
+        }
         ret.spline_priors = tmp_priors.segment(0, ret.n_splines);
         ret.spline_centers = tmp_centers.segment(0, ret.n_splines);
         ret.fractional_covariance = ret.covmat.size() ? ret.SumMatrices()
@@ -554,6 +563,7 @@ namespace PROfit {
         ret.other_index = other_index;
         ret.shape_only = shape_only;
         ret.cov2spline_debug_info = cov2spline_debug_info;
+        CopyQuadraticGroups(ret, new_index);
         return ret;
     }
 
@@ -1061,6 +1071,207 @@ namespace PROfit {
         return (c[1] + x*(2.0f*c[2] + 3.0f*x*c[3])) / width;
     }
 
+    int PROsyst::FactorColumn(int i) const {
+        // g gets the group the spline belongs to, g = -1 if the spline does not belong to any
+        // group or the argument i is out of bounds of the quadratic_group_of vector
+        const int g = (i >= 0 && i < (int)quadratic_group_of.size()) ? quadratic_group_of[i] : -1;
+        return g < 0 ? i : quadratic_groups[g].members.front();
+    }
+
+    float PROsyst::GetSplineFactor(int i, const Eigen::VectorXf& shifts, int bin) const {
+        const int g = (i >= 0 && i < (int)quadratic_group_of.size()) ? quadratic_group_of[i] : -1;
+        if(g < 0) return GetSplineShift(i, shifts(i), bin); // spline does not belong to any group, return usual shift
+        const QuadraticSplineGroup& grp = quadratic_groups[g];
+        if(i != grp.members.front()) return 1.0f;   // the first member carries the whole group
+        if(bin < 0 || bin >= grp.cross.rows()) return 1.0f;  // out of bounds
+        const int n = (int)grp.members.size();
+        float r = 1.0f;
+        int p = 0;
+
+        // Get additive response for quadratic spline group
+        for(int a = 0; a < n; ++a) {
+            const int ma = grp.members[a];
+            r += GetSplineShift(ma, shifts(ma), bin) - 1.0f; // Get linear terms
+            for(int b = a + 1; b < n; ++b, ++p) {
+                r += grp.cross(bin, p) * shifts(ma) * shifts(grp.members[b]); // Get quadratic terms
+            }
+        }
+        return r;
+    }
+
+    float PROsyst::GetSplineFactorDeriv(int i, const Eigen::VectorXf& shifts, int bin) const {
+        const int g = (i >= 0 && i < (int)quadratic_group_of.size()) ? quadratic_group_of[i] : -1;
+        if(g < 0) return GetSplineShiftDeriv(i, shifts(i), bin); // spline does not belong to any group, return usual deriv
+        const QuadraticSplineGroup& grp = quadratic_groups[g];
+        if(bin < 0 || bin >= grp.cross.rows()) return 0.0f; // out of bounds
+        float d = GetSplineShiftDeriv(i, shifts(i), bin); // derivative from linear term
+        const int n = (int)grp.members.size();
+        int p = 0;
+        for(int a = 0; a < n; ++a)
+            for(int b = a + 1; b < n; ++b, ++p) {
+                if(grp.members[a] == i)      d += grp.cross(bin, p) * shifts(grp.members[b]);
+                else if(grp.members[b] == i) d += grp.cross(bin, p) * shifts(grp.members[a]);
+            }
+        return d;
+    }
+
+    void PROsyst::FillSplineCrossQuad(const SystStruct& syst, const PROconfig& config) {
+        // Shape-only rescales every member knob spectrum to the CV integral per channel before the
+        // ratio; a per-channel normalised response is a ratio of quadratics, not a quadratic, so the
+        // additive group form is not exact there and the raw CROSS universes would not match the
+        // rescaled member splines anyway.
+        if(shape_only) {
+            log<LOG_ERROR>(L"%1% || spline_cross_quad '%2%' is not supported with --shape-only: the additive cross-term response assumes an unnormalised, degree-2 response.") % __func__ % syst.systname.c_str();
+            log<LOG_ERROR>(L"Terminating.");
+            exit(EXIT_FAILURE);
+        }
+        const std::vector<std::string>& names = config.m_mcgen_variation_cross_quad_splines.at(syst.systname);
+        QuadraticSplineGroup grp;
+        for(const std::string& name : names) {
+            auto it = syst_map.find(name);
+            if(it == syst_map.end() || it->second.second != SystType::Spline) {
+                log<LOG_ERROR>(L"%1% || spline_cross_quad '%2%': member '%3%' is not a spline in this PROsyst.") % __func__ % syst.systname.c_str() % name.c_str();
+                log<LOG_ERROR>(L"Terminating.");
+                exit(EXIT_FAILURE);
+            }
+            const int m = (int)it->second.first;
+            if(spline_binnings[m] != syst.binning || quadratic_group_of[m] != -1 || config.m_mcgen_variation_inflate.count(name)) {
+                log<LOG_ERROR>(L"%1% || spline_cross_quad '%2%': member '%3%' must share its binning, belong to no other group and carry no inflate=.") % __func__ % syst.systname.c_str() % name.c_str();
+                log<LOG_ERROR>(L"Terminating.");
+                exit(EXIT_FAILURE);
+            }
+            grp.members.push_back(m);
+        }
+        const int n = (int)grp.members.size();
+        const int npairs = n * (n - 1) / 2;
+        if((int)syst.p_multi_spec.size() != 1 + npairs) {
+            log<LOG_ERROR>(L"%1% || spline_cross_quad '%2%': branch has %3% entries but %4% members need 1 + %5%.") % __func__ % syst.systname.c_str() % syst.p_multi_spec.size() % n % npairs;
+            log<LOG_ERROR>(L"Terminating.");
+            exit(EXIT_FAILURE);
+        }
+        // Universe u holds the weight at design point u (knob values are 0..npairs, so u == entry).
+        // Ratio to entry 0 is the response R(e_i+e_j); subtract what the members' splines already
+        // give at +1 to leave the pure cross coefficient e_ij = R - s_i(1) - s_j(1) + 1.
+        const int nbins = syst.p_cv->GetNbins();
+        const Eigen::VectorXf& u0 = syst.p_multi_spec[0]->Spec();
+        grp.cross = Eigen::MatrixXf::Zero(nbins, npairs);
+        int p = 0;
+        for(int a = 0; a < n; ++a) {
+            for(int b = a + 1; b < n; ++b, ++p) {
+                const Eigen::VectorXf& up = syst.p_multi_spec[1 + p]->Spec();
+                for(int k = 0; k < nbins; ++k) {
+                    if(u0(k) == 0) continue;
+                    // Subtract individual responses from joint response
+                    grp.cross(k, p) = up(k) / u0(k) - GetSplineShift(grp.members[a], 1.0f, k) - GetSplineShift(grp.members[b], 1.0f, k) + 1.0f;
+                }
+            }
+        }
+        // Even knot spacing is required here, though not for ordinary splines. The group's factor
+        // 1 + sum(s_i - 1) + sum e_ij eta_i eta_j is exact for a quadratic response only if each
+        // member's spline s_i(eta) is itself exactly 1 + b eta + d eta^2 between knots. PROfit's
+        // Hermite segments take the slope at a knot as (y2-y0)/2, which is the derivative of a
+        // parabola only when the neighbouring knots are equidistant (any spacing, not just unit).
+        // With uneven knobvals s_i still passes through every knot, so the e_ij extraction above
+        // and the on-axis quadraticity probe below are unaffected and would report a perfect fit,
+        // but s_i bows off the parabola BETWEEN knots and the group response silently loses the
+        // exactness.
+        for(int m : grp.members) {
+            std::vector<float> kn;   // this member's knot positions in knob units, e.g. -3,-2,-1,0,1,2,3
+            for(int seg = 0; seg < splines[m].segments_per_bin; ++seg) kn.push_back(splines[m].segments[seg].knot);  // each segment starts at a knot
+            kn.push_back(spline_hi[m]);   // ... and the last segment ends at spline_hi
+            for(size_t q = 2; q < kn.size(); ++q) {
+                const float d0 = kn[1] - kn[0], dq = kn[q] - kn[q-1];   // first gap is the reference; every later gap must match it
+                if(std::abs(dq - d0) > 1e-4f * std::max(std::abs(d0), 1.0f)) {   // relative 1e-4 tolerance, floored at 1 knob unit
+                    log<LOG_ERROR>(L"%1% || spline_cross_quad '%2%': member '%3%' has unevenly spaced knobvals (%4% then %5%). PROfit's spline is then not exact for a quadratic between knots, so the group response would be silently wrong. Use evenly spaced knobvals.")
+                        % __func__ % syst.systname.c_str() % spline_names[m].c_str() % d0 % dq;
+                    log<LOG_ERROR>(L"Terminating.");
+                    exit(EXIT_FAILURE);
+                }
+            }
+        }
+
+        const Eigen::VectorXf& cv_spec = syst.p_cv->Spec();  // used to skip bins with no MC
+
+        // The additive form 1 + sum(s_i - 1) + ... assumes s_i(0) = 1 for every member
+        for(int m : grp.members) {
+            for(int k = 0; k < nbins; ++k) {
+                if(cv_spec(k) <= 0) continue;
+                const float s0 = GetSplineShift(m, 0.0f, k);
+                if(std::abs(s0 - 1.0f) > 1e-5f) {
+                    log<LOG_ERROR>(L"%1% || spline_cross_quad '%2%': member '%3%' gives s(0) = %4% (not 1) in bin %5%. The additive group response assumes s_i(0) = 1; set force_0_cv=\"true\" on the member.")
+                        % __func__ % syst.systname.c_str() % spline_names[m].c_str() % s0 % k;
+                    log<LOG_ERROR>(L"Terminating.");
+                    exit(EXIT_FAILURE);
+                }
+            }
+        }
+
+        // The additive group response is exact only if each member's per-bin response really is
+        // quadratic in its parameter. The on-axis knots over-determine that: b and d are fixed by
+        // the +-1 knots alone, so every knot beyond them is a prediction. Check it. 
+        constexpr float quad_tol = 1e-3f;                    // relative departure above which the group is flagged approximate
+
+        // Track the single worst offender across all members, bins and knots for the log message.
+        float worst = 0.0f;
+        int worst_m = -1, worst_bin = -1;
+        float worst_knob = 0.0f, worst_pred = 0.0f, worst_got = 0.0f;
+        for(int m : grp.members) {
+            std::vector<float> probes;   // the member's own knots beyond +-1; same in every bin
+            for(int seg = 0; seg < splines[m].segments_per_bin; ++seg) {
+                if(std::abs(splines[m].segments[seg].knot) > 1.0f) probes.push_back(splines[m].segments[seg].knot);
+            }
+            if(std::abs(spline_hi[m]) > 1.0f) probes.push_back(spline_hi[m]);   // the last knot is not a segment start
+            for(int k = 0; k < nbins; ++k) {
+                if(cv_spec(k) <= 0) continue;
+                // Fit 1 + b eta + d eta^2 through the +-1 knots alone (s(0) = 1 by construction):
+                // the odd part gives the slope b, the even part the curvature d.
+                const float sp = GetSplineShift(m, 1.0f, k), sm = GetSplineShift(m, -1.0f, k);
+                const float b = 0.5f * (sp - sm), d = 0.5f * (sp + sm) - 1.0f;
+                for(float knob : probes) {
+                    const float pred = 1.0f + b * knob + d * knob * knob;   // what a quadratic predicts at the outer knot
+                    const float got  = GetSplineShift(m, knob, k);         // what the MC universe actually gave there
+                    const float rel  = std::abs(got - pred) / std::max(std::abs(got), 1e-3f);   // floor avoids dividing by a ~0 response
+                    if(rel > worst) { worst = rel; worst_m = m; worst_bin = k; worst_knob = knob; worst_pred = pred; worst_got = got; }
+                }
+            }
+        }
+        if(worst > quad_tol) {
+            log<LOG_WARNING>(L"%1% || spline_cross_quad '%2%': member '%3%' is NOT quadratic in its parameter -- at bin %4%, knob %5% the +-1 knots predict %6% but the spline gives %7% (%8% relative). The additive cross-term response is exact only for a degree-2 response, so this group's prediction is approximate.")
+                % __func__ % syst.systname.c_str() % spline_names[worst_m].c_str() % worst_bin % worst_knob % worst_pred % worst_got % worst;
+        }
+
+        std::string pair_map;
+        int q = 0;
+        for(int a = 0; a < n; ++a) {
+            for(int b2 = a + 1; b2 < n; ++b2, ++q) {
+                pair_map += " " + std::to_string(1 + q) + ":(" + spline_names[grp.members[a]] + "," + spline_names[grp.members[b2]] + ")"; 
+            }
+        }
+        for(int m : grp.members) quadratic_group_of[m] = (int)quadratic_groups.size();
+        log<LOG_INFO>(L"%1% || spline_cross_quad '%2%': %3% splines coupled through %4% cross terms per bin (%5% bins); worst on-axis departure from a quadratic %6% (tolerance %7%). Branch entry -> pair:%8%")
+            % __func__ % syst.systname.c_str() % n % npairs % nbins % worst % quad_tol % pair_map.c_str();
+        quadratic_groups.push_back(std::move(grp));
+    }
+
+    void PROsyst::CopyQuadraticGroups(PROsyst& ret, const std::vector<int>& new_index) const {
+        ret.quadratic_group_of.assign(ret.splines.size(), -1);
+        for(const QuadraticSplineGroup& g : quadratic_groups) {
+            QuadraticSplineGroup copy = g;
+            int kept = 0;
+            for(int& m : copy.members) {
+                m = (m >= 0 && m < (int)new_index.size()) ? new_index[m] : -1;
+                kept += (m >= 0);
+            }
+            if(kept != (int)copy.members.size()) {
+                if(kept > 1)
+                    log<LOG_WARNING>(L"%1% || A spline_cross_quad group lost members in this subset; its %2% surviving splines are combined multiplicatively.") % __func__ % kept;
+                continue;
+            }
+            for(int m : copy.members) ret.quadratic_group_of[m] = (int)ret.quadratic_groups.size();
+            ret.quadratic_groups.push_back(std::move(copy));
+        }
+    }
+
     void PROsyst::FillSpline(const SystStruct& syst, bool unmirrored) {
         std::vector<PROspec> ratios;
         ratios.reserve(syst.p_multi_spec.size());
@@ -1111,6 +1322,13 @@ namespace PROfit {
             }
         }
 
+        // Check that we have a universe in addition to the CV
+        if(ratios.size() < 2) {
+            log<LOG_ERROR>(L"%1% || systematic %2% has only %3% spline knot(s) after adding the knob=0 point; at least one universe with a nonzero knobval is required to build a spline.") % __func__ % syst.systname.c_str() % ratios.size();
+            log<LOG_ERROR>(L"Terminating.");
+            exit(EXIT_FAILURE);
+        }
+
         int nbins = syst.p_cv->GetNbins();
         Spline spline;
         spline.bins = nbins;
@@ -1144,11 +1362,12 @@ namespace PROfit {
                 const float y1 = ratios[0].GetBinContent(i);
                 const float y2 = ratios[1].GetBinContent(i);
                 const float slope = (y2 - y1) / (knobvals[1] - knobvals[0]);
+                // GetSplineShift evaluates each segment on x in [0,1], so the linear term is the rise across it
                 if(unmirrored)
-                    bin_segments.push_back(SplineSegment{(float)(-knobvals[1]), {slope * (-knobvals[1]) + y1, slope, 0, 0}});
+                    bin_segments.push_back(SplineSegment{(float)(-knobvals[1]), {slope * (-knobvals[1]) + y1, y2 - y1, 0, 0}});
                 else
-                    bin_segments.push_back(SplineSegment{(float)(-knobvals[1]), {y2, -slope, 0, 0}});
-                bin_segments.push_back(SplineSegment{(float)knobvals[0], {slope * (float)knobvals[0] + y1, slope, 0, 0}});
+                    bin_segments.push_back(SplineSegment{(float)(-knobvals[1]), {y2, y1 - y2, 0, 0}});
+                bin_segments.push_back(SplineSegment{(float)knobvals[0], {slope * (float)knobvals[0] + y1, y2 - y1, 0, 0}});
             } else {
                 {
                     const float y1 = ratios[0].GetBinContent(i);
@@ -1541,13 +1760,14 @@ namespace PROfit {
         assert(shifts.size() == splines.size());
         int nbins = config.m_num_variable_bins_total[other_index];
         PROspec ret(nbins);
+        const Eigen::Map<const Eigen::VectorXf> shift_vec(shifts.data(), shifts.size());
         for(size_t i = 0; i < prop.NEvent(); ++i) {
             const int reco_bin = prop.VariableBinIndex(other_index, i);
             float weight = 1;
             for(size_t j = 0; j < shifts.size(); ++j) {
                 int binning = spline_binnings[j];
                 const int spline_bin = prop.VariableBinIndex(binning, i);
-                weight *= GetSplineShift(j, shifts[j], spline_bin);
+                weight *= GetSplineFactor(j, shift_vec, spline_bin);
             }
             ret.Fill(reco_bin, weight * prop.added_weights[i]);
         }

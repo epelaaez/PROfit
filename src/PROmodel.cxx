@@ -181,6 +181,14 @@ static std::string canonicalize_model_tag(const std::string &name) {
 std::unique_ptr<PROmodel> get_model_from_string(const PROconfig& config, const PROpeller &prop) {
     std::string name = canonicalize_model_tag(config.m_model_tag);
 
+    if(!config.m_model_options.empty() && name.rfind("LBL_", 0) != 0) {
+        std::string keys;
+        for(const auto &kv : config.m_model_options) keys += (keys.empty() ? "" : ", ") + kv.first;
+        log<LOG_ERROR>(L"%1% || <model> options [%2%] are only supported by the LBL_* models, but the model tag is '%3%'. Terminating.")
+            % __func__ % keys.c_str() % name.c_str();
+        exit(EXIT_FAILURE);
+    }
+
     if(name == "null") {
         return std::unique_ptr<PROmodel>(new NullModel(prop));
     } else if(name == "numudisTEST") {
@@ -193,8 +201,8 @@ std::unique_ptr<PROmodel> get_model_from_string(const PROconfig& config, const P
         return std::unique_ptr<PROmodel>(new PRO3p1_decay_vis_model2(prop,config.m_model_parameter_map));
     } else if(name == "SBL_3+2_Usq") {
         return std::unique_ptr<PROmodel>(new PRO3p2(prop, config.m_model_parameter_map));
-    } else if(name == "LBL_3nu-matter_angles") {
-        return std::unique_ptr<PROmodel>(new PROLBL(prop, config.m_model_parameter_map));
+    } else if(name == "LBL_3nu-matter_angles" || name == "LBL_3nu-vacuum_angles") {
+        return std::unique_ptr<PROmodel>(new PROLBL(config, prop, name == "LBL_3nu-matter_angles"));
     } else if(name == "template") {
         return std::unique_ptr<PROmodel>(new PROtemplate(config, prop));
     }
@@ -203,7 +211,7 @@ std::unique_ptr<PROmodel> get_model_from_string(const PROconfig& config, const P
     if(const SineModelRecipe *recipe = find_sine_recipe(name)) {
         return std::unique_ptr<PROmodel>(new PROsineModel(prop, config.m_model_parameter_map, *recipe));
     }
-    log<LOG_ERROR>(L"%1% || Unrecognized model name %2%. Valid tags (regime_model_parameterization(_NC); legacy pre-v3.1 names are auto-mapped): null, template, SBL_2flav_(numudis,nueapp,nuedis), SBL_2flav_(numudis,nudis)_NC, SBL_3+1_(Usq,angles,sinsq2thee,sinsq2thmumu,sinsq2thmue) and their _NC versions, SBL_3+1+decay_(invis,vis1,vis2), SBL_3+2_Usq, LBL_3nu-matter_angles. Terminating.") % __func__ % name.c_str();
+    log<LOG_ERROR>(L"%1% || Unrecognized model name %2%. Valid tags (regime_model_parameterization(_NC); legacy pre-v3.1 names are auto-mapped): null, template, SBL_2flav_(numudis,nueapp,nuedis), SBL_2flav_(numudis,nudis)_NC, SBL_3+1_(Usq,angles,sinsq2thee,sinsq2thmumu,sinsq2thmue) and their _NC versions, SBL_3+1+decay_(invis,vis1,vis2), SBL_3+2_Usq, LBL_3nu-matter_angles, LBL_3nu-vacuum_angles. Terminating.") % __func__ % name.c_str();
     exit(EXIT_FAILURE);
 }
 

@@ -516,8 +516,13 @@ std::map<std::string, TObject *> draw_fit_result(const PROconfig &config, const 
     }
 
     if(fitres.fitter.best_fit.size()) {
-        // NActiveBins == total bins unless a fit-region mask (e.g. PROjector) is installed.
-        std::string hname = "#chi^{2}/nbins = " + chi2LabelValue(fitres.chi2) + "/" + to_string(config.NActiveBins(config.i_prime));
+        // Degrees of freedom of the fitted minimum: bins entering the chi2 sum (active, and
+        // for neyman data>0) minus free physics params and free uniform-prior splines, minus
+        // one per channel under --shapeonly. Gaussian-prior splines net zero (pull = one
+        // pseudo-measurement). See PROndof in inc/PROmetric.h.
+        const PROndof ndof = metric.GetNdof();
+        log<LOG_INFO>(L"%1% || Post-fit chi2 = %2% with %3%") % __func__ % fitres.chi2 % ndof.describe().c_str();
+        std::string hname = "global #chi^{2}/ndf = " + chi2LabelValue(fitres.chi2) + "/" + to_string(ndof.value());
         PROspec bf = FillSpectra(config, prop, syst, model, fitres.fitter.best_fit, true, config.i_prime);
         // Shape-only: the best fit IS the prediction rescaled onto the data; the post-fit
         // band's error_point/center_shift live on that scale too.

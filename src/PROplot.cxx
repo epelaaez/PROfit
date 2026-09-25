@@ -17,6 +17,31 @@
 
 namespace PROfit{
 
+    std::vector<int> colors = {
+        kAzure+1,      // Light blue
+        kRed+1,        // Bright red
+        kGreen+3,      // Medium green
+        kOrange+7,      // Deep orange
+        kBlue+2,        // Darker blue
+        kViolet+2,      // Purple/violet
+        kGray+1,         // Light gray
+        kYellow+2,      // Golden yellow
+        kTeal+3,        // Teal
+        kPink+2,        // Pink
+        kMagenta+2,     // Magenta
+        kSpring+5,      // Blue-green
+        kMagenta - 3,   // Rich purple-violet
+        kCyan + 2,      // Vivid sky blue
+        kOrange - 3,    // Deep amber / warm yellow
+        kGreen - 2,     // Forest / dark green
+        kPink - 3,      // Soft rose
+        kYellow - 7,    // Mustard / olive-gold
+        kViolet - 6,    // Deep indigo
+        kSpring - 1,    // Bright lime green
+        kRed - 7,       // Crimson / maroon
+        kAzure - 4      // Slate blue
+    };
+
     void set_matrix_palette() {
         //Covariance colors, move this eslewher
         const Int_t NCont = 255;
@@ -186,14 +211,17 @@ namespace PROfit{
         ret["total_cor"] = std::move(cor_hist);
         ret["collapsed_total_cor"] = std::move(collapsed_cor_hist);
 
+        const size_t n_full = config.m_num_variable_bins_total[config.i_prime];
+        const size_t n_coll = config.m_num_variable_bins_total_collapsed[config.i_prime];
+
         for(const auto &name: syst.covar_names) {
             const Eigen::MatrixXf &covar = syst.GrabMatrix(name);
             const Eigen::MatrixXf &corr = syst.GrabCorrMatrix(name);
 
-            std::unique_ptr<TH2D> cov_h = std::make_unique<TH2D>(("cov"+name).c_str(), (name+" Fractional Covariance;Bin # ;Bin #").c_str(), config.m_num_variable_bins_total[config.i_prime], 0, config.m_num_variable_bins_total[config.i_prime], config.m_num_variable_bins_total[config.i_prime], 0, config.m_num_variable_bins_total[config.i_prime]);
-            std::unique_ptr<TH2D> corr_h = std::make_unique<TH2D>(("cor"+name).c_str(), (name+" Correlation;Bin # ;Bin #").c_str(), config.m_num_variable_bins_total[config.i_prime], 0, config.m_num_variable_bins_total[config.i_prime], config.m_num_variable_bins_total[config.i_prime], 0, config.m_num_variable_bins_total[config.i_prime]);
-            for(size_t i = 0; i < config.m_num_variable_bins_total[config.i_prime]; ++i){
-                for(size_t j = 0; j < config.m_num_variable_bins_total[config.i_prime]; ++j){
+            std::unique_ptr<TH2D> cov_h = std::make_unique<TH2D>(("cov"+name).c_str(), (name+" Fractional Covariance;Bin # ;Bin #").c_str(), n_full, 0, n_full, n_full, 0, n_full);
+            std::unique_ptr<TH2D> corr_h = std::make_unique<TH2D>(("cor"+name).c_str(), (name+" Correlation;Bin # ;Bin #").c_str(), n_full, 0, n_full, n_full, 0, n_full);
+            for(size_t i = 0; i < n_full; ++i){
+                for(size_t j = 0; j < n_full; ++j){
                     cov_h->SetBinContent(i+1,j+1,covar(i,j));
                     corr_h->SetBinContent(i+1,j+1,corr(i,j));
                 }
@@ -205,8 +233,31 @@ namespace PROfit{
             corr_h->SetMaximum(1);
             corr_h->SetMinimum(-1);
 
+            // Collapsed version, built the same way as collapsed_total_frac_cov:
+            // fractional -> absolute (full binning) -> collapse -> fractional (collapsed binning)
+            Eigen::MatrixXf syst_full_covariance = diag * covar * diag;
+            Eigen::MatrixXf syst_collapsed_full = CollapseMatrix(config, syst_full_covariance);
+            Eigen::MatrixXf syst_collapsed_frac = collapsed_cv_inv_diag * syst_collapsed_full * collapsed_cv_inv_diag;
+
+            std::unique_ptr<TH2D> ccov_h = std::make_unique<TH2D>(("ccov"+name).c_str(), (name+" Collapsed Fractional Covariance;Bin # ;Bin #").c_str(), n_coll, 0, n_coll, n_coll, 0, n_coll);
+            std::unique_ptr<TH2D> ccorr_h = std::make_unique<TH2D>(("ccor"+name).c_str(), (name+" Collapsed Correlation;Bin # ;Bin #").c_str(), n_coll, 0, n_coll, n_coll, 0, n_coll);
+            for(size_t i = 0; i < n_coll; ++i){
+                for(size_t j = 0; j < n_coll; ++j){
+                    ccov_h->SetBinContent(i+1,j+1,syst_collapsed_frac(i,j));
+                    ccorr_h->SetBinContent(i+1,j+1,syst_collapsed_frac(i,j)/(sqrt(syst_collapsed_frac(i,i))*sqrt(syst_collapsed_frac(j,j))));
+                }
+            }
+
+            float ccov_max_abs = std::max(ccov_h->GetMaximum(), std::abs(ccov_h->GetMinimum()));
+            ccov_h->SetMaximum(ccov_max_abs);
+            ccov_h->SetMinimum(-ccov_max_abs);
+            ccorr_h->SetMaximum(1);
+            ccorr_h->SetMinimum(-1);
+
             ret[name+"_cov"] = std::move(cov_h);
             ret[name+"_corr"] = std::move(corr_h);
+            ret["collapsed_"+name+"_cov"] = std::move(ccov_h);
+            ret["collapsed_"+name+"_corr"] = std::move(ccorr_h);
         }
 
         return ret;
@@ -1715,6 +1766,8 @@ namespace PROfit{
                     auto chi_label = [&](const Eigen::MatrixXf &projection) {
                         if(!chi_metric || !chi_spec || projection.rows() == 0) return std::string();
                         const float chi2 = chi_metric->getSingleChannelChi(global_channel_index, *chi_spec, other_index, projection);
+                        // Per-channel fixed-point comparison (no pull, no free-parameter accounting):
+                        // labelled nbins, not ndf. The global chi2/ndf comes from PROmetric::GetNdof().
                         return std::string("#chi^{2}/nbins = ") + chi2LabelValue(chi2) + "/" + std::to_string(projection.rows());
                     };
                     auto draw_chi_label = [&](const std::string &label) {
@@ -2221,13 +2274,16 @@ namespace PROfit{
 
                     std::string chi_label_text;
                     log<LOG_DEBUG>(L"%1% || projected_x_chi_label : %2%") % __func__ % projected_x_chi_label.c_str();
-                    if(config.m_channel_variable_dims[channel][other_index] == 2 && !projected_x_chi_label.empty()) {
-                        chi_label_text = projected_x_chi_label;
+                    // A single entry in `texts` is the global post-fit chi2/ndf label from
+                    // draw_fit_result (PROmetric::GetNdof); post-fit pages show ONLY that, not the
+                    // per-channel chi2/nbins projection label. Per-channel `texts` (the plot
+                    // subcommand's prefit labels) remain a fallback behind the projection label.
+                    if(texts.size() == 1) {
+                        if(TText *line = (TText*)texts.front().GetListOfLines()->First()) chi_label_text = line->GetTitle();
                     } else if(!projected_x_chi_label.empty()) {
                         chi_label_text = projected_x_chi_label;
                     } else if(texts.size()!=0) {
-                        TPaveText &box = texts.size() == 1 ? texts.front() : texts.at(global_channel_index);
-                        if(TText *line = (TText*)box.GetListOfLines()->First()) chi_label_text = line->GetTitle();
+                        if(TText *line = (TText*)texts.at(global_channel_index).GetListOfLines()->First()) chi_label_text = line->GetTitle();
                         log<LOG_DEBUG>(L"%1% || alternative chi2 text used : %2%") % __func__ % chi_label_text.c_str();
                     }
                     // should probably be switching this to a more clear boolean...
@@ -2304,21 +2360,6 @@ namespace PROfit{
 
     int plotPriorFractionalSystematicBreakdown(const PROconfig &config, const PROspec &spec, const PROsyst &allsplinesyst, std::string filename, int other_index) {
         //Input PROsyst needs to be the allsplinesyst for now
-
-        std::vector<int> colors = {
-            kAzure+1,      // Light blue
-            kRed+1,        // Bright red
-            kGreen+3,      // Medium green
-            kOrange+7,      // Deep orange
-            kBlue+2,        // Darker blue
-            kViolet+2,      // Purple/violet
-            kGray+1,         // Light gray
-            kYellow+2,      // Golden yellow
-            kTeal+3,        // Teal
-            kPink+2,        // Pink
-            kMagenta+2,     // Magenta
-            kSpring+5      // Blue-green
-        };
 
         std::vector<int> line_styles = {
             1,  // Solid (base style)
@@ -2650,21 +2691,6 @@ namespace PROfit{
     int plotPriorFractionalSystematicRatios(const PROconfig &config, const PROspec &spec, const PROsyst &allsplinesyst, std::string filename, int other_index) {
         //Input PROsyst needs to be the allsplinesyst for now
 
-        std::vector<int> colors = {
-            kAzure+1,      // Light blue
-            kRed+1,        // Bright red
-            kGreen+3,      // Medium green
-            kOrange+7,      // Deep orange
-            kBlue+2,        // Darker blue
-            kViolet+2,      // Purple/violet
-            kGray+1,         // Light gray
-            kYellow+2,      // Golden yellow
-            kTeal+3,        // Teal
-            kPink+2,        // Pink
-            kMagenta+2,     // Magenta
-            kSpring+5      // Blue-green
-        };
-
         std::vector<int> line_styles = {
             1,  // Solid (base style)
             1,  // Dashed
@@ -2995,11 +3021,7 @@ int plotPriorFractionalSystematicChannelRatios(const PROconfig &config, const PR
                 % __func__ % config.m_num_channels;
             return 1;
         }
-
-        std::vector<int> colors = {
-            kAzure+1, kRed+1, kGreen+3, kOrange+7, kBlue+2, kViolet+2,
-            kGray+1, kYellow+2, kTeal+3, kPink+2, kMagenta+2, kSpring+5
-        };
+  
         std::vector<int> line_styles = {1, 1};
 
         std::map<std::string,std::vector<std::string>> used_tags;
