@@ -1890,9 +1890,10 @@ regime_model_parameterization(_NC)
   `template`) carry no prefix.
 * **model** — the physics hypothesis: `2flav` (one effective two-flavour-like
   amplitude per channel), `3+1`, `3+2`, `3+1+decay` (3+1 plus sterile decay),
-  `3nu-matter` (standard three-flavour with Earth-matter effects). A hyphen
-  qualifies *within* a slot (`3nu-matter` vs a hypothetical `3nu-vacuum`),
-  just as `+` does in `3+1`.
+  `3nu-matter` (standard three-flavour with Earth-matter effects) or
+  `3nu-vacuum` (the same three-flavour physics in vacuum). A hyphen
+  qualifies *within* a slot (`3nu-matter` vs `3nu-vacuum`), just as `+`
+  does in `3+1`.
 * **parameterization** — which parameter set the *same* physics is fitted in:
   `Usq` (squared mixing-matrix elements |Ue4|², |Uμ4|², …), `angles`
   (sin²2θ₁₄, sin²θ₂₄, …), or the name of the headline amplitude that becomes a
@@ -1924,8 +1925,10 @@ A few conventions apply to all models:
 * **Constraints**: some models carry a `model_constraint` that rejects
   unphysical parameter combinations (e.g. 3+1 unitarity) during the fit.
 * All oscillation models need the `<parameter name="L/E" .../>` entry in the
-  model block pointing at the true-L/E variable (exception: `numudisTEST`
-  and `template`, noted below).
+  model block pointing at the true-L/E variable (exceptions: `numudisTEST`
+  takes `name="L"` + `name="E"`, the LBL models take {L,E}, E+`baseline=`,
+  or — vacuum only — a signed L/E, and `template` takes none; see below).
+  For the LBL models negative E (or L/E) marks an antineutrino event.
 
 ### `null` *(legacy: `nullmodel`)*
 
@@ -2138,11 +2141,15 @@ Rules: **0** = no osc, **1** = νμ→νμ, **2** = νμ→νe, **3** = νe→ν
 **4** = ν̄μ→ν̄e (the CP-conjugate appearance — give your antineutrino
 fullosc branch rule 4).
 
-### `LBL_3nu-matter_angles` *(legacy: `LBL`)* — full three-flavour long-baseline (NuFastLBL)
+### `LBL_3nu-matter_angles` *(legacy: `LBL`)* and `LBL_3nu-vacuum_angles` — full three-flavour long-baseline (NuFastLBL)
 
-Standard 3ν oscillations **including Earth-matter effects** (NuFastLBL's
-`Probability_Matter_LBL` with a constant-density profile), all parameters
-fitted in **linear** space with bounds spanning the global-fit allowed ranges.
+Standard 3ν oscillations, either **including Earth-matter effects**
+(NuFastLBL's `Probability_Matter_LBL` with a constant-density profile) or
+**in vacuum** (`Probability_Vacuum_LBL` — cheaper, and numerically safe as
+Δm²₃₁ crosses zero, where the matter solver has a singular point near
+Δm²ee = 0). Both tags share one implementation and one parameter set, all
+fitted in **linear** space with bounds spanning the global-fit allowed ranges,
+so you can flip a config between them to compare matter and vacuum directly.
 
 | # | name | meaning | bounds | default |
 |---|---|---|---|---|
@@ -2156,6 +2163,67 @@ fitted in **linear** space with bounds spanning the global-fit allowed ranges.
 Rules cover the full 3×3 matrix: **0** = no osc, **1** = Pee, **2** = Peμ,
 **3** = Peτ, **4** = Pμe, **5** = Pμμ, **6** = Pμτ, **7** = Pτe,
 **8** = Pτμ, **9** = Pττ.
+
+The kinematic inputs are **per-event `<variable>`s**, like every other
+oscillation model; E is always **signed** (negative = antineutrino, flipping
+δ_CP and the MSW potential), and E = 0 or L/E = 0 is the no-oscillation
+limit. Three layouts are accepted:
+
+| `<parameter>`s | matter | vacuum | `baseline=` attribute |
+|---|---|---|---|
+| `L` [km] + `E` [GeV], both per-event | exact 2D | works | **conflict — fatal** |
+| `E` only | L fixed at `baseline=`, 1D grid | ratio = baseline/E | **required** |
+| `L/E` [km/GeV, signed] only | fatal (MSW ∝ E; the ratio underdetermines it) | exact 1D | fatal (redundant) |
+
+Most fixed-baseline experiments want the **E-only** form — it is exact for a
+constant baseline and keeps the evaluation grid one-dimensional. Use the
+`{L, E}` pair only when the baseline genuinely varies across the MC.
+
+⚠ *Before v3.0.4-dev the model took one `"L/E"` parameter that was silently
+read as E [GeV] at a fixed L = 1300 km — older LBL configs must migrate to
+the inputs above.*
+
+⚠ **Grid memory (`{L, E}` pair only)**: with two kinematic variables the
+binned-evaluation grid is n_L × n_E **global** bins (bin count × number of
+subchannels for each) × 10 probability components × every variable's reco
+bins. Keep the L and E truth binnings lean — a 200×20-bin pair on a
+many-subchannel config allocates tens of GB and will OOM; ~10 bins each is
+usually plenty. The E-only and L/E forms have no such blow-up.
+
+`<model>` tag attributes (on a non-LBL tag they are a config error; the
+vacuum tag ignores the three matter-only ones with a warning so a matter
+config can be re-tagged unchanged):
+
+| attribute | meaning | allowed | default |
+|---|---|---|---|
+| `baseline=` | fixed baseline L [km] (E-only mode; both regimes) | > 0 | — (required with E-only) |
+| `density=` | constant matter density ρ [g/cm³] (matter only) | ≥ 0 | 3 |
+| `electron_fraction=` | electron fraction Yₑ (matter only) | (0, 1] | 0.5 |
+| `n_newton=` | NuFast Newton iterations (matter only; 1 recommended for many-year DUNE/HK precision) | integer 0–10 | 0 |
+
+```xml
+<model tag="LBL_3nu-matter_angles" baseline="1300" density="2.848" n_newton="1">
+    <parameter name="E" variable_index="2"/>
+    ...
+</model>
+```
+
+Notes:
+
+* NuFast is a **constant-density** solver: there is no layered/PREM profile.
+  Use your experiment's line-averaged crustal density — commonly ≈2.6 g/cm³
+  for T2K/HK, ≈2.84 for NOvA, 2.848 for DUNE (the default 3 is the legacy
+  hardcoded value, kept for continuity). `density="0"` works but warns —
+  prefer the vacuum tag, which takes a different (safer) code path.
+* The **matter** solver (DMP zeroth order) is singular in a narrow band of
+  dmsq_31 around 0 and around Δm²ee = 0 (≈2×10⁻⁵ eV²); the model rejects it
+  via `model_constraint` (like 3+1 unitarity), so fits and scans skip those
+  points automatically. The vacuum solver has no such band.
+* Like every model setting, these attributes are **not** part of the XML
+  hash: changing ρ re-uses the `_prop/_syst.bin` caches (correct — the
+  model never affects them) but silently *invalidates* any FC.root, AFC
+  `_mesh/_bank/_brazil.bin` or PROjector constraint made with the old values
+  (the same artifact class as gotcha 12 in CLAUDE.md) — regenerate those.
 
 ### `template` *(legacy alias: `template_fit`)* — per-subchannel normalization fit
 
