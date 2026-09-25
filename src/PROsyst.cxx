@@ -1165,14 +1165,11 @@ namespace PROfit {
                 const float y1 = ratios[0].GetBinContent(i);
                 const float y2 = ratios[1].GetBinContent(i);
                 const float slope = (y2 - y1) / (knobvals[1] - knobvals[0]);
-                // GetSplineShift maps each segment onto x in [0,1]: scale the slope by segment width
-                const float w_lo = knobvals[0] + knobvals[1];
-                const float w_hi = knobvals[1] - knobvals[0];
                 if(unmirrored)
-                    bin_segments.push_back(SplineSegment{(float)(-knobvals[1]), {slope * (-knobvals[1]) + y1, slope * w_lo, 0, 0}});
+                    bin_segments.push_back(SplineSegment{(float)(-knobvals[1]), {slope * (-knobvals[1]) + y1, slope, 0, 0}});
                 else
-                    bin_segments.push_back(SplineSegment{(float)(-knobvals[1]), {y2, -slope * w_lo, 0, 0}});
-                bin_segments.push_back(SplineSegment{(float)knobvals[0], {slope * (float)knobvals[0] + y1, slope * w_hi, 0, 0}});
+                    bin_segments.push_back(SplineSegment{(float)(-knobvals[1]), {y2, -slope, 0, 0}});
+                bin_segments.push_back(SplineSegment{(float)knobvals[0], {slope * (float)knobvals[0] + y1, slope, 0, 0}});
             } else {
                 {
                     const float y1 = ratios[0].GetBinContent(i);

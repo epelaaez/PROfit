@@ -1,16 +1,9 @@
 #include "PROfit_common.h"
 
-// Integer knobs print as "1"/"-1", same as the old int keys, so existing _detvar_props.bin stay valid.
-std::string DetVarKnobLabel(float knobval) {
-    std::ostringstream ss;
-    ss << knobval;
-    return ss.str();
-}
-
 // Unique key for DetVar propeller maps (names can be reused across sections).
 std::string DetVarKey(const PROconfig& config, size_t file_index) {
     const auto& dv = config.m_detvar_files[file_index];
-    return "sec" + std::to_string(dv.section_index) + "::" + dv.name + "." + DetVarKnobLabel(dv.knobval);
+    return "sec" + std::to_string(dv.section_index) + "::" + dv.name + "." + std::to_string(dv.knobval);
 }
 
 // Build a collision-free composite key for event i_event from its matching_var_values.
@@ -27,9 +20,9 @@ std::vector<int> DetVarMatchingKey(const PROpeller& prop, size_t i_event) {
 // in both propellers. var_idx selects which variable's bin indices to use.
 // Returns false (leaving out_cv/out_var unchanged) if either propeller lacks matching vars.
 bool BuildDetVarMatchedSpecs(
-        const PROpeller& cvprop, const std::map<float, const PROpeller*> &varprop,
+        const PROpeller& cvprop, const std::map<int, const PROpeller*> &varprop,
         int var_idx, int spec_size,
-        PROspec& out_cv, std::map<float, PROspec> &out_var) {
+        PROspec& out_cv, std::map<int, PROspec> &out_var) {
 
     if(!cvprop.has_matching_vars || 
             !std::all_of(varprop.begin(), varprop.end(), [](const auto &p){ return p.second->has_matching_vars;})) 
@@ -48,7 +41,7 @@ bool BuildDetVarMatchedSpecs(
 
     // Step 2: find the set of keys present in both CV and variation;
     // track unique var keys to compute CV-only / var-only / overlapping counts.
-    std::map<float, std::set<std::vector<int>>> var_key_set;
+    std::map<int, std::set<std::vector<int>>> var_key_set;
     std::set<std::vector<int>> common_keys;
     for(const auto &[kv, prop] : varprop) {
         for(size_t j = 0; j < prop->NEvent(); ++j) {
@@ -88,7 +81,7 @@ bool BuildDetVarMatchedSpecs(
     }
 
     // Step 4: fill matched var spec
-    std::map<float, PROspec> matched_var;
+    std::map<int, PROspec> matched_var;
     Eigen::VectorXf n_var_prop_matched = Eigen::VectorXf::Zero(varprop.size());
     Eigen::VectorXf n_var_evt = Eigen::VectorXf::Zero(varprop.size());
     size_t prop_i = 0;
@@ -236,7 +229,7 @@ void run_process(PROpeller &prop, std::vector<std::vector<SystStruct>> &systsstr
                     log<LOG_WARNING>(L"%1% || Skipping DetVar '%2%' -- no <systematic>/<allowlist> entry with this name, so it is NOT used.") % __func__ % varName.c_str();
                     continue;
                 }
-                std::map<float, size_t> syst_files;
+                std::map<int, size_t> syst_files;
                 auto find_fn = [&varName](const PROconfig::DetVarFile &dvf) { return dvf.name == varName; };
                 auto it = config.m_detvar_files.begin() + idv;
                 while((it = std::find_if(it, config.m_detvar_files.end(), find_fn))
@@ -253,8 +246,8 @@ void run_process(PROpeller &prop, std::vector<std::vector<SystStruct>> &systsstr
                     binningIndex = config.i_prime;
 
                 PROspec cvSpec = FillSpectra(cvconfig, cvprop, emptySyst, cvmodel, cvparams, true, binningIndex);
-                std::map<float, PROspec> specs;
-                std::map<float, const PROpeller*> props;
+                std::map<int, PROspec> specs;
+                std::map<int, const PROpeller*> props;
                 for(const auto &[k, i] : syst_files) {
                     PROpeller& dvprop = dvprops.at(DetVarKey(config, i));
                     PROconfig dvconfig = config.BuildDetVarConfig(i);

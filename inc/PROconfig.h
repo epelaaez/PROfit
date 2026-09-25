@@ -699,7 +699,7 @@ namespace PROfit{
                 float partial_load_frac = 1.0f;
                 bool is_cv;
                 size_t section_index;  // which DetVarSection this file belongs to
-                float knobval = 0;
+                int knobval = 0;
             };
 
             bool m_has_detvar_section = false;

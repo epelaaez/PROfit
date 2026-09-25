@@ -1209,21 +1209,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 var_file.name = var_name;
                 var_file.pot = strtod(var_pot_str, &end);
                 var_file.is_cv = false;
-                var_file.knobval = 1;
-                if(knobval) {
-                    const double kv = strtod(knobval, &end);
-                    if(end == knobval || *end != '\0' || !std::isfinite(kv) || kv == 0) {
-                        log<LOG_ERROR>(L"%1% || ERROR: DetVar variation '%2%' has knobval '%3%'; it must be a non-zero number (knob 0 is the section's <cv>).") % __func__ % var_name % knobval;
-                        exit(EXIT_FAILURE);
-                    }
-                    var_file.knobval = kv;
-                }
-                for(const auto &dvf : m_detvar_files) {
-                    if(!dvf.is_cv && dvf.section_index == section_idx && dvf.name == var_name && dvf.knobval == var_file.knobval) {
-                        log<LOG_ERROR>(L"%1% || ERROR: DetVar variation '%2%' declares knobval %3% more than once in section %4%.") % __func__ % var_name % var_file.knobval % section_idx;
-                        exit(EXIT_FAILURE);
-                    }
-                }
+                var_file.knobval = knobval ? strtod(knobval, &end) : 1;
                 var_file.section_index = section_idx;
                 { const char* frac = pVar->Attribute("partial_load_frac");
                   var_file.partial_load_frac = frac ? (float)strtod(frac, nullptr) : 1.0f; }
