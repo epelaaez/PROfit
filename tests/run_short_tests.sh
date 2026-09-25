@@ -289,6 +289,15 @@ else
     note "FAIL  t26jordsame  (global fit differs from t24aptglobal)"
     FAIL=$((FAIL+1))
 fi
+# (d) Escaped characters in a DetVar-inherited branch: tinyxml2 decodes &lt;/&amp; on
+#     parse, and the DetVar child XML used to be written back unescaped, so a '<' in a
+#     <variable> broke the child parse. Both cuts are no-ops (category is an integer,
+#     random_value lies in [0,1)).
+sed -e '0,/5\*mcweight\*(category == 0)/s//5*mcweight*(category \&gt; -1 \&amp;\&amp; category \&lt; 1)/' \
+    -e '0,/<variable>reco_visible_energy<\/variable>/s//<variable>reco_visible_energy*(random_value \&lt; 2 \&amp;\&amp; random_value \&gt; -1)<\/variable>/' \
+    local_applyto_detvar.xml > local_applyto_detvar_esc.xml
+COMMON=(-x local_applyto_detvar_esc.xml -t "${TAG}aptesc" -n 1 -v 2 --seed 405 --preset fast)
+run_test t26kescprocess process
 COMMON=("${SAVED_COMMON[@]}")
 
 # --- 10. regex wildcards (patterns are unanchored ECMAScript regexes) ---------
