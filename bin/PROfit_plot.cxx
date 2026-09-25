@@ -1,4 +1,5 @@
 #include "PROfit_common.h"
+#include "TLatex.h"
 
 void run_plot(const PROconfig &config, const PROpeller &prop, const PROmetric &metric, const PROmodel &model, const std::vector<PROsyst> &variable_systs, const Eigen::VectorXf &CVParams, const Eigen::VectorXf &fakeDataParams, const Eigen::VectorXf &fake_data_osc_param_vector, const std::vector<PROdata> &variable_data, const PROpt &options) {
     std::uniform_int_distribution<uint32_t> dseed(0, std::numeric_limits<uint32_t>::max());
@@ -163,7 +164,7 @@ void run_plot(const PROconfig &config, const PROpeller &prop, const PROmetric &m
                         mp.cv = FillSpectra(cvconfig, cvprop_plot, PROsyst(), *cv_model, cvparams, !options.eventbyevent, binningIndex);
                         if(BuildDetVarMatchedSpecs(cvprop_plot, props, binningIndex,
                                                    (int)config.m_num_variable_bins_total[binningIndex],
-                                                   mp.cv, mp.vars)) {
+                                                   mp.cv, mp.vars, true)) {
                             // Undo POT scaling from both CV and variation matched spectra so
                             // the overlapping plot shows raw event-weight units (no POT scaling)
                             const double det_pot_ov = config.m_det_pot[0];
@@ -361,15 +362,16 @@ void run_plot(const PROconfig &config, const PROpeller &prop, const PROmetric &m
                                         cv_total_ov->SetLineWidth(3);
                                         cv_total_ov->SetFillColor(kWhite);
                                         cv_total_ov->SetFillStyle(0);
-                                        std::vector<double> maxs;
                                         for(auto &[kv, h] : var_total_ov) {
                                             h->SetLineWidth(2);
                                             h->SetFillColor(kWhite);
                                             h->SetFillStyle(0);
-                                            maxs.push_back(h->GetMaximum());
                                         }
 
-                                        float ymax_ov = std::max(cv_total_ov->GetMaximum(), *std::max_element(maxs.begin(), maxs.end()));
+                                        // Leave room for the error bars.
+                                        float ymax_ov = cv_total_ov->GetMaximum() + cv_total_ov->GetBinError(cv_total_ov->GetMaximumBin());
+                                        for(auto &[kv, h] : var_total_ov)
+                                            ymax_ov = std::max(ymax_ov, (float)(h->GetMaximum() + h->GetBinError(h->GetMaximumBin())));
                                         cv_total_ov->SetMaximum(ymax_ov * 1.15);
                                         std::string ov_title = config.m_mode_names[im] + " " + config.m_detector_names[id] + " " + config.m_channel_names[ic] + " " + detvar_names[idv] + " (Matched)";
                                         cv_total_ov->SetTitle(ov_title.c_str());
@@ -393,19 +395,165 @@ void run_plot(const PROconfig &config, const PROpeller &prop, const PROmetric &m
                                         int ov_var_colors[] = {kRed, kBlue, kGreen+2, kMagenta, kCyan+1, kOrange+1, kViolet+1, kTeal+1};
                                         int n_ov_var_colors = sizeof(ov_var_colors)/sizeof(ov_var_colors[0]);
                                         int ov_color_idx = 0;
+                                        // Error bars are the weighted MC stat errors, sqrt(sum w^2), of each matched sample.
+                                        cv_total_ov->SetMarkerColor(kBlack);
                                         cv_total_ov->Draw("hist");
-                                        ov_leg->AddEntry(cv_total_ov, "Matched CV", "l");
+                                        cv_total_ov->Draw("E1 same");
+                                        ov_leg->AddEntry(cv_total_ov, "Matched CV", "le");
                                         for(auto &[kv, h] : var_total_ov) {
                                             h->SetLineColor(ov_var_colors[ov_color_idx % n_ov_var_colors]);
+                                            h->SetMarkerColor(ov_var_colors[ov_color_idx % n_ov_var_colors]);
                                             ++ov_color_idx;
                                             h->Draw("hist same");
-                                            ov_leg->AddEntry(h, (detvar_names[idv]+" "+std::to_string(kv)).c_str(), "l");
+                                            h->Draw("E1 same");
+                                            ov_leg->AddEntry(h, (detvar_names[idv]+" "+std::to_string(kv)).c_str(), "le");
                                         }
 
                                         ov_leg->Draw("same");
 
                                         drawVersionWatermark(&ov_canvas);
                                         ov_canvas.Print(ov_pdf.c_str(), "pdf");
+
+                                        // For 2D channels also draw every slice, per subchannel: the DetVar spline is
+                                        // built bin-by-bin in exactly these bins, so low matched statistics show up here
+                                        // rather than being averaged away in the projection above.
+                                        const int ov_binning = detvar_binning[idv];
+                                        if(config.m_channel_variable_dims[ic][ov_binning] == 2) {
+                                            const auto &bins2d = config.m_channel_variable_bins[ic][ov_binning];
+                                            const size_t nx = bins2d.NBinsAlong(0), ny = bins2d.NBinsAlong(1);
+                                            const std::vector<float> edges_x = bins2d.Edges(0), edges_y = bins2d.Edges(1);
+                                            const std::string title_x = config.GetChannelAxisTitle(ic, ov_binning, 0);
+                                            const std::string title_y = config.GetChannelAxisTitle(ic, ov_binning, 1);
+
+                                            for(size_t sc = 0; sc < config.m_num_subchannels[ic]; sc++) {
+                                                const size_t gsc = ov_global_subchannel_index + sc;
+                                                const int start = config.GetGlobalVariableBinStart(gsc, ov_binning);
+                                                // fixed_dim is the variable held fixed within each pad (1: slices in y, 0: slices in x).
+                                                for(int fixed_dim : {1, 0}) {
+                                                    const size_t nslices = fixed_dim == 1 ? ny : nx;
+                                                    const size_t nalong  = fixed_dim == 1 ? nx : ny;
+                                                    const std::vector<float> &along_edges = fixed_dim == 1 ? edges_x : edges_y;
+                                                    const std::vector<float> &slice_edges = fixed_dim == 1 ? edges_y : edges_x;
+                                                    const std::string &along_title = fixed_dim == 1 ? title_x : title_y;
+                                                    const std::string &slice_title = fixed_dim == 1 ? title_y : title_x;
+                                                    auto flat = [&](size_t islice, size_t ialong) {
+                                                        return start + (fixed_dim == 1 ? ialong*ny + islice : islice*ny + ialong);
+                                                    };
+
+                                                    // Hists/legend/lines drawn on this page; freed after the page is printed and cleared.
+                                                    std::vector<std::unique_ptr<TObject>> keep;
+                                                    ov_canvas.Clear();
+                                                    ov_canvas.cd();
+                                                    TPad *head = new TPad("dv_ov_head", "", 0, 0.95, 1, 1);
+                                                    TPad *body = new TPad("dv_ov_body", "", 0, 0, 1, 0.95);
+                                                    // Pads are owned by their parent pad (kCanDelete), freed by ov_canvas.Clear().
+                                                    head->SetBit(kCanDelete); body->SetBit(kCanDelete);
+                                                    head->Draw(); body->Draw();
+                                                    head->cd();
+                                                    const std::string page_title = config.m_mode_names[im] + " " + config.m_detector_names[id] + " " + config.m_channel_names[ic]
+                                                        + " | " + config.m_fullnames[gsc] + " | " + detvar_names[idv] + " (Matched), slices in " + slice_title;
+                                                    TLatex *lat = new TLatex(0.01, 0.5, page_title.c_str());
+                                                    keep.emplace_back(lat);
+                                                    lat->SetNDC(); lat->SetTextAlign(12); lat->SetTextSize(0.35);
+                                                    lat->Draw();
+
+                                                    const int ncols = (int)std::ceil(std::sqrt((double)nslices));
+                                                    const int nrows = (int)std::ceil(nslices / (double)ncols);
+                                                    body->Divide(ncols, nrows);
+                                                    for(size_t is = 0; is < nslices; ++is) {
+                                                        TVirtualPad *cell = body->cd(is + 1);
+                                                        const std::string sfx = "_" + std::to_string(gsc) + "_" + std::to_string(fixed_dim) + "_" + std::to_string(is);
+                                                        TPad *top = new TPad(("dv_ov_top"+sfx).c_str(), "", 0, 0.32, 1, 1);
+                                                        TPad *bot = new TPad(("dv_ov_bot"+sfx).c_str(), "", 0, 0, 1, 0.32);
+                                                        top->SetBit(kCanDelete); bot->SetBit(kCanDelete);
+                                                        top->SetBottomMargin(0.02); top->SetLeftMargin(0.14);
+                                                        bot->SetTopMargin(0.02); bot->SetBottomMargin(0.32); bot->SetLeftMargin(0.14);
+                                                        cell->cd(); top->Draw(); bot->Draw();
+
+                                                        std::ostringstream st;
+                                                        st << slice_title << " in [" << slice_edges[is] << ", " << slice_edges[is+1] << ")";
+                                                        TH1D *hcv = new TH1D(("dv_ov_cv"+sfx).c_str(), (st.str()+";;Events").c_str(), nalong, along_edges.data());
+                                                        hcv->SetDirectory(nullptr);
+                                                        keep.emplace_back(hcv);
+                                                        for(size_t ia = 0; ia < nalong; ++ia) {
+                                                            hcv->SetBinContent(ia+1, mp.cv.Spec()(flat(is, ia)));
+                                                            hcv->SetBinError(ia+1, mp.cv.Error()(flat(is, ia)));
+                                                        }
+                                                        std::vector<TH1D*> hvars, hrats;
+                                                        double ymax = hcv->GetMaximum() + hcv->GetBinError(hcv->GetMaximumBin());
+                                                        double rmin = 1.0, rmax = 1.0;
+                                                        int icol = 0;
+                                                        for(const auto &[kv, vspec] : mp.vars) {
+                                                            const std::string vsfx = sfx + "_" + std::to_string(kv);
+                                                            TH1D *hv = new TH1D(("dv_ov_var"+vsfx).c_str(), "", nalong, along_edges.data());
+                                                            TH1D *hr = new TH1D(("dv_ov_rat"+vsfx).c_str(), ";"+TString(along_title.c_str())+";Var/CV", nalong, along_edges.data());
+                                                            hv->SetDirectory(nullptr); hr->SetDirectory(nullptr);
+                                                            keep.emplace_back(hv); keep.emplace_back(hr);
+                                                            for(size_t ia = 0; ia < nalong; ++ia) {
+                                                                const float v = vspec.Spec()(flat(is, ia)), c = mp.cv.Spec()(flat(is, ia));
+                                                                hv->SetBinContent(ia+1, v);
+                                                                hv->SetBinError(ia+1, vspec.Error()(flat(is, ia)));
+                                                                if(c != 0) {
+                                                                    hr->SetBinContent(ia+1, v/c);
+                                                                    rmin = std::min(rmin, (double)v/c);
+                                                                    rmax = std::max(rmax, (double)v/c);
+                                                                }
+                                                            }
+                                                            ymax = std::max(ymax, hv->GetMaximum() + hv->GetBinError(hv->GetMaximumBin()));
+                                                            const int col = ov_var_colors[icol++ % n_ov_var_colors];
+                                                            hv->SetLineColor(col); hv->SetMarkerColor(col); hv->SetLineWidth(2);
+                                                            hr->SetLineColor(col); hr->SetLineWidth(2);
+                                                            hvars.push_back(hv); hrats.push_back(hr);
+                                                        }
+
+                                                        top->cd();
+                                                        hcv->SetStats(0);
+                                                        hcv->SetLineColor(kBlack); hcv->SetMarkerColor(kBlack); hcv->SetLineWidth(2);
+                                                        hcv->SetMinimum(0);
+                                                        hcv->SetMaximum(ymax > 0 ? 1.2*ymax : 1.0);
+                                                        hcv->GetXaxis()->SetLabelSize(0);
+                                                        hcv->GetYaxis()->SetLabelSize(0.06); hcv->GetYaxis()->SetTitleSize(0.06);
+                                                        hcv->Draw("E1");
+                                                        for(TH1D *hv : hvars) hv->Draw("E1 same");
+                                                        if(is == 0) {
+                                                            TLegend *leg = new TLegend(0.6, 0.72, 0.89, 0.88);
+                                                            keep.emplace_back(leg);
+                                                            leg->SetFillStyle(0); leg->SetLineWidth(0);
+                                                            leg->AddEntry(hcv, "Matched CV", "le");
+                                                            int il = 0;
+                                                            for(const auto &[kv, vspec] : mp.vars)
+                                                                leg->AddEntry(hvars[il++], (detvar_names[idv]+" "+std::to_string(kv)).c_str(), "le");
+                                                            leg->Draw();
+                                                        }
+
+                                                        bot->cd();
+                                                        const double pad_r = std::max(0.1, 0.1*(rmax - rmin));
+                                                        for(size_t ir = 0; ir < hrats.size(); ++ir) {
+                                                            TH1D *hr = hrats[ir];
+                                                            if(ir == 0) {
+                                                                hr->SetStats(0);
+                                                                hr->SetMinimum(std::max(0.0, rmin - pad_r));
+                                                                hr->SetMaximum(rmax + pad_r);
+                                                                hr->GetXaxis()->SetLabelSize(0.12); hr->GetXaxis()->SetTitleSize(0.12);
+                                                                hr->GetYaxis()->SetLabelSize(0.10); hr->GetYaxis()->SetTitleSize(0.11);
+                                                                hr->GetYaxis()->SetTitleOffset(0.55); hr->GetYaxis()->SetNdivisions(505);
+                                                                hr->Draw("hist");
+                                                            } else {
+                                                                hr->Draw("hist same");
+                                                            }
+                                                        }
+                                                        TLine *one = new TLine(along_edges.front(), 1.0, along_edges.back(), 1.0);
+                                                        keep.emplace_back(one);
+                                                        one->SetLineStyle(2);
+                                                        one->Draw();
+                                                    }
+                                                    drawVersionWatermark(&ov_canvas);
+                                                    ov_canvas.Print(ov_pdf.c_str(), "pdf");
+                                                    ov_canvas.Clear();
+                                                }
+                                            }
+                                            ov_canvas.cd();
+                                        }
 
                                         delete cv_total_ov;
                                         //delete var_total_ov;
