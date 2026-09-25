@@ -161,6 +161,14 @@ run_test t14afcbrazil --use-fake-data "${AFC[@]}" --mode brazil --n-brazil-throw
 run_test t15mcmc          --use-fake-data mcmc --nchains 1
 run_test t16scaletest     --use-fake-data scale-test -N 50 --tests fillspectra,metric
 
+# --- 7b. Systematic selection (--exclude-systs / --syst-list) -----------------
+# By name + tag (MC-stat must stay in the fit), by plotname (drops MC-stat on
+# request), a tag-based --syst-list, and a typo'd name, which must be refused.
+run_test t40exclude       --use-fake-data --poisson-throw --exclude-systs RPA_CCQE flux global
+run_test t40bexclmcstat   --use-fake-data --poisson-throw --exclude-systs "MC Stats" global
+run_test t41systlist      --use-fake-data --poisson-throw --syst-list xsec MCStat global
+expect_fail t42excltypo   --use-fake-data --exclude-systs NotASyst global
+
 # --- 8. PROjector two-stage pre-fit / projected fit ---------------------------
 run_test t17pjprefit      --use-fake-data --projector-prefit "_ND_" global
 CONSTRAINT="${TAG}_t17pjprefit_PROjector_constraint.bin"
@@ -289,6 +297,15 @@ else
     note "FAIL  t26jordsame  (global fit differs from t24aptglobal)"
     FAIL=$((FAIL+1))
 fi
+# (d) Escaped characters in a DetVar-inherited branch: tinyxml2 decodes &lt;/&amp; on
+#     parse, and the DetVar child XML used to be written back unescaped, so a '<' in a
+#     <variable> broke the child parse. Both cuts are no-ops (category is an integer,
+#     random_value lies in [0,1)).
+sed -e '0,/5\*mcweight\*(category == 0)/s//5*mcweight*(category \&gt; -1 \&amp;\&amp; category \&lt; 1)/' \
+    -e '0,/<variable>reco_visible_energy<\/variable>/s//<variable>reco_visible_energy*(random_value \&lt; 2 \&amp;\&amp; random_value \&gt; -1)<\/variable>/' \
+    local_applyto_detvar.xml > local_applyto_detvar_esc.xml
+COMMON=(-x local_applyto_detvar_esc.xml -t "${TAG}aptesc" -n 1 -v 2 --seed 405 --preset fast)
+run_test t26kescprocess process
 COMMON=("${SAVED_COMMON[@]}")
 
 # --- 10. regex wildcards (patterns are unanchored ECMAScript regexes) ---------
@@ -308,6 +325,48 @@ expect_fail t29badregex   process
 sed 's#>nu_ND:0.01<#>^nomatch$:0.01<#' local_test.xml > local_regex_none.xml
 COMMON=(-x local_regex_none.xml -t "${TAG}rgxnone" -n 1 -v 2 --seed 405 --preset fast)
 expect_fail t30nomatch    process
+COMMON=("${SAVED_COMMON[@]}")
+
+# --- 11. LBL 3nu models (matter + vacuum) -------------------------------------
+# Matter needs per-event L and E <parameter>s, so its XML replaces the L/E
+# variable with a true-baseline one (hash changes -> own tag + process). The
+# L/E and E binnings are cut down hard: the model grid is n_L x n_E GLOBAL bins
+# x 10 components x every variable's reco bins, which OOMs at the base 200x20.
+# Vacuum's single signed L/E swaps only the model block (not hashed) and reuses
+# the t00 caches. Binaries predating the vacuum tag fail t31c by design.
+sed -e 's|<bins unit="True L/E \[km/GeV\]" min="0" max="2.5" nbins="200" plot="false"/>|<bins unit="True Baseline [km]" min="0" max="1" nbins="4" plot="false"/>|' \
+    -e 's|<bins unit="True Neutrino Energy \[GeV\]" min="0" max="3" nbins="20" />|<bins unit="True Neutrino Energy [GeV]" min="0" max="3" nbins="5" />|' \
+    -e 's|<variable>true_baseline/(1000\*true_neutrino_energy)</variable>|<variable>true_baseline/1000</variable>|' \
+    -e 's|<model tag="nueapp">|<model tag="LBL_3nu-matter_angles">|' \
+    -e 's|<parameter name="L/E" variable_index="1"/>|<parameter name="L" variable_index="1"/><parameter name="E" variable_index="2"/>|' \
+    local_test.xml > local_lbl_matter.xml
+sed 's|tag="LBL_3nu-matter_angles"|tag="LBL_3nu-matter_angles" density="3" electron_fraction="0.5" n_newton="0"|' local_lbl_matter.xml > local_lbl_explicit.xml
+sed 's|<model tag="nueapp">|<model tag="LBL_3nu-vacuum_angles">|' local_test.xml > local_lbl_vacuum.xml
+sed -e 's|<model tag="nueapp">|<model tag="LBL_3nu-matter_angles" baseline="1300">|' \
+    -e 's|<parameter name="L/E" variable_index="1"/>|<parameter name="E" variable_index="2"/>|' \
+    local_test.xml > local_lbl_eonly.xml
+sed 's|<model tag="nueapp">|<model tag="nueapp" density="3">|'    local_test.xml > local_lbl_sblopt.xml
+COMMON=(-x local_lbl_matter.xml -t "${TAG}lbl" -n 1 -v 2 --seed 405 --preset fast)
+run_test t31lblprocess process
+run_test t31almatter   --use-fake-data global
+COMMON=(-x local_lbl_explicit.xml -t "${TAG}lbl" -n 1 -v 2 --seed 405 --preset fast)
+run_test t31blexplicit --use-fake-data global
+# Explicit legacy-default attributes must be bitwise identical to no attributes.
+if cmp -s "${TAG}lbl_t31almatter_global_fit.txt" "${TAG}lbl_t31blexplicit_global_fit.txt"; then
+    note "PASS  t31dlbldefault  (explicit default attributes bitwise-identical)"
+    PASS=$((PASS+1))
+else
+    note "FAIL  t31dlbldefault  (explicit LBL defaults changed the fit)"
+    FAIL=$((FAIL+1))
+fi
+COMMON=(-x local_lbl_vacuum.xml -t "$TAG" -n 1 -v 2 --seed 405 --preset fast)
+run_test t31clvacuum   --use-fake-data global
+# E-only + baseline= (fixed-baseline mode, 1D grid; also reuses the t00 caches).
+COMMON=(-x local_lbl_eonly.xml -t "$TAG" -n 1 -v 2 --seed 405 --preset fast)
+run_test t31eleonly    --use-fake-data global
+# Model options on a non-LBL tag must be refused loudly.
+COMMON=(-x local_lbl_sblopt.xml -t "$TAG" -n 1 -v 2 --seed 405 --preset fast)
+expect_fail t32lbadopt  --use-fake-data global
 COMMON=("${SAVED_COMMON[@]}")
 
 note "----------------------------------------------------------------------"

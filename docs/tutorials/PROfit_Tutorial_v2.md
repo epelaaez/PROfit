@@ -74,6 +74,7 @@ Appendices:
 * [Appendix A: regenerating every plot in this tutorial](#appendix-a-regenerating-every-plot-in-this-tutorial)
 * [Appendix B: available physics models](#appendix-b-available-physics-models-incpromodelh)
 * [Appendix C: the pre-fit and post-fit error bands, in full](#appendix-c-the-pre-fit-and-post-fit-error-bands-in-full)
+* [Appendix D: counting degrees of freedom (ndf)](#appendix-d-counting-degrees-of-freedom-ndf)
 
 ---
 
@@ -350,6 +351,7 @@ The five main `type`s:
 | `flat` | you, in the XML (`pattern:fraction`) | diagonal-only covariance — the error is uncorrelated bin-by-bin | no |
 | `binned_unconstrained` | you, in the XML (a name; scope via `apply_to_subchannel`) | ONE free, un-pulled normalisation parameter **per bin** of the `binning` variable, shared by every matched subchannel — the bins float independently inside `scale_range` (default ×0 to ×10) with a uniform prior | yes, N of them, named `<name>_bin0..<name>_bin(N-1)`, in units of (scale − 1) |
 | `covariance_to_spline_uniform` | the SUM of the `covariance` entries matched by `sources="regex"` (which are then not built on their own) | the `num_decomp_knobs` leading eigenmodes of the fractional covariance become **free, un-pulled** linear splines inside `restrict` (default ±10σ of the mode); the remaining modes stay a Gaussian residual covariance (`include_resid_cov`, default on) | yes, N of them, named `<name>_decomp_knob_0..(N-1)`, in σ units of each mode |
+| `spline_cross_quad` | a weight branch holding, per event, the CV weight and the joint +1σ shift of every pair of the `spline` entries listed in `splines="A, B, ..."` | the ηᵢηⱼ cross coefficients those splines' product lacks; the group's factor becomes `1 + Σ(sᵢ−1) + Σ eᵢⱼηᵢηⱼ`, exact for a response quadratic in the group | no — it couples the listed splines |
 
 `mcstat` you will almost always want on (finite MC statistics IS a
 systematic on the prediction); `norm` is the right tool for flux
@@ -449,6 +451,67 @@ its box is `[lo−1, hi−1]`, and there is **no Gaussian pull** (it is a
 * `prior=`, `center=`, `prior_type=`, `restrict=` and `<correlation>` are
   refused for these entries; FC/Brazil throws share the uniform-spline
   caveat above (truncated Gaussian, not uniform).
+
+### Coupling quadratic splines exactly: `spline_cross_quad`
+
+```xml
+<systematic type="spline" binning="var0" knobvals="-3, -2, -1, 0, 1, 2, 3" force_0_cv="true">FA_PCA1</systematic>
+<systematic type="spline" binning="var0" knobvals="-3, -2, -1, 0, 1, 2, 3" force_0_cv="true">FA_PCA2</systematic>
+<systematic type="spline_cross_quad" binning="var0" force_0_cv="true" splines="FA_PCA1, FA_PCA2">FA_CROSS</systematic>
+```
+
+Every `type="spline"` systematic is one fit parameter, in σ units of its knob.
+Write the parameters of the two splines above as `η₁` (FA_PCA1) and `η₂`
+(FA_PCA2). From its ±1, 2, 3σ universes PROfit builds, per bin, a response curve
+`sᵢ(ηᵢ)` for each spline on its own. Near the CV that curve is
+`sᵢ(ηᵢ) = 1 + bᵢηᵢ + dᵢηᵢ² + …`, Here, we assume `dᵢηᵢ²` is the highest non-zero term. 
+When several splines are active, PROfit multiplies their curves, so the prediction for the bin is scaled by
+`s₁(η₁) · s₂(η₂)`.
+
+That product is only correct when the two parameters act independently. It
+fails whenever the true response contains a term proportional to `η₁η₂`:
+multiplying out `s₁ · s₂` gives `η₁η₂` the coefficient `b₁b₂`, whereas the
+physics can give it any value. A case of this is the axial form factor. The fit
+parameters shift `F_A` linearly, `F_A = F_A^CV + c₁η₁ + c₂η₂` for fixed
+functions `c₁`, `c₂` of `Q²`. We expect the event weight to be quadratic in `F_A`. Squaring
+the sum produces a `2c₁c₂η₁η₂` piece in the per-event weight that no product of
+one-parameter curves reproduces.
+
+For the splines listed in `splines=` (the "group"), the per-bin response to
+moving all of the group's parameters at the same time is, to second order,
+
+```
+1 + Σᵢ bᵢηᵢ + Σᵢ dᵢηᵢ² + Σᵢ<ⱼ eᵢⱼηᵢηⱼ
+```
+
+The member splines already fix `bᵢ` and `dᵢ`. The `spline_cross_quad` weight
+branch supplies what is missing, `eᵢⱼ`, through one extra universe per pair of
+members. Entry 0 holds the CV weight. The pairs are enumerated as `i<j` over the
+`splines=` list, so with `splines="A, B, C"` entry 1 is A and B both shifted to
++1σ, entry 2 is A and C, and entry 3 is B and C. `N` members give `N(N−1)/2`
+pairs and the branch must hold exactly `1 + N(N−1)/2` entries. From each pair
+universe PROfit solves for `eᵢⱼ` exactly, and the group's weight becomes
+`1 + Σᵢ(sᵢ−1) + Σᵢ<ⱼ eᵢⱼηᵢηⱼ`, evaluated additively instead of as `Π sᵢ`.
+
+The `spline_cross_quad` entry is not a fit parameter and never appears in a
+PROsyst on its own. Its name is a shorthand for its members:
+`--syst-list FA_CROSS` is the same as `--syst-list FA_PCA1 FA_PCA2`, and
+`--exclude-systs FA_CROSS` removes both. If a selection keeps only some of a
+group's members, the coupling is dropped and the survivors are combined
+multiplicatively as ordinary splines (PROfit warns when this happens). Members
+must be `type="spline"` on the same `binning`, carry no `inflate=`, use evenly
+spaced `knobvals`, belong to no other group, and all carry the same
+`apply_to_subchannel` pattern or none. The entry itself inherits that pattern
+when it has none. The entry and its members must carry the same
+`include_only_weights` (or none), since `eᵢⱼ` is extracted from ratios of
+universes that have to be filled with the same event weights. The group is not
+supported with `--shape-only`, where the per-channel normalised response is no
+longer quadratic. Members must also have `force_0_cv="true"` (or no `0` in
+their `knobvals`) so that `sᵢ(0) = 1`, which the additive form assumes. 
+The additive form is exact only when the response is at most
+quadratic in the group's parameters, which holds for the `F_A²` case above; 
+PROfit checks each member against a quadratic at its knots and warns if the 
+departure is large.
 
 ### Freeing the leading modes of a covariance: `covariance_to_spline_uniform`
 
@@ -606,14 +669,20 @@ multithreaded runs are statistically equivalent but not byte-identical.
 
 | Option | What it does |
 |---|---|
-| `--syst-list Flux1 Flux2` | use ONLY these systematics |
-| `--exclude-systs RPA_CCQE` | use everything except these |
+| `--syst-list Flux1 Flux2` | use ONLY these systematics (the MC-stat covariance too only if its XML name is listed) |
+| `--exclude-systs RPA_CCQE` | use everything except these (MC-stat stays unless its XML name, e.g. `MCStat`, is listed) |
 | `--fix dmsq Flux1` | fix parameters at CV (physics or splines) |
 | `--syst-only` | fix ALL physics parameters (nuisance-only fit) |
 | `--statonly` | drop systematics entirely |
 | `--shapeonly` (alias `--shape-only`) / `--rateonly` | shape-only or single-bin-normalisation analysis. Shape-only (v3.1 convention): in every collapsed channel the *prediction* is rescaled onto the data's integral before the χ² (the data is never touched, so the statistical term is fixed and the χ² is exactly invariant under an overall rate change); every spline knob and every covariance source (incl. flat/norm/mcstat/external) is projected onto per-channel shape; one dof per channel is lost; `fc`/brazil/`fc-adaptive` inherit the flag. Implies `--area-norm` for plots. |
 | `-c/--chi2 neyman\|pearson\|CNP\|poisson` | χ² metric (default `neyman`; legacy aliases `PROchi`/`PROCNP`/`Poisson`) |
 | `--grad-mode analytic` | gradient strategy: `analytic` (default, alias `exact`) / `central-full` / `one-sided-full` / `central-lin` (Gauss-Newton) / `one-sided-lin` |
+
+`--syst-list` and `--exclude-systs` accept XML names, plotnames or tags (a tag
+selects every systematic that carries it), and a `covariance_to_spline` /
+`external_covariance_to_spline` / `binned_unconstrained` parent name selects all
+of its derived parameters. A name that matches nothing is fatal, so a typo cannot
+silently fit the full set.
 
 The **default gradient is now `analytic`** (closed-form spectrum Jacobian
 through the oscillation models and splines, *plus* the exact
@@ -831,6 +900,11 @@ Outputs:
 * `TUT_glob1_PROglobal_postfit_correlation_matrix.pdf` (+ `_nuisance_only` version) — post-fit parameter correlations
 * `TUT_glob1_PROglobal_postfit_posteriors.pdf` — post-fit parameter constraints
 * `TUT_glob1_PROglobal.root` — all of the above as ROOT objects
+
+The `global #chi^{2}/ndf` label on the post-fit pages uses
+**ndf = (bins entering the χ²) − (free physics parameters) − (free
+uniform-prior splines) − (one per channel under `--shapeonly`)**; the log
+prints the breakdown. See Appendix D for what each term counts.
 
 <img src="figures/TUT_glob1_PROglobal_hists.png" width="800"/>
 
@@ -1816,9 +1890,10 @@ regime_model_parameterization(_NC)
   `template`) carry no prefix.
 * **model** — the physics hypothesis: `2flav` (one effective two-flavour-like
   amplitude per channel), `3+1`, `3+2`, `3+1+decay` (3+1 plus sterile decay),
-  `3nu-matter` (standard three-flavour with Earth-matter effects). A hyphen
-  qualifies *within* a slot (`3nu-matter` vs a hypothetical `3nu-vacuum`),
-  just as `+` does in `3+1`.
+  `3nu-matter` (standard three-flavour with Earth-matter effects) or
+  `3nu-vacuum` (the same three-flavour physics in vacuum). A hyphen
+  qualifies *within* a slot (`3nu-matter` vs `3nu-vacuum`), just as `+`
+  does in `3+1`.
 * **parameterization** — which parameter set the *same* physics is fitted in:
   `Usq` (squared mixing-matrix elements |Ue4|², |Uμ4|², …), `angles`
   (sin²2θ₁₄, sin²θ₂₄, …), or the name of the headline amplitude that becomes a
@@ -1850,8 +1925,10 @@ A few conventions apply to all models:
 * **Constraints**: some models carry a `model_constraint` that rejects
   unphysical parameter combinations (e.g. 3+1 unitarity) during the fit.
 * All oscillation models need the `<parameter name="L/E" .../>` entry in the
-  model block pointing at the true-L/E variable (exception: `numudisTEST`
-  and `template`, noted below).
+  model block pointing at the true-L/E variable (exceptions: `numudisTEST`
+  takes `name="L"` + `name="E"`, the LBL models take {L,E}, E+`baseline=`,
+  or — vacuum only — a signed L/E, and `template` takes none; see below).
+  For the LBL models negative E (or L/E) marks an antineutrino event.
 
 ### `null` *(legacy: `nullmodel`)*
 
@@ -2064,11 +2141,15 @@ Rules: **0** = no osc, **1** = νμ→νμ, **2** = νμ→νe, **3** = νe→ν
 **4** = ν̄μ→ν̄e (the CP-conjugate appearance — give your antineutrino
 fullosc branch rule 4).
 
-### `LBL_3nu-matter_angles` *(legacy: `LBL`)* — full three-flavour long-baseline (NuFastLBL)
+### `LBL_3nu-matter_angles` *(legacy: `LBL`)* and `LBL_3nu-vacuum_angles` — full three-flavour long-baseline (NuFastLBL)
 
-Standard 3ν oscillations **including Earth-matter effects** (NuFastLBL's
-`Probability_Matter_LBL` with a constant-density profile), all parameters
-fitted in **linear** space with bounds spanning the global-fit allowed ranges.
+Standard 3ν oscillations, either **including Earth-matter effects**
+(NuFastLBL's `Probability_Matter_LBL` with a constant-density profile) or
+**in vacuum** (`Probability_Vacuum_LBL` — cheaper, and numerically safe as
+Δm²₃₁ crosses zero, where the matter solver has a singular point near
+Δm²ee = 0). Both tags share one implementation and one parameter set, all
+fitted in **linear** space with bounds spanning the global-fit allowed ranges,
+so you can flip a config between them to compare matter and vacuum directly.
 
 | # | name | meaning | bounds | default |
 |---|---|---|---|---|
@@ -2082,6 +2163,67 @@ fitted in **linear** space with bounds spanning the global-fit allowed ranges.
 Rules cover the full 3×3 matrix: **0** = no osc, **1** = Pee, **2** = Peμ,
 **3** = Peτ, **4** = Pμe, **5** = Pμμ, **6** = Pμτ, **7** = Pτe,
 **8** = Pτμ, **9** = Pττ.
+
+The kinematic inputs are **per-event `<variable>`s**, like every other
+oscillation model; E is always **signed** (negative = antineutrino, flipping
+δ_CP and the MSW potential), and E = 0 or L/E = 0 is the no-oscillation
+limit. Three layouts are accepted:
+
+| `<parameter>`s | matter | vacuum | `baseline=` attribute |
+|---|---|---|---|
+| `L` [km] + `E` [GeV], both per-event | exact 2D | works | **conflict — fatal** |
+| `E` only | L fixed at `baseline=`, 1D grid | ratio = baseline/E | **required** |
+| `L/E` [km/GeV, signed] only | fatal (MSW ∝ E; the ratio underdetermines it) | exact 1D | fatal (redundant) |
+
+Most fixed-baseline experiments want the **E-only** form — it is exact for a
+constant baseline and keeps the evaluation grid one-dimensional. Use the
+`{L, E}` pair only when the baseline genuinely varies across the MC.
+
+⚠ *Before v3.0.4-dev the model took one `"L/E"` parameter that was silently
+read as E [GeV] at a fixed L = 1300 km — older LBL configs must migrate to
+the inputs above.*
+
+⚠ **Grid memory (`{L, E}` pair only)**: with two kinematic variables the
+binned-evaluation grid is n_L × n_E **global** bins (bin count × number of
+subchannels for each) × 10 probability components × every variable's reco
+bins. Keep the L and E truth binnings lean — a 200×20-bin pair on a
+many-subchannel config allocates tens of GB and will OOM; ~10 bins each is
+usually plenty. The E-only and L/E forms have no such blow-up.
+
+`<model>` tag attributes (on a non-LBL tag they are a config error; the
+vacuum tag ignores the three matter-only ones with a warning so a matter
+config can be re-tagged unchanged):
+
+| attribute | meaning | allowed | default |
+|---|---|---|---|
+| `baseline=` | fixed baseline L [km] (E-only mode; both regimes) | > 0 | — (required with E-only) |
+| `density=` | constant matter density ρ [g/cm³] (matter only) | ≥ 0 | 3 |
+| `electron_fraction=` | electron fraction Yₑ (matter only) | (0, 1] | 0.5 |
+| `n_newton=` | NuFast Newton iterations (matter only; 1 recommended for many-year DUNE/HK precision) | integer 0–10 | 0 |
+
+```xml
+<model tag="LBL_3nu-matter_angles" baseline="1300" density="2.848" n_newton="1">
+    <parameter name="E" variable_index="2"/>
+    ...
+</model>
+```
+
+Notes:
+
+* NuFast is a **constant-density** solver: there is no layered/PREM profile.
+  Use your experiment's line-averaged crustal density — commonly ≈2.6 g/cm³
+  for T2K/HK, ≈2.84 for NOvA, 2.848 for DUNE (the default 3 is the legacy
+  hardcoded value, kept for continuity). `density="0"` works but warns —
+  prefer the vacuum tag, which takes a different (safer) code path.
+* The **matter** solver (DMP zeroth order) is singular in a narrow band of
+  dmsq_31 around 0 and around Δm²ee = 0 (≈2×10⁻⁵ eV²); the model rejects it
+  via `model_constraint` (like 3+1 unitarity), so fits and scans skip those
+  points automatically. The vacuum solver has no such band.
+* Like every model setting, these attributes are **not** part of the XML
+  hash: changing ρ re-uses the `_prop/_syst.bin` caches (correct — the
+  model never affects them) but silently *invalidates* any FC.root, AFC
+  `_mesh/_bank/_brazil.bin` or PROjector constraint made with the old values
+  (the same artifact class as gotcha 12 in CLAUDE.md) — regenerate those.
 
 ### `template` *(legacy alias: `template_fit`)* — per-subchannel normalization fit
 
@@ -2526,6 +2668,41 @@ prediction barely moves. The posterior width `Σ − Σ(C+Σ)⁻¹Σ` is the pri
 width minus what the data pinned down — always smaller, shrinking to the
 statistical floor in the high-statistics limit. Everything the post-fit band
 does is these two lines, evaluated once per MCMC sample.
+
+---
+
+# Appendix D: counting degrees of freedom (ndf)
+
+```
+ndf = n_bins − n_free_physics − n_free_uniform − n_shape
+```
+
+Computed by `PROmetric::GetNdof()` (`inc/PROmetric.h`) at the post-fit
+minimum:
+
+* **`n_bins`**: the bins that actually enter the χ² sum, i.e. active
+  (fit-region mask, including PROjector's) and with positive statistical
+  variance. That depends on the metric:
+  * `neyman`: zero-data bins drop out, since their variance *is* the data;
+  * `CNP`, `pearson`, `poisson`: every active bin counts.
+* **`n_free_physics`**: physics parameters that are not fixed.
+* **`n_free_uniform`**: free `prior_type="uniform"` splines. They have no
+  pull term, so each one is a genuine free parameter.
+* **Gaussian-prior splines net zero**, whether the prior comes from XML
+  `prior=`, `<correlation>`s or a PROjector constraint. The pull term is one
+  pseudo-measurement that cancels the parameter.
+* **Covariance systematics count zero.** They are marginalised inside the
+  covariance matrix and are not fit parameters.
+* **"Fixed"** means pinned by `--fix`, `--syst-only` or a scan, i.e. zero-width
+  bounds.
+* **`n_shape`** (`--shapeonly` only): one per channel with at least one
+  contributing bin, for its lost normalisation. Channels are per detector, so
+  shape-only also gives up the ND/FD rate ratio.
+
+The log line reads e.g. `ndf = 100 bins - 2 phys - 0 uniform - 0 shape = 98`.
+Only the global post-fit label is a χ²/ndf. The per-channel and 2D
+projection labels are fixed-point comparisons with no pull and no parameter
+accounting, so they read χ²/nbins. A pathological setup can give ndf ≤ 0.
 
 ---
 

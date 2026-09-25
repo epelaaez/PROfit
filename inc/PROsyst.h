@@ -55,6 +55,22 @@ namespace PROfit {
     };
 
     /**
+     * @brief Splines whose joint response is a quadratic form rather than a product.
+     * @details Built from a "spline_cross_quad" systematic, and valid ONLY for a joint response of
+     * degree <= 2 in its members -- a quadratic form is all this type can represent. 
+     * FillSplineCrossQuad checks the premise against the surplus on-axis
+     * knots and warns if it fails. The members' own splines supply the
+     * on-axis response s_i(eta_i); cross(bin, p) is the eta_i eta_j coefficient of the p-th
+     * pair (i<j over members, itertools.combinations order). The group's factor in the
+     * systematic-weight product is 1 + sum_i (s_i - 1) + sum_{i<j} cross_ij eta_i eta_j,
+     * exact for any per-bin response that is a polynomial of degree <= 2 in the members.
+     */
+    struct QuadraticSplineGroup {
+        std::vector<int> members;   ///< Spline indices, in the order the pairs are enumerated.
+        Eigen::MatrixXf cross;      ///< (bins, npairs) cross coefficients e_ij per bin.
+    };
+
+    /**
      * @brief Diagnostic info captured when a "covariance_to_spline" systematic is processed.
      * @details Populated by FillSplinesFromCovariance; consumed by plotCov2SplineChecks to
      * make a covariance_to_spline_checks.pdf debug document.
@@ -120,6 +136,8 @@ namespace PROfit {
 
             /**
              * @brief Return a new PROsyst containing only the named systematics.
+             * @details The mcstat covariance is included only if its name is in @p systs.
+             * Every name must be registered (see HasSyst()); an unknown one throws.
              * @param systs  List of systematic names to include.
              * @return Subset PROsyst.
              */
@@ -127,10 +145,16 @@ namespace PROfit {
 
             /**
              * @brief Return a new PROsyst with the named systematics removed.
+             * @details The mcstat covariance (registered only internally, not in covar_names)
+             * is kept unless its name is in @p systs. Unknown names are ignored — callers
+             * validate with HasSyst().
              * @param systs  List of systematic names to exclude.
              * @return Complement PROsyst.
              */
             PROsyst excluding(const std::vector<std::string> &systs) const;
+
+            /** @brief True if @p name is a registered spline or covariance (incl. mcstat). */
+            bool HasSyst(const std::string &name) const { return syst_map.count(name) > 0; }
 
             /**
              * @brief Convert all spline systematics to covariance matrices and return the result.
@@ -342,6 +366,27 @@ namespace PROfit {
              * beyond the outermost knots. Returns 0 for an out-of-range bin. */
             float GetSplineShiftDeriv(int syst_num, float shift, int bin) const;
 
+            /* Function: For a "spline_cross_quad" systematic, resolve its member splines and turn its
+             * universes (entry 0 = CV, entry 1+p = joint +1 sigma shift of pair p) into the per-bin
+             * cross coefficients of a QuadraticSplineGroup. Members must already be built. */
+            void FillSplineCrossQuad(const SystStruct& syst, const PROconfig& config);
+
+            /* Function: The factor spline i contributes to the multiplicative systematic weight at
+             * (all shifts, bin). This is the generic accessor every spline goes through, grouped or
+             * not: an ungrouped spline returns GetSplineShift(i, shifts(i), bin) unchanged. For a
+             * QuadraticSplineGroup the first member carries the whole group response and the others
+             * return 1, so systw = prod_i GetSplineFactor(i) stays the combination rule everywhere. */
+            float GetSplineFactor(int i, const Eigen::VectorXf& shifts, int bin) const;
+
+            /* Function: d(group or spline factor)/d(shift_i), consistent with GetSplineFactor. For a
+             * group member this is the derivative of the group response, which lives in column
+             * FactorColumn(i) of the factor product. */
+            float GetSplineFactorDeriv(int i, const Eigen::VectorXf& shifts, int bin) const;
+
+            /* Function: Index of the factor-product column that depends on shift_i: i itself, or the
+             * first member of i's QuadraticSplineGroup. */
+            int FactorColumn(int i) const;
+
             /* Function: Get cv spectrum shifted using spline */
             PROspec GetSplineShiftedSpectrum(const PROconfig& config, const PROpeller& prop, std::string name, float shift) const;
             PROspec GetSplineShiftedSpectrum(const PROconfig& config, const PROpeller& prop, int syst_num, float shift) const;
@@ -383,10 +428,15 @@ namespace PROfit {
             std::vector<bool> spline_is_pre_migration;
 
             std::vector<SplinePriorType> spline_prior_types; ///< Prior model for each spline nuisance parameter.
+            std::vector<QuadraticSplineGroup> quadratic_groups;   ///< Cross-term groups built from "spline_cross_quad" systematics.
+            std::vector<int> quadratic_group_of;         ///< Per spline: index into quadratic_groups, or -1.
             bool has_external_prior_cov = false;     ///< If true, metrics use external_prior_cov as a fully correlated Gaussian prior (PROjector).
             Eigen::MatrixXf external_prior_cov;      ///< Absolute prior covariance over the spline nuisance parameters (used with spline_centers).
             std::map<std::string, Cov2SplineDebugInfo> cov2spline_debug_info; ///< Debug info per "covariance_to_spline" systematic, keyed by parent systname.
         private:
+            /* Carry quadratic_groups into a subset/excluding copy; new_index[old spline] = new index or -1.
+             * A group with a removed member is dropped (its survivors revert to the plain product). */
+            void CopyQuadraticGroups(PROsyst& ret, const std::vector<int>& new_index) const;
             std::map<std::string, std::pair<size_t, SystType>> syst_map; ///< Map from systematic name to (index, type).
             std::vector<Spline> splines;             ///< Ordered list of spline objects.
             size_t n_splines = 0;                    ///< Number of spline systematics.

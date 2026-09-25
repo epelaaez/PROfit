@@ -2,7 +2,9 @@
 #include "PROlog.h"
 #include <cctype>
 #include <cmath>
+#include <limits>
 #include <cstdlib>
+#include <cstring>
 #include <ctype.h>
 #include <numeric>
 #include <sstream>
@@ -53,6 +55,47 @@ namespace {
         }
         label_out = s;
         unit_out = "";
+    }
+
+    // tinyxml2 hands back attribute/text values with entities already decoded (&lt; -> <,
+    // &amp; -> &), so any such value written back into a hand-built child XML (data and
+    // DetVar configs) must be re-escaped or the child fails to parse.
+    std::string XmlEscape(const std::string &s) {
+        std::string out;
+        out.reserve(s.size());
+        for(char c : s) {
+            switch(c) {
+                case '&': out += "&amp;"; break;
+                case '<': out += "&lt;"; break;
+                case '>': out += "&gt;"; break;
+                case '"': out += "&quot;"; break;
+                default: out += c;
+            }
+        }
+        return out;
+    }
+
+    // Exact inverse of XmlEscape, single left-to-right pass so "&amp;lt;" -> "&lt;".
+    std::string XmlUnescape(const std::string &s) {
+        static const std::pair<const char*, char> entities[] = {
+            {"&amp;", '&'}, {"&lt;", '<'}, {"&gt;", '>'}, {"&quot;", '"'}};
+        std::string out;
+        out.reserve(s.size());
+        for(size_t i = 0; i < s.size(); ) {
+            bool matched = false;
+            if(s[i] == '&') {
+                for(const auto &[ent, ch] : entities) {
+                    if(s.compare(i, std::strlen(ent), ent) == 0) {
+                        out += ch;
+                        i += std::strlen(ent);
+                        matched = true;
+                        break;
+                    }
+                }
+            }
+            if(!matched) out += s[i++];
+        }
+        return out;
     }
 
     // The `use` attribute on <mode>/<detector>/<channel>/<subchannel> is
@@ -750,8 +793,12 @@ int PROconfig::LoadFromXML(const std::string &filename){
     tinyxml2::XMLElement *pMC, *pWeiMaps, *pList, *pCorrelations, *pSpec, *pShapeOnlyMap;
     pMC   = doc.FirstChildElement("MCFile");
     pWeiMaps = doc.FirstChildElement("WeightMaps");
-    pList = doc.FirstChildElement("variation_list");
-    if(!pList) pList = doc.FirstChildElement("systematics"); // alternative name for variation_list
+    // <systematics> is an alternative name for <variation_list>; both may appear in any order
+    auto is_variation_list = [](const tinyxml2::XMLElement *e) {
+        return !strcmp(e->Name(), "variation_list") || !strcmp(e->Name(), "systematics");
+    };
+    pList = doc.FirstChildElement();
+    while(pList && !is_variation_list(pList)) pList = pList->NextSiblingElement();
     pCorrelations = doc.FirstChildElement("correlation");
     pSpec = doc.FirstChildElement("varied_spectrum");
     pShapeOnlyMap = doc.FirstChildElement("ShapeOnlyUncertainty");
@@ -1205,13 +1252,33 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 var_file.name = var_name;
                 var_file.pot = strtod(var_pot_str, &end);
                 var_file.is_cv = false;
-                var_file.knobval = knobval ? strtod(knobval, &end) : 1;
+                if(knobval) {
+                    char *kend = nullptr;
+                    double kval = strtod(knobval, &kend);
+                    if(kend == knobval || *kend != '\0' || !std::isfinite(kval)) {
+                        log<LOG_ERROR>(L"%1% || ERROR: DetVar variation '%2%' (section %3%) has non-numeric knobval '%4%'")
+                            % __func__ % var_name % section_idx % knobval;
+                        exit(EXIT_FAILURE);
+                    }
+                    var_file.knobval = kval;
+                } else {
+                    var_file.knobval = 1;
+                }
                 var_file.section_index = section_idx;
+                
+                // Check for duplicate entries
+                for(const DetVarFile &prev : m_detvar_files) {
+                    if(prev.section_index == section_idx && !prev.is_cv && prev.name == var_file.name && prev.knobval == var_file.knobval) {
+                        log<LOG_ERROR>(L"%1% || ERROR: DetVar variation '%2%' (section %3%) declares knobval %4% more than once — knob values must be unique")
+                            % __func__ % var_name % section_idx % var_file.knobval;
+                        exit(EXIT_FAILURE);
+                    }
+                }
                 { const char* frac = pVar->Attribute("partial_load_frac");
                   var_file.partial_load_frac = frac ? (float)strtod(frac, nullptr) : 1.0f; }
                 m_detvar_files.push_back(var_file);
                 m_detvar_variation_names.insert(var_name);
-                log<LOG_INFO>(L"%1% || DetVar variation '%2%' file (section %3%): %4%, POT: %5%") % __func__ % var_name % section_idx % dv_filename % var_file.pot;
+                log<LOG_INFO>(L"%1% || DetVar variation '%2%' file (section %3%): %4%, POT: %5%, knobval: %6%") % __func__ % var_name % section_idx % dv_filename % var_file.pot % var_file.knobval;
 
                 pVar = pVar->NextSiblingElement("variation");
             }
@@ -1240,32 +1307,32 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
                 // Mode(s) - use m_mode_names.size() since m_num_modes isn't set yet
                 for(size_t im = 0; im < m_mode_names.size(); im++) {
-                    dvXml << "<mode name=\"" << m_mode_names[im] << "\" />\n";
+                    dvXml << "<mode name=\"" << XmlEscape(m_mode_names[im]) << "\" />\n";
                 }
                 dvXml << "\n";
 
                 // Detector(s) - use m_detector_names.size() since m_num_detectors isn't set yet
                 for(size_t id = 0; id < m_detector_names.size(); id++) {
-                    dvXml << "<detector name=\"" << m_detector_names[id] << "\" pot=\"";
+                    dvXml << "<detector name=\"" << XmlEscape(m_detector_names[id]) << "\" pot=\"";
                     dvXml << std::scientific << m_det_pot[id] << "\" />\n";
                 }
                 dvXml << "\n";
 
                 // Channels with same subchannels as main config
                 for(size_t ic = 0; ic < m_channel_names.size(); ic++) {
-                    dvXml << "<channel name=\"" << m_channel_names[ic] << "\"";
+                    dvXml << "<channel name=\"" << XmlEscape(m_channel_names[ic]) << "\"";
                     if(!m_channel_plotnames[ic].empty()) {
-                        dvXml << " plotname=\"" << m_channel_plotnames[ic] << "\"";
+                        dvXml << " plotname=\"" << XmlEscape(m_channel_plotnames[ic]) << "\"";
                     }
                     dvXml << ">\n";
                     dvXml << m_channel_bins_xml_strings[ic];
                     for(size_t sc = 0; sc < m_subchannel_names[ic].size(); sc++) {
-                        dvXml << "\t<subchannel name=\"" << m_subchannel_names[ic][sc] << "\"";
+                        dvXml << "\t<subchannel name=\"" << XmlEscape(m_subchannel_names[ic][sc]) << "\"";
                         if(!m_subchannel_plotnames[ic][sc].empty()) {
-                            dvXml << " plotname=\"" << m_subchannel_plotnames[ic][sc] << "\"";
+                            dvXml << " plotname=\"" << XmlEscape(m_subchannel_plotnames[ic][sc]) << "\"";
                         }
                         if(!m_subchannel_colors[ic][sc].empty()) {
-                            dvXml << " color=\"" << m_subchannel_colors[ic][sc] << "\"";
+                            dvXml << " color=\"" << XmlEscape(m_subchannel_colors[ic][sc]) << "\"";
                         }
                         dvXml << "/>\n";
                     }
@@ -1310,7 +1377,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                             found_any = true;
                             // Reconstruct <branch> XML from stored data
                             std::ostringstream brXml;
-                            brXml << "\t<branch associated_subchannel=\"" << sc_name << "\"";
+                            brXml << "\t<branch associated_subchannel=\"" << XmlEscape(sc_name) << "\"";
                             if(m_branch_variables[fi][bi]->model_rule >= 0) {
                                 brXml << " model_rule=\"" << m_branch_variables[fi][bi]->model_rule << "\"";
                             }
@@ -1322,16 +1389,16 @@ int PROconfig::LoadFromXML(const std::string &filename){
                             int out_wi = 1;
                             for(size_t wi = 0; wi < m_mcgen_weight_names[fi][bi].size(); wi++) {
                                 if(!sec_iow.empty() && std::find(sec_iow.begin(), sec_iow.end(), (int)(wi+1)) == sec_iow.end()) continue;
-                                brXml << " weight_" << out_wi++ << "=\"" << m_mcgen_weight_names[fi][bi][wi] << "\"";
+                                brXml << " weight_" << out_wi++ << "=\"" << XmlEscape(m_mcgen_weight_names[fi][bi][wi]) << "\"";
                             }
                             // Append extra weights defined only for this DetVarSection
                             for(const auto& ew : m_detvar_extra_weights_per_section[section_idx]) {
-                                brXml << " weight_" << out_wi++ << "=\"" << ew << "\"";
+                                brXml << " weight_" << out_wi++ << "=\"" << XmlEscape(ew) << "\"";
                             }
                             brXml << ">\n";
                             // Variables
                             for(const auto& vname : m_branch_variables[fi][bi]->variable_names) {
-                                brXml << "\t\t<variable>" << vname << "</variable>\n";
+                                brXml << "\t\t<variable>" << XmlEscape(vname) << "</variable>\n";
                             }
                             brXml << "\t</branch>\n";
 
@@ -1448,10 +1515,9 @@ int PROconfig::LoadFromXML(const std::string &filename){
     }else{
         while(pList){
 
-            // Support both old naming (allowlist) and new naming (systematic)
-            tinyxml2::XMLElement *pAllowList = pList->FirstChildElement("allowlist");
-            if(!pAllowList) pAllowList = pList->FirstChildElement("systematic");
-            while(pAllowList){
+            // Old (allowlist) and new (systematic) naming, freely interleaved
+            for(tinyxml2::XMLElement *pAllowList = pList->FirstChildElement(); pAllowList; pAllowList = pAllowList->NextSiblingElement()){
+                if(strcmp(pAllowList->Name(), "allowlist") && strcmp(pAllowList->Name(), "systematic")) continue;
                 const char *text = pAllowList->GetText();
                 std::string wt = "null";
                 if(text) {
@@ -1463,7 +1529,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 }
 
                 //check for known attributes
-                const std::vector<std::string> expected_attrs = {"name", "type", "plotname", "binning", "knobvals", "tag", "prior", "center", "prior_type", "force_0_cv", "include_only_weights", "scale","filename", "xvar", "yvar", "restrict", "mirror", "num_decomp_knobs", "include_resid_cov", "inflate", "weights", "apply_to_subchannel", "scale_range", "sources"};
+                const std::vector<std::string> expected_attrs = {"name", "type", "plotname", "binning", "knobvals", "tag", "prior", "center", "prior_type", "force_0_cv", "include_only_weights", "scale","filename", "xvar", "yvar", "restrict", "mirror", "num_decomp_knobs", "include_resid_cov", "inflate", "weights", "apply_to_subchannel", "scale_range", "sources", "splines"};
                 for (const tinyxml2::XMLAttribute* attr = pAllowList->FirstAttribute(); attr; attr = attr->Next()) {
                     std::string name = attr->Name();
                     if (std::find(expected_attrs.begin(), expected_attrs.end(), name) == expected_attrs.end()) {
@@ -1496,6 +1562,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 const char *apply_to_subchannel = pAllowList->Attribute("apply_to_subchannel");
                 const char *scale_range = pAllowList->Attribute("scale_range");
                 const char *sources = pAllowList->Attribute("sources");
+                const char *splines = pAllowList->Attribute("splines");
 
                 if(!variation_type) {
                     throw std::invalid_argument(std::string("<allowlist>/<systematic> entry '") + wt + "' has no type= attribute");
@@ -1579,6 +1646,38 @@ int PROconfig::LoadFromXML(const std::string &filename){
                         % __func__ % wt.c_str() % pattern.c_str() % atoi(num_decomp_knobs) % m_mcgen_variation_restrict[wt].first % m_mcgen_variation_restrict[wt].second;
                 } else if(sources) {
                     throw std::invalid_argument(std::string("sources is only supported for type='covariance_to_spline_uniform' systematics; got type '") +
+                        variation_type + "' for '" + wt + "'");
+                }
+                if(std::string(variation_type) == "spline_cross_quad") {
+                    // Reads a weight branch whose entry 0 is the CV point and entry 1+p the joint +1 sigma
+                    // shift of the p-th pair (i<j) of the splines= list. PROsyst turns those into the
+                    // eta_i eta_j response coefficients that a product of the members' splines lacks.
+                    if(!splines) {
+                        throw std::invalid_argument(std::string("spline_cross_quad systematic '") + wt +
+                            "' requires splines=\"A, B, ...\" naming its member type=\"spline\" entries in pair order");
+                    }
+                    if(knobs || prior || center || prior_type || restrict_str || filename || xvar || yvar || mirrored || num_decomp_knobs || include_resid_cov || weights || scale_range || inflate) {
+                        throw std::invalid_argument(std::string("spline_cross_quad systematic '") + wt +
+                            "' only supports the attributes type, plotname, tag, binning, force_0_cv, include_only_weights, scale, apply_to_subchannel and splines (its knob values are derived from the pair count)");
+                    }
+                    std::vector<std::string> members;
+                    std::string tok;
+                    std::istringstream ss(splines);
+                    while(std::getline(ss, tok, ',')) {
+                        size_t b = tok.find_first_not_of(" \t"), e = tok.find_last_not_of(" \t");
+                        if(b != std::string::npos) members.push_back(tok.substr(b, e - b + 1));
+                    }
+                    if(members.size() < 2) {
+                        throw std::invalid_argument(std::string("spline_cross_quad systematic '") + wt + "' needs at least two names in splines=");
+                    }
+                    const size_t npairs = members.size() * (members.size() - 1) / 2;
+                    std::vector<double> kv(1 + npairs);
+                    for(size_t k = 0; k < kv.size(); ++k) kv[k] = (double)k;
+                    m_mcgen_variation_knobval_override[wt] = kv;
+                    m_mcgen_variation_cross_quad_splines[wt] = members;
+                    log<LOG_INFO>(L"%1% || spline_cross_quad systematic %2%: %3% member splines, %4% pair universes") % __func__ % wt.c_str() % members.size() % npairs;
+                } else if(splines) {
+                    throw std::invalid_argument(std::string("splines is only supported for type='spline_cross_quad' systematics; got type '") +
                         variation_type + "' for '" + wt + "'");
                 }
                 if(prior_type) {
@@ -1836,9 +1935,6 @@ int PROconfig::LoadFromXML(const std::string &filename){
                     log<LOG_INFO>(L"%1% || Parsed apply_to_subchannel='%2%' for systematic %3% (unanchored regex against subchannel fullnames; plain substrings work as-is)") % __func__ % pattern.c_str() % wt.c_str();
                 }
                 log<LOG_DEBUG>(L"%1% || Allowlisting variations: %2%") % __func__ % wt.c_str() ;
-                tinyxml2::XMLElement *pNext = pAllowList->NextSiblingElement("allowlist");
-                if(!pNext) pNext = pAllowList->NextSiblingElement("systematic");
-                pAllowList = pNext;
             }
 
             tinyxml2::XMLElement *pDenyList = pList->FirstChildElement("denylist");
@@ -1848,9 +1944,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 log<LOG_DEBUG>(L"%1% || Denylisting variations: %2%") % __func__ % bt.c_str() ;
                 pDenyList = pDenyList->NextSiblingElement("denylist");
             }
-            tinyxml2::XMLElement *pNextList = pList->NextSiblingElement("variation_list");
-            if(!pNextList) pNextList = pList->NextSiblingElement("systematics");
-            pList = pNextList;
+            do pList = pList->NextSiblingElement(); while(pList && !is_variation_list(pList));
         }
     }
 
@@ -2041,12 +2135,36 @@ int PROconfig::LoadFromXML(const std::string &filename){
         // Read in how many bins this channel uses
 
         const std::vector<std::string> expected_attrs = {"tag","name","index"};
+        // Numeric model options, range-checked at parse time (before any long `process`).
+        struct ModelOptionAttr { const char* name; double lo; double hi; bool integer; const char* allowed; };
+        const std::vector<ModelOptionAttr> model_option_attrs = {
+            {"baseline",          std::nextafter(0.0, 1.0), std::numeric_limits<double>::max(), false, "a number > 0 (km)"},
+            {"density",           0.0,                      std::numeric_limits<double>::max(), false, "a number >= 0 (g/cm^3)"},
+            {"electron_fraction", std::nextafter(0.0, 1.0), 1.0,                                false, "a number in (0, 1]"},
+            {"n_newton",          0.0,                      10.0,                               true,  "an integer in [0, 10]"},
+        };
         for (const tinyxml2::XMLAttribute* attr = pModel->FirstAttribute(); attr; attr = attr->Next()) {
             std::string name = attr->Name();
+            auto opt = std::find_if(model_option_attrs.begin(), model_option_attrs.end(),
+                    [&name](const ModelOptionAttr &o){ return name == o.name; });
+            if (opt != model_option_attrs.end()) {
+                const char* sval = attr->Value();
+                char* opt_end = NULL;
+                double val = strtod(sval, &opt_end);
+                if (opt_end == sval || *opt_end != '\0' || !std::isfinite(val)
+                        || val < opt->lo || val > opt->hi
+                        || (opt->integer && val != std::floor(val))) {
+                    log<LOG_ERROR>(L"%1% || ERROR! <model> attribute %2%=\"%3%\" is not a valid value (must be %4%).")
+                        % __func__ % name.c_str() % sval % opt->allowed;
+                    throw std::invalid_argument(std::string("<model> attribute ") + name + " has invalid value: " + sval);
+                }
+                m_model_options[name] = val;
+                continue;
+            }
             if (std::find(expected_attrs.begin(), expected_attrs.end(), name) == expected_attrs.end()) {
-                log<LOG_ERROR>(L"%1% || ERROR! Attribute [%2%] in the <variation> element is not expected.") % __func__ % name.c_str()  ;
-                log<LOG_ERROR>(L"%1% || -- Check spelling: allowed attributes are %2%") % __func__ % expected_attrs ;
-                throw std::invalid_argument(std::string("<variation> attribute not allowed : ") + name);
+                log<LOG_ERROR>(L"%1% || ERROR! Attribute [%2%] in the <model> element is not expected.") % __func__ % name.c_str()  ;
+                log<LOG_ERROR>(L"%1% || -- Check spelling: allowed attributes are %2% plus the model options baseline, density, electron_fraction, n_newton") % __func__ % expected_attrs ;
+                throw std::invalid_argument(std::string("<model> attribute not allowed : ") + name);
             }
         }
 
@@ -2162,6 +2280,8 @@ int PROconfig::LoadFromXML(const std::string &filename){
             m_num_variation_type_binned_unconstrained+=1;
         } else if(m_mcgen_variation_type[i] == "covariance_to_spline_uniform"){
             // Built in PROsyst from its source covariance entries; nothing to count here.
+        } else if(m_mcgen_variation_type[i] == "spline_cross_quad"){
+            // Universes are read like a spline's; PROsyst folds them into its member splines' group.
         } else {
             log<LOG_ERROR>(L"%1% || Unrecognized variation type %2%") % __func__ % m_mcgen_variation_type[i].c_str();
         }
@@ -2195,6 +2315,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
     // Needs the subchannel fullnames and per-channel binnings that CalcTotalBins just built.
     this->RegisterBinnedUnconstrainedChildren();
+    this->ResolveSplineCrossQuadMembers();
     this->ResolveCovarianceToSplineUniformSources();
 
     log<LOG_INFO>(L"%1% || Checking number of Mode/Detector/Channel/Subchannels and BINs") % __func__;
@@ -2221,22 +2342,22 @@ int PROconfig::LoadFromXML(const std::string &filename){
 
         // Mode(s)
         for(size_t im = 0; im < m_num_modes; im++) {
-            dataXml << "<mode name=\"" << m_mode_names[im] << "\" />\n";
+            dataXml << "<mode name=\"" << XmlEscape(m_mode_names[im]) << "\" />\n";
         }
         dataXml << "\n";
 
         // Detector(s) — format pot in scientific notation to preserve precision
         for(size_t id = 0; id < m_num_detectors; id++) {
-            dataXml << "<detector name=\"" << m_detector_names[id] << "\" pot=\"";
+            dataXml << "<detector name=\"" << XmlEscape(m_detector_names[id]) << "\" pot=\"";
             dataXml << std::scientific << m_det_pot[id] << "\" />\n";
         }
         dataXml << "\n";
 
         // Channels with a single "data" subchannel, reusing the original bins XML
         for(size_t ic = 0; ic < m_num_channels; ic++) {
-            dataXml << "<channel name=\"" << m_channel_names[ic] << "\"";
+            dataXml << "<channel name=\"" << XmlEscape(m_channel_names[ic]) << "\"";
             if(!m_channel_plotnames[ic].empty()) {
-                dataXml << " plotname=\"" << m_channel_plotnames[ic] << "\"";
+                dataXml << " plotname=\"" << XmlEscape(m_channel_plotnames[ic]) << "\"";
             }
             dataXml << ">\n";
             dataXml << m_channel_bins_xml_strings[ic];
@@ -2918,6 +3039,89 @@ void PROconfig::ResolveCovarianceToSplineUniformSources(){
     }
 }
 
+void PROconfig::ResolveSplineCrossQuadMembers(){
+    for(const auto &[parent, members] : m_mcgen_variation_cross_quad_splines){
+        const int binning = m_mcgen_variation_binning_map.at(parent);
+        std::vector<std::string> seen;
+        for(const std::string &name : members){
+            auto type_it = m_mcgen_variation_type_map.find(name);
+            if(type_it == m_mcgen_variation_type_map.end() || type_it->second != "spline"){
+                log<LOG_ERROR>(L"%1% || ERROR: splines= of spline_cross_quad systematic '%2%' names '%3%', which is not a type=\"spline\" entry in the variation list.") % __func__ % parent.c_str() % name.c_str();
+                log<LOG_ERROR>(L"Terminating.");
+                exit(EXIT_FAILURE);
+            }
+            if(m_mcgen_variation_binning_map.at(name) != binning){
+                log<LOG_ERROR>(L"%1% || ERROR: spline_cross_quad systematic '%2%' (binning var%3%) and its member '%4%' (binning var%5%) must share a binning.") % __func__ % parent.c_str() % binning % name.c_str() % m_mcgen_variation_binning_map.at(name);
+                log<LOG_ERROR>(L"Terminating.");
+                exit(EXIT_FAILURE);
+            }
+            if(std::find(seen.begin(), seen.end(), name) != seen.end()){
+                log<LOG_ERROR>(L"%1% || ERROR: spline_cross_quad systematic '%2%' lists member '%3%' twice.") % __func__ % parent.c_str() % name.c_str();
+                log<LOG_ERROR>(L"Terminating.");
+                exit(EXIT_FAILURE);
+            }
+            // The additive group factor 1 + sum(s_i - 1) + sum e_ij eta_i eta_j assumes s_i(0) = 1.
+            auto kv_it = m_mcgen_variation_knobval_override.find(name);
+            const bool explicit_zero = kv_it != m_mcgen_variation_knobval_override.end()
+                && std::any_of(kv_it->second.begin(), kv_it->second.end(), [](double k){ return k == 0.0; });
+            auto f0_it = m_mcgen_variation_force_0_cv.find(name);
+            const bool forced = f0_it != m_mcgen_variation_force_0_cv.end() && f0_it->second;
+            if(explicit_zero && !forced){
+                log<LOG_ERROR>(L"%1% || ERROR: spline_cross_quad systematic '%2%': member '%3%' has an explicit 0 in knobvals but no force_0_cv=\"true\". The additive group response assumes s_i(0) = 1, add it to the member.") % __func__ % parent.c_str() % name.c_str();
+                log<LOG_ERROR>(L"Terminating.");
+                exit(EXIT_FAILURE);
+            }
+            // R(e_i+e_j) and s_i(1) are ratios of per-bin sums; the subtraction e_ij = R - s_i - s_j + 1
+            // is only meaningful if the cross entry and its members fill their universes under the
+            // same event weighting, i.e. the same include_only_weights (or none on both).
+            auto iow_of = [&](const std::string &n) -> std::vector<int> {
+                auto it = m_mcgen_variation_include_only_weights.find(n);
+                return it == m_mcgen_variation_include_only_weights.end() ? std::vector<int>{} : it->second;
+            };
+            if(iow_of(name) != iow_of(parent)){
+                log<LOG_ERROR>(L"%1% || ERROR: spline_cross_quad systematic '%2%' and its member '%3%' must carry the same include_only_weights (or none on both); the cross coefficients are extracted from ratios of universes that must be filled with the same event weights.") % __func__ % parent.c_str() % name.c_str();
+                log<LOG_ERROR>(L"Terminating.");
+                exit(EXIT_FAILURE);
+            }
+            seen.push_back(name);
+        }
+
+        // apply_to_subchannel: the cross entry only couples its members, so it cannot carry a
+        // scope of its own. So: every member must carry the same pattern (or none), and the
+        // entry either matches it or, when it has none, inherits it.
+        auto pattern_of = [&](const std::string &name) -> const std::string* {
+            auto it = m_mcgen_variation_apply_to_subchannel.find(name);
+            return it == m_mcgen_variation_apply_to_subchannel.end() ? nullptr : &it->second;
+        };
+        const std::string *member_pattern = pattern_of(members.front());
+        for(const std::string &name : members){
+            const std::string *pat = pattern_of(name);
+            const bool same = (pat == nullptr && member_pattern == nullptr) || (pat && member_pattern && *pat == *member_pattern);
+            if(!same){
+                log<LOG_ERROR>(L"%1% || ERROR: spline_cross_quad systematic '%2%': members '%3%' (apply_to_subchannel='%4%') and '%5%' (apply_to_subchannel='%6%') must carry the same apply_to_subchannel pattern, or none.")
+                    % __func__ % parent.c_str() % members.front().c_str() % (member_pattern ? member_pattern->c_str() : "") % name.c_str() % (pat ? pat->c_str() : "");
+                log<LOG_ERROR>(L"Terminating.");
+                exit(EXIT_FAILURE);
+            }
+        }
+        const std::string *parent_pattern = pattern_of(parent);
+        if(parent_pattern && !(member_pattern && *parent_pattern == *member_pattern)){
+            log<LOG_ERROR>(L"%1% || ERROR: spline_cross_quad systematic '%2%' has apply_to_subchannel='%3%' but its members have '%4%'. The entry must match its members' pattern, or omit apply_to_subchannel to inherit it.")
+                % __func__ % parent.c_str() % parent_pattern->c_str() % (member_pattern ? member_pattern->c_str() : "");
+            log<LOG_ERROR>(L"Terminating.");
+            exit(EXIT_FAILURE);
+        }
+        if(!parent_pattern && member_pattern){
+            m_mcgen_variation_apply_to_subchannel[parent] = *member_pattern;
+            log<LOG_INFO>(L"%1% || spline_cross_quad systematic '%2%' inherits apply_to_subchannel='%3%' from its members.") % __func__ % parent.c_str() % member_pattern->c_str();
+        }
+
+        // Never a PROsyst entry of its own, so --syst-list/--exclude-systs resolve it to its members.
+        m_mcgen_variation_children[parent] = members;
+        log<LOG_INFO>(L"%1% || spline_cross_quad systematic '%2%' couples splines %3%") % __func__ % parent.c_str() % members;
+    }
+}
+
 uint32_t PROconfig::CalcHash() const{
     int fixed_seed = 404;
     uint32_t hash;
@@ -3012,8 +3216,11 @@ uint32_t PROconfig::CalcDetVarHash() const{
     for(const auto& dv : m_detvar_files) {
         unique_string << dv.section_index << dv.name << dv.filename << dv.pot << dv.is_cv;
     }
+    // Hash the unescaped form: templates built before XmlEscape existed carried raw values, so
+    // this keeps existing _detvar_props.bin valid (unless a copied <bins>/<model>/<friend>
+    // attribute itself holds an escaped character).
     for(const auto& tmpl : m_detvar_xml_templates)
-        unique_string << tmpl;
+        unique_string << XmlUnescape(tmpl);
 
     // Include matching vars so that adding/removing cv_variation_matching_vars forces reprocessing
     for(const auto& sec_vars : m_detvar_matching_vars_per_section)
@@ -3069,13 +3276,13 @@ PROconfig PROconfig::BuildDetVarConfig(size_t file_index) const {
         std::string fn_placeholder = "__DETVAR_FILENAME__";
         auto pos = xml_str.find(fn_placeholder);
         if(pos != std::string::npos) {
-            xml_str.replace(pos, fn_placeholder.size(), dvfile.filename);
+            xml_str.replace(pos, fn_placeholder.size(), XmlEscape(dvfile.filename));
         }
 
         std::string tr_placeholder = "__DETVAR_TREENAME__";
         pos = xml_str.find(tr_placeholder);
         if(pos != std::string::npos) {
-            xml_str.replace(pos, tr_placeholder.size(), dvfile.treename);
+            xml_str.replace(pos, tr_placeholder.size(), XmlEscape(dvfile.treename));
         }
 
         std::string pot_placeholder = "__DETVAR_POT__";
