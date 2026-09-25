@@ -306,6 +306,49 @@ sed -e '0,/5\*mcweight\*(category == 0)/s//5*mcweight*(category \&gt; -1 \&amp;\
     local_applyto_detvar.xml > local_applyto_detvar_esc.xml
 COMMON=(-x local_applyto_detvar_esc.xml -t "${TAG}aptesc" -n 1 -v 2 --seed 405 --preset fast)
 run_test t26kescprocess process
+# (e) One DetVar name in several <DetVarSection>s is ONE systematic: each section gives the
+#     response in its own subchannels, and where sections overlap their responses average,
+#     weighted by each section's POT-normalised CV. Section A (event-matched, all ND, same
+#     file: ratio 1, CV at 5e20 POT = weight 2), B (FD, ratio 4) and C (ND numu only,
+#     ratio 4, weight 1) give ND nue 1, ND numu (2*1+1*4)/3 = 2, FD 4. This used to build
+#     three same-named parameters, each from the last section's variation file.
+dvs_section() {  # <ND|FD> <cv pot> <var pot> <knobval> <event-matched 0|1> <subchannel>...
+    local det=$1 cvpot=$2 varpot=$3 knob=$4 match=$5; shift 5
+    printf '  <DetVarSection treename="events/selected" scale="1.0"%s>\n' "$([ "$match" = 1 ] && echo ' cv_variation_matching_vars="Run,Subrun,Evt"')"
+    printf '    <cv filename="%s/fake_sbn_mc_%s.root" pot="%s"/>\n' "$MCDIR" "$det" "$cvpot"
+    printf '    <variation name="DetVarShared" filename="%s/fake_sbn_mc_%s.root" pot="%s" knobval="%s"/>\n' "$MCDIR" "$det" "$varpot" "$knob"
+    printf '    <subchannel>%s</subchannel>\n' "$@"
+    printf '  </DetVarSection>\n'
+}
+dvs_xml() {  # <out.xml> <knobval of the FD section>
+    local nd="nu_ND_nue_intrinsic nu_ND_nue_background nu_ND_nue_fullosc nu_ND_numu_signal nu_ND_numu_background"
+    local blk
+    blk="<DetVarFiles>
+$(dvs_section ND 5e+20 2.5e+20 +1 1 $nd)
+$(dvs_section FD 1e+21 2.5e+20 "$2" 0 ${nd//_ND_/_FD_})
+$(dvs_section ND 1e+21 2.5e+20 +1 0 nu_ND_numu_signal nu_ND_numu_background)
+</DetVarFiles>"
+    awk -v blk="$blk" '/<variation_list>/ && !dv { print blk; dv=1 } {print}
+      /FiducialVol_FD/ && !sy { print "    <allowlist type=\"spline\" name=\"DetVarShared\" plotname=\"DetVarShared\" tag=\"det\"/>"; sy=1 }' \
+      local_applyto.xml > "$1"
+}
+dvs_xml local_detvar_shared.xml +1
+dvs_xml local_detvar_shared_knobs.xml -1
+COMMON=(-x local_detvar_shared.xml -t "${TAG}dvs" -n 1 -v 2 --seed 405 --preset fast)
+run_test t26ldvsprocess process
+run_test t26mdvsplot    --use-fake-data plot --with-splines
+if [ -n "$ROOTEXE" ]; then
+    if "$ROOTEXE" -l -b -q "$REPO/tests/check_spline_response.C(\"${TAG}dvs_t26mdvsplot_PROplot.root\",\"DetVarShared;0-48;1,DetVarShared;64-132;2,DetVarShared;166-214;4,DetVarShared;230-298;4\")" > logs/t26ndvsresp.log 2>&1; then
+        note "PASS  t26ndvsresp  (shared DetVar name: per-section responses, CV-weighted overlap)"
+        PASS=$((PASS+1))
+    else
+        note "FAIL  t26ndvsresp -- see logs/t26ndvsresp.log"
+        FAIL=$((FAIL+1))
+    fi
+fi
+# ...and a shared name must carry the same knob values in every section.
+COMMON=(-x local_detvar_shared_knobs.xml -t "${TAG}dvsk" -n 1 -v 2 --seed 405 --preset fast)
+expect_fail t26odvsknobs process
 COMMON=("${SAVED_COMMON[@]}")
 
 # --- 10. regex wildcards (patterns are unanchored ECMAScript regexes) ---------

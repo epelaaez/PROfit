@@ -40,6 +40,7 @@ short, seeded (`--seed 405 -n 1 --preset fast fast`) instance of each workflow:
 | t26b–d | every systematic (incl. mcstat, norm, flat, norm_to_covariance) restricted to FD ⇒ total fractional covariance ND block exactly zero |
 | t26e–g | DetVar systematic (same ND file as CV and half-POT variation) restricted to the ND nue channel |
 | t26h–j | branch-order regression: an `incl_systematics="false"` branch first in a systematics-carrying MCFile must process and give the identical global fit |
+| t26l–o | one DetVar name in three sections (event-matched ND, FD, overlapping ND numu) is ONE systematic: per-section responses, CV-weighted average where sections overlap (`check_spline_response.C`); t26o refuses differing knob sets |
 | t27–t30 | regex patterns: alternation accepted; invalid regex and zero-match patterns refused |
 | t31–t32 | LBL 3ν models: matter `global` with per-event L+E parameters (own tag + process — its XML replaces the L/E variable with a lean 4-bin L and cuts E to 5 bins, since the 2D model grid is n_L×n_E global bins ×10 components and OOMs at the base binning); explicit legacy-default attributes (`density="3" electron_fraction="0.5" n_newton="0"`) bitwise-identical to no attributes; vacuum `global` from the single signed L/E and matter `global` in fixed-baseline E-only mode (`baseline="1300"`), both reusing the t00 caches; model options on a non-LBL tag refused. Fails by design on binaries predating `LBL_3nu-vacuum_angles` |
 

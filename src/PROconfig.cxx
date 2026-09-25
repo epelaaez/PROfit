@@ -334,6 +334,40 @@ void PROconfig::ValidateFitVariable() const {
             % __func__ % i_prime;
 }
 
+void PROconfig::ValidateDetVarSharedNames() const {
+    std::map<std::string, std::map<size_t, std::set<double>>> knobs; // name -> section -> knobvals
+    for(const auto &dvf : m_detvar_files)
+        if(!dvf.is_cv) knobs[dvf.name][dvf.section_index].insert(dvf.knobval);
+
+    for(const auto &[name, per_sec] : knobs) {
+        if(per_sec.size() < 2 || m_mcgen_variation_type_map.count(name) == 0) continue;
+
+        std::string secs;
+        const auto &[sec0, knobs0] = *per_sec.begin();
+        for(const auto &[sec, ks] : per_sec) {
+            if(ks != knobs0) {
+                log<LOG_ERROR>(L"%1% || ERROR: DetVar '%2%' is in sections %3% and %4% with different knobval sets. A name shared across sections is ONE systematic, so every section must provide the same knob values.")
+                    % __func__ % name.c_str() % sec0 % sec;
+                exit(EXIT_FAILURE);
+            }
+            secs += (secs.empty() ? "" : ", ") + std::to_string(sec);
+        }
+        log<LOG_INFO>(L"%1% || DetVar '%2%' is in sections %3%: combined into one systematic, each section providing the response in its own subchannels.")
+            % __func__ % name.c_str() % secs.c_str();
+
+        for(auto a = per_sec.begin(); a != per_sec.end(); ++a) {
+            for(auto b = std::next(a); b != per_sec.end(); ++b) {
+                const auto &sa = m_detvar_subchannels_per_section.at(a->first);
+                const auto &sb = m_detvar_subchannels_per_section.at(b->first);
+                const auto shared = std::find_first_of(sa.begin(), sa.end(), sb.begin(), sb.end());
+                if(shared == sa.end()) continue;
+                log<LOG_WARNING>(L"%1% || DetVar '%2%': sections %3% and %4% both fill subchannel %5% (maybe others). There the response is the average of the sections' responses weighted by each section's POT-normalised CV, so each section's pot=/scale= must give its true share of that prediction.")
+                    % __func__ % name.c_str() % a->first % b->first % shared->c_str();
+            }
+        }
+    }
+}
+
 int PROconfig::LoadFromXML(const std::string &filename){
 
 
@@ -2310,6 +2344,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
     // i_prime was resolved at the top of this function; only now are m_num_variables and the
     // model parameter map filled in, so this is the first point it can be checked.
     this->ValidateFitVariable();
+    this->ValidateDetVarSharedNames();
 
     this->CalcTotalBins();
 
