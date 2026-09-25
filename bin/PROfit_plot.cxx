@@ -40,6 +40,7 @@ void run_plot(const PROconfig &config, const PROpeller &prop, const PROmetric &m
     std::vector<TPaveText> notext;
     if(options.binwidth_scale) opt |= PlotOptions::BinWidthScaled;
     if(options.area_normalized) opt |= PlotOptions::AreaNormalized;
+    if(options.shapeonly) opt |= PlotOptions::ShapeOnly;
     if(options.legend_counts) opt |= PlotOptions::LegendCounts;
     std::vector<PROspec> variable_cvs;
     std::vector<std::map<std::string, TObject *>> cv_objs;
@@ -61,6 +62,12 @@ void run_plot(const PROconfig &config, const PROpeller &prop, const PROmetric &m
                 false, options.plot_channel_ratios, do_bkg_subtract ? &bkg_subchannels : nullptr);
         cv_objs.push_back(objs);
     }
+
+    // Shape-only: the fractional breakdowns and covariance plots show the per-channel shape
+    // part of every systematic (MiniBooNE M_shape) about the CV, as the fit sees them. The
+    // chi^2 labels (allcov_metric) are unaffected: the metric re-projects at evaluation.
+    if(options.shapeonly && need_allcov)
+        allcovsyst.ProjectCovariancesOntoShape(config, variable_cvs[config.i_prime].Spec());
 
     if(!options.no_frac_syst) {
         std::string filename = options.final_output_tag+"_fractional_systematics.pdf";
@@ -594,6 +601,7 @@ void run_plot(const PROconfig &config, const PROpeller &prop, const PROmetric &m
             auto &mat = it->second;
             log<LOG_INFO>(L"%1% || Printing first plot %2% (%3% x %4% bins)") % __func__ % name.c_str() % mat->GetNbinsX() % mat->GetNbinsY();
             mat->Draw("colz");
+            if(options.shapeonly) drawShapeOnlyNote(&c);
             drawVersionWatermark(&c);
             c.Print(covar_pdf.c_str(), "pdf");
             ++n_printed;
@@ -611,6 +619,7 @@ void run_plot(const PROconfig &config, const PROpeller &prop, const PROmetric &m
             }
             log<LOG_INFO>(L"%1% || Printing %2% (%3% x %4% bins)") % __func__ % name.c_str() % mat->GetNbinsX() % mat->GetNbinsY();
             mat->Draw("colz");
+            if(options.shapeonly) drawShapeOnlyNote(&c);
             drawVersionWatermark(&c);
             c.Print(covar_pdf.c_str(), "pdf");
             ++n_printed;
@@ -695,7 +704,7 @@ void run_plot(const PROconfig &config, const PROpeller &prop, const PROmetric &m
                                        + sub.bkg_mcstat_var_collapsed.array()).sqrt();
             data_plot = PROdata(Eigen::VectorXf(data_plot.Spec() - sub.bkg_cv_collapsed), new_err);
         } else {
-            other_err_bands.push_back(getErrorBand(config, prop, variable_systs[io], model, variable_cvs[io], CVParams, io, (size_t)options.band_throws));
+            other_err_bands.push_back(getErrorBand(config, prop, variable_systs[io], model, variable_cvs[io], CVParams, io, (size_t)options.band_throws, options.area_normalized));
         }
         auto objs = plot_channels(options.final_output_tag+"_PROplot_Variable_"+std::to_string(io)+"_ErrorBand.pdf", config, cv_plot, {}, data_plot,
                 other_err_bands.back(), {}, other_channel_chitexts[io], options.pbounds, opt | PlotOptions::DataMCRatio, io,

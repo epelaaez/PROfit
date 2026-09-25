@@ -4,6 +4,7 @@ void run_profile(float &global_fit_chi2, Eigen::VectorXf &global_fit_result, con
     GlobalFitOptions opt = GlobalFitOptions::Default;
     if(options.progress_bar) opt |= GlobalFitOptions::Progress;
     if(options.binwidth_scale) opt |= GlobalFitOptions::BinWidthScaled;
+    if(options.area_normalized) opt |= GlobalFitOptions::AreaNormalized;
     if(!fixed[0] || !options.systs_only) opt |= GlobalFitOptions::FreqSeedPts;
     opt |= options.MCMC_prefit_errors ? GlobalFitOptions::MCMCPrefitErrorBand : GlobalFitOptions::PrefitErrorBand;
     opt |= GlobalFitOptions::PostFitErrorBand;
@@ -23,6 +24,7 @@ void run_profile(float &global_fit_chi2, Eigen::VectorXf &global_fit_result, con
     }
     if(options.binwidth_scale) popt |= PlotOptions::BinWidthScaled;
     if(options.area_normalized) popt |= PlotOptions::AreaNormalized;
+    if(options.shapeonly) popt |= PlotOptions::ShapeOnly;
     if(options.legend_counts) popt |= PlotOptions::LegendCounts;
 
     std::map<std::string, TObject *> drawn_objs = draw_fit_result(config, prop, metric.GetModel(), metric.GetSysts(), metric, cv, data, fitres, options.final_output_tag+"_PROfile", popt, options.pbounds, options.plot_channel_ratios);

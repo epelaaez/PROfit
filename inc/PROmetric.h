@@ -169,6 +169,8 @@ namespace PROfit {
             const PROmodel &GetModel() const { return model; }
             /** @brief Return a const reference to the systematic object used by this metric. */
             const PROsyst &GetSysts() const { return *syst; }
+            /** @brief True if the prediction is rescaled onto the data per channel (--shapeonly). */
+            bool ShapeOnly() const { return shape_only; }
             /**
              * @brief Compute the chi-squared contribution from a single channel.
              * @param channel_index  Global channel index.

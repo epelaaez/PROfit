@@ -303,7 +303,7 @@ namespace PROfit{
 
             return spline_graphs;
         }
-    PROerrorbar getErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const PROspec &cv_spec, const Eigen::VectorXf &cvparams, int other_index, size_t nthrows) {
+    PROerrorbar getErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const PROspec &cv_spec, const Eigen::VectorXf &cvparams, int other_index, size_t nthrows, bool shape_norm) {
 
         Eigen::VectorXf cv = CollapseMatrix(config, cv_spec.Spec(), other_index);
 
@@ -339,6 +339,7 @@ namespace PROfit{
         //Fills already collapsed
         for(size_t i = 0; i < nerrorsample; ++i){
             Eigen::VectorXf var = FillSystRandomThrow(config, prop, syst, model,cv_spec, cvparams, dseed(PROseed::global_rng), other_index).Spec();
+            if(shape_norm) var = var.cwiseProduct(ChannelNormFactors(config, var, cv, other_index));
             specs.push_back(var);
             delta = cv - var;
             cov += delta  * delta.transpose();
@@ -361,14 +362,20 @@ namespace PROfit{
         return ebar;
     }
 
-    PROerrorbar getCovarianceOnlyErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const Eigen::VectorXf &params, int var_index, const Eigen::VectorXf &data_spec) {
+    PROerrorbar getCovarianceOnlyErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const Eigen::VectorXf &params, int var_index, const Eigen::VectorXf &data_spec, bool shape_norm, bool shape_fit) {
         Eigen::VectorXf cv = FillSpectra(config, prop, syst, model, params, true, var_index).Spec();
+        // Shape-only fit: condition as the metric does, about the prediction rescaled onto
+        // the data, with the covariance at that scale and projected onto shape.
+        shape_fit = shape_fit && data_spec.size() == (Eigen::Index)config.m_num_variable_bins_total_collapsed[var_index];
+        if(shape_fit) cv = ShapeRescaleToData(config, cv, data_spec, var_index);
         Eigen::VectorXf cv_coll = CollapseMatrix(config, cv, var_index);
+        const Eigen::SparseMatrix<float> R = (shape_fit || shape_norm) ? ShapeProjectorCollapsed(config, cv_coll, var_index) : Eigen::SparseMatrix<float>();
 
         Eigen::MatrixXf cov;
         if(syst.GetNCovar() > 0) {
             Eigen::MatrixXf L = syst.DecomposeFractionalCovariance(config, cv);
             cov = L * L.transpose();
+            if(shape_fit) cov = Eigen::MatrixXf(R * cov * R.transpose());
         } else {
             cov = Eigen::MatrixXf::Zero(cv_coll.size(), cv_coll.size());
         }
@@ -401,11 +408,15 @@ namespace PROfit{
                     u(a) = data_spec(contrib[a]) - cv_coll(contrib[a]);
                 }
                 Eigen::LDLT<Eigen::MatrixXd> M_ldlt(M);
+                // With no free splines this equals the fit's chi^2 at params (Neyman).
+                log<LOG_INFO>(L"%1% || Data-constrained band: u^T (C+Sigma)^-1 u = %2% over %3% bins") % __func__ % u.dot(M_ldlt.solve(u)) % nb;
                 shift = (K * M_ldlt.solve(u)).cast<float>();
                 cov = (Sig_full - K * M_ldlt.solve(K.transpose())).cast<float>();
                 constrained = true;
             }
         }
+        // Area-normalised display of an absolute fit: keep only the shape part of the band.
+        if(shape_norm && !shape_fit && syst.GetNCovar() > 0) cov = Eigen::MatrixXf(R * cov * R.transpose());
 
         PROerrorbar ebar(cv_coll.size());
         ebar.constrained = constrained;
@@ -513,6 +524,25 @@ namespace PROfit{
             conv[bin] = f;
         }
         return conv;
+    }
+
+    // Small grey tag under a chi^2 label saying what that chi^2 is, top-left aligned at NDC
+    // (x, y) of the current pad: "shape-only" for a shape-only fit, "absolute #chi^{2}" when
+    // the plot is area-normalised but the chi^2 is not. Empty text = nothing drawn.
+    static const char *chiTagText(PlotOptions opt) {
+        if(bool(opt&PlotOptions::ShapeOnly)) return "shape-only";
+        if(bool(opt&PlotOptions::AreaNormalized)) return "absolute #chi^{2}";
+        return "";
+    }
+    static void drawChiTag(double x, double y, const char *text) {
+        if(!text || !*text) return;
+        TLatex tag;
+        tag.SetNDC();
+        tag.SetTextFont(42);
+        tag.SetTextSize(0.025);
+        tag.SetTextColor(kGray+1);
+        tag.SetTextAlign(13);
+        tag.DrawLatex(x, y, text);
     }
 
     Eigen::VectorXf make_1d_spec(Eigen::VectorXf input_spec, size_t nbinsx, size_t nbinsy=1, int offset = 0, int dims=1){
@@ -1258,6 +1288,12 @@ namespace PROfit{
         if(bool(opt&PlotOptions::DataMCRatio) || bool(opt&PlotOptions::DataPostfitRatio)) p2->Draw();
 
         leg->Draw("same");
+        if(!text.empty() && *chiTagText(opt)) {
+            // Under the chi^2 line: the legend's last entry (entries fill row-major).
+            const double lx1 = stack_legend ? 0.38 : 0.32, colw = ((stack_legend ? 0.89 : 0.90) - lx1) / leg->GetNColumns();
+            const int col = (leg->GetListOfPrimitives()->GetSize() - 1) % leg->GetNColumns();
+            drawChiTag(lx1 + (col + leg->GetMargin()) * colw, 0.735, chiTagText(opt));
+        }
         drawVersionWatermark(c);
         c->Print(filename.c_str());
         log<LOG_DEBUG>(L"%1% || Finishing Plotting 1D Histogram %2%") % __func__ % hist_titles.c_str();
@@ -1744,6 +1780,7 @@ namespace PROfit{
                         text.SetTextFont(42);
                         text.SetTextSize(0.03);
                         text.DrawClone();
+                        drawChiTag(0.63, 0.905, chiTagText(opt));
                     };
                     std::string projected_x_chi_label; // We want to pass this to the 1d plotter outside the 2d plotting
                     if(config.m_channel_variable_dims[channel][other_index] == 2){
@@ -2639,6 +2676,7 @@ namespace PROfit{
                     leg->Draw();
 
                     drawVersionWatermark(&c, WatermarkPos::RightEdge);
+                    if(allsplinesyst.ShapeOnly()) drawShapeOnlyNote(&c, WatermarkPos::RightEdge);
                     c.Update();
                     c.Print(filename.c_str());
                     global_channel_index++;
@@ -2960,6 +2998,7 @@ namespace PROfit{
                         leg->Draw();
 
                         drawVersionWatermark(&c, WatermarkPos::RightEdge);
+                        if(allsplinesyst.ShapeOnly()) drawShapeOnlyNote(&c, WatermarkPos::RightEdge);
                         c.Update();
                         c.Print(filename.c_str());
                         global_channel_index++;
@@ -3176,6 +3215,7 @@ int plotPriorFractionalSystematicChannelRatios(const PROconfig &config, const PR
             leg->Draw();
 
             drawVersionWatermark(&c, WatermarkPos::RightEdge);
+            if(allsplinesyst.ShapeOnly()) drawShapeOnlyNote(&c, WatermarkPos::RightEdge);
             c.Update();
             c.Print(filename.c_str());
         }}}}
@@ -3590,7 +3630,7 @@ int plotPriorFractionalSystematicChannelRatios(const PROconfig &config, const PR
         delete c;
     }
 
-    int plotCovariancePosteriorPulls(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const Eigen::VectorXf &best_fit, const Eigen::VectorXf &data_spec, const std::string &filename, int var_index, std::map<std::string, TObject*> *drawn_objs) {
+    int plotCovariancePosteriorPulls(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const Eigen::VectorXf &best_fit, const Eigen::VectorXf &data_spec, const std::string &filename, int var_index, std::map<std::string, TObject*> *drawn_objs, bool shape_fit) {
         if(syst.GetNCovar() == 0) {
             log<LOG_INFO>(L"%1% || No covariance-type systematics; skipping the covariance posterior pull plot.") % __func__;
             return 1;
@@ -3607,10 +3647,13 @@ int plotPriorFractionalSystematicChannelRatios(const PROconfig &config, const PR
         // Keep this algebra in sync with the constrained block of
         // getMCMCErrorBand (PROplot.h) and getCovarianceOnlyErrorBand above.
         Eigen::VectorXf cv = FillSpectra(config, prop, syst, model, best_fit, true, var_index).Spec();
+        // Shape-only fit: same conditioning as the metric and getMCMCErrorBand.
+        if(shape_fit) cv = ShapeRescaleToData(config, cv, data_spec, var_index);
         for(int i = 0; i < cv.size(); ++i)
             if(cv(i) <= 0.0f) cv(i) = 1e-6f; // Floor zero-count / inactive subchannels
         Eigen::VectorXf cv_coll = CollapseMatrix(config, cv, var_index);
         Eigen::MatrixXf L = syst.DecomposeFractionalCovariance(config, cv);
+        if(shape_fit) L = Eigen::MatrixXf(ShapeProjectorCollapsed(config, cv_coll, var_index) * L);
 
         std::vector<int> contrib;
         std::vector<char> in_fit(nbins_coll, 0);

@@ -121,10 +121,12 @@ namespace PROfit {
              * @param prop        MC event store (used for spline building).
              * @param config      Analysis configuration.
              * @param systs       Vector of SystStruct objects; one per systematic variation.
-             * @param shapeonly   Shape-only mode: every spline variation and every covariance
-             *                    source is projected onto per-channel SHAPE (each collapsed
-             *                    channel's normalisation removed) — see ShapeProjector /
-             *                    ShapeRescaleUniverse. Must match the metric's shape_only flag.
+             * @param shapeonly   Shape-only mode. The systematics stay PHYSICAL: shape-only is done
+             *                    by the metric (per-channel rescale onto data + ShapeProjectorCollapsed
+             *                    about the current prediction, i.e. MiniBooNE's M_shape) and by the
+             *                    band builders. Here it only projects covariances onto per-channel
+             *                    shape, about the physical null prediction, before they are
+             *                    decomposed into spline knobs (FillSplinesFromCovarianceMatrix).
              * @param other_index Variable index for which to build systematics (-1 = primary).
              * @param model       Physics model (used when converting splines to covariance).
              * @param params      Physics parameter vector for CV spectrum evaluation.
@@ -227,6 +229,17 @@ namespace PROfit {
              * is idempotent on a covariance whose universes were already ShapeRescaleUniverse'd.
              */
             static Eigen::MatrixXf ShapeProjector(const std::vector<std::pair<size_t,size_t>> &blocks, const Eigen::VectorXf &cv);
+
+            /**
+             * @brief In place: project every covariance matrix onto per-channel shape about @p cv.
+             * @details Applies ShapeProjector (blocks of this PROsyst's binning) to each covmat,
+             * refreshes the correlation matrices and fractional_covariance. For shape-only
+             * DISPLAYS (fractional breakdowns, covariance plots) of a physical PROsyst; the
+             * chi^2 never needs it (the metric projects about the current prediction).
+             * @param config Analysis configuration.
+             * @param cv     Uncollapsed spectrum (binning other_index) to project about.
+             */
+            void ProjectCovariancesOntoShape(const PROconfig &config, const Eigen::VectorXf &cv);
 
             // ----- apply_to_subchannel scoping (post-build, type-agnostic) -----
             //

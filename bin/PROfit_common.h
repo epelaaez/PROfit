@@ -90,6 +90,7 @@ enum struct GlobalFitOptions {
     PostFitErrorBand    = 1 << 5,
     BinWidthScaled      = 1 << 6,
     LegacyPostFitErrorBand = 1 << 7, ///< Post-fit band without the data-constrained posterior pull of the covariance systematics: posterior spline throws around the best fit + PRIOR covariance throws (pre-v3.0 behavior; --legacy-postfit-error).
+    AreaNormalized      = 1 << 8, ///< Error bands carry per-channel shape uncertainty only (--area-norm / --shapeonly).
 };
 inline GlobalFitOptions operator|(GlobalFitOptions lhs, GlobalFitOptions rhs) { 
     return static_cast<GlobalFitOptions>(static_cast<int>(lhs) | static_cast<int>(rhs)); 

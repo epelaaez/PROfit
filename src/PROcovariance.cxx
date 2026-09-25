@@ -143,6 +143,10 @@ float PROcovariance::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &g
     // kept sparse — the full-binning dense diag(s)*F*diag(s) is never
     // materialized (this runs on every evaluation).
     Eigen::MatrixXf collapsed_full_covariance = CollapsedScaledCovariance(config, syst->fractional_covariance, spec_full);
+    // Shape-only: project about the CURRENT prediction, not the nominal MC the PROsyst was
+    // built with. collapsed_full_covariance stays unprojected for the analytic gradient.
+    Eigen::SparseMatrix<float> shape_R;
+    if(shape_only) shape_R = ShapeProjectorCollapsed(config, collapsed_mc_spec, config.i_prime);
 
     // non_empty_indices and reduced_collapsed_stat_covariance are precomputed once
     // (PROcovariance::buildConstantStatCache) only when the concrete metric guarantees
@@ -171,7 +175,9 @@ float PROcovariance::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &g
         idx(non_empty_indices.data(), (Eigen::Index)reduced_size);
 
     // Per-call: reduced_collapsed_full_covariance depends on `result` via collapsed_full_covariance.
-    Eigen::MatrixXf reduced_collapsed_full_covariance = collapsed_full_covariance(idx, idx);
+    Eigen::MatrixXf reduced_collapsed_full_covariance = shape_only
+        ? Eigen::MatrixXf(Eigen::MatrixXf(shape_R * collapsed_full_covariance * shape_R.transpose())(idx, idx))
+        : Eigen::MatrixXf(collapsed_full_covariance(idx, idx));
 
     Eigen::MatrixXf M = reduced_collapsed_stat_covariance + reduced_collapsed_full_covariance;
 
@@ -340,15 +346,22 @@ float PROcovariance::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &g
             Eigen::VectorXf u_c = Eigen::VectorXf::Zero(T.cols());
             for(size_t k = 0; k < reduced_size; ++k)
                 u_c(non_empty_indices[k]) = Minv_delta_b(k);
-            const Eigen::VectorXf w_full = T * u_c;
+            // Shape-only: M_sys = R Q R^T, so the dQ term sees v = R^T u_c.
+            const Eigen::VectorXf v_c = shape_only ? Eigen::VectorXf(shape_R.transpose() * u_c) : u_c;
+            const Eigen::VectorXf w_full = T * v_c;
             const Eigen::VectorXf g_full = syst->fractional_covariance * w_full.cwiseProduct(spec_full);
             const Eigen::VectorXf wg = w_full.cwiseProduct(g_full);
 
             Eigen::MatrixXf G = FillSpectraGradient(config, peller, *syst, model, param, fs_cache, config.i_prime);
+            Eigen::VectorXf u_kappa;
             if(shape_only) {
                 // Chain rule for the per-channel rescale s̃ = s ∘ (T r), r_c = ΣD_c / ΣP_c(θ):
                 //   ds̃_i/dθ = r_c ds_i/dθ + s_i dr_c/dθ,   dr_c/dθ = −(r_c/ΣP_c) Σ_{b∈c} (TᵀG)_b
                 // (i in channel c). A rank-one correction per channel block.
+                // The projector R = I − P̃1ᵀ/ΣP̃_c also moves with P̃ (ΣP̃_c = ΣD_c is fixed):
+                // −uᵀ(dR Q Rᵀ + R Q dRᵀ)u = 2 Σ_c (u_c·dP̃_c) Σ_c(Q v)_c / ΣP̃_c.
+                const Eigen::VectorXf q = collapsed_full_covariance * v_c;
+                u_kappa = Eigen::VectorXf::Zero(u_c.size());
                 const Eigen::MatrixXf TtG_raw = T.transpose() * G;
                 const Eigen::VectorXf collapsed_raw = T.transpose() * result.Spec();
                 const auto full_blocks = PROsyst::ChannelBlocks(config, config.i_prime);
@@ -360,12 +373,16 @@ float PROcovariance::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &g
                     Eigen::RowVectorXf dr = Eigen::RowVectorXf::Zero(G.cols());
                     if(sumP > 0.0f) dr = -(rc / sumP) * TtG_raw.middleRows(cstart, cl).colwise().sum();
                     G.middleRows(fs, fl) = rc * G.middleRows(fs, fl) + result.Spec().segment(fs, fl) * dr;
+                    const float sumPt = collapsed_mc_spec.segment(cstart, cl).sum();
+                    if(sumPt > 0.0f && std::isfinite(sumPt))
+                        u_kappa.segment(cstart, cl) = u_c.segment(cstart, cl) * (q.segment(cstart, cl).sum() / sumPt);
                     cstart += cl; ++gci;
                 }
             }
             Eigen::MatrixXf TtG = T.transpose() * G; // collapsed-space Jacobian (ncollapsed × nparams)
             Eigen::VectorXf grad_vec = 2.0f * (TtG(idx, Eigen::all).transpose() * Minv_delta_b)
                                      - 2.0f * (G.transpose() * wg);
+            if(shape_only) grad_vec += 2.0f * (TtG.transpose() * u_kappa);
             grad_vec.segment(model.nparams, nsyst) += pull_grad_nuis;
 
             for (size_t i = 0; i < model.nparams + nsyst; i++) {
@@ -414,6 +431,10 @@ float PROcovariance::operator()(const Eigen::VectorXf &param, Eigen::VectorXf &g
             const Eigen::VectorXf sl = shape_only ? ShapeRescaleToData(config, rl.Spec(), normdata, config.i_prime) : rl.Spec();
             Eigen::MatrixXf cfcl  = CollapsedScaledCovariance(config, syst->fractional_covariance, sl);
             Eigen::VectorXf cmcl  = CollapseMatrix(config, sl);
+            if(shape_only) {
+                const Eigen::SparseMatrix<float> Rl = ShapeProjectorCollapsed(config, cmcl, config.i_prime);
+                cfcl = Eigen::MatrixXf(Rl * cfcl * Rl.transpose());
+            }
             Eigen::MatrixXf gM_lo;
             if(statisticalVariancesDependOnPrediction()) {
                 const Eigen::VectorXf varied_stat = statisticalVariances(cmcl, normdata, &param_at);
@@ -598,6 +619,10 @@ float PROcovariance::getSingleChannelChi(size_t global_channel_index, const PROs
     Eigen::MatrixXf M = Eigen::MatrixXf(stat_variances(idx).asDiagonal());
     if(syst->GetNCovar()){
         Eigen::MatrixXf collapsed_full_covariance = CollapsedScaledCovariance(config, syst->fractional_covariance, cv_full);
+        if(shape_only) {
+            const Eigen::SparseMatrix<float> R = ShapeProjectorCollapsed(config, collapsed_cv, config.i_prime);
+            collapsed_full_covariance = Eigen::MatrixXf(R * collapsed_full_covariance * R.transpose());
+        }
         M += collapsed_full_covariance(idx, idx);
     }
 

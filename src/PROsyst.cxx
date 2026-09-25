@@ -46,6 +46,20 @@ namespace PROfit {
         return R;
     }
 
+    void PROsyst::ProjectCovariancesOntoShape(const PROconfig &config, const Eigen::VectorXf &cv) {
+        const Eigen::MatrixXf R = ShapeProjector(ChannelBlocks(config, other_index), cv);
+        for(size_t i = 0; i < covmat.size(); ++i) {
+            if(covmat[i].rows() != R.rows() || covmat[i].cols() != R.cols()) {
+                log<LOG_WARNING>(L"%1% || Covariance %2% is %3%x%4%, expected %5%; not projected onto shape.") % __func__ % i % covmat[i].rows() % covmat[i].cols() % R.rows();
+                continue;
+            }
+            const Eigen::MatrixXf proj = R * covmat[i] * R.transpose();
+            covmat[i] = 0.5f * (proj + proj.transpose());
+            if(i < corrmat.size()) corrmat[i] = GenerateCorrMatrix(covmat[i]);
+        }
+        if(covmat.size()) fractional_covariance = SumMatrices();
+    }
+
     std::vector<char> PROsyst::SubchannelScopeMask(const PROconfig &config, int binning, const std::string &pattern) {
         std::vector<char> mask(config.m_num_variable_bins_total[binning], 1);
         if(pattern.empty()) return mask;
@@ -164,23 +178,22 @@ namespace PROfit {
         shape_only = shapeonly;
         std::vector<const SystStruct*> cross_systs;  // need every member spline built first: second pass below
         if(shape_only) {
-            // Per-channel blocks and a nominal spectrum for every binning any systematic
-            // lives in (splines keep their own binning) plus this PROsyst's own.
+            // The systematics themselves stay physical: the metric's per-channel rescale and
+            // its evaluation-time projector (ShapeProjectorCollapsed) do shape-only. Here we
+            // only need per-channel blocks and a nominal to project covariances onto shape
+            // BEFORE they are decomposed into spline knobs (FillSplinesFromCovarianceMatrix).
             std::set<int> binnings{other_index};
             for(const auto &syst: systs) if(syst.binning >= 0) binnings.insert(syst.binning);
             for(int b: binnings) {
                 shape_blocks[b] = ChannelBlocks(config, b);
                 const Eigen::Index nb = config.m_num_variable_bins_total[b];
                 Eigen::VectorXf nominal;
-                // Prefer the nominal MC carried by any weight-based systematic in this
-                // binning (it is exactly the CV every fractional matrix is normalised to).
-                for(const auto &syst: systs) {
-                    const int sb = syst.binning < 0 ? other_index : syst.binning;
-                    if(sb == b && syst.p_cv && syst.p_cv->GetNbins() == nb) { nominal = syst.p_cv->Spec(); break; }
-                }
-                if(nominal.size() == 0) {
-                    // No weight-based systematic in this binning (e.g. flat/norm/external only):
-                    // bin the CV event weights directly.
+                // The physical null prediction: every event (incl. incl_systematics="false"
+                // subchannels such as cosmics) at the model's default oscillation. A systematic's
+                // p_cv is not a substitute: it omits those subchannels and weights model_rule!=0
+                // samples at P=1.
+                if(model) nominal = FillSpectra(config, prop, PROsyst(), *model, model->default_val, true, b).Spec();
+                if(nominal.size() != nb) {
                     nominal = Eigen::VectorXf::Zero(nb);
                     if(b < (int)prop.variable_bin_indices.size())
                         for(size_t ev = 0; ev < prop.NEvent(); ++ev) {
@@ -190,7 +203,7 @@ namespace PROfit {
                 }
                 shape_nominal[b] = nominal;
             }
-            log<LOG_INFO>(L"%1% || Shape-only mode: systematics for variable %2% will be projected onto per-channel shape (%3% channel blocks).") % __func__ % other_index % shape_blocks.at(other_index).size();
+            log<LOG_INFO>(L"%1% || Shape-only mode (variable %2%, %3% channel blocks): systematics are kept physical; covariances are projected onto per-channel shape only before spline decomposition.") % __func__ % other_index % shape_blocks.at(other_index).size();
         }
         for(const auto& syst: systs) {
             log<LOG_DEBUG>(L"%1% || syst mode: %2%") % __func__ % syst.mode.c_str();
@@ -418,26 +431,6 @@ namespace PROfit {
         // external covariances, mcstat, cov->spline children — every type, uniformly.
         ApplySubchannelScopes(config, systs);
 
-        if(shape_only && covmat.size()) {
-            // Shape-only: project EVERY covariance source (flat, norm_to_covariance,
-            // external, mcstat, covariance_to_spline residual, ...) onto per-channel shape.
-            // Universe-built matrices are already shape (R is idempotent on them); the
-            // parametric sources carry full normalisation until projected here.
-            const Eigen::MatrixXf R = ShapeProjector(shape_blocks.at(other_index), shape_nominal.at(other_index));
-            size_t nproj = 0;
-            for(size_t i = 0; i < covmat.size(); ++i) {
-                if(covmat[i].rows() != R.rows() || covmat[i].cols() != R.cols()) {
-                    log<LOG_WARNING>(L"%1% || Shape-only: covariance %2% is %3%x%4%, expected %5%; not projected.") % __func__ % i % covmat[i].rows() % covmat[i].cols() % R.rows();
-                    continue;
-                }
-                Eigen::MatrixXf proj = R * covmat[i] * R.transpose();
-                covmat[i] = 0.5f * (proj + proj.transpose());
-                if(i < corrmat.size()) corrmat[i] = GenerateCorrMatrix(covmat[i]);
-                ++nproj;
-            }
-            log<LOG_INFO>(L"%1% || Shape-only: projected %2% covariance source(s) onto per-channel shape for variable %3%.") % __func__ % nproj % other_index;
-        }
-
         if(covmat.size()==0){
             int nbins =  config.m_num_variable_bins_total[other_index];
             Eigen::MatrixXf fracM = Eigen::MatrixXf::Zero(nbins, nbins);
@@ -635,12 +628,6 @@ namespace PROfit {
         Eigen::MatrixXf cv_inverse = cv.asDiagonal().inverse();
         Eigen::MatrixXf frac_covar_matrix = cv_inverse * mat * cv_inverse;
         PROsyst::toFiniteMatrix(frac_covar_matrix);
-        if(shape_only) {
-            // Products of several shape-only spline ratios preserve each channel's
-            // integral only to first order; project the throw covariance exactly.
-            const Eigen::MatrixXf R = ShapeProjector(ChannelBlocks(config, other_index), cv);
-            frac_covar_matrix = R * frac_covar_matrix * R.transpose();
-        }
 
         return frac_covar_matrix;
     }
@@ -720,7 +707,7 @@ namespace PROfit {
 
         //generate matrix only if it's not already in the map
         if(syst_map.find(sysname) == syst_map.end()){
-            std::pair<Eigen::MatrixXf, Eigen::MatrixXf> matrices = PROsyst::GenerateCovarMatrices(syst, shape_only ? &shapeBlocksFor(syst) : nullptr);
+            std::pair<Eigen::MatrixXf, Eigen::MatrixXf> matrices = PROsyst::GenerateCovarMatrices(syst);
 
             // If inflate is set, scale the covariance by inflate^2 (uncertainty scales by inflate).
             // The correlation matrix is unchanged by a constant scaling.
@@ -1305,15 +1292,7 @@ namespace PROfit {
                 knob0_index = ratios.size();  // Will be set after push_back below
             }
 
-            if(shape_only) {
-                // Shape-only: each knob's spectrum is rescaled to the CV integral PER
-                // CHANNEL before the ratio is taken, so the spline moves shape only.
-                PROspec var = *syst.p_multi_spec[i];
-                ShapeRescaleUniverse(shapeBlocksFor(syst), syst.p_cv->Spec(), var.Spec());
-                ratios.push_back(var / *syst.p_cv);
-            } else {
-                ratios.push_back((*syst.p_multi_spec[i]) / *syst.p_cv);
-            }
+            ratios.push_back((*syst.p_multi_spec[i]) / *syst.p_cv);
             knobvals.push_back(syst.knobval[i]);
         }
         if (!found0) {
@@ -1542,14 +1521,15 @@ namespace PROfit {
     }
 
     void PROsyst::FillSplinesFromCovariance(const SystStruct& syst) {
-        Eigen::MatrixXf frac_cov = PROsyst::GenerateFracCovarMatrix(syst, shape_only ? &shapeBlocksFor(syst) : nullptr);
+        Eigen::MatrixXf frac_cov = PROsyst::GenerateFracCovarMatrix(syst);
         FillSplinesFromCovarianceMatrix(frac_cov, syst);
     }
 
     void PROsyst::FillSplinesFromCovarianceMatrix(Eigen::MatrixXf frac_cov, const SystStruct& syst, SplinePriorType prior, float knob_lo, float knob_hi) {
         if(shape_only && shape_blocks.count(syst.binning < 0 ? other_index : syst.binning)) {
-            // Shape-only: decompose the per-channel SHAPE part of the matrix (exact projector;
-            // idempotent on a matrix whose universes were already rescaled per channel).
+            // Shape-only: decompose the per-channel SHAPE part of the matrix, taken about the
+            // physical null prediction, so no knob is spent on (or left free along) a pure
+            // channel normalisation the shape-only chi^2 cannot see.
             const Eigen::MatrixXf R = ShapeProjector(shapeBlocksFor(syst), shapeNominalFor(syst));
             frac_cov = R * frac_cov * R.transpose();
         }
