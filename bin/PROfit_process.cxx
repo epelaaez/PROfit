@@ -29,10 +29,12 @@ std::vector<int> DetVarMatchingKey(const PROpeller& prop, size_t i_event) {
 // Build PROspec objects for CV and variation using only events whose matching keys appear
 // in both propellers. var_idx selects which variable's bin indices to use.
 // Returns false (leaving out_cv/out_var unchanged) if either propeller lacks matching vars.
+// If fill_errors is set, Error() holds sqrt(sum w^2) per bin (used for plotting only).
 bool BuildDetVarMatchedSpecs(
         const PROpeller& cvprop, const std::map<double, const PROpeller*> &varprop,
         int var_idx, int spec_size,
-        PROspec& out_cv, std::map<double, PROspec> &out_var) {
+        PROspec& out_cv, std::map<double, PROspec> &out_var,
+        bool fill_errors) {
 
     if(!cvprop.has_matching_vars || 
             !std::all_of(varprop.begin(), varprop.end(), [](const auto &p){ return p.second->has_matching_vars;})) 
@@ -82,13 +84,19 @@ bool BuildDetVarMatchedSpecs(
 
     // Step 3: fill matched CV spec
     PROspec matched_cv(spec_size);
+    // sum w^2 in double: propeller weights carry the POT scaling (~1e21), so w^2 overflows float.
+    Eigen::VectorXd sumw2 = Eigen::VectorXd::Zero(fill_errors ? spec_size : 0);
     size_t n_cv_prop_matched = 0;
     for(size_t i = 0; i < cvprop.NEvent(); ++i) {
         if(!common_keys.count(DetVarMatchingKey(cvprop, i))) continue;
         ++n_cv_prop_matched;
         int bin = cvprop.variable_bin_indices[var_idx][i];
-        if(bin >= 0) matched_cv.QuickFill(bin, cvprop.added_weights[i]);
+        if(bin >= 0) {
+            matched_cv.QuickFill(bin, cvprop.added_weights[i]);
+            if(fill_errors) sumw2(bin) += (double)cvprop.added_weights[i]*cvprop.added_weights[i];
+        }
     }
+    if(fill_errors) matched_cv.Error() = sumw2.cwiseSqrt().cast<float>();
 
     // Step 4: fill matched var spec
     std::map<double, PROspec> matched_var;
@@ -98,12 +106,17 @@ bool BuildDetVarMatchedSpecs(
     for(const auto &[kv, prop] : varprop) {
         matched_var[kv] = PROspec(spec_size);
         n_var_evt(prop_i) = prop->NEvent();
+        if(fill_errors) sumw2.setZero();
         for(size_t j = 0; j < prop->NEvent(); ++j) {
             if(!common_keys.count(DetVarMatchingKey(*prop, j))) continue;
             n_var_prop_matched(prop_i) += 1;
             int bin = prop->variable_bin_indices[var_idx][j];
-            if(bin >= 0) matched_var[kv].QuickFill(bin, prop->added_weights[j]);
+            if(bin >= 0) {
+                matched_var[kv].QuickFill(bin, prop->added_weights[j]);
+                if(fill_errors) sumw2(bin) += (double)prop->added_weights[j]*prop->added_weights[j];
+            }
         }
+        if(fill_errors) matched_var[kv].Error() = sumw2.cwiseSqrt().cast<float>();
         prop_i++;
     }
     log<LOG_INFO>(L"DetVar matching: matched propeller events CV: %1%, var: %2% (total propeller events CV: %3%, var: %4%)")

@@ -119,7 +119,8 @@ std::vector<int> DetVarMatchingKey(const PROpeller& prop, size_t i_event);
 bool BuildDetVarMatchedSpecs(
         const PROpeller& cvprop, const std::map<double, const PROpeller*> &varprop,
         int var_idx, int spec_size,
-        PROspec& out_cv, std::map<double, PROspec> &out_var);
+        PROspec& out_cv, std::map<double, PROspec> &out_var,
+        bool fill_errors = false);
 
 struct PROpt {
     std::string xmlname = "NULL.xml"; 
