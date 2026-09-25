@@ -74,6 +74,7 @@ Appendices:
 * [Appendix A: regenerating every plot in this tutorial](#appendix-a-regenerating-every-plot-in-this-tutorial)
 * [Appendix B: available physics models](#appendix-b-available-physics-models-incpromodelh)
 * [Appendix C: the pre-fit and post-fit error bands, in full](#appendix-c-the-pre-fit-and-post-fit-error-bands-in-full)
+* [Appendix D: counting degrees of freedom (ndf)](#appendix-d-counting-degrees-of-freedom-ndf)
 
 ---
 
@@ -899,6 +900,11 @@ Outputs:
 * `TUT_glob1_PROglobal_postfit_correlation_matrix.pdf` (+ `_nuisance_only` version) — post-fit parameter correlations
 * `TUT_glob1_PROglobal_postfit_posteriors.pdf` — post-fit parameter constraints
 * `TUT_glob1_PROglobal.root` — all of the above as ROOT objects
+
+The `global #chi^{2}/ndf` label on the post-fit pages uses
+**ndf = (bins entering the χ²) − (free physics parameters) − (free
+uniform-prior splines) − (one per channel under `--shapeonly`)**; the log
+prints the breakdown. See Appendix D for what each term counts.
 
 <img src="figures/TUT_glob1_PROglobal_hists.png" width="800"/>
 
@@ -2594,6 +2600,41 @@ prediction barely moves. The posterior width `Σ − Σ(C+Σ)⁻¹Σ` is the pri
 width minus what the data pinned down — always smaller, shrinking to the
 statistical floor in the high-statistics limit. Everything the post-fit band
 does is these two lines, evaluated once per MCMC sample.
+
+---
+
+# Appendix D: counting degrees of freedom (ndf)
+
+```
+ndf = n_bins − n_free_physics − n_free_uniform − n_shape
+```
+
+Computed by `PROmetric::GetNdof()` (`inc/PROmetric.h`) at the post-fit
+minimum:
+
+* **`n_bins`**: the bins that actually enter the χ² sum, i.e. active
+  (fit-region mask, including PROjector's) and with positive statistical
+  variance. That depends on the metric:
+  * `neyman`: zero-data bins drop out, since their variance *is* the data;
+  * `CNP`, `pearson`, `poisson`: every active bin counts.
+* **`n_free_physics`**: physics parameters that are not fixed.
+* **`n_free_uniform`**: free `prior_type="uniform"` splines. They have no
+  pull term, so each one is a genuine free parameter.
+* **Gaussian-prior splines net zero**, whether the prior comes from XML
+  `prior=`, `<correlation>`s or a PROjector constraint. The pull term is one
+  pseudo-measurement that cancels the parameter.
+* **Covariance systematics count zero.** They are marginalised inside the
+  covariance matrix and are not fit parameters.
+* **"Fixed"** means pinned by `--fix`, `--syst-only` or a scan, i.e. zero-width
+  bounds.
+* **`n_shape`** (`--shapeonly` only): one per channel with at least one
+  contributing bin, for its lost normalisation. Channels are per detector, so
+  shape-only also gives up the ND/FD rate ratio.
+
+The log line reads e.g. `ndf = 100 bins - 2 phys - 0 uniform - 0 shape = 98`.
+Only the global post-fit label is a χ²/ndf. The per-channel and 2D
+projection labels are fixed-point comparisons with no pull and no parameter
+accounting, so they read χ²/nbins. A pathological setup can give ndf ≤ 0.
 
 ---
 
