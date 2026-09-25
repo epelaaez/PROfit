@@ -325,6 +325,7 @@ namespace PROfit {
                 // unconditionally (keyed to syst.binning), matching covariance_to_spline.
                 Eigen::MatrixXf frac_cov = LoadExternalFractionalCovariance(config, syst);
                 size_t n_before = splines.size();
+                size_t n_covar_before = covar_names.size();
                 FillSplinesFromCovarianceMatrix(frac_cov, syst);
                 size_t n_after = splines.size();
 
@@ -334,22 +335,7 @@ namespace PROfit {
                 bool is_flux_ext = config.has_flux_tag(syst.systname);
                 for(size_t si = n_before; si < n_after; ++si)
                     spline_is_pre_migration.push_back(is_flux_ext);
-
-                // Propagate parent tag + plotname to the synthesized knob entries (see
-                // covariance_to_spline branch above for the rationale).
-                PROconfig& mut_config = const_cast<PROconfig&>(config);
-                auto parent_tags_it = mut_config.m_mcgen_variation_tags.find(syst.systname);
-                auto parent_plotname_it = mut_config.m_mcgen_variation_plotname_map.find(syst.systname);
-                for(size_t si = n_before; si < n_after; ++si) {
-                    const std::string& knob_name = spline_names[si];
-                    if(parent_tags_it != mut_config.m_mcgen_variation_tags.end()) {
-                        mut_config.m_mcgen_variation_tags[knob_name] = parent_tags_it->second;
-                    }
-                    if(parent_plotname_it != mut_config.m_mcgen_variation_plotname_map.end()) {
-                        const std::string suffix = knob_name.substr(syst.systname.size());
-                        mut_config.m_mcgen_variation_plotname_map[knob_name] = parent_plotname_it->second + suffix;
-                    }
-                }
+                PropagateDerivedNames(config, syst.systname, n_before, n_covar_before);
             }
         }
 
@@ -552,6 +538,18 @@ namespace PROfit {
             ret.covar_names.push_back(name);
             ret.covmat.push_back(covmat[idx]);
             ret.corrmat.push_back(corrmat[idx]);
+            ++ret.n_covar;
+        }
+        // Covariances registered only in syst_map (the mcstat matrix, never in covar_names)
+        // are kept unless named explicitly. Appended last, as in the ctor, so the summation
+        // order of fractional_covariance is unchanged.
+        for(const auto &[name, entry]: syst_map) {
+            if(entry.second != SystType::Covariance) continue;
+            if(std::find(covar_names.begin(), covar_names.end(), name) != covar_names.end()) continue;
+            if(std::find(systs.begin(), systs.end(), name) != systs.end()) continue;
+            ret.syst_map[name] = std::make_pair(ret.covmat.size(), SystType::Covariance);
+            ret.covmat.push_back(covmat[entry.first]);
+            ret.corrmat.push_back(corrmat[entry.first]);
             ++ret.n_covar;
         }
         ret.spline_priors = tmp_priors.segment(0, ret.n_splines);
