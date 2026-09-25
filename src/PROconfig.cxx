@@ -2268,6 +2268,32 @@ int PROconfig::LoadFromXML(const std::string &filename){
             m_model_parameter_min.push_back(model_parameter_min==NULL ? 0.0f  : (float)strtod(model_parameter_min, &end));
             m_model_parameter_max.push_back(model_parameter_max==NULL ? 10.0f : (float)strtod(model_parameter_max, &end));
 
+            // Template-model options (get_model_from_string refuses them on any other tag).
+            // subchannels=: regex over subchannel fullnames, every match scales with this one
+            // parameter (the name is then just the parameter's name). Matches are resolved in
+            // PROtemplate; a zero-match pattern is refused below, once the fullnames exist.
+            const char* model_parameter_subchannels = pModelParam->Attribute("subchannels");
+            if(model_parameter_subchannels != NULL && model_parameter_subchannels[0] == '\0'){
+                log<LOG_ERROR>(L"%1% || ERROR! Model parameter '%2%' has an empty subchannels= pattern (it would match every subchannel).") % __func__ % model_parameter_name;
+                throw std::invalid_argument(std::string("empty subchannels= on model parameter ") + model_parameter_name);
+            }
+            m_model_parameter_subchannels.push_back(model_parameter_subchannels==NULL ? "" : model_parameter_subchannels);
+
+            const char* model_parameter_default = pModelParam->Attribute("default");
+            if(model_parameter_default == NULL){
+                m_model_parameter_default.push_back(std::nullopt);
+            }else{
+                char* def_end = NULL;
+                double val = strtod(model_parameter_default, &def_end);
+                if(def_end == model_parameter_default || *def_end != '\0' || !std::isfinite(val)
+                        || val < m_model_parameter_min.back() || val > m_model_parameter_max.back()){
+                    log<LOG_ERROR>(L"%1% || ERROR! Model parameter '%2%' has default=\"%3%\", which is not a number in its [min, max] = [%4%, %5%].")
+                        % __func__ % model_parameter_name % model_parameter_default % m_model_parameter_min.back() % m_model_parameter_max.back();
+                    throw std::invalid_argument(std::string("invalid default= on model parameter ") + model_parameter_name + ": " + model_parameter_default);
+                }
+                m_model_parameter_default.push_back((float)val);
+            }
+
             log<LOG_DEBUG>(L"%1% || Model Param Name :  %2% and index %3% (min %4%, max %5%) ") % __func__ % m_model_parameter_names.back().c_str() % m_model_parameter_index.back() % m_model_parameter_min.back() % m_model_parameter_max.back()  ;
             m_model_parameter_map[m_model_parameter_names.back()]=m_model_parameter_index.back();
             pModelParam = pModelParam->NextSiblingElement("parameter");
@@ -2347,6 +2373,17 @@ int PROconfig::LoadFromXML(const std::string &filename){
     this->ValidateDetVarSharedNames();
 
     this->CalcTotalBins();
+
+    // Refuse a zero-match template subchannels= pattern now rather than after a long `process`.
+    for(size_t k = 0; k < m_model_parameter_subchannels.size(); ++k){
+        const std::string &pattern = m_model_parameter_subchannels[k];
+        if(pattern.empty()) continue;
+        if(MatchNames(m_fullnames, pattern, "subchannels= of model parameter '" + m_model_parameter_names[k] + "'").empty()){
+            log<LOG_ERROR>(L"%1% || ERROR: model parameter '%2%' has subchannels=\"%3%\", which matches NO subchannel fullname. Fullnames are <mode>_<detector>_<channel>_<subchannel>; matching is an unanchored regex.")
+                % __func__ % m_model_parameter_names[k].c_str() % pattern.c_str();
+            throw std::invalid_argument("subchannels= of model parameter " + m_model_parameter_names[k] + " matches no subchannel: " + pattern);
+        }
+    }
 
     // Needs the subchannel fullnames and per-channel binnings that CalcTotalBins just built.
     this->RegisterBinnedUnconstrainedChildren();

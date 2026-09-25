@@ -31,6 +31,7 @@
 #include <climits>
 #include <cstdlib>
 #include <numeric>
+#include <optional>
 #include <stdexcept>
 #include <regex>
 
@@ -587,9 +588,15 @@ namespace PROfit{
             std::map<std::string,int> m_model_parameter_map;
             /// Optional per-model-parameter min/max bounds, read from the <parameter> tag's
             /// "min"/"max" attributes. Used by normalization-style models (e.g. template)
-            /// where each <parameter> names a subchannel and min/max are its scale bounds.
+            /// where each <parameter> floats one or more subchannels and min/max are its scale bounds.
             std::vector<float> m_model_parameter_min;
             std::vector<float> m_model_parameter_max;
+            /// Template model only: the <parameter>'s subchannels= regex (unanchored, over
+            /// subchannel fullnames). Empty = attribute absent, the name IS the exact fullname.
+            std::vector<std::string> m_model_parameter_subchannels;
+            /// Template model only: the <parameter>'s default= value (CV, bkg-only seed and --fix
+            /// point); nullopt = attribute absent, the model's own default applies.
+            std::vector<std::optional<float>> m_model_parameter_default;
             /// Numeric <model> attributes (density=, electron_fraction=, n_newton=);
             /// consumed by PROLBL, fatal on non-LBL tags, not hashed.
             std::map<std::string, double> m_model_options;

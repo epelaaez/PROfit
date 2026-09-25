@@ -2234,12 +2234,46 @@ Notes:
 
 ### `template` *(legacy alias: `template_fit`)* — per-subchannel normalization fit
 
-Not an oscillation model: each `<parameter name="...">` in the model block
-names a **subchannel** whose normalization floats as one linear scale
-parameter (bounds from the parameter's `min`/`max` attributes, default 1);
-every non-floated subchannel stays fixed at 1. `model_rule` is ignored —
-events are routed by subchannel membership. Needs no L/E variable. Useful
-for sideband/template fits and cross-section-style normalization studies.
+Not an oscillation model: each `<parameter>` in the model block is one
+linear scale parameter (bounds from its `min`/`max` attributes, default 1)
+multiplying the normalization of one or more **subchannels**; every
+non-floated subchannel stays fixed at 1. `model_rule` is ignored — events are
+routed by subchannel membership. Needs no L/E variable. Useful for
+sideband/template fits, cross-section-style normalization studies, and
+signal-strength fits of a predicted signal template.
+
+Which subchannels a parameter scales:
+
+* **No `subchannels=` attribute** (the original form): `name` *is* the exact
+  subchannel fullname, and the parameter floats that one subchannel.
+* **`subchannels="<regex>"`**: the parameter floats **every** subchannel whose
+  fullname the regex matches (unanchored, like every pattern in PROfit —
+  anchor with `^…$` for exact names), all driven by the *same* scale. `name`
+  is then just the parameter's name, the one `--fix`, `--inject`,
+  `--inject-cv` and `surface --xvar/--yvar` use.
+
+```xml
+<model tag="template">
+  <!-- one signal strength for both beam modes: the fit tests the predicted nubar/nu ratio -->
+  <parameter name="mu_signal" subchannels="^(nu|nubar)_MiniBooNE_nue_oscnue$" min="0" max="50" default="0"/>
+  <!-- the original exact-name form still works alongside it -->
+  <parameter name="nu_MiniBooNE_numu_background" min="0.5" max="2"/>
+</model>
+```
+
+`default="<value>"` (must lie in `[min, max]`) moves the parameter's central
+value off 1. With `default="0"` the CV, the background-only fixed seed of
+`global`/`profile`, the `--fix` pin and the default Asimov fake data all sit
+at the **no-signal** hypothesis — the natural null for a signal strength.
+`--inject mu_signal 1` then makes the nominal-signal Asimov.
+
+Refused at parse or model construction: a `subchannels=` pattern that
+matches no subchannel, an empty pattern, a subchannel claimed by two
+parameters (by pattern or by exact name), two parameters with the same
+name, a `default=` outside `[min, max]`, and `subchannels=`/`default=` on
+any model other than `template`. As with every model setting the `<model>`
+block is not part of the `_prop/_syst.bin` hash, so editing it reuses those
+caches.
 
 ---
 
