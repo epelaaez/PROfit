@@ -2670,6 +2670,19 @@ builders then do the following.
   area-normalised. The bands are shape bands as above, and the χ² label, which
   is still the absolute χ², gets a small grey **"absolute χ²"** tag. Under
   `--shapeonly` the tag reads **"shape-only"**.
+- **Fractional-systematics breakdowns and covariance plots.** These are the
+  `_fractional_systematics.pdf` family, `_PROplot_Covar.pdf` and the ROOT
+  `Covariance/` directory. Under `--shapeonly`, `plot` projects every
+  systematic's matrix onto shape about the CV first, so they show exactly the
+  M_shape the fit uses. Every such page carries a light-grey "shape-only" note.
+  Expect big changes relative to the full plots:
+  - normalisation-dominated systematics shrink;
+  - a systematic confined to part of the spectrum grows in the bins it never
+    touches, because renormalising pushes them the opposite way;
+  - each systematic has pivot bins where its shape error passes close to zero;
+  - the covariance acquires negative (anti-correlated) entries.
+
+  Under `--area-norm` alone these plots stay full, because the fit is absolute.
 
 ### D.5 What the systematics object does, and what it used to do
 
