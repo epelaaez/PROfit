@@ -236,7 +236,7 @@ void run_process(PROpeller &prop, std::vector<std::vector<SystStruct>> &systsstr
                 const std::string& varName = config.m_detvar_files[idv].name;
 
                 if(config.m_mcgen_variation_type_map.count(varName) == 0) {
-                    log<LOG_INFO>(L"%1% || Skipping DetVar '%2%' -- no matching entry in <systematics> section.") % __func__ % varName.c_str();
+                    log<LOG_WARNING>(L"%1% || Skipping DetVar '%2%' -- no <systematic>/<allowlist> entry with this name, so it is NOT used.") % __func__ % varName.c_str();
                     continue;
                 }
                 std::map<double, size_t> syst_files;
