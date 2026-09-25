@@ -161,6 +161,15 @@ namespace PROfit {
     }
 
     PROsyst::PROsyst( const PROpeller &prop, const PROconfig &config, const std::vector<SystStruct>& systs, bool shapeonly, int other_index, const PROmodel* model, const Eigen::VectorXf* params) : other_index(other_index) {
+        // Names index syst_map, priors and --fix: a repeat would silently become two parameters.
+        std::set<std::string> seen_names;
+        for(const auto &syst : systs) {
+            if(!seen_names.insert(syst.systname).second) {
+                log<LOG_ERROR>(L"%1% || ERROR: systematic '%2%' was built twice; each name must be exactly one systematic.") % __func__ % syst.systname.c_str();
+                log<LOG_ERROR>(L"Terminating.");
+                exit(EXIT_FAILURE);
+            }
+        }
         shape_only = shapeonly;
         if(shape_only) {
             // Per-channel blocks and a nominal spectrum for every binning any systematic

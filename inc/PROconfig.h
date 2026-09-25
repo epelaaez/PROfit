@@ -303,6 +303,15 @@ namespace PROfit{
              */
             void ValidateFitVariable() const;
 
+            /**
+             * @brief Check DetVar variations whose name appears in more than one DetVarSection.
+             * @details Such a name is ONE systematic (one fit parameter): run_process builds each
+             * section's response from that section's own CV and files and sums them. Fatal unless
+             * every section provides the same knob values; warns when two of its sections share a
+             * subchannel, where the result is a CV-weighted average of their responses.
+             */
+            void ValidateDetVarSharedNames() const;
+
 
         public:
 

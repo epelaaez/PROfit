@@ -40,6 +40,7 @@ short, seeded (`--seed 405 -n 1 --preset fast fast`) instance of each workflow:
 | t26b–d | every systematic (incl. mcstat, norm, flat, norm_to_covariance) restricted to FD ⇒ total fractional covariance ND block exactly zero |
 | t26e–g | DetVar systematic (same ND file as CV and half-POT variation) restricted to the ND nue channel |
 | t26h–j | branch-order regression: an `incl_systematics="false"` branch first in a systematics-carrying MCFile must process and give the identical global fit |
+| t26l–o | one DetVar name in three sections (event-matched ND, FD, overlapping ND numu) is ONE systematic: per-section responses, CV-weighted average where sections overlap (`check_spline_response.C`); t26o refuses differing knob sets |
 | t27–t30 | regex patterns: alternation accepted; invalid regex and zero-match patterns refused |
 
 Outputs land in `tests/runs/<TAG>/` with per-test logs in `logs/` and a

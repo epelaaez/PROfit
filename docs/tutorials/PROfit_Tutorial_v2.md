@@ -410,7 +410,13 @@ The `<allowlist>` attributes:
   exempt one of two MCFiles that fill the same subchannel (use
   `incl_systematics="false"` on that branch). This is how per-detector
   systematics work in multi-detector fits where each detector's MC carries a
-  different set of weight branches.
+  different set of weight branches. The converse, ONE detector-variation knob
+  shared by several detectors, is a DetVar `<variation name=…>` repeated across
+  `<DetVarSection>`s: it is one systematic (one fit parameter), each section
+  supplying the response in its own subchannels from its own `<cv>`. Every
+  section must give the same `knobval`s. Where two sections fill the same
+  subchannel their responses are averaged, weighted by each section's
+  POT-normalised CV, so set their `pot=`/`scale=` as for the matching MC files.
 * `scale_range="lo, hi"` — `binned_unconstrained` only: the multiplicative
   range every free bin may take (default `0, 10`; must contain 1).
 

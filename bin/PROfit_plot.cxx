@@ -107,53 +107,52 @@ void run_plot(const PROconfig &config, const PROpeller &prop, const PROmetric &m
                     plot_cv_idx_by_section[config.m_detvar_files[idv].section_index] = idv;
             }
 
-            std::vector<size_t> skip;
+            // One spectrum per DetVar file, index-aligned with m_detvar_files (the pages rely on it).
             for(size_t idv = 0; idv < config.GetNumDetVarFiles(); ++idv) {
-                if(skip.size() && std::find(skip.begin(), skip.end(), idv) != skip.end()) continue;
                 const std::string& name = config.m_detvar_files[idv].name;
                 const std::string key = DetVarKey(config, idv);
                 if(plot_dvprops.count(key) == 0) {
                     log<LOG_ERROR>(L"%1% || DetVar entry '%2%' not found in combined binary. Run 'process' first.") % __func__ % name.c_str();
                     break;
                 }
-                std::map<double, size_t> syst_files;
-                auto find_fn = [&name](const PROconfig::DetVarFile &dvf) { return dvf.name == name; };
-                auto it = config.m_detvar_files.begin() + idv;
-                while((it = std::find_if(it, config.m_detvar_files.end(), find_fn))
-                        != std::end(config.m_detvar_files)) {
-                    size_t i = std::distance(config.m_detvar_files.begin(), it);
-                    syst_files[it->knobval] = i;
-                    skip.push_back(i);
-                    it++;
-                }
 
                 int binningIndex = config.m_mcgen_variation_binning_map.count(name) ? config.m_mcgen_variation_binning_map.at(name) : config.i_prime;
                 if(binningIndex < 0 || binningIndex >= (int)config.m_num_variables)
                     binningIndex = config.i_prime;
 
+                PROconfig dvconfig = config.BuildDetVarConfig(idv);
+                PROpeller& dvprop = plot_dvprops.at(key);
+                std::unique_ptr<PROmodel> dv_model = std::make_unique<NullModel>(dvprop);
+                PROsyst dvsysts;
+                Eigen::VectorXf dvparams = Eigen::VectorXf::Constant(dv_model->nparams, 0);
+
+                // Always use full spec for _DetVarFull PDF
+                detvar_specs.push_back(FillSpectra(dvconfig, dvprop, dvsysts, *dv_model, dvparams, !options.eventbyevent, binningIndex));
+                detvar_names.push_back(name);
+                detvar_binning.push_back(binningIndex);
+            }
+
+            // Matched pairs for the _DetVarOverlapping PDF: one per (section, name), keyed by its first file.
+            std::set<std::pair<size_t, std::string>> paired;
+            for(size_t idv = 0; idv < detvar_specs.size(); ++idv) {
+                const PROconfig::DetVarFile &dvf = config.m_detvar_files[idv];
+                if(dvf.is_cv || !paired.insert({dvf.section_index, dvf.name}).second) continue;
+                const std::string &name = dvf.name;
+                const size_t sec = dvf.section_index;
+                const int binningIndex = detvar_binning[idv];
+
+                std::map<double, size_t> syst_files;
                 std::map<double, const PROpeller*> props;
                 MatchedPair mp;
-                for(auto &[kv, f] : syst_files) {
-                    PROconfig dvconfig = config.BuildDetVarConfig(f);
-                    const std::string key = DetVarKey(config, f);
-                    PROpeller& dvprop = plot_dvprops.at(key);
-
-                    std::unique_ptr<PROmodel> dv_model = std::make_unique<NullModel>(dvprop);
-                    PROsyst dvsysts;
-                    Eigen::VectorXf dvparams = Eigen::VectorXf::Constant(dv_model->nparams, 0);
-
-                    // Always use full spec for _DetVarFull PDF
-                    PROspec full_spec = FillSpectra(dvconfig, dvprop, dvsysts, *dv_model, dvparams, !options.eventbyevent, binningIndex);
-                    mp.vars[kv] = full_spec;
-                    props[kv] = &dvprop;
-                    detvar_specs.push_back(full_spec);
-                    detvar_names.push_back(name);
-                    detvar_binning.push_back(binningIndex);
+                for(size_t i = idv; i < detvar_specs.size(); ++i) {
+                    const PROconfig::DetVarFile &f = config.m_detvar_files[i];
+                    if(f.is_cv || f.section_index != sec || f.name != name) continue;
+                    syst_files[f.knobval] = i;
+                    props[f.knobval] = &plot_dvprops.at(DetVarKey(config, i));
+                    mp.vars[f.knobval] = detvar_specs[i];
                 }
 
-                // For variation files, build matched pair for _DetVarOverlapping PDF
-                if(!config.m_detvar_files[idv].is_cv) {
-                    size_t sec = config.m_detvar_files[idv].section_index;
+                {
                     auto cv_it = plot_cv_idx_by_section.find(sec);
                     if(cv_it != plot_cv_idx_by_section.end()) {
                         PROpeller& cvprop_plot = plot_dvprops.at(DetVarKey(config, cv_it->second));
@@ -182,7 +181,7 @@ void run_plot(const PROconfig &config, const PROpeller &prop, const PROmetric &m
                                 }
                             }
                             matched_pairs[idv] = std::move(mp);
-                            log<LOG_INFO>(L"%1% || DetVar plot '%2%': matched pair built for Overlapping PDF") % __func__ % name.c_str();
+                            log<LOG_INFO>(L"%1% || DetVar plot '%2%' (section %3%): matched pair built for Overlapping PDF") % __func__ % name.c_str() % sec;
                         }
                     }
                 }
@@ -281,7 +280,7 @@ void run_plot(const PROconfig &config, const PROpeller &prop, const PROmetric &m
                                             var_total->SetFillStyle(0);
                                             if(var_total->GetMaximum() > ymax) ymax = var_total->GetMaximum();
                                             var_totals.push_back(var_total);
-                                            var_labels.push_back(detvar_names[idv]);
+                                            var_labels.push_back(detvar_names[idv] + " " + FormatKnobVal(config.m_detvar_files[idv].knobval));
                                         }
                                         color_idx++;
                                     }
@@ -371,7 +370,7 @@ void run_plot(const PROconfig &config, const PROpeller &prop, const PROmetric &m
 
                                         float ymax_ov = std::max(cv_total_ov->GetMaximum(), *std::max_element(maxs.begin(), maxs.end()));
                                         cv_total_ov->SetMaximum(ymax_ov * 1.15);
-                                        std::string ov_title = config.m_mode_names[im] + " " + config.m_detector_names[id] + " " + config.m_channel_names[ic] + " " + detvar_names[idv] + " (Matched)";
+                                        std::string ov_title = config.m_mode_names[im] + " " + config.m_detector_names[id] + " " + config.m_channel_names[ic] + " " + detvar_names[idv] + " (Matched, sec " + std::to_string(config.m_detvar_files[idv].section_index) + ")";
                                         cv_total_ov->SetTitle(ov_title.c_str());
                                         {
                                             std::string chan_unit = config.GetChannelUnit(ic, config.i_prime);
