@@ -7,7 +7,7 @@ void run_plot(const PROconfig &config, const PROpeller &prop, const PROmetric &m
     // chi2/ndf labels on the error-band plots. Skip the conversion when none of
     // those are requested — but ALWAYS consume the seed draw so the global RNG
     // stream (and hence every downstream error-band throw) is flag-independent.
-    const bool need_allcov = options.with_covar || !options.no_frac_syst;
+    const bool need_allcov = options.with_covar || !options.no_frac_syst || options.with_subcovar;
     const uint32_t allcov_seed = dseed(PROseed::global_rng);
     PROsyst allcovsyst;
     if(need_allcov) {
@@ -556,29 +556,67 @@ void run_plot(const PROconfig &config, const PROpeller &prop, const PROmetric &m
 
     }
 
-    //Now some covariances (opt-in: slow and large with many bins/systematics)
     std::map<std::string, std::unique_ptr<TH2D>> matrices;
-    if(options.with_covar) {
+    if(options.with_covar || options.with_subcovar) {
         matrices = covarianceTH2D(allcovsyst, config, variable_cvs[config.i_prime]);
-        c.Print((options.final_output_tag+"_PROplot_Covar.pdf" + "[").c_str(), "pdf");
+        const std::string covar_pdf = options.final_output_tag + "_PROplot_Covar.pdf";
+        log<LOG_INFO>(L"%1% || Writing covariance plots to %2% (%3% matrices available)") % __func__ % covar_pdf.c_str() % matrices.size();
+        c.Print((covar_pdf + "[").c_str(), "pdf");
 
-        std::vector<std::string> first_plots = {"collapsed_total_cor","collapsed_total_frac_cov","total_cor","total_frac_cov"};
+        std::vector<std::string> plot_filters;
+        std::vector<std::string> first_plots;
+        // Printed first, in this order
+        if(options.with_subcovar){
+            std::vector<std::string> first_plots = {"collapsed_total_cor", "collapsed_total_frac_cov", "total_cor", "total_frac_cov"};
+            plot_filters = {};
+        }else{
+            std::vector<std::string> first_plots = {"collapsed_total_cor", "collapsed_total_frac_cov"};
+            // Any other matrix is printed only if its name contains one of these
+            // (the full-resolution matrices make the PDF huge). Candidate for a command-line option.
+            plot_filters = {"collapsed"};
+        }
+
+
+        auto passes_filter = [&](const std::string &name) {
+            for (const auto &f : plot_filters)
+                if (name.find(f) != std::string::npos) return true;
+            return false;
+        };
+
+        int n_printed = 0, n_skipped = 0;
 
         for(const auto &name: first_plots){
-            auto &mat = matrices.at(name);
+            auto it = matrices.find(name);
+            if (it == matrices.end()) {
+                log<LOG_WARNING>(L"%1% || First plot %2% not found in covariance matrices, skipping") % __func__ % name.c_str();
+                continue;
+            }
+            auto &mat = it->second;
+            log<LOG_INFO>(L"%1% || Printing first plot %2% (%3% x %4% bins)") % __func__ % name.c_str() % mat->GetNbinsX() % mat->GetNbinsY();
             mat->Draw("colz");
             drawVersionWatermark(&c);
-            c.Print((options.final_output_tag+"_PROplot_Covar.pdf").c_str(), "pdf");
+            c.Print(covar_pdf.c_str(), "pdf");
+            ++n_printed;
         }
-
 
         for(const auto &[name, mat]: matrices) {
-            if (std::find(first_plots.begin(), first_plots.end(), name) != first_plots.end())continue;
+            if (std::find(first_plots.begin(), first_plots.end(), name) != first_plots.end()) {
+                log<LOG_DEBUG>(L"%1% || Skipping %2%: already printed as a first plot") % __func__ % name.c_str();
+                continue;
+            }
+            if (!passes_filter(name)) {
+                log<LOG_DEBUG>(L"%1% || Skipping %2%: matches no plot filter (%3% x %4% bins)") % __func__ % name.c_str() % mat->GetNbinsX() % mat->GetNbinsY();
+                ++n_skipped;
+                continue;
+            }
+            log<LOG_INFO>(L"%1% || Printing %2% (%3% x %4% bins)") % __func__ % name.c_str() % mat->GetNbinsX() % mat->GetNbinsY();
             mat->Draw("colz");
             drawVersionWatermark(&c);
-            c.Print((options.final_output_tag+"_PROplot_Covar.pdf").c_str(), "pdf");
+            c.Print(covar_pdf.c_str(), "pdf");
+            ++n_printed;
         }
-        c.Print((options.final_output_tag+"_PROplot_Covar.pdf" + "]").c_str(), "pdf");
+        c.Print((covar_pdf + "]").c_str(), "pdf");
+        log<LOG_INFO>(L"%1% || Covariance PDF done: %2% pages printed, %3% matrices filtered out") % __func__ % n_printed % n_skipped;
     }
 
     //errorband

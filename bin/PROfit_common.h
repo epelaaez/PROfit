@@ -150,6 +150,7 @@ struct PROpt {
     bool with_splines = false, binwidth_scale = false, area_normalized = false, data_mc_ratio = false;
     bool legend_counts = false;
     bool with_covar = false, no_frac_syst = false;
+    bool with_subcovar = false;
     int band_throws = 2500;
     std::map<std::string, float> fake_data_osc_params;
     std::map<std::string, float> cv_osc_params;

@@ -211,14 +211,17 @@ namespace PROfit{
         ret["total_cor"] = std::move(cor_hist);
         ret["collapsed_total_cor"] = std::move(collapsed_cor_hist);
 
+        const size_t n_full = config.m_num_variable_bins_total[config.i_prime];
+        const size_t n_coll = config.m_num_variable_bins_total_collapsed[config.i_prime];
+
         for(const auto &name: syst.covar_names) {
             const Eigen::MatrixXf &covar = syst.GrabMatrix(name);
             const Eigen::MatrixXf &corr = syst.GrabCorrMatrix(name);
 
-            std::unique_ptr<TH2D> cov_h = std::make_unique<TH2D>(("cov"+name).c_str(), (name+" Fractional Covariance;Bin # ;Bin #").c_str(), config.m_num_variable_bins_total[config.i_prime], 0, config.m_num_variable_bins_total[config.i_prime], config.m_num_variable_bins_total[config.i_prime], 0, config.m_num_variable_bins_total[config.i_prime]);
-            std::unique_ptr<TH2D> corr_h = std::make_unique<TH2D>(("cor"+name).c_str(), (name+" Correlation;Bin # ;Bin #").c_str(), config.m_num_variable_bins_total[config.i_prime], 0, config.m_num_variable_bins_total[config.i_prime], config.m_num_variable_bins_total[config.i_prime], 0, config.m_num_variable_bins_total[config.i_prime]);
-            for(size_t i = 0; i < config.m_num_variable_bins_total[config.i_prime]; ++i){
-                for(size_t j = 0; j < config.m_num_variable_bins_total[config.i_prime]; ++j){
+            std::unique_ptr<TH2D> cov_h = std::make_unique<TH2D>(("cov"+name).c_str(), (name+" Fractional Covariance;Bin # ;Bin #").c_str(), n_full, 0, n_full, n_full, 0, n_full);
+            std::unique_ptr<TH2D> corr_h = std::make_unique<TH2D>(("cor"+name).c_str(), (name+" Correlation;Bin # ;Bin #").c_str(), n_full, 0, n_full, n_full, 0, n_full);
+            for(size_t i = 0; i < n_full; ++i){
+                for(size_t j = 0; j < n_full; ++j){
                     cov_h->SetBinContent(i+1,j+1,covar(i,j));
                     corr_h->SetBinContent(i+1,j+1,corr(i,j));
                 }
@@ -230,8 +233,31 @@ namespace PROfit{
             corr_h->SetMaximum(1);
             corr_h->SetMinimum(-1);
 
+            // Collapsed version, built the same way as collapsed_total_frac_cov:
+            // fractional -> absolute (full binning) -> collapse -> fractional (collapsed binning)
+            Eigen::MatrixXf syst_full_covariance = diag * covar * diag;
+            Eigen::MatrixXf syst_collapsed_full = CollapseMatrix(config, syst_full_covariance);
+            Eigen::MatrixXf syst_collapsed_frac = collapsed_cv_inv_diag * syst_collapsed_full * collapsed_cv_inv_diag;
+
+            std::unique_ptr<TH2D> ccov_h = std::make_unique<TH2D>(("ccov"+name).c_str(), (name+" Collapsed Fractional Covariance;Bin # ;Bin #").c_str(), n_coll, 0, n_coll, n_coll, 0, n_coll);
+            std::unique_ptr<TH2D> ccorr_h = std::make_unique<TH2D>(("ccor"+name).c_str(), (name+" Collapsed Correlation;Bin # ;Bin #").c_str(), n_coll, 0, n_coll, n_coll, 0, n_coll);
+            for(size_t i = 0; i < n_coll; ++i){
+                for(size_t j = 0; j < n_coll; ++j){
+                    ccov_h->SetBinContent(i+1,j+1,syst_collapsed_frac(i,j));
+                    ccorr_h->SetBinContent(i+1,j+1,syst_collapsed_frac(i,j)/(sqrt(syst_collapsed_frac(i,i))*sqrt(syst_collapsed_frac(j,j))));
+                }
+            }
+
+            float ccov_max_abs = std::max(ccov_h->GetMaximum(), std::abs(ccov_h->GetMinimum()));
+            ccov_h->SetMaximum(ccov_max_abs);
+            ccov_h->SetMinimum(-ccov_max_abs);
+            ccorr_h->SetMaximum(1);
+            ccorr_h->SetMinimum(-1);
+
             ret[name+"_cov"] = std::move(cov_h);
             ret[name+"_corr"] = std::move(corr_h);
+            ret["collapsed_"+name+"_cov"] = std::move(ccov_h);
+            ret["collapsed_"+name+"_corr"] = std::move(ccorr_h);
         }
 
         return ret;
@@ -2627,7 +2653,6 @@ namespace PROfit{
     int plotPriorFractionalSystematicRatios(const PROconfig &config, const PROspec &spec, const PROsyst &allsplinesyst, std::string filename, int other_index) {
         //Input PROsyst needs to be the allsplinesyst for now
 
-
         std::vector<int> line_styles = {
             1,  // Solid (base style)
             1,  // Dashed
@@ -2957,7 +2982,7 @@ int plotPriorFractionalSystematicChannelRatios(const PROconfig &config, const PR
                 % __func__ % config.m_num_channels;
             return 1;
         }
-
+  
         std::vector<int> line_styles = {1, 1};
 
         std::map<std::string,std::vector<std::string>> used_tags;
