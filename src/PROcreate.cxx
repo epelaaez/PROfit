@@ -766,10 +766,8 @@ namespace PROfit {
                     if(sys_mode == "norm"){
                         sv.back().has_restrict = true;
                         sv.back().restrict_hi = 3.0f;
-                        // FIXME: -1.0/std::floor(flat_percent) is -inf for any percent < 1
-                        // (floor gives 0); likely intended -1.0/flat_percent. Left as-is here
-                        // because changing it alters throw-restriction behavior (separate PR).
-                        sv.back().restrict_lo = -1.0/std::floor(flat_percent);
+                        // Weight is 1+k*f: stop at the -3 knot, or earlier where the norm hits zero.
+                        sv.back().restrict_lo = std::max(-3.0f, -1.0f/flat_percent);
                         log<LOG_INFO>(L"%1% || Setting restrict=[%2%, %3%] for systematic %4%") % __func__ % sv.back().restrict_lo % sv.back().restrict_hi % sys_name.c_str();
                     }
                     map_systematic_knob_vals[sys_name] = {-3.0f, -2.0f, -1.0f, 0.0f, 1.0f, 2.0f, 3.0f};
