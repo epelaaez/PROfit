@@ -189,6 +189,15 @@ std::unique_ptr<PROmodel> get_model_from_string(const PROconfig& config, const P
         exit(EXIT_FAILURE);
     }
 
+    if(name != "template") {
+        for(size_t k = 0; k < config.m_model_parameter_names.size(); ++k) {
+            if(config.m_model_parameter_subchannels[k].empty() && !config.m_model_parameter_default[k]) continue;
+            log<LOG_ERROR>(L"%1% || <parameter name=\"%2%\"> sets subchannels= or default=, which only the template model supports, but the model tag is '%3%'. Terminating.")
+                % __func__ % config.m_model_parameter_names[k].c_str() % name.c_str();
+            exit(EXIT_FAILURE);
+        }
+    }
+
     if(name == "null") {
         return std::unique_ptr<PROmodel>(new NullModel(prop));
     } else if(name == "numudisTEST") {
