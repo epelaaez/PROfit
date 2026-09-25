@@ -350,6 +350,7 @@ The five main `type`s:
 | `flat` | you, in the XML (`pattern:fraction`) | diagonal-only covariance — the error is uncorrelated bin-by-bin | no |
 | `binned_unconstrained` | you, in the XML (a name; scope via `apply_to_subchannel`) | ONE free, un-pulled normalisation parameter **per bin** of the `binning` variable, shared by every matched subchannel — the bins float independently inside `scale_range` (default ×0 to ×10) with a uniform prior | yes, N of them, named `<name>_bin0..<name>_bin(N-1)`, in units of (scale − 1) |
 | `covariance_to_spline_uniform` | the SUM of the `covariance` entries matched by `sources="regex"` (which are then not built on their own) | the `num_decomp_knobs` leading eigenmodes of the fractional covariance become **free, un-pulled** linear splines inside `restrict` (default ±10σ of the mode); the remaining modes stay a Gaussian residual covariance (`include_resid_cov`, default on) | yes, N of them, named `<name>_decomp_knob_0..(N-1)`, in σ units of each mode |
+| `spline_cross_quad` | a weight branch holding, per event, the CV weight and the joint +1σ shift of every pair of the `spline` entries listed in `splines="A, B, ..."` | the ηᵢηⱼ cross coefficients those splines' product lacks; the group's factor becomes `1 + Σ(sᵢ−1) + Σ eᵢⱼηᵢηⱼ`, exact for a response quadratic in the group | no — it couples the listed splines |
 
 `mcstat` you will almost always want on (finite MC statistics IS a
 systematic on the prediction); `norm` is the right tool for flux
@@ -449,6 +450,67 @@ its box is `[lo−1, hi−1]`, and there is **no Gaussian pull** (it is a
 * `prior=`, `center=`, `prior_type=`, `restrict=` and `<correlation>` are
   refused for these entries; FC/Brazil throws share the uniform-spline
   caveat above (truncated Gaussian, not uniform).
+
+### Coupling quadratic splines exactly: `spline_cross_quad`
+
+```xml
+<systematic type="spline" binning="var0" knobvals="-3, -2, -1, 0, 1, 2, 3" force_0_cv="true">FA_PCA1</systematic>
+<systematic type="spline" binning="var0" knobvals="-3, -2, -1, 0, 1, 2, 3" force_0_cv="true">FA_PCA2</systematic>
+<systematic type="spline_cross_quad" binning="var0" force_0_cv="true" splines="FA_PCA1, FA_PCA2">FA_CROSS</systematic>
+```
+
+Every `type="spline"` systematic is one fit parameter, in σ units of its knob.
+Write the parameters of the two splines above as `η₁` (FA_PCA1) and `η₂`
+(FA_PCA2). From its ±1, 2, 3σ universes PROfit builds, per bin, a response curve
+`sᵢ(ηᵢ)` for each spline on its own. Near the CV that curve is
+`sᵢ(ηᵢ) = 1 + bᵢηᵢ + dᵢηᵢ² + …`, Here, we assume `dᵢηᵢ²` is the highest non-zero term. 
+When several splines are active, PROfit multiplies their curves, so the prediction for the bin is scaled by
+`s₁(η₁) · s₂(η₂)`.
+
+That product is only correct when the two parameters act independently. It
+fails whenever the true response contains a term proportional to `η₁η₂`:
+multiplying out `s₁ · s₂` gives `η₁η₂` the coefficient `b₁b₂`, whereas the
+physics can give it any value. A case of this is the axial form factor. The fit
+parameters shift `F_A` linearly, `F_A = F_A^CV + c₁η₁ + c₂η₂` for fixed
+functions `c₁`, `c₂` of `Q²`. We expect the event weight to be quadratic in `F_A`. Squaring
+the sum produces a `2c₁c₂η₁η₂` piece in the per-event weight that no product of
+one-parameter curves reproduces.
+
+For the splines listed in `splines=` (the "group"), the per-bin response to
+moving all of the group's parameters at the same time is, to second order,
+
+```
+1 + Σᵢ bᵢηᵢ + Σᵢ dᵢηᵢ² + Σᵢ<ⱼ eᵢⱼηᵢηⱼ
+```
+
+The member splines already fix `bᵢ` and `dᵢ`. The `spline_cross_quad` weight
+branch supplies what is missing, `eᵢⱼ`, through one extra universe per pair of
+members. Entry 0 holds the CV weight. The pairs are enumerated as `i<j` over the
+`splines=` list, so with `splines="A, B, C"` entry 1 is A and B both shifted to
++1σ, entry 2 is A and C, and entry 3 is B and C. `N` members give `N(N−1)/2`
+pairs and the branch must hold exactly `1 + N(N−1)/2` entries. From each pair
+universe PROfit solves for `eᵢⱼ` exactly, and the group's weight becomes
+`1 + Σᵢ(sᵢ−1) + Σᵢ<ⱼ eᵢⱼηᵢηⱼ`, evaluated additively instead of as `Π sᵢ`.
+
+The `spline_cross_quad` entry is not a fit parameter and never appears in a
+PROsyst on its own. Its name is a shorthand for its members:
+`--syst-list FA_CROSS` is the same as `--syst-list FA_PCA1 FA_PCA2`, and
+`--exclude-systs FA_CROSS` removes both. If a selection keeps only some of a
+group's members, the coupling is dropped and the survivors are combined
+multiplicatively as ordinary splines (PROfit warns when this happens). Members
+must be `type="spline"` on the same `binning`, carry no `inflate=`, use evenly
+spaced `knobvals`, belong to no other group, and all carry the same
+`apply_to_subchannel` pattern or none. The entry itself inherits that pattern
+when it has none. The entry and its members must carry the same
+`include_only_weights` (or none), since `eᵢⱼ` is extracted from ratios of
+universes that have to be filled with the same event weights. The group is not
+supported with `--shape-only`, where the per-channel normalised response is no
+longer quadratic. Members must also have `force_0_cv="true"` (or no `0` in
+their `knobvals`) so that `sᵢ(0) = 1`, which the additive form assumes. 
+The additive form is exact only when the response is at most
+quadratic in the group's parameters, which holds for the `F_A²` case above; 
+PROfit checks each member against a quadratic at its knots and warns if the 
+departure is large.
 
 ### Freeing the leading modes of a covariance: `covariance_to_spline_uniform`
 
