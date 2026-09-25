@@ -2275,7 +2275,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
             const char* model_parameter_subchannels = pModelParam->Attribute("subchannels");
             if(model_parameter_subchannels != NULL && model_parameter_subchannels[0] == '\0'){
                 log<LOG_ERROR>(L"%1% || ERROR! Model parameter '%2%' has an empty subchannels= pattern (it would match every subchannel).") % __func__ % model_parameter_name;
-                throw std::invalid_argument(std::string("empty subchannels= on model parameter ") + model_parameter_name);
+                exit(EXIT_FAILURE);
             }
             m_model_parameter_subchannels.push_back(model_parameter_subchannels==NULL ? "" : model_parameter_subchannels);
 
@@ -2289,7 +2289,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                         || val < m_model_parameter_min.back() || val > m_model_parameter_max.back()){
                     log<LOG_ERROR>(L"%1% || ERROR! Model parameter '%2%' has default=\"%3%\", which is not a number in its [min, max] = [%4%, %5%].")
                         % __func__ % model_parameter_name % model_parameter_default % m_model_parameter_min.back() % m_model_parameter_max.back();
-                    throw std::invalid_argument(std::string("invalid default= on model parameter ") + model_parameter_name + ": " + model_parameter_default);
+                    exit(EXIT_FAILURE);
                 }
                 m_model_parameter_default.push_back((float)val);
             }
@@ -2381,7 +2381,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
         if(MatchNames(m_fullnames, pattern, "subchannels= of model parameter '" + m_model_parameter_names[k] + "'").empty()){
             log<LOG_ERROR>(L"%1% || ERROR: model parameter '%2%' has subchannels=\"%3%\", which matches NO subchannel fullname. Fullnames are <mode>_<detector>_<channel>_<subchannel>; matching is an unanchored regex.")
                 % __func__ % m_model_parameter_names[k].c_str() % pattern.c_str();
-            throw std::invalid_argument("subchannels= of model parameter " + m_model_parameter_names[k] + " matches no subchannel: " + pattern);
+            exit(EXIT_FAILURE);
         }
     }
 
