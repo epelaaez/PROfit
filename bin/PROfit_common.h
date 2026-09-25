@@ -113,11 +113,12 @@ std::vector<FixedSeed> buildBkgOnlyFixedSeeds(const PROmodel &model, const Eigen
 
 // DetVar helpers (defined in PROfit_process.cxx, also used by run_plot).
 std::string DetVarKey(const PROconfig& config, size_t file_index);
+std::string FormatKnobVal(double kv);
 std::vector<int> DetVarMatchingKey(const PROpeller& prop, size_t i_event);
 bool BuildDetVarMatchedSpecs(
-        const PROpeller& cvprop, const std::map<int, const PROpeller*> &varprop,
+        const PROpeller& cvprop, const std::map<double, const PROpeller*> &varprop,
         int var_idx, int spec_size,
-        PROspec& out_cv, std::map<int, PROspec> &out_var);
+        PROspec& out_cv, std::map<double, PROspec> &out_var);
 
 struct PROpt {
     std::string xmlname = "NULL.xml"; 
