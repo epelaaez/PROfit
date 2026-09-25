@@ -750,8 +750,12 @@ int PROconfig::LoadFromXML(const std::string &filename){
     tinyxml2::XMLElement *pMC, *pWeiMaps, *pList, *pCorrelations, *pSpec, *pShapeOnlyMap;
     pMC   = doc.FirstChildElement("MCFile");
     pWeiMaps = doc.FirstChildElement("WeightMaps");
-    pList = doc.FirstChildElement("variation_list");
-    if(!pList) pList = doc.FirstChildElement("systematics"); // alternative name for variation_list
+    // <systematics> is an alternative name for <variation_list>; both may appear in any order
+    auto is_variation_list = [](const tinyxml2::XMLElement *e) {
+        return !strcmp(e->Name(), "variation_list") || !strcmp(e->Name(), "systematics");
+    };
+    pList = doc.FirstChildElement();
+    while(pList && !is_variation_list(pList)) pList = pList->NextSiblingElement();
     pCorrelations = doc.FirstChildElement("correlation");
     pSpec = doc.FirstChildElement("varied_spectrum");
     pShapeOnlyMap = doc.FirstChildElement("ShapeOnlyUncertainty");
@@ -1205,7 +1209,21 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 var_file.name = var_name;
                 var_file.pot = strtod(var_pot_str, &end);
                 var_file.is_cv = false;
-                var_file.knobval = knobval ? strtod(knobval, &end) : 1;
+                var_file.knobval = 1;
+                if(knobval) {
+                    const double kv = strtod(knobval, &end);
+                    if(end == knobval || *end != '\0' || !std::isfinite(kv) || kv == 0) {
+                        log<LOG_ERROR>(L"%1% || ERROR: DetVar variation '%2%' has knobval '%3%'; it must be a non-zero number (knob 0 is the section's <cv>).") % __func__ % var_name % knobval;
+                        exit(EXIT_FAILURE);
+                    }
+                    var_file.knobval = kv;
+                }
+                for(const auto &dvf : m_detvar_files) {
+                    if(!dvf.is_cv && dvf.section_index == section_idx && dvf.name == var_name && dvf.knobval == var_file.knobval) {
+                        log<LOG_ERROR>(L"%1% || ERROR: DetVar variation '%2%' declares knobval %3% more than once in section %4%.") % __func__ % var_name % var_file.knobval % section_idx;
+                        exit(EXIT_FAILURE);
+                    }
+                }
                 var_file.section_index = section_idx;
                 { const char* frac = pVar->Attribute("partial_load_frac");
                   var_file.partial_load_frac = frac ? (float)strtod(frac, nullptr) : 1.0f; }
@@ -1448,10 +1466,9 @@ int PROconfig::LoadFromXML(const std::string &filename){
     }else{
         while(pList){
 
-            // Support both old naming (allowlist) and new naming (systematic)
-            tinyxml2::XMLElement *pAllowList = pList->FirstChildElement("allowlist");
-            if(!pAllowList) pAllowList = pList->FirstChildElement("systematic");
-            while(pAllowList){
+            // Old (allowlist) and new (systematic) naming, freely interleaved
+            for(tinyxml2::XMLElement *pAllowList = pList->FirstChildElement(); pAllowList; pAllowList = pAllowList->NextSiblingElement()){
+                if(strcmp(pAllowList->Name(), "allowlist") && strcmp(pAllowList->Name(), "systematic")) continue;
                 const char *text = pAllowList->GetText();
                 std::string wt = "null";
                 if(text) {
@@ -1836,9 +1853,6 @@ int PROconfig::LoadFromXML(const std::string &filename){
                     log<LOG_INFO>(L"%1% || Parsed apply_to_subchannel='%2%' for systematic %3% (unanchored regex against subchannel fullnames; plain substrings work as-is)") % __func__ % pattern.c_str() % wt.c_str();
                 }
                 log<LOG_DEBUG>(L"%1% || Allowlisting variations: %2%") % __func__ % wt.c_str() ;
-                tinyxml2::XMLElement *pNext = pAllowList->NextSiblingElement("allowlist");
-                if(!pNext) pNext = pAllowList->NextSiblingElement("systematic");
-                pAllowList = pNext;
             }
 
             tinyxml2::XMLElement *pDenyList = pList->FirstChildElement("denylist");
@@ -1848,9 +1862,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 log<LOG_DEBUG>(L"%1% || Denylisting variations: %2%") % __func__ % bt.c_str() ;
                 pDenyList = pDenyList->NextSiblingElement("denylist");
             }
-            tinyxml2::XMLElement *pNextList = pList->NextSiblingElement("variation_list");
-            if(!pNextList) pNextList = pList->NextSiblingElement("systematics");
-            pList = pNextList;
+            do pList = pList->NextSiblingElement(); while(pList && !is_variation_list(pList));
         }
     }
 

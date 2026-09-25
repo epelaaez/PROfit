@@ -89,7 +89,7 @@ void run_plot(const PROconfig &config, const PROpeller &prop, const PROmetric &m
         std::vector<std::string> detvar_names;
         std::vector<int> detvar_binning;
         // Matched pairs for _DetVarOverlapping PDF (var file index -> matched cv+var specs)
-        struct MatchedPair { PROspec cv; std::map<int, PROspec> vars; };
+        struct MatchedPair { PROspec cv; std::map<float, PROspec> vars; };
         std::map<size_t, MatchedPair> matched_pairs;
 
         if(!std::filesystem::exists(dvAllPropsBin)) {
@@ -116,7 +116,7 @@ void run_plot(const PROconfig &config, const PROpeller &prop, const PROmetric &m
                     log<LOG_ERROR>(L"%1% || DetVar entry '%2%' not found in combined binary. Run 'process' first.") % __func__ % name.c_str();
                     break;
                 }
-                std::map<int, size_t> syst_files;
+                std::map<float, size_t> syst_files;
                 auto find_fn = [&name](const PROconfig::DetVarFile &dvf) { return dvf.name == name; };
                 auto it = config.m_detvar_files.begin() + idv;
                 while((it = std::find_if(it, config.m_detvar_files.end(), find_fn))
@@ -131,7 +131,7 @@ void run_plot(const PROconfig &config, const PROpeller &prop, const PROmetric &m
                 if(binningIndex < 0 || binningIndex >= (int)config.m_num_variables)
                     binningIndex = config.i_prime;
 
-                std::map<int, const PROpeller*> props;
+                std::map<float, const PROpeller*> props;
                 MatchedPair mp;
                 for(auto &[kv, f] : syst_files) {
                     PROconfig dvconfig = config.BuildDetVarConfig(f);
@@ -331,12 +331,12 @@ void run_plot(const PROconfig &config, const PROpeller &prop, const PROmetric &m
 
                                     const MatchedPair& mp = mp_it->second;
                                     std::map<std::string, std::unique_ptr<TH1D>> cv_hists_ov = getCV1DHists(mp.cv, config, options.binwidth_scale, detvar_binning[idv]);
-                                    std::map<int, std::map<std::string, std::unique_ptr<TH1D>>> var_hists_ov;
+                                    std::map<float, std::map<std::string, std::unique_ptr<TH1D>>> var_hists_ov;
                                     for(auto &[kv, vspec] : mp.vars)
                                         var_hists_ov[kv] = getCV1DHists(vspec, config, options.binwidth_scale, detvar_binning[idv]);
 
                                     TH1D* cv_total_ov = nullptr;
-                                    std::map<int, TH1D*> var_total_ov;
+                                    std::map<float, TH1D*> var_total_ov;
                                     for(size_t sc = 0; sc < config.m_num_subchannels[ic]; sc++) {
                                         const std::string& subchannel_name = config.m_fullnames[ov_global_subchannel_index + sc];
                                         auto cv_hit = cv_hists_ov.find(subchannel_name);
@@ -399,7 +399,7 @@ void run_plot(const PROconfig &config, const PROpeller &prop, const PROmetric &m
                                             h->SetLineColor(ov_var_colors[ov_color_idx % n_ov_var_colors]);
                                             ++ov_color_idx;
                                             h->Draw("hist same");
-                                            ov_leg->AddEntry(h, (detvar_names[idv]+" "+std::to_string(kv)).c_str(), "l");
+                                            ov_leg->AddEntry(h, (detvar_names[idv]+" "+DetVarKnobLabel(kv)).c_str(), "l");
                                         }
 
                                         ov_leg->Draw("same");
