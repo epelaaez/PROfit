@@ -412,6 +412,95 @@ COMMON=(-x local_lbl_sblopt.xml -t "$TAG" -n 1 -v 2 --seed 405 --preset fast)
 expect_fail t32lbadopt  --use-fake-data global
 COMMON=("${SAVED_COMMON[@]}")
 
+# --- 12. template model: shared subchannels= parameter + default= -------------
+# The <model> block is not hashed, so every variant reuses the t00 caches. One
+# subchannels= regex drives several subchannels with a single scale (the use
+# case: one signal strength over nu+nubar); here "mu" floats the ND and FD nue
+# fullosc templates together, against the legacy form (one exact-name parameter
+# per subchannel). With EVERY parameter pinned (--fix at --inject-cv /
+# --inject-systs-cv) a global fit is one chi2 evaluation, and the two forms at
+# the same scale are the same prediction, so their chi2 must agree; unpinned,
+# the shared fit must recover the injected mu. Binaries predating subchannels=
+# fail t33*.
+tmpl_xml() {  # <out.xml> <model tag> <parameter element>...
+    local out=$1 tag=$2; shift 2
+    awk -v tag="$tag" -v p="$(printf '    %s\n' "$@")" '
+        /<model tag="nueapp">/ { print "<model tag=\"" tag "\">"; print p; skip=1; next }
+        skip { if (/<\/model>/) { print; skip=0 } next }
+        { print }' local_test.xml > "$out"
+}
+TSEP=('<parameter name="nu_ND_nue_fullosc" min="0" max="1"/>' '<parameter name="nu_FD_nue_fullosc" min="0" max="1"/>')
+TSH='<parameter name="mu" subchannels="^nu_(ND|FD)_nue_fullosc$" min="0" max="1" default="0"/>'
+tmpl_xml local_tmpl_sep.xml      template "${TSEP[@]}"
+tmpl_xml local_tmpl_shared.xml   template "$TSH"
+tmpl_xml local_tmpl_grad.xml     template '<parameter name="mu" subchannels="^nu_(ND|FD)_nue_fullosc$" min="0.045" max="0.055" default="0.05"/>'
+tmpl_xml local_tmpl_none.xml     template '<parameter name="mu" subchannels="^nu_(ND|FD)_nue_nomatch$" min="0" max="1"/>'
+tmpl_xml local_tmpl_twice.xml    template "$TSH" "${TSEP[0]}"
+tmpl_xml local_tmpl_baddef.xml   template '<parameter name="mu" subchannels="fullosc" min="0" max="1" default="2"/>'
+tmpl_xml local_tmpl_nontmpl.xml  nueapp   '<parameter name="L/E" variable_index="1" subchannels="fullosc"/>'
+
+# global_chi2 <test name>: the INFO-level best-fit chi2 from the test's file log.
+global_chi2() { sed -n 's/.*Global Best Fit chi^2: *\([-+0-9.eE]*\).*/\1/p' "logs/$1.full.log" | tail -n 1; }
+tmpl_equal() {  # <check name> <test A> <test B>
+    local a b; a=$(global_chi2 "$2"); b=$(global_chi2 "$3")
+    if [ -n "$a" ] && [ -n "$b" ] && awk -v a="$a" -v b="$b" 'BEGIN { d=a-b; if (d<0) d=-d; m=(a<0?-a:a); exit !(d <= 1e-5*(m>1?m:1)) }'; then
+        note "PASS  $1  (shared vs separate, all pinned, chi2: $a vs $b)"
+        PASS=$((PASS+1))
+    else
+        note "FAIL  $1  (shared vs separate pinned chi2 differ: '$a' vs '$b')"
+        FAIL=$((FAIL+1))
+    fi
+}
+SEPNAMES=(nu_ND_nue_fullosc nu_FD_nue_fullosc)
+SPLINES=(CrossSection1 CrossSection2 CrossSection3 CrossSection4 DetSys1 DetSys2 DetSys3
+         Flux1 Flux2 Flux3 FiducialVol_FD FluxNorm_FD FiducialVol_ND FluxNorm_ND)
+SPLINE_CV=(--inject-systs-cv CrossSection1 0.7 CrossSection2 -1.1 DetSys1 0.4 Flux2 -0.3 FluxNorm_ND 0.9)
+COMMON=(-x local_tmpl_sep.xml -t "$TAG" -n 1 -v 2 --seed 405 --preset fast)
+run_test t33atmplsep02    -l logs/t33atmplsep02.full.log -w 3 --use-fake-data --fix "${SEPNAMES[@]}" "${SPLINES[@]}" "${SPLINE_CV[@]}" \
+    -i nu_ND_nue_fullosc 0.05 nu_FD_nue_fullosc 0.05 --inject-cv nu_ND_nue_fullosc 0.02 nu_FD_nue_fullosc 0.02 global
+run_test t33ctmplsep08    -l logs/t33ctmplsep08.full.log -w 3 --use-fake-data --fix "${SEPNAMES[@]}" "${SPLINES[@]}" "${SPLINE_CV[@]}" \
+    -i nu_ND_nue_fullosc 0.05 nu_FD_nue_fullosc 0.05 --inject-cv nu_ND_nue_fullosc 0.8 nu_FD_nue_fullosc 0.8 global
+COMMON=(-x local_tmpl_shared.xml -t "$TAG" -n 1 -v 2 --seed 405 --preset fast)
+run_test t33btmplshared02 -l logs/t33btmplshared02.full.log -w 3 --use-fake-data --fix mu "${SPLINES[@]}" "${SPLINE_CV[@]}" \
+    -i mu 0.05 --inject-cv mu 0.02 global
+run_test t33dtmplshared08 -l logs/t33dtmplshared08.full.log -w 3 --use-fake-data --fix mu "${SPLINES[@]}" "${SPLINE_CV[@]}" \
+    -i mu 0.05 --inject-cv mu 0.8 global
+tmpl_equal t33etmplequal02 t33atmplsep02 t33btmplshared02
+tmpl_equal t33ftmplequal08 t33ctmplsep08 t33dtmplshared08
+run_test t33gtmplrecover  --use-fake-data -i mu 0.05 global
+mu_fit=$(sed -n 's/^mu : *//p' "${TAG}_t33gtmplrecover_global_fit.txt" 2>/dev/null)
+if [ -n "$mu_fit" ] && awk -v m="$mu_fit" 'BEGIN { d=m-0.05; if (d<0) d=-d; exit !(d < 1e-3) }'; then
+    note "PASS  t33htmplmu  (shared mu recovered: $mu_fit, injected 0.05)"
+    PASS=$((PASS+1))
+else
+    note "FAIL  t33htmplmu  (shared mu not recovered: '$mu_fit', injected 0.05)"
+    FAIL=$((FAIL+1))
+fi
+# gradcheck draws mu uniformly in [min,max] around an Asimov at default=: keep the box
+# tight, since the fullosc template is so large that a wide box puts every point at a
+# chi2 where the float central-FD reference itself is noise.
+COMMON=(-x local_tmpl_grad.xml -t "$TAG" -n 1 -v 2 --seed 405 --preset fast)
+run_test t33itmplgrad     -l logs/t33itmplgrad.full.log -w 3 --use-fake-data scale-test --tests gradcheck -N 200
+grad_rel=$(sed -n 's/.*\[GRADCHECK\] mode=analytic .*mean_rel=\([-+0-9.eE]*\).*/\1/p' logs/t33itmplgrad.full.log | tail -n 1)
+if [ -n "$grad_rel" ] && awk -v r="$grad_rel" 'BEGIN { exit !(r < 0.2) }'; then
+    note "PASS  t33itmplgradrel  (analytic vs central-full mean_rel $grad_rel)"
+    PASS=$((PASS+1))
+else
+    note "FAIL  t33itmplgradrel  (analytic vs central-full mean_rel '$grad_rel', want < 0.2)"
+    FAIL=$((FAIL+1))
+fi
+# Refused: zero-match pattern, a subchannel claimed twice, default= outside [min,max],
+# and subchannels= on a non-template model.
+COMMON=(-x local_tmpl_none.xml    -t "$TAG" -n 1 -v 2 --seed 405 --preset fast)
+expect_fail t33jtmplnomatch  --use-fake-data global
+COMMON=(-x local_tmpl_twice.xml   -t "$TAG" -n 1 -v 2 --seed 405 --preset fast)
+expect_fail t33ktmpltwice    --use-fake-data global
+COMMON=(-x local_tmpl_baddef.xml  -t "$TAG" -n 1 -v 2 --seed 405 --preset fast)
+expect_fail t33ltmplbaddef   --use-fake-data global
+COMMON=(-x local_tmpl_nontmpl.xml -t "$TAG" -n 1 -v 2 --seed 405 --preset fast)
+expect_fail t33mtmplnontmpl  --use-fake-data global
+COMMON=("${SAVED_COMMON[@]}")
+
 note "----------------------------------------------------------------------"
 note "RESULT: $PASS passed, $FAIL failed  (outputs in $RUNDIR)"
 exit "$FAIL"
