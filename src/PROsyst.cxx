@@ -1130,6 +1130,13 @@ namespace PROfit {
             }
         }
 
+        // Check that we have a universe in addition to the CV
+        if(ratios.size() < 2) {
+            log<LOG_ERROR>(L"%1% || systematic %2% has only %3% spline knot(s) after adding the knob=0 point; at least one universe with a nonzero knobval is required to build a spline.") % __func__ % syst.systname.c_str() % ratios.size();
+            log<LOG_ERROR>(L"Terminating.");
+            exit(EXIT_FAILURE);
+        }
+
         int nbins = syst.p_cv->GetNbins();
         Spline spline;
         spline.bins = nbins;

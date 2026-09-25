@@ -1247,13 +1247,33 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 var_file.name = var_name;
                 var_file.pot = strtod(var_pot_str, &end);
                 var_file.is_cv = false;
-                var_file.knobval = knobval ? strtod(knobval, &end) : 1;
+                if(knobval) {
+                    char *kend = nullptr;
+                    double kval = strtod(knobval, &kend);
+                    if(kend == knobval || *kend != '\0' || !std::isfinite(kval)) {
+                        log<LOG_ERROR>(L"%1% || ERROR: DetVar variation '%2%' (section %3%) has non-numeric knobval '%4%'")
+                            % __func__ % var_name % section_idx % knobval;
+                        exit(EXIT_FAILURE);
+                    }
+                    var_file.knobval = kval;
+                } else {
+                    var_file.knobval = 1;
+                }
                 var_file.section_index = section_idx;
+                
+                // Check for duplicate entries
+                for(const DetVarFile &prev : m_detvar_files) {
+                    if(prev.section_index == section_idx && !prev.is_cv && prev.name == var_file.name && prev.knobval == var_file.knobval) {
+                        log<LOG_ERROR>(L"%1% || ERROR: DetVar variation '%2%' (section %3%) declares knobval %4% more than once — knob values must be unique")
+                            % __func__ % var_name % section_idx % var_file.knobval;
+                        exit(EXIT_FAILURE);
+                    }
+                }
                 { const char* frac = pVar->Attribute("partial_load_frac");
                   var_file.partial_load_frac = frac ? (float)strtod(frac, nullptr) : 1.0f; }
                 m_detvar_files.push_back(var_file);
                 m_detvar_variation_names.insert(var_name);
-                log<LOG_INFO>(L"%1% || DetVar variation '%2%' file (section %3%): %4%, POT: %5%") % __func__ % var_name % section_idx % dv_filename % var_file.pot;
+                log<LOG_INFO>(L"%1% || DetVar variation '%2%' file (section %3%): %4%, POT: %5%, knobval: %6%") % __func__ % var_name % section_idx % dv_filename % var_file.pot % var_file.knobval;
 
                 pVar = pVar->NextSiblingElement("variation");
             }
