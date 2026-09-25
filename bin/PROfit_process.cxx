@@ -236,10 +236,6 @@ void run_process(PROpeller &prop, std::vector<std::vector<SystStruct>> &systsstr
             PROconfig cvconfig = config.BuildDetVarConfig(cv_idx);
             NullModel cvmodel(cvprop);
             Eigen::VectorXf cvparams = Eigen::VectorXf::Constant(cvmodel.nparams, 0);
-            int cv_binning = cvconfig.i_prime;
-            if(cv_binning < 0 || cv_binning >= (int)config.m_num_variables)
-                cv_binning = config.i_prime;
-            PROspec cvSpec = FillSpectra(cvconfig, cvprop, emptySyst, cvmodel, cvparams, true, cv_binning);
 
             std::set<std::string> done;
             for(size_t idv = 0; idv < config.m_detvar_files.size(); ++idv) {
@@ -364,6 +360,12 @@ void run_process(PROpeller &prop, std::vector<std::vector<SystStruct>> &systsstr
                 ss.apply_to_subchannel = apply_it->second;
                 ss.apply_to_subchannel_names = MatchNames(config.m_fullnames, apply_it->second, "apply_to_subchannel of DetVar systematic " + varName);
                 log<LOG_INFO>(L"%1% || DetVar '%2%' restricted by apply_to_subchannel='%3%' to %4% subchannel(s).") % __func__ % varName.c_str() % apply_it->second.c_str() % ss.apply_to_subchannel_names.size();
+            }
+            // PROcreate sets inflate on weight-based systematics; DetVar ones are built here.
+            auto inflate_it = config.m_mcgen_variation_inflate.find(varName);
+            if(inflate_it != config.m_mcgen_variation_inflate.end()) {
+                ss.inflate = inflate_it->second;
+                log<LOG_INFO>(L"%1% || DetVar '%2%': inflate=%3%") % __func__ % varName.c_str() % ss.inflate;
             }
             ss.CreateSpecs(cvTotal.Spec().size());
             ss.p_cv = std::make_shared<PROspec>(cvTotal);
