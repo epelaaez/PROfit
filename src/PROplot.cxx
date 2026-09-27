@@ -2402,6 +2402,8 @@ namespace PROfit{
         }
 
 
+        // Keep each systematic's per-bin information
+        struct SliceEntry { std::string label; int color; int style; Eigen::VectorXd var; };
 
         int nTags = used_tags.size()+1;
         int gridCols = std::ceil(std::sqrt(nTags));
@@ -2413,6 +2415,7 @@ namespace PROfit{
 
         Eigen::MatrixXf diag = spec.Spec().array().matrix().asDiagonal();
         Eigen::MatrixXf collapsed_diag = CollapseMatrix(config, diag);
+        const Eigen::VectorXf collapsed_cv = collapsed_diag.diagonal();
 
         // Diagnostic: Check collapsed_diag for issues
         bool has_nan = collapsed_diag.array().isNaN().any();
@@ -2498,9 +2501,14 @@ namespace PROfit{
                     log<LOG_INFO>(L"%1% || Channel %2%: gridCols=%3%, gridRows=%4%, nTags=%5%")
                         % __func__ % global_channel_index % gridCols % gridRows % nTags;
 
+                    // For 2D bins, we keep each (tag, systematic) per 2D bin to draw later
+                    const bool is_2d = config.m_channel_variable_dims[channel][other_index] == 2;
+                    std::vector<std::pair<std::string, std::vector<SliceEntry>>> slice_groups;
+
                     std::vector<TH1F*> vsums;
                     std::vector<std::string> vnames;
                     for (const auto &[tag, vec] : used_tags) {
+                        if(is_2d) slice_groups.emplace_back(tag, std::vector<SliceEntry>{});
 
                         c.cd(padIndex++);
                         if (!gPad) {
@@ -2586,6 +2594,14 @@ namespace PROfit{
 
                             const std::string &plotname = config.m_mcgen_variation_plotname_map.at(systname);
                             leg->AddEntry(h, plotname.c_str(), "l");
+                            if(is_2d) {
+                                Eigen::VectorXd fv = Eigen::VectorXd::Zero(nbins);
+                                for(size_t b = 0; b < nbins; ++b) {
+                                    const double cv = collapsed_cv(binstart + b);
+                                    if(cv > 0) fv(b) = std::max(0.0f, channel_cov(b, b)) / (cv*cv);
+                                }
+                                slice_groups.back().second.push_back({plotname, colors[color_idx], line_styles[style_idx], fv});
+                            }
                             h->SetLineColor(colors[color_idx]);
                             h->SetLineStyle(line_styles[style_idx]);
                             hvec.push_back(h);
@@ -2679,6 +2695,121 @@ namespace PROfit{
                     if(allsplinesyst.ShapeOnly()) drawShapeOnlyNote(&c, WatermarkPos::RightEdge);
                     c.Update();
                     c.Print(filename.c_str());
+
+                    // For 2D bins, show per-bin uncertainties for each tag
+                    if(is_2d) {
+                        const auto &bins2d = config.m_channel_variable_bins[channel][other_index];
+                        const size_t nx = bins2d.NBinsAlong(0), ny = bins2d.NBinsAlong(1);
+                        const std::vector<float> edges_x = bins2d.Edges(0), edges_y = bins2d.Edges(1);
+                        const std::string title_x = config.GetChannelAxisTitle(channel, other_index, 0);
+                        const std::string title_y = config.GetChannelAxisTitle(channel, other_index, 1);
+
+                        // Summary group
+                        std::vector<SliceEntry> summary;
+                        for(size_t t = 0; t < slice_groups.size(); ++t) {
+                            Eigen::VectorXd tv = Eigen::VectorXd::Zero(nbins);
+                            for(const auto &e : slice_groups[t].second) tv += e.var;
+                            summary.push_back({slice_groups[t].first, colors[t % colors.size()], 1, tv});
+                        }
+                        slice_groups.emplace_back("Summary", summary);
+
+                        for(size_t ig = 0; ig < slice_groups.size(); ++ig) {
+                            const std::string &gname = slice_groups[ig].first;
+                            const std::vector<SliceEntry> &entries = slice_groups[ig].second;
+                            Eigen::VectorXd gsum = Eigen::VectorXd::Zero(nbins);
+                            for(const auto &e : entries) gsum += e.var;
+                            // One y scale for every slice of the group so the slices can be compared directly.
+                            const double ymax = gsum.maxCoeff() > 0 ? 1.3*std::sqrt(gsum.maxCoeff()) : 1.0;
+
+                            // fixed_dim is the variable held fixed within each pad (1: slices in y, 0: slices in x).
+                            for(int fixed_dim : {1, 0}) {
+                                const size_t nslices = fixed_dim == 1 ? ny : nx;
+                                const size_t nalong  = fixed_dim == 1 ? nx : ny;
+                                const std::vector<float> &along_edges = fixed_dim == 1 ? edges_x : edges_y;
+                                const std::vector<float> &slice_edges = fixed_dim == 1 ? edges_y : edges_x;
+                                const std::string &along_title = fixed_dim == 1 ? title_x : title_y;
+                                const std::string &slice_title = fixed_dim == 1 ? title_y : title_x;
+                                // Collapsed channel bins are x-major with y fastest
+                                auto flat = [&](size_t islice, size_t ialong) {
+                                    return fixed_dim == 1 ? ialong*ny + islice : islice*ny + ialong;
+                                };
+
+                                // Hists/text drawn on this page; freed after the page is printed and cleared.
+                                std::vector<std::unique_ptr<TObject>> keep;
+                                c.Clear();
+                                c.cd();
+                                TPad *head = new TPad("frac_sl_head", "", 0, 0.95, 1, 1);
+                                TPad *body = new TPad("frac_sl_body", "", 0, 0, 1, 0.95);
+                                // Pads are owned by the canvas (kCanDelete), freed by c.Clear().
+                                head->SetBit(kCanDelete); body->SetBit(kCanDelete);
+                                head->Draw(); body->Draw();
+                                head->cd();
+                                const std::string page_title = name + " | " + gname + " | slices in " + slice_title;
+                                TLatex *lat = new TLatex(0.01, 0.5, page_title.c_str());
+                                keep.emplace_back(lat);
+                                lat->SetNDC(); lat->SetTextAlign(12); lat->SetTextSize(0.35);
+                                lat->Draw();
+
+                                // One cell per slice plus one for the legend.
+                                const size_t ncells = nslices + 1;
+                                const int ncols = (int)std::ceil(std::sqrt((double)ncells));
+                                const int nrows = (int)std::ceil(ncells / (double)ncols);
+                                body->Divide(ncols, nrows);
+                                const std::string sfx0 = "_" + std::to_string(global_channel_index) + "_" + std::to_string(ig) + "_" + std::to_string(fixed_dim);
+                                TH1F *leg_sum = nullptr;
+                                std::vector<TH1F*> leg_hists;
+                                for(size_t is = 0; is < nslices; ++is) {
+                                    body->cd(is + 1);
+                                    gPad->SetLeftMargin(0.15); gPad->SetBottomMargin(0.14);
+                                    const std::string sfx = sfx0 + "_" + std::to_string(is);
+                                    std::ostringstream st;
+                                    st << slice_title << " in [" << slice_edges[is] << ", " << slice_edges[is+1] << ")";
+                                    TH1F *hs = new TH1F(("frac_sl_sum"+sfx).c_str(), (st.str() + ";" + along_title + ";Fractional Uncertainty").c_str(), nalong, along_edges.data());
+                                    hs->SetDirectory(nullptr);
+                                    keep.emplace_back(hs);
+                                    for(size_t ia = 0; ia < nalong; ++ia)
+                                        hs->SetBinContent(ia+1, std::sqrt(gsum(flat(is, ia))));
+                                    hs->SetStats(0);
+                                    hs->SetLineColor(kBlack); hs->SetLineWidth(2);
+                                    hs->SetMinimum(0);
+                                    hs->SetMaximum(ymax);
+                                    hs->GetXaxis()->SetLabelSize(0.06); hs->GetXaxis()->SetTitleSize(0.06);
+                                    hs->GetXaxis()->SetNdivisions(505);
+                                    hs->GetYaxis()->SetLabelSize(0.06); hs->GetYaxis()->SetTitleSize(0.06);
+                                    hs->GetYaxis()->SetTitleOffset(1.2); hs->GetYaxis()->SetNdivisions(505);
+                                    hs->Draw("HIST");
+                                    if(is == 0) leg_sum = hs;
+                                    for(size_t ie = 0; ie < entries.size(); ++ie) {
+                                        const SliceEntry &e = entries[ie];
+                                        TH1F *h = new TH1F(("frac_sl_e"+sfx+"_"+std::to_string(ie)).c_str(), "", nalong, along_edges.data());
+                                        h->SetDirectory(nullptr);
+                                        keep.emplace_back(h);
+                                        for(size_t ia = 0; ia < nalong; ++ia)
+                                            h->SetBinContent(ia+1, std::sqrt(e.var(flat(is, ia))));
+                                        h->SetLineColor(e.color); h->SetLineStyle(e.style); h->SetLineWidth(1);
+                                        h->Draw("HIST SAME");
+                                        if(is == 0) leg_hists.push_back(h);
+                                    }
+                                }
+                                body->cd(nslices + 1);
+                                TLegend *leg = new TLegend(0.02, 0.02, 0.92, 0.98);
+                                keep.emplace_back(leg);
+                                leg->SetFillStyle(0); leg->SetLineWidth(0);
+                                leg->SetNColumns(entries.size() > 8 ? 2 : 1);
+                                leg->SetTextSize(entries.size() > 8 ? 0.06 : 0.08);
+                                leg->AddEntry(leg_sum, "Sum", "l");
+                                for(size_t ie = 0; ie < entries.size(); ++ie)
+                                    leg->AddEntry(leg_hists[ie], entries[ie].label.c_str(), "l");
+                                leg->Draw();
+
+                                drawVersionWatermark(&c, WatermarkPos::RightEdge);
+                                if(allsplinesyst.ShapeOnly()) drawShapeOnlyNote(&c, WatermarkPos::RightEdge);
+                                c.Update();
+                                c.Print(filename.c_str());
+                                c.Clear();
+                            }
+                        }
+                    }
                     global_channel_index++;
                 }
             }
