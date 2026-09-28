@@ -2323,7 +2323,10 @@ int PROconfig::LoadFromXML(const std::string &filename){
         }else if(m_mcgen_variation_type[i] == "spline_to_covariance"){
             m_num_variation_type_spline_to_covariance+=1;
         }else if(m_mcgen_variation_type[i] == "mcstat"){
-            m_mcgen_variation_allowlist[i] = "mcstat";
+            // Find the entry by name: the allowlist skips DetVar-matched systematics, so it is not
+            // index-aligned with m_mcgen_variation_type.
+            auto it = std::find(m_mcgen_variation_allowlist.begin(), m_mcgen_variation_allowlist.end(), m_mcstat_systname);
+            if(it != m_mcgen_variation_allowlist.end()) *it = "mcstat";
             m_mcgen_variation_type_map["mcstat"] = "mcstat";
             m_use_mcstats = true;
         }else if(m_mcgen_variation_type[i] == "external_covariance"){
