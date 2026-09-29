@@ -183,16 +183,21 @@ namespace PROfit{
         std::unique_ptr<TH2D> cor_hist = std::make_unique<TH2D>("cor", "Correlation Matrix;Bin # ;Bin #", config.m_num_variable_bins_total[config.i_prime], 0, config.m_num_variable_bins_total[config.i_prime], config.m_num_variable_bins_total[config.i_prime], 0, config.m_num_variable_bins_total[config.i_prime]);
         std::unique_ptr<TH2D> collapsed_cor_hist = std::make_unique<TH2D>("ccor", "Collapsed Correlation Matrix;Bin # ;Bin #", config.m_num_variable_bins_total_collapsed[config.i_prime], 0, config.m_num_variable_bins_total_collapsed[config.i_prime], config.m_num_variable_bins_total_collapsed[config.i_prime], 0, config.m_num_variable_bins_total_collapsed[config.i_prime]);
 
+         auto safe_corr = [](const Eigen::MatrixXf &m, size_t i, size_t j) -> float {
+             const float denom = std::sqrt(m(i,i) * m(j,j));
+             return denom > 0 ? m(i,j) / denom : 0.0f;
+         };
+
         for(size_t i = 0; i < config.m_num_variable_bins_total[config.i_prime]; ++i)
             for(size_t j = 0; j < config.m_num_variable_bins_total[config.i_prime]; ++j){
                 cov_hist->SetBinContent(i+1,j+1,fractional_cov(i,j));
-                cor_hist->SetBinContent(i+1,j+1,fractional_cov(i,j)/(sqrt(fractional_cov(i,i))*sqrt(fractional_cov(j,j))));
+                cor_hist->SetBinContent(i+1,j+1,safe_corr(fractional_cov,i,j));
             }
 
         for(size_t i = 0; i < config.m_num_variable_bins_total_collapsed[config.i_prime]; ++i)
             for(size_t j = 0; j < config.m_num_variable_bins_total_collapsed[config.i_prime]; ++j){
                 collapsed_cov_hist->SetBinContent(i+1,j+1,collapsed_frac_cov(i,j));
-                collapsed_cor_hist->SetBinContent(i+1,j+1,collapsed_frac_cov(i,j)/(sqrt(collapsed_frac_cov(i,i))*sqrt(collapsed_frac_cov(j,j))));
+                collapsed_cor_hist->SetBinContent(i+1,j+1,safe_corr(collapsed_frac_cov,i,j));
             }
 
         float cov_max_abs = std::max(cov_hist->GetMaximum(), std::abs(cov_hist->GetMinimum()));
@@ -244,7 +249,7 @@ namespace PROfit{
             for(size_t i = 0; i < n_coll; ++i){
                 for(size_t j = 0; j < n_coll; ++j){
                     ccov_h->SetBinContent(i+1,j+1,syst_collapsed_frac(i,j));
-                    ccorr_h->SetBinContent(i+1,j+1,syst_collapsed_frac(i,j)/(sqrt(syst_collapsed_frac(i,i))*sqrt(syst_collapsed_frac(j,j))));
+                    ccorr_h->SetBinContent(i+1,j+1,safe_corr(syst_collapsed_frac,i,j));
                 }
             }
 
