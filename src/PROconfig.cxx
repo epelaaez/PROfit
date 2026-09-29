@@ -2323,7 +2323,10 @@ int PROconfig::LoadFromXML(const std::string &filename){
         }else if(m_mcgen_variation_type[i] == "spline_to_covariance"){
             m_num_variation_type_spline_to_covariance+=1;
         }else if(m_mcgen_variation_type[i] == "mcstat"){
-            m_mcgen_variation_allowlist[i] = "mcstat";
+            // Find the entry by name: the allowlist skips DetVar-matched systematics, so it is not
+            // index-aligned with m_mcgen_variation_type.
+            auto it = std::find(m_mcgen_variation_allowlist.begin(), m_mcgen_variation_allowlist.end(), m_mcstat_systname);
+            if(it != m_mcgen_variation_allowlist.end()) *it = "mcstat";
             m_mcgen_variation_type_map["mcstat"] = "mcstat";
             m_use_mcstats = true;
         }else if(m_mcgen_variation_type[i] == "external_covariance"){
@@ -2994,8 +2997,10 @@ int PROconfig::HexToROOTColor(const std::string& hexColor) const{
 void PROconfig::RegisterBinnedUnconstrainedChildren(){
     m_mcgen_variation_children.clear();
     for(size_t i = 0; i < m_mcgen_variation_allowlist.size(); ++i){
-        if(m_mcgen_variation_type[i] != "binned_unconstrained") continue;
+        // Look the type up by name: m_mcgen_variation_type has one entry per <systematic>, but the
+        // allowlist skips DetVar-matched ones, so the two are not index-aligned.
         const std::string parent = m_mcgen_variation_allowlist[i];
+        if(m_mcgen_variation_type_map.at(parent) != "binned_unconstrained") continue;
 
         const int binning = m_mcgen_variation_binning_map.at(parent);
         if(binning < 0 || binning >= (int)m_num_variables){
@@ -3087,9 +3092,10 @@ void PROconfig::ResolveCovarianceToSplineUniformSources(){
         for(size_t i = 0; i < m_mcgen_variation_allowlist.size(); ++i){
             const std::string &name = m_mcgen_variation_allowlist[i];
             if(name == parent || !PatternMatches(name, re)) continue;
-            if(m_mcgen_variation_type[i] != "covariance"){
+            const std::string &type = m_mcgen_variation_type_map.at(name);
+            if(type != "covariance"){
                 log<LOG_ERROR>(L"%1% || ERROR: sources='%2%' of covariance_to_spline_uniform systematic '%3%' matches '%4%' which has type '%5%'; only type=\"covariance\" entries can be summed.")
-                    % __func__ % pattern.c_str() % parent.c_str() % name.c_str() % m_mcgen_variation_type[i].c_str();
+                    % __func__ % pattern.c_str() % parent.c_str() % name.c_str() % type.c_str();
                 log<LOG_ERROR>(L"Terminating.");
                 exit(EXIT_FAILURE);
             }
