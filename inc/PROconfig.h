@@ -31,6 +31,7 @@
 #include <climits>
 #include <cstdlib>
 #include <numeric>
+#include <optional>
 #include <stdexcept>
 #include <regex>
 
@@ -303,6 +304,15 @@ namespace PROfit{
              */
             void ValidateFitVariable() const;
 
+            /**
+             * @brief Check DetVar variations whose name appears in more than one DetVarSection.
+             * @details Such a name is ONE systematic (one fit parameter): run_process builds each
+             * section's response from that section's own CV and files and sums them. Fatal unless
+             * every section provides the same knob values; warns when two of its sections share a
+             * subchannel, where the result is a CV-weighted average of their responses.
+             */
+            void ValidateDetVarSharedNames() const;
+
 
         public:
 
@@ -341,6 +351,14 @@ namespace PROfit{
              * list, filling m_mcgen_variation_source_parent (each matched entry must be type="covariance"
              * and may be claimed by one pattern only). */
             void ResolveCovarianceToSplineUniformSources();
+
+            /** @brief Validate every spline_cross_quad entry's splines= list (each name must be a type="spline"
+             * entry on the same binning, listed once, all with the same apply_to_subchannel pattern or
+             * none; the entry must match that pattern or, when it has none, inherits it) and register
+             * the entry in m_mcgen_variation_children with its members as children, so
+             * --syst-list/--exclude-systs resolve it to names PROsyst registers. Needs the allowlist
+             * and binning map, so it runs after the systematics are parsed. */
+            void ResolveSplineCrossQuadMembers();
 
             SplinePriorType GetSplinePriorType(const std::string &systematic) const {
                 auto it = m_mcgen_variation_prior_types.find(systematic);
@@ -556,6 +574,7 @@ namespace PROfit{
             std::map<std::string, std::vector<std::string>> m_mcgen_variation_children; //parent XML name -> the derived PROsyst names it expands to: "<parent>_bin<j>" (binned_unconstrained, filled at parse time) or "<parent>_decomp_knob_<k>"/"<parent>_resid_cov" (covariance_to_spline[_uniform], filled when PROsyst is built)
             std::map<std::string, std::string> m_mcgen_variation_sources; //covariance_to_spline_uniform: sources="<regex>" (unanchored) selecting the type="covariance" entries whose fractional matrices are summed and decomposed
             std::map<std::string, std::string> m_mcgen_variation_source_parent; //type="covariance" entry name -> the covariance_to_spline_uniform entry that decomposes it (such an entry is never built as a covariance of its own)
+            std::map<std::string, std::vector<std::string>> m_mcgen_variation_cross_quad_splines; //spline_cross_quad: splines="A, B, ..." -> the member type="spline" entries, in the order the CROSS branch enumerates pairs (i<j over this list)
 
             //FIX skepic
             std::vector<std::string> systematic_name;
@@ -569,9 +588,18 @@ namespace PROfit{
             std::map<std::string,int> m_model_parameter_map;
             /// Optional per-model-parameter min/max bounds, read from the <parameter> tag's
             /// "min"/"max" attributes. Used by normalization-style models (e.g. template)
-            /// where each <parameter> names a subchannel and min/max are its scale bounds.
+            /// where each <parameter> floats one or more subchannels and min/max are its scale bounds.
             std::vector<float> m_model_parameter_min;
             std::vector<float> m_model_parameter_max;
+            /// Template model only: the <parameter>'s subchannels= regex (unanchored, over
+            /// subchannel fullnames). Empty = attribute absent, the name IS the exact fullname.
+            std::vector<std::string> m_model_parameter_subchannels;
+            /// Template model only: the <parameter>'s default= value (CV, bkg-only seed and --fix
+            /// point); nullopt = attribute absent, the model's own default applies.
+            std::vector<std::optional<float>> m_model_parameter_default;
+            /// Numeric <model> attributes (density=, electron_fraction=, n_newton=);
+            /// consumed by PROLBL, fatal on non-LBL tags, not hashed.
+            std::map<std::string, double> m_model_options;
 
             bool m_bool_rate_only;
             //----- PUBLIC FUNCTIONS ------
@@ -699,7 +727,7 @@ namespace PROfit{
                 float partial_load_frac = 1.0f;
                 bool is_cv;
                 size_t section_index;  // which DetVarSection this file belongs to
-                int knobval = 0;
+                double knobval = 0;
             };
 
             bool m_has_detvar_section = false;

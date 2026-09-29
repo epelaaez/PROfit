@@ -92,6 +92,30 @@ namespace PROfit {
         if(prev) prev->cd();
     }
 
+    // Light-grey "shape-only" note for pages whose content is shape-projected. Same
+    // top-level-canvas rule as the watermark. RightEdge puts it at the top of the
+    // right-edge strip (the watermark runs up from the bottom); otherwise it sits just
+    // above the top-left corner of the frame.
+    inline void drawShapeOnlyNote(TVirtualPad *pad, WatermarkPos pos = WatermarkPos::TopRight) {
+        if(!pad) return;
+        TVirtualPad *prev = gPad;
+        pad->cd();
+        TText t;
+        t.SetNDC();
+        t.SetTextFont(42);
+        t.SetTextColor(kGray+1);
+        t.SetTextSize(0.022f);
+        if(pos == WatermarkPos::RightEdge) {
+            t.SetTextAngle(90);
+            t.SetTextAlign(31); // rotated: the text ends at the anchor, near the top edge
+            t.DrawText(0.998, 0.995, "shape-only");
+        } else {
+            t.SetTextAlign(11);
+            t.DrawText(pad->GetLeftMargin(), std::min(1.0 - pad->GetTopMargin() + 0.004, 0.97), "shape-only");
+        }
+        if(prev) prev->cd();
+    }
+
 }
 
 #endif

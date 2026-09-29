@@ -303,69 +303,97 @@ static void expand_derived_parents(std::vector<std::string> &names, const PROcon
     names = expanded;
 }
 
-void include_or_exclude_systs(std::vector<PROsyst> &variable_systs, const PROconfig &config, const PROpt &options) {
-    if(options.syst_list.size()) {
-
-        std::vector<std::string> systs_to_include;
-        for(const auto &s: options.syst_list) {
-            bool istag = false;
-            for(const auto &[syst, tags]: config.m_mcgen_variation_tags) {
-                if(std::find(tags.begin(), tags.end(), s) != std::end(tags)) {
-                    istag = true;
-                    systs_to_include.push_back(syst);
-                }
+// Resolve the names given to --syst-list / --exclude-systs into names PROsyst registered.
+// Each token is a tag (every systematic carrying it), a registered name or derived parent, or
+// a plotname. A token matching none of these is fatal: a typo must not silently fit the full set.
+static std::vector<std::string> resolve_syst_names(const std::vector<std::string> &tokens, const PROconfig &config,
+                                                   const std::vector<PROsyst> &variable_systs, const char *flag) {
+    auto registered = [&](const std::string &n) {
+        for(const PROsyst &s: variable_systs) if(s.HasSyst(n)) return true;
+        return false;
+    };
+    std::vector<std::string> names;
+    for(const std::string &s: tokens) {
+        bool found = false;
+        for(const auto &[syst, tags]: config.m_mcgen_variation_tags) {
+            if(std::find(tags.begin(), tags.end(), s) != tags.end()) {
+                names.push_back(syst);
+                found = true;
             }
-            if(!istag) systs_to_include.push_back(s);
         }
-        for(std::string &name: systs_to_include) {
+        if(!found && (registered(s) || config.m_mcgen_variation_children.count(s))) {
+            names.push_back(s);
+            found = true;
+        }
+        if(!found) {
             for(const auto &[xml_name, plot_name]: config.m_mcgen_variation_plotname_map) {
-                if(name == plot_name) {
-                    name = xml_name;
+                if(s == plot_name) {
+                    names.push_back(xml_name);
+                    found = true;
+                    break;
                 }
             }
         }
-        expand_derived_parents(systs_to_include, config);
-        int io=0;
-        for(PROsyst &syst: variable_systs){
-            // variable_systs are built for plot=="true" OR i_prime — the fitting
-            // variable must get the subset even when it is not plotted, or the
-            // metric silently fits the full systematics set.
-            if(config.m_channel_variable_plot_bool.at(io) || (size_t)io == config.i_prime){
-                syst = syst.subset(systs_to_include);
-            }
-            io++;
+        if(found) continue;
+        auto src = config.m_mcgen_variation_source_parent.find(s);
+        if(src != config.m_mcgen_variation_source_parent.end()) {
+            log<LOG_ERROR>(L"%1% || %2%: '%3%' is a source of covariance_to_spline_uniform systematic '%4%' and has no parameters of its own; select '%4%' instead.")
+                % __func__ % flag % s.c_str() % src->second.c_str();
+        } else {
+            log<LOG_ERROR>(L"%1% || %2%: '%3%' matches no systematic built for the fit/plotted variables (not a systematic name, plotname or tag).")
+                % __func__ % flag % s.c_str();
         }
-    } else if(options.systs_excluded.size()) {
-
-        std::vector<std::string> systs_to_exclude;
-        for(const auto &s: options.systs_excluded) {
-            log<LOG_INFO>(L"%1% || Excluding systematic %2% by command line argument.") % __func__ % s.c_str();
-            bool istag = false;
-            for(const auto &[syst, tags]: config.m_mcgen_variation_tags) {
-                if(std::find(tags.begin(), tags.end(), s) != std::end(tags)) {
-                    istag = true;
-                    systs_to_exclude.push_back(syst);
-                }
-            }
-            if(!istag) systs_to_exclude.push_back(s);
-        }
-        for(std::string &name: systs_to_exclude) {
-            for(const auto &[xml_name, plot_name]: config.m_mcgen_variation_plotname_map) {
-                if(name == plot_name) {
-                    name = xml_name;
-                }
-            }
-        }
-        expand_derived_parents(systs_to_exclude, config);
-        int io=0;
-        for(PROsyst &syst: variable_systs){
-            // Same plot=="true"-or-i_prime rule as the subset branch above.
-            if(config.m_channel_variable_plot_bool.at(io) || (size_t)io == config.i_prime){
-                syst = syst.excluding(systs_to_exclude);
-            }
-            io++;
-        }
+        log<LOG_ERROR>(L"Terminating.");
+        exit(EXIT_FAILURE);
     }
+    expand_derived_parents(names, config);
+    // Tags can also carry entries that never become a PROsyst entry of their own (e.g.
+    // covariance_to_spline_uniform sources); only the registered members are selectable.
+    names.erase(std::remove_if(names.begin(), names.end(), [&](const std::string &n) { return !registered(n); }), names.end());
+    return names;
+}
+
+void include_or_exclude_systs(std::vector<PROsyst> &variable_systs, const PROconfig &config, const PROpt &options) {
+    const bool include = !options.syst_list.empty();
+    if(!include && options.systs_excluded.empty()) return;
+
+    const char *flag = include ? "--syst-list" : "--exclude-systs";
+    const std::vector<std::string> names = resolve_syst_names(include ? options.syst_list : options.systs_excluded,
+                                                              config, variable_systs, flag);
+    log<LOG_INFO>(L"%1% || %2% resolves to %3% systematic(s): %4%") % __func__ % flag % names.size() % names;
+    if(include && config.m_use_mcstats && std::find(names.begin(), names.end(), config.m_mcstat_systname) == names.end()) {
+        log<LOG_INFO>(L"%1% || --syst-list does not include the MC-stat covariance '%2%'; fitting without MC statistical uncertainty.")
+            % __func__ % config.m_mcstat_systname.c_str();
+    }
+
+    for(size_t io = 0; io < variable_systs.size(); ++io) {
+        // variable_systs are built for plot=="true" OR i_prime — the fitting variable must get
+        // the selection even when it is not plotted, or the metric silently fits the full set.
+        if(!config.m_channel_variable_plot_bool.at(io) && io != config.i_prime) continue;
+        PROsyst &syst = variable_systs[io];
+        if(include) {
+            // Some entries exist only in their own binning's PROsyst (external_covariance,
+            // _resid_cov); subset() needs every name to exist.
+            std::vector<std::string> here;
+            for(const std::string &n: names) if(syst.HasSyst(n)) here.push_back(n);
+            syst = syst.subset(here);
+        } else {
+            syst = syst.excluding(names);
+        }
+        log<LOG_INFO>(L"%1% || Variable %2%: %3% spline(s) and %4% covariance(s) after %5%.")
+            % __func__ % io % syst.GetNSplines() % syst.GetNCovar() % flag;
+    }
+}
+
+Eigen::VectorXf remap_spline_params(const Eigen::VectorXf &params, size_t nphys,
+                                    const std::vector<std::string> &old_names, const std::vector<std::string> &new_names) {
+    Eigen::VectorXf out = Eigen::VectorXf::Zero(nphys + new_names.size());
+    out.head(nphys) = params.head(nphys);
+    for(size_t i = 0; i < new_names.size(); ++i) {
+        auto it = std::find(old_names.begin(), old_names.end(), new_names[i]);
+        if(it != old_names.end()) out(nphys + i) = params(nphys + std::distance(old_names.begin(), it));
+    }
+    return out;
 }
 
 void empty_bin_check(const PROconfig &config, const PROpt &options, const PROpeller &prop, const PROmodel &model, const PROsyst &systs, const PROdata data, bool use_real_data) {

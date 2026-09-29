@@ -90,6 +90,7 @@ enum struct GlobalFitOptions {
     PostFitErrorBand    = 1 << 5,
     BinWidthScaled      = 1 << 6,
     LegacyPostFitErrorBand = 1 << 7, ///< Post-fit band without the data-constrained posterior pull of the covariance systematics: posterior spline throws around the best fit + PRIOR covariance throws (pre-v3.0 behavior; --legacy-postfit-error).
+    AreaNormalized      = 1 << 8, ///< Error bands carry per-channel shape uncertainty only (--area-norm / --shapeonly).
 };
 inline GlobalFitOptions operator|(GlobalFitOptions lhs, GlobalFitOptions rhs) { 
     return static_cast<GlobalFitOptions>(static_cast<int>(lhs) | static_cast<int>(rhs)); 
@@ -113,11 +114,13 @@ std::vector<FixedSeed> buildBkgOnlyFixedSeeds(const PROmodel &model, const Eigen
 
 // DetVar helpers (defined in PROfit_process.cxx, also used by run_plot).
 std::string DetVarKey(const PROconfig& config, size_t file_index);
+std::string FormatKnobVal(double kv);
 std::vector<int> DetVarMatchingKey(const PROpeller& prop, size_t i_event);
 bool BuildDetVarMatchedSpecs(
-        const PROpeller& cvprop, const std::map<int, const PROpeller*> &varprop,
+        const PROpeller& cvprop, const std::map<double, const PROpeller*> &varprop,
         int var_idx, int spec_size,
-        PROspec& out_cv, std::map<int, PROspec> &out_var);
+        PROspec& out_cv, std::map<double, PROspec> &out_var,
+        bool fill_errors = false);
 
 struct PROpt {
     std::string xmlname = "NULL.xml"; 
@@ -149,6 +152,7 @@ struct PROpt {
     bool with_splines = false, binwidth_scale = false, area_normalized = false, data_mc_ratio = false;
     bool legend_counts = false;
     bool with_covar = false, no_frac_syst = false;
+    bool with_subcovar = false;
     int band_throws = 2500;
     std::map<std::string, float> fake_data_osc_params;
     std::map<std::string, float> cv_osc_params;
@@ -256,6 +260,9 @@ Eigen::VectorXf make_fakedata_params(Eigen::VectorXf &fake_data_osc_param_vector
 void make_param_vectors(Eigen::VectorXf &fakeDataParams, Eigen::VectorXf &CVParams, const PROconfig &config, const PROpt &options, const PROmodel &model, const PROsyst &systs, const Eigen::VectorXf &fake_data_osc_param_vector);
 void resolve_fit_presets(PROpt &options, const PROconfig &config, const PROmodel &model);
 void include_or_exclude_systs(std::vector<PROsyst> &variable_systs, const PROconfig &config, const PROpt &options);
+// Re-lay the spline part of a [physics, splines] vector from old_names' order onto new_names'
+// by name; splines absent from old_names get 0.
+Eigen::VectorXf remap_spline_params(const Eigen::VectorXf &params, size_t nphys, const std::vector<std::string> &old_names, const std::vector<std::string> &new_names);
 void empty_bin_check(const PROconfig &config, const PROpt &options, const PROpeller &prop, const PROmodel &model, const PROsyst &systs, const PROdata data, bool use_real_data);
 void set_global_bounds(Eigen::VectorXf &lb, Eigen::VectorXf &ub, std::vector<int> &fixed, const PROconfig &config, const PROpt &options, PROmodel &model, PROsyst &systs, const Eigen::VectorXf &CVParams);
 void print_global_fit_results(float global_fit_chi2, const Eigen::VectorXf &global_fit_result, const PROconfig &config, const PROpt &options, const PROmetric &metric);

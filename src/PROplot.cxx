@@ -17,6 +17,31 @@
 
 namespace PROfit{
 
+    std::vector<int> colors = {
+        kAzure+1,      // Light blue
+        kRed+1,        // Bright red
+        kGreen+3,      // Medium green
+        kOrange+7,      // Deep orange
+        kBlue+2,        // Darker blue
+        kViolet+2,      // Purple/violet
+        kGray+1,         // Light gray
+        kYellow+2,      // Golden yellow
+        kTeal+3,        // Teal
+        kPink+2,        // Pink
+        kMagenta+2,     // Magenta
+        kSpring+5,      // Blue-green
+        kMagenta - 3,   // Rich purple-violet
+        kCyan + 2,      // Vivid sky blue
+        kOrange - 3,    // Deep amber / warm yellow
+        kGreen - 2,     // Forest / dark green
+        kPink - 3,      // Soft rose
+        kYellow - 7,    // Mustard / olive-gold
+        kViolet - 6,    // Deep indigo
+        kSpring - 1,    // Bright lime green
+        kRed - 7,       // Crimson / maroon
+        kAzure - 4      // Slate blue
+    };
+
     void set_matrix_palette() {
         //Covariance colors, move this eslewher
         const Int_t NCont = 255;
@@ -158,16 +183,21 @@ namespace PROfit{
         std::unique_ptr<TH2D> cor_hist = std::make_unique<TH2D>("cor", "Correlation Matrix;Bin # ;Bin #", config.m_num_variable_bins_total[config.i_prime], 0, config.m_num_variable_bins_total[config.i_prime], config.m_num_variable_bins_total[config.i_prime], 0, config.m_num_variable_bins_total[config.i_prime]);
         std::unique_ptr<TH2D> collapsed_cor_hist = std::make_unique<TH2D>("ccor", "Collapsed Correlation Matrix;Bin # ;Bin #", config.m_num_variable_bins_total_collapsed[config.i_prime], 0, config.m_num_variable_bins_total_collapsed[config.i_prime], config.m_num_variable_bins_total_collapsed[config.i_prime], 0, config.m_num_variable_bins_total_collapsed[config.i_prime]);
 
+         auto safe_corr = [](const Eigen::MatrixXf &m, size_t i, size_t j) -> float {
+             const float denom = std::sqrt(m(i,i) * m(j,j));
+             return denom > 0 ? m(i,j) / denom : 0.0f;
+         };
+
         for(size_t i = 0; i < config.m_num_variable_bins_total[config.i_prime]; ++i)
             for(size_t j = 0; j < config.m_num_variable_bins_total[config.i_prime]; ++j){
                 cov_hist->SetBinContent(i+1,j+1,fractional_cov(i,j));
-                cor_hist->SetBinContent(i+1,j+1,fractional_cov(i,j)/(sqrt(fractional_cov(i,i))*sqrt(fractional_cov(j,j))));
+                cor_hist->SetBinContent(i+1,j+1,safe_corr(fractional_cov,i,j));
             }
 
         for(size_t i = 0; i < config.m_num_variable_bins_total_collapsed[config.i_prime]; ++i)
             for(size_t j = 0; j < config.m_num_variable_bins_total_collapsed[config.i_prime]; ++j){
                 collapsed_cov_hist->SetBinContent(i+1,j+1,collapsed_frac_cov(i,j));
-                collapsed_cor_hist->SetBinContent(i+1,j+1,collapsed_frac_cov(i,j)/(sqrt(collapsed_frac_cov(i,i))*sqrt(collapsed_frac_cov(j,j))));
+                collapsed_cor_hist->SetBinContent(i+1,j+1,safe_corr(collapsed_frac_cov,i,j));
             }
 
         float cov_max_abs = std::max(cov_hist->GetMaximum(), std::abs(cov_hist->GetMinimum()));
@@ -186,14 +216,17 @@ namespace PROfit{
         ret["total_cor"] = std::move(cor_hist);
         ret["collapsed_total_cor"] = std::move(collapsed_cor_hist);
 
+        const size_t n_full = config.m_num_variable_bins_total[config.i_prime];
+        const size_t n_coll = config.m_num_variable_bins_total_collapsed[config.i_prime];
+
         for(const auto &name: syst.covar_names) {
             const Eigen::MatrixXf &covar = syst.GrabMatrix(name);
             const Eigen::MatrixXf &corr = syst.GrabCorrMatrix(name);
 
-            std::unique_ptr<TH2D> cov_h = std::make_unique<TH2D>(("cov"+name).c_str(), (name+" Fractional Covariance;Bin # ;Bin #").c_str(), config.m_num_variable_bins_total[config.i_prime], 0, config.m_num_variable_bins_total[config.i_prime], config.m_num_variable_bins_total[config.i_prime], 0, config.m_num_variable_bins_total[config.i_prime]);
-            std::unique_ptr<TH2D> corr_h = std::make_unique<TH2D>(("cor"+name).c_str(), (name+" Correlation;Bin # ;Bin #").c_str(), config.m_num_variable_bins_total[config.i_prime], 0, config.m_num_variable_bins_total[config.i_prime], config.m_num_variable_bins_total[config.i_prime], 0, config.m_num_variable_bins_total[config.i_prime]);
-            for(size_t i = 0; i < config.m_num_variable_bins_total[config.i_prime]; ++i){
-                for(size_t j = 0; j < config.m_num_variable_bins_total[config.i_prime]; ++j){
+            std::unique_ptr<TH2D> cov_h = std::make_unique<TH2D>(("cov"+name).c_str(), (name+" Fractional Covariance;Bin # ;Bin #").c_str(), n_full, 0, n_full, n_full, 0, n_full);
+            std::unique_ptr<TH2D> corr_h = std::make_unique<TH2D>(("cor"+name).c_str(), (name+" Correlation;Bin # ;Bin #").c_str(), n_full, 0, n_full, n_full, 0, n_full);
+            for(size_t i = 0; i < n_full; ++i){
+                for(size_t j = 0; j < n_full; ++j){
                     cov_h->SetBinContent(i+1,j+1,covar(i,j));
                     corr_h->SetBinContent(i+1,j+1,corr(i,j));
                 }
@@ -205,8 +238,31 @@ namespace PROfit{
             corr_h->SetMaximum(1);
             corr_h->SetMinimum(-1);
 
+            // Collapsed version, built the same way as collapsed_total_frac_cov:
+            // fractional -> absolute (full binning) -> collapse -> fractional (collapsed binning)
+            Eigen::MatrixXf syst_full_covariance = diag * covar * diag;
+            Eigen::MatrixXf syst_collapsed_full = CollapseMatrix(config, syst_full_covariance);
+            Eigen::MatrixXf syst_collapsed_frac = collapsed_cv_inv_diag * syst_collapsed_full * collapsed_cv_inv_diag;
+
+            std::unique_ptr<TH2D> ccov_h = std::make_unique<TH2D>(("ccov"+name).c_str(), (name+" Collapsed Fractional Covariance;Bin # ;Bin #").c_str(), n_coll, 0, n_coll, n_coll, 0, n_coll);
+            std::unique_ptr<TH2D> ccorr_h = std::make_unique<TH2D>(("ccor"+name).c_str(), (name+" Collapsed Correlation;Bin # ;Bin #").c_str(), n_coll, 0, n_coll, n_coll, 0, n_coll);
+            for(size_t i = 0; i < n_coll; ++i){
+                for(size_t j = 0; j < n_coll; ++j){
+                    ccov_h->SetBinContent(i+1,j+1,syst_collapsed_frac(i,j));
+                    ccorr_h->SetBinContent(i+1,j+1,safe_corr(syst_collapsed_frac,i,j));
+                }
+            }
+
+            float ccov_max_abs = std::max(ccov_h->GetMaximum(), std::abs(ccov_h->GetMinimum()));
+            ccov_h->SetMaximum(ccov_max_abs);
+            ccov_h->SetMinimum(-ccov_max_abs);
+            ccorr_h->SetMaximum(1);
+            ccorr_h->SetMinimum(-1);
+
             ret[name+"_cov"] = std::move(cov_h);
             ret[name+"_corr"] = std::move(corr_h);
+            ret["collapsed_"+name+"_cov"] = std::move(ccov_h);
+            ret["collapsed_"+name+"_corr"] = std::move(ccorr_h);
         }
 
         return ret;
@@ -252,7 +308,7 @@ namespace PROfit{
 
             return spline_graphs;
         }
-    PROerrorbar getErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const PROspec &cv_spec, const Eigen::VectorXf &cvparams, int other_index, size_t nthrows) {
+    PROerrorbar getErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const PROspec &cv_spec, const Eigen::VectorXf &cvparams, int other_index, size_t nthrows, bool shape_norm) {
 
         Eigen::VectorXf cv = CollapseMatrix(config, cv_spec.Spec(), other_index);
 
@@ -288,6 +344,7 @@ namespace PROfit{
         //Fills already collapsed
         for(size_t i = 0; i < nerrorsample; ++i){
             Eigen::VectorXf var = FillSystRandomThrow(config, prop, syst, model,cv_spec, cvparams, dseed(PROseed::global_rng), other_index).Spec();
+            if(shape_norm) var = var.cwiseProduct(ChannelNormFactors(config, var, cv, other_index));
             specs.push_back(var);
             delta = cv - var;
             cov += delta  * delta.transpose();
@@ -310,14 +367,20 @@ namespace PROfit{
         return ebar;
     }
 
-    PROerrorbar getCovarianceOnlyErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const Eigen::VectorXf &params, int var_index, const Eigen::VectorXf &data_spec) {
+    PROerrorbar getCovarianceOnlyErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const Eigen::VectorXf &params, int var_index, const Eigen::VectorXf &data_spec, bool shape_norm, bool shape_fit) {
         Eigen::VectorXf cv = FillSpectra(config, prop, syst, model, params, true, var_index).Spec();
+        // Shape-only fit: condition as the metric does, about the prediction rescaled onto
+        // the data, with the covariance at that scale and projected onto shape.
+        shape_fit = shape_fit && data_spec.size() == (Eigen::Index)config.m_num_variable_bins_total_collapsed[var_index];
+        if(shape_fit) cv = ShapeRescaleToData(config, cv, data_spec, var_index);
         Eigen::VectorXf cv_coll = CollapseMatrix(config, cv, var_index);
+        const Eigen::SparseMatrix<float> R = (shape_fit || shape_norm) ? ShapeProjectorCollapsed(config, cv_coll, var_index) : Eigen::SparseMatrix<float>();
 
         Eigen::MatrixXf cov;
         if(syst.GetNCovar() > 0) {
             Eigen::MatrixXf L = syst.DecomposeFractionalCovariance(config, cv);
             cov = L * L.transpose();
+            if(shape_fit) cov = Eigen::MatrixXf(R * cov * R.transpose());
         } else {
             cov = Eigen::MatrixXf::Zero(cv_coll.size(), cv_coll.size());
         }
@@ -350,11 +413,15 @@ namespace PROfit{
                     u(a) = data_spec(contrib[a]) - cv_coll(contrib[a]);
                 }
                 Eigen::LDLT<Eigen::MatrixXd> M_ldlt(M);
+                // With no free splines this equals the fit's chi^2 at params (Neyman).
+                log<LOG_INFO>(L"%1% || Data-constrained band: u^T (C+Sigma)^-1 u = %2% over %3% bins") % __func__ % u.dot(M_ldlt.solve(u)) % nb;
                 shift = (K * M_ldlt.solve(u)).cast<float>();
                 cov = (Sig_full - K * M_ldlt.solve(K.transpose())).cast<float>();
                 constrained = true;
             }
         }
+        // Area-normalised display of an absolute fit: keep only the shape part of the band.
+        if(shape_norm && !shape_fit && syst.GetNCovar() > 0) cov = Eigen::MatrixXf(R * cov * R.transpose());
 
         PROerrorbar ebar(cv_coll.size());
         ebar.constrained = constrained;
@@ -462,6 +529,25 @@ namespace PROfit{
             conv[bin] = f;
         }
         return conv;
+    }
+
+    // Small grey tag under a chi^2 label saying what that chi^2 is, top-left aligned at NDC
+    // (x, y) of the current pad: "shape-only" for a shape-only fit, "absolute #chi^{2}" when
+    // the plot is area-normalised but the chi^2 is not. Empty text = nothing drawn.
+    static const char *chiTagText(PlotOptions opt) {
+        if(bool(opt&PlotOptions::ShapeOnly)) return "shape-only";
+        if(bool(opt&PlotOptions::AreaNormalized)) return "absolute #chi^{2}";
+        return "";
+    }
+    static void drawChiTag(double x, double y, const char *text) {
+        if(!text || !*text) return;
+        TLatex tag;
+        tag.SetNDC();
+        tag.SetTextFont(42);
+        tag.SetTextSize(0.025);
+        tag.SetTextColor(kGray+1);
+        tag.SetTextAlign(13);
+        tag.DrawLatex(x, y, text);
     }
 
     Eigen::VectorXf make_1d_spec(Eigen::VectorXf input_spec, size_t nbinsx, size_t nbinsy=1, int offset = 0, int dims=1){
@@ -1207,6 +1293,12 @@ namespace PROfit{
         if(bool(opt&PlotOptions::DataMCRatio) || bool(opt&PlotOptions::DataPostfitRatio)) p2->Draw();
 
         leg->Draw("same");
+        if(!text.empty() && *chiTagText(opt)) {
+            // Under the chi^2 line: the legend's last entry (entries fill row-major).
+            const double lx1 = stack_legend ? 0.38 : 0.32, colw = ((stack_legend ? 0.89 : 0.90) - lx1) / leg->GetNColumns();
+            const int col = (leg->GetListOfPrimitives()->GetSize() - 1) % leg->GetNColumns();
+            drawChiTag(lx1 + (col + leg->GetMargin()) * colw, 0.735, chiTagText(opt));
+        }
         drawVersionWatermark(c);
         c->Print(filename.c_str());
         log<LOG_DEBUG>(L"%1% || Finishing Plotting 1D Histogram %2%") % __func__ % hist_titles.c_str();
@@ -1679,6 +1771,8 @@ namespace PROfit{
                     auto chi_label = [&](const Eigen::MatrixXf &projection) {
                         if(!chi_metric || !chi_spec || projection.rows() == 0) return std::string();
                         const float chi2 = chi_metric->getSingleChannelChi(global_channel_index, *chi_spec, other_index, projection);
+                        // Per-channel fixed-point comparison (no pull, no free-parameter accounting):
+                        // labelled nbins, not ndf. The global chi2/ndf comes from PROmetric::GetNdof().
                         return std::string("#chi^{2}/nbins = ") + chi2LabelValue(chi2) + "/" + std::to_string(projection.rows());
                     };
                     auto draw_chi_label = [&](const std::string &label) {
@@ -1691,6 +1785,7 @@ namespace PROfit{
                         text.SetTextFont(42);
                         text.SetTextSize(0.03);
                         text.DrawClone();
+                        drawChiTag(0.63, 0.905, chiTagText(opt));
                     };
                     std::string projected_x_chi_label; // We want to pass this to the 1d plotter outside the 2d plotting
                     if(config.m_channel_variable_dims[channel][other_index] == 2){
@@ -2184,13 +2279,16 @@ namespace PROfit{
 
                     std::string chi_label_text;
                     log<LOG_DEBUG>(L"%1% || projected_x_chi_label : %2%") % __func__ % projected_x_chi_label.c_str();
-                    if(config.m_channel_variable_dims[channel][other_index] == 2 && !projected_x_chi_label.empty()) {
-                        chi_label_text = projected_x_chi_label;
+                    // A single entry in `texts` is the global post-fit chi2/ndf label from
+                    // draw_fit_result (PROmetric::GetNdof); post-fit pages show ONLY that, not the
+                    // per-channel chi2/nbins projection label. Per-channel `texts` (the plot
+                    // subcommand's prefit labels) remain a fallback behind the projection label.
+                    if(texts.size() == 1) {
+                        if(TText *line = (TText*)texts.front().GetListOfLines()->First()) chi_label_text = line->GetTitle();
                     } else if(!projected_x_chi_label.empty()) {
                         chi_label_text = projected_x_chi_label;
                     } else if(texts.size()!=0) {
-                        TPaveText &box = texts.size() == 1 ? texts.front() : texts.at(global_channel_index);
-                        if(TText *line = (TText*)box.GetListOfLines()->First()) chi_label_text = line->GetTitle();
+                        if(TText *line = (TText*)texts.at(global_channel_index).GetListOfLines()->First()) chi_label_text = line->GetTitle();
                         log<LOG_DEBUG>(L"%1% || alternative chi2 text used : %2%") % __func__ % chi_label_text.c_str();
                     }
                     // should probably be switching this to a more clear boolean...
@@ -2268,21 +2366,6 @@ namespace PROfit{
     int plotPriorFractionalSystematicBreakdown(const PROconfig &config, const PROspec &spec, const PROsyst &allsplinesyst, std::string filename, int other_index) {
         //Input PROsyst needs to be the allsplinesyst for now
 
-        std::vector<int> colors = {
-            kAzure+1,      // Light blue
-            kRed+1,        // Bright red
-            kGreen+3,      // Medium green
-            kOrange+7,      // Deep orange
-            kBlue+2,        // Darker blue
-            kViolet+2,      // Purple/violet
-            kGray+1,         // Light gray
-            kYellow+2,      // Golden yellow
-            kTeal+3,        // Teal
-            kPink+2,        // Pink
-            kMagenta+2,     // Magenta
-            kSpring+5      // Blue-green
-        };
-
         std::vector<int> line_styles = {
             1,  // Solid (base style)
             1,  // Dashed
@@ -2324,6 +2407,8 @@ namespace PROfit{
         }
 
 
+        // Keep each systematic's per-bin information
+        struct SliceEntry { std::string label; int color; int style; Eigen::VectorXd var; };
 
         int nTags = used_tags.size()+1;
         int gridCols = std::ceil(std::sqrt(nTags));
@@ -2335,6 +2420,7 @@ namespace PROfit{
 
         Eigen::MatrixXf diag = spec.Spec().array().matrix().asDiagonal();
         Eigen::MatrixXf collapsed_diag = CollapseMatrix(config, diag);
+        const Eigen::VectorXf collapsed_cv = collapsed_diag.diagonal();
 
         // Diagnostic: Check collapsed_diag for issues
         bool has_nan = collapsed_diag.array().isNaN().any();
@@ -2420,9 +2506,14 @@ namespace PROfit{
                     log<LOG_INFO>(L"%1% || Channel %2%: gridCols=%3%, gridRows=%4%, nTags=%5%")
                         % __func__ % global_channel_index % gridCols % gridRows % nTags;
 
+                    // For 2D bins, we keep each (tag, systematic) per 2D bin to draw later
+                    const bool is_2d = config.m_channel_variable_dims[channel][other_index] == 2;
+                    std::vector<std::pair<std::string, std::vector<SliceEntry>>> slice_groups;
+
                     std::vector<TH1F*> vsums;
                     std::vector<std::string> vnames;
                     for (const auto &[tag, vec] : used_tags) {
+                        if(is_2d) slice_groups.emplace_back(tag, std::vector<SliceEntry>{});
 
                         c.cd(padIndex++);
                         if (!gPad) {
@@ -2508,6 +2599,14 @@ namespace PROfit{
 
                             const std::string &plotname = config.m_mcgen_variation_plotname_map.at(systname);
                             leg->AddEntry(h, plotname.c_str(), "l");
+                            if(is_2d) {
+                                Eigen::VectorXd fv = Eigen::VectorXd::Zero(nbins);
+                                for(size_t b = 0; b < nbins; ++b) {
+                                    const double cv = collapsed_cv(binstart + b);
+                                    if(cv > 0) fv(b) = std::max(0.0f, channel_cov(b, b)) / (cv*cv);
+                                }
+                                slice_groups.back().second.push_back({plotname, colors[color_idx], line_styles[style_idx], fv});
+                            }
                             h->SetLineColor(colors[color_idx]);
                             h->SetLineStyle(line_styles[style_idx]);
                             hvec.push_back(h);
@@ -2598,8 +2697,124 @@ namespace PROfit{
                     leg->Draw();
 
                     drawVersionWatermark(&c, WatermarkPos::RightEdge);
+                    if(allsplinesyst.ShapeOnly()) drawShapeOnlyNote(&c, WatermarkPos::RightEdge);
                     c.Update();
                     c.Print(filename.c_str());
+
+                    // For 2D bins, show per-bin uncertainties for each tag
+                    if(is_2d) {
+                        const auto &bins2d = config.m_channel_variable_bins[channel][other_index];
+                        const size_t nx = bins2d.NBinsAlong(0), ny = bins2d.NBinsAlong(1);
+                        const std::vector<float> edges_x = bins2d.Edges(0), edges_y = bins2d.Edges(1);
+                        const std::string title_x = config.GetChannelAxisTitle(channel, other_index, 0);
+                        const std::string title_y = config.GetChannelAxisTitle(channel, other_index, 1);
+
+                        // Summary group
+                        std::vector<SliceEntry> summary;
+                        for(size_t t = 0; t < slice_groups.size(); ++t) {
+                            Eigen::VectorXd tv = Eigen::VectorXd::Zero(nbins);
+                            for(const auto &e : slice_groups[t].second) tv += e.var;
+                            summary.push_back({slice_groups[t].first, colors[t % colors.size()], 1, tv});
+                        }
+                        slice_groups.emplace_back("Summary", summary);
+
+                        for(size_t ig = 0; ig < slice_groups.size(); ++ig) {
+                            const std::string &gname = slice_groups[ig].first;
+                            const std::vector<SliceEntry> &entries = slice_groups[ig].second;
+                            Eigen::VectorXd gsum = Eigen::VectorXd::Zero(nbins);
+                            for(const auto &e : entries) gsum += e.var;
+                            // One y scale for every slice of the group so the slices can be compared directly.
+                            const double ymax = gsum.maxCoeff() > 0 ? 1.3*std::sqrt(gsum.maxCoeff()) : 1.0;
+
+                            // fixed_dim is the variable held fixed within each pad (1: slices in y, 0: slices in x).
+                            for(int fixed_dim : {1, 0}) {
+                                const size_t nslices = fixed_dim == 1 ? ny : nx;
+                                const size_t nalong  = fixed_dim == 1 ? nx : ny;
+                                const std::vector<float> &along_edges = fixed_dim == 1 ? edges_x : edges_y;
+                                const std::vector<float> &slice_edges = fixed_dim == 1 ? edges_y : edges_x;
+                                const std::string &along_title = fixed_dim == 1 ? title_x : title_y;
+                                const std::string &slice_title = fixed_dim == 1 ? title_y : title_x;
+                                // Collapsed channel bins are x-major with y fastest
+                                auto flat = [&](size_t islice, size_t ialong) {
+                                    return fixed_dim == 1 ? ialong*ny + islice : islice*ny + ialong;
+                                };
+
+                                // Hists/text drawn on this page; freed after the page is printed and cleared.
+                                std::vector<std::unique_ptr<TObject>> keep;
+                                c.Clear();
+                                c.cd();
+                                TPad *head = new TPad("frac_sl_head", "", 0, 0.95, 1, 1);
+                                TPad *body = new TPad("frac_sl_body", "", 0, 0, 1, 0.95);
+                                // Pads are owned by the canvas (kCanDelete), freed by c.Clear().
+                                head->SetBit(kCanDelete); body->SetBit(kCanDelete);
+                                head->Draw(); body->Draw();
+                                head->cd();
+                                const std::string page_title = name + " | " + gname + " | slices in " + slice_title;
+                                TLatex *lat = new TLatex(0.01, 0.5, page_title.c_str());
+                                keep.emplace_back(lat);
+                                lat->SetNDC(); lat->SetTextAlign(12); lat->SetTextSize(0.35);
+                                lat->Draw();
+
+                                // One cell per slice plus one for the legend.
+                                const size_t ncells = nslices + 1;
+                                const int ncols = (int)std::ceil(std::sqrt((double)ncells));
+                                const int nrows = (int)std::ceil(ncells / (double)ncols);
+                                body->Divide(ncols, nrows);
+                                const std::string sfx0 = "_" + std::to_string(global_channel_index) + "_" + std::to_string(ig) + "_" + std::to_string(fixed_dim);
+                                TH1F *leg_sum = nullptr;
+                                std::vector<TH1F*> leg_hists;
+                                for(size_t is = 0; is < nslices; ++is) {
+                                    body->cd(is + 1);
+                                    gPad->SetLeftMargin(0.15); gPad->SetBottomMargin(0.14);
+                                    const std::string sfx = sfx0 + "_" + std::to_string(is);
+                                    std::ostringstream st;
+                                    st << slice_title << " in [" << slice_edges[is] << ", " << slice_edges[is+1] << ")";
+                                    TH1F *hs = new TH1F(("frac_sl_sum"+sfx).c_str(), (st.str() + ";" + along_title + ";Fractional Uncertainty").c_str(), nalong, along_edges.data());
+                                    hs->SetDirectory(nullptr);
+                                    keep.emplace_back(hs);
+                                    for(size_t ia = 0; ia < nalong; ++ia)
+                                        hs->SetBinContent(ia+1, std::sqrt(gsum(flat(is, ia))));
+                                    hs->SetStats(0);
+                                    hs->SetLineColor(kBlack); hs->SetLineWidth(2);
+                                    hs->SetMinimum(0);
+                                    hs->SetMaximum(ymax);
+                                    hs->GetXaxis()->SetLabelSize(0.06); hs->GetXaxis()->SetTitleSize(0.06);
+                                    hs->GetXaxis()->SetNdivisions(505);
+                                    hs->GetYaxis()->SetLabelSize(0.06); hs->GetYaxis()->SetTitleSize(0.06);
+                                    hs->GetYaxis()->SetTitleOffset(1.2); hs->GetYaxis()->SetNdivisions(505);
+                                    hs->Draw("HIST");
+                                    if(is == 0) leg_sum = hs;
+                                    for(size_t ie = 0; ie < entries.size(); ++ie) {
+                                        const SliceEntry &e = entries[ie];
+                                        TH1F *h = new TH1F(("frac_sl_e"+sfx+"_"+std::to_string(ie)).c_str(), "", nalong, along_edges.data());
+                                        h->SetDirectory(nullptr);
+                                        keep.emplace_back(h);
+                                        for(size_t ia = 0; ia < nalong; ++ia)
+                                            h->SetBinContent(ia+1, std::sqrt(e.var(flat(is, ia))));
+                                        h->SetLineColor(e.color); h->SetLineStyle(e.style); h->SetLineWidth(1);
+                                        h->Draw("HIST SAME");
+                                        if(is == 0) leg_hists.push_back(h);
+                                    }
+                                }
+                                body->cd(nslices + 1);
+                                TLegend *leg = new TLegend(0.02, 0.02, 0.92, 0.98);
+                                keep.emplace_back(leg);
+                                leg->SetFillStyle(0); leg->SetLineWidth(0);
+                                leg->SetNColumns(entries.size() > 8 ? 2 : 1);
+                                leg->SetTextSize(entries.size() > 8 ? 0.06 : 0.08);
+                                leg->AddEntry(leg_sum, "Sum", "l");
+                                for(size_t ie = 0; ie < entries.size(); ++ie)
+                                    leg->AddEntry(leg_hists[ie], entries[ie].label.c_str(), "l");
+                                leg->Draw();
+
+                                drawVersionWatermark(&c, WatermarkPos::RightEdge);
+                                if(allsplinesyst.ShapeOnly()) drawShapeOnlyNote(&c, WatermarkPos::RightEdge);
+                                c.Update();
+                                c.Print(filename.c_str());
+                                c.Clear();
+                            }
+                        }
+                    }
                     global_channel_index++;
                 }
             }
@@ -2611,21 +2826,6 @@ namespace PROfit{
 
     int plotPriorFractionalSystematicRatios(const PROconfig &config, const PROspec &spec, const PROsyst &allsplinesyst, std::string filename, int other_index) {
         //Input PROsyst needs to be the allsplinesyst for now
-
-        std::vector<int> colors = {
-            kAzure+1,      // Light blue
-            kRed+1,        // Bright red
-            kGreen+3,      // Medium green
-            kOrange+7,      // Deep orange
-            kBlue+2,        // Darker blue
-            kViolet+2,      // Purple/violet
-            kGray+1,         // Light gray
-            kYellow+2,      // Golden yellow
-            kTeal+3,        // Teal
-            kPink+2,        // Pink
-            kMagenta+2,     // Magenta
-            kSpring+5      // Blue-green
-        };
 
         std::vector<int> line_styles = {
             1,  // Solid (base style)
@@ -2934,6 +3134,7 @@ namespace PROfit{
                         leg->Draw();
 
                         drawVersionWatermark(&c, WatermarkPos::RightEdge);
+                        if(allsplinesyst.ShapeOnly()) drawShapeOnlyNote(&c, WatermarkPos::RightEdge);
                         c.Update();
                         c.Print(filename.c_str());
                         global_channel_index++;
@@ -2956,11 +3157,7 @@ int plotPriorFractionalSystematicChannelRatios(const PROconfig &config, const PR
                 % __func__ % config.m_num_channels;
             return 1;
         }
-
-        std::vector<int> colors = {
-            kAzure+1, kRed+1, kGreen+3, kOrange+7, kBlue+2, kViolet+2,
-            kGray+1, kYellow+2, kTeal+3, kPink+2, kMagenta+2, kSpring+5
-        };
+  
         std::vector<int> line_styles = {1, 1};
 
         std::map<std::string,std::vector<std::string>> used_tags;
@@ -3154,6 +3351,7 @@ int plotPriorFractionalSystematicChannelRatios(const PROconfig &config, const PR
             leg->Draw();
 
             drawVersionWatermark(&c, WatermarkPos::RightEdge);
+            if(allsplinesyst.ShapeOnly()) drawShapeOnlyNote(&c, WatermarkPos::RightEdge);
             c.Update();
             c.Print(filename.c_str());
         }}}}
@@ -3568,7 +3766,7 @@ int plotPriorFractionalSystematicChannelRatios(const PROconfig &config, const PR
         delete c;
     }
 
-    int plotCovariancePosteriorPulls(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const Eigen::VectorXf &best_fit, const Eigen::VectorXf &data_spec, const std::string &filename, int var_index, std::map<std::string, TObject*> *drawn_objs) {
+    int plotCovariancePosteriorPulls(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const Eigen::VectorXf &best_fit, const Eigen::VectorXf &data_spec, const std::string &filename, int var_index, std::map<std::string, TObject*> *drawn_objs, bool shape_fit) {
         if(syst.GetNCovar() == 0) {
             log<LOG_INFO>(L"%1% || No covariance-type systematics; skipping the covariance posterior pull plot.") % __func__;
             return 1;
@@ -3585,10 +3783,13 @@ int plotPriorFractionalSystematicChannelRatios(const PROconfig &config, const PR
         // Keep this algebra in sync with the constrained block of
         // getMCMCErrorBand (PROplot.h) and getCovarianceOnlyErrorBand above.
         Eigen::VectorXf cv = FillSpectra(config, prop, syst, model, best_fit, true, var_index).Spec();
+        // Shape-only fit: same conditioning as the metric and getMCMCErrorBand.
+        if(shape_fit) cv = ShapeRescaleToData(config, cv, data_spec, var_index);
         for(int i = 0; i < cv.size(); ++i)
             if(cv(i) <= 0.0f) cv(i) = 1e-6f; // Floor zero-count / inactive subchannels
         Eigen::VectorXf cv_coll = CollapseMatrix(config, cv, var_index);
         Eigen::MatrixXf L = syst.DecomposeFractionalCovariance(config, cv);
+        if(shape_fit) L = Eigen::MatrixXf(ShapeProjectorCollapsed(config, cv_coll, var_index) * L);
 
         std::vector<int> contrib;
         std::vector<char> in_fit(nbins_coll, 0);

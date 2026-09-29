@@ -161,6 +161,14 @@ run_test t14afcbrazil --use-fake-data "${AFC[@]}" --mode brazil --n-brazil-throw
 run_test t15mcmc          --use-fake-data mcmc --nchains 1
 run_test t16scaletest     --use-fake-data scale-test -N 50 --tests fillspectra,metric
 
+# --- 7b. Systematic selection (--exclude-systs / --syst-list) -----------------
+# By name + tag (MC-stat must stay in the fit), by plotname (drops MC-stat on
+# request), a tag-based --syst-list, and a typo'd name, which must be refused.
+run_test t40exclude       --use-fake-data --poisson-throw --exclude-systs RPA_CCQE flux global
+run_test t40bexclmcstat   --use-fake-data --poisson-throw --exclude-systs "MC Stats" global
+run_test t41systlist      --use-fake-data --poisson-throw --syst-list xsec MCStat global
+expect_fail t42excltypo   --use-fake-data --exclude-systs NotASyst global
+
 # --- 8. PROjector two-stage pre-fit / projected fit ---------------------------
 run_test t17pjprefit      --use-fake-data --projector-prefit "_ND_" global
 CONSTRAINT="${TAG}_t17pjprefit_PROjector_constraint.bin"
@@ -289,6 +297,58 @@ else
     note "FAIL  t26jordsame  (global fit differs from t24aptglobal)"
     FAIL=$((FAIL+1))
 fi
+# (d) Escaped characters in a DetVar-inherited branch: tinyxml2 decodes &lt;/&amp; on
+#     parse, and the DetVar child XML used to be written back unescaped, so a '<' in a
+#     <variable> broke the child parse. Both cuts are no-ops (category is an integer,
+#     random_value lies in [0,1)).
+sed -e '0,/5\*mcweight\*(category == 0)/s//5*mcweight*(category \&gt; -1 \&amp;\&amp; category \&lt; 1)/' \
+    -e '0,/<variable>reco_visible_energy<\/variable>/s//<variable>reco_visible_energy*(random_value \&lt; 2 \&amp;\&amp; random_value \&gt; -1)<\/variable>/' \
+    local_applyto_detvar.xml > local_applyto_detvar_esc.xml
+COMMON=(-x local_applyto_detvar_esc.xml -t "${TAG}aptesc" -n 1 -v 2 --seed 405 --preset fast)
+run_test t26kescprocess process
+# (e) One DetVar name in several <DetVarSection>s is ONE systematic: each section gives the
+#     response in its own subchannels, and where sections overlap their responses average,
+#     weighted by each section's POT-normalised CV. Section A (event-matched, all ND, same
+#     file: ratio 1, CV at 5e20 POT = weight 2), B (FD, ratio 4) and C (ND numu only,
+#     ratio 4, weight 1) give ND nue 1, ND numu (2*1+1*4)/3 = 2, FD 4. This used to build
+#     three same-named parameters, each from the last section's variation file.
+dvs_section() {  # <ND|FD> <cv pot> <var pot> <knobval> <event-matched 0|1> <subchannel>...
+    local det=$1 cvpot=$2 varpot=$3 knob=$4 match=$5; shift 5
+    printf '  <DetVarSection treename="events/selected" scale="1.0"%s>\n' "$([ "$match" = 1 ] && echo ' cv_variation_matching_vars="Run,Subrun,Evt"')"
+    printf '    <cv filename="%s/fake_sbn_mc_%s.root" pot="%s"/>\n' "$MCDIR" "$det" "$cvpot"
+    printf '    <variation name="DetVarShared" filename="%s/fake_sbn_mc_%s.root" pot="%s" knobval="%s"/>\n' "$MCDIR" "$det" "$varpot" "$knob"
+    printf '    <subchannel>%s</subchannel>\n' "$@"
+    printf '  </DetVarSection>\n'
+}
+dvs_xml() {  # <out.xml> <knobval of the FD section>
+    local nd="nu_ND_nue_intrinsic nu_ND_nue_background nu_ND_nue_fullosc nu_ND_numu_signal nu_ND_numu_background"
+    local blk
+    blk="<DetVarFiles>
+$(dvs_section ND 5e+20 2.5e+20 +1 1 $nd)
+$(dvs_section FD 1e+21 2.5e+20 "$2" 0 ${nd//_ND_/_FD_})
+$(dvs_section ND 1e+21 2.5e+20 +1 0 nu_ND_numu_signal nu_ND_numu_background)
+</DetVarFiles>"
+    awk -v blk="$blk" '/<variation_list>/ && !dv { print blk; dv=1 } {print}
+      /FiducialVol_FD/ && !sy { print "    <allowlist type=\"spline\" name=\"DetVarShared\" plotname=\"DetVarShared\" tag=\"det\"/>"; sy=1 }' \
+      local_applyto.xml > "$1"
+}
+dvs_xml local_detvar_shared.xml +1
+dvs_xml local_detvar_shared_knobs.xml -1
+COMMON=(-x local_detvar_shared.xml -t "${TAG}dvs" -n 1 -v 2 --seed 405 --preset fast)
+run_test t26ldvsprocess process
+run_test t26mdvsplot    --use-fake-data plot --with-splines
+if [ -n "$ROOTEXE" ]; then
+    if "$ROOTEXE" -l -b -q "$REPO/tests/check_spline_response.C(\"${TAG}dvs_t26mdvsplot_PROplot.root\",\"DetVarShared;0-48;1,DetVarShared;64-132;2,DetVarShared;166-214;4,DetVarShared;230-298;4\")" > logs/t26ndvsresp.log 2>&1; then
+        note "PASS  t26ndvsresp  (shared DetVar name: per-section responses, CV-weighted overlap)"
+        PASS=$((PASS+1))
+    else
+        note "FAIL  t26ndvsresp -- see logs/t26ndvsresp.log"
+        FAIL=$((FAIL+1))
+    fi
+fi
+# ...and a shared name must carry the same knob values in every section.
+COMMON=(-x local_detvar_shared_knobs.xml -t "${TAG}dvsk" -n 1 -v 2 --seed 405 --preset fast)
+expect_fail t26odvsknobs process
 COMMON=("${SAVED_COMMON[@]}")
 
 # --- 10. regex wildcards (patterns are unanchored ECMAScript regexes) ---------
@@ -308,6 +368,137 @@ expect_fail t29badregex   process
 sed 's#>nu_ND:0.01<#>^nomatch$:0.01<#' local_test.xml > local_regex_none.xml
 COMMON=(-x local_regex_none.xml -t "${TAG}rgxnone" -n 1 -v 2 --seed 405 --preset fast)
 expect_fail t30nomatch    process
+COMMON=("${SAVED_COMMON[@]}")
+
+# --- 11. LBL 3nu models (matter + vacuum) -------------------------------------
+# Matter needs per-event L and E <parameter>s, so its XML replaces the L/E
+# variable with a true-baseline one (hash changes -> own tag + process). The
+# L/E and E binnings are cut down hard: the model grid is n_L x n_E GLOBAL bins
+# x 10 components x every variable's reco bins, which OOMs at the base 200x20.
+# Vacuum's single signed L/E swaps only the model block (not hashed) and reuses
+# the t00 caches. Binaries predating the vacuum tag fail t31c by design.
+sed -e 's|<bins unit="True L/E \[km/GeV\]" min="0" max="2.5" nbins="200" plot="false"/>|<bins unit="True Baseline [km]" min="0" max="1" nbins="4" plot="false"/>|' \
+    -e 's|<bins unit="True Neutrino Energy \[GeV\]" min="0" max="3" nbins="20" />|<bins unit="True Neutrino Energy [GeV]" min="0" max="3" nbins="5" />|' \
+    -e 's|<variable>true_baseline/(1000\*true_neutrino_energy)</variable>|<variable>true_baseline/1000</variable>|' \
+    -e 's|<model tag="nueapp">|<model tag="LBL_3nu-matter_angles">|' \
+    -e 's|<parameter name="L/E" variable_index="1"/>|<parameter name="L" variable_index="1"/><parameter name="E" variable_index="2"/>|' \
+    local_test.xml > local_lbl_matter.xml
+sed 's|tag="LBL_3nu-matter_angles"|tag="LBL_3nu-matter_angles" density="3" electron_fraction="0.5" n_newton="0"|' local_lbl_matter.xml > local_lbl_explicit.xml
+sed 's|<model tag="nueapp">|<model tag="LBL_3nu-vacuum_angles">|' local_test.xml > local_lbl_vacuum.xml
+sed -e 's|<model tag="nueapp">|<model tag="LBL_3nu-matter_angles" baseline="1300">|' \
+    -e 's|<parameter name="L/E" variable_index="1"/>|<parameter name="E" variable_index="2"/>|' \
+    local_test.xml > local_lbl_eonly.xml
+sed 's|<model tag="nueapp">|<model tag="nueapp" density="3">|'    local_test.xml > local_lbl_sblopt.xml
+COMMON=(-x local_lbl_matter.xml -t "${TAG}lbl" -n 1 -v 2 --seed 405 --preset fast)
+run_test t31lblprocess process
+run_test t31almatter   --use-fake-data global
+COMMON=(-x local_lbl_explicit.xml -t "${TAG}lbl" -n 1 -v 2 --seed 405 --preset fast)
+run_test t31blexplicit --use-fake-data global
+# Explicit legacy-default attributes must be bitwise identical to no attributes.
+if cmp -s "${TAG}lbl_t31almatter_global_fit.txt" "${TAG}lbl_t31blexplicit_global_fit.txt"; then
+    note "PASS  t31dlbldefault  (explicit default attributes bitwise-identical)"
+    PASS=$((PASS+1))
+else
+    note "FAIL  t31dlbldefault  (explicit LBL defaults changed the fit)"
+    FAIL=$((FAIL+1))
+fi
+COMMON=(-x local_lbl_vacuum.xml -t "$TAG" -n 1 -v 2 --seed 405 --preset fast)
+run_test t31clvacuum   --use-fake-data global
+# E-only + baseline= (fixed-baseline mode, 1D grid; also reuses the t00 caches).
+COMMON=(-x local_lbl_eonly.xml -t "$TAG" -n 1 -v 2 --seed 405 --preset fast)
+run_test t31eleonly    --use-fake-data global
+# Model options on a non-LBL tag must be refused loudly.
+COMMON=(-x local_lbl_sblopt.xml -t "$TAG" -n 1 -v 2 --seed 405 --preset fast)
+expect_fail t32lbadopt  --use-fake-data global
+COMMON=("${SAVED_COMMON[@]}")
+
+# --- 12. template model: shared subchannels= parameter + default= -------------
+# The <model> block is not hashed, so every variant reuses the t00 caches. One
+# subchannels= regex drives several subchannels with a single scale (the use
+# case: one signal strength over nu+nubar); here "mu" floats the ND and FD nue
+# fullosc templates together, against the legacy form (one exact-name parameter
+# per subchannel). With EVERY parameter pinned (--fix at --inject-cv /
+# --inject-systs-cv) a global fit is one chi2 evaluation, and the two forms at
+# the same scale are the same prediction, so their chi2 must agree; unpinned,
+# the shared fit must recover the injected mu. Binaries predating subchannels=
+# fail t33*.
+tmpl_xml() {  # <out.xml> <model tag> <parameter element>...
+    local out=$1 tag=$2; shift 2
+    awk -v tag="$tag" -v p="$(printf '    %s\n' "$@")" '
+        /<model tag="nueapp">/ { print "<model tag=\"" tag "\">"; print p; skip=1; next }
+        skip { if (/<\/model>/) { print; skip=0 } next }
+        { print }' local_test.xml > "$out"
+}
+TSEP=('<parameter name="nu_ND_nue_fullosc" min="0" max="1"/>' '<parameter name="nu_FD_nue_fullosc" min="0" max="1"/>')
+TSH='<parameter name="mu" subchannels="^nu_(ND|FD)_nue_fullosc$" min="0" max="1" default="0"/>'
+tmpl_xml local_tmpl_sep.xml      template "${TSEP[@]}"
+tmpl_xml local_tmpl_shared.xml   template "$TSH"
+tmpl_xml local_tmpl_grad.xml     template '<parameter name="mu" subchannels="^nu_(ND|FD)_nue_fullosc$" min="0.045" max="0.055" default="0.05"/>'
+tmpl_xml local_tmpl_none.xml     template '<parameter name="mu" subchannels="^nu_(ND|FD)_nue_nomatch$" min="0" max="1"/>'
+tmpl_xml local_tmpl_twice.xml    template "$TSH" "${TSEP[0]}"
+tmpl_xml local_tmpl_baddef.xml   template '<parameter name="mu" subchannels="fullosc" min="0" max="1" default="2"/>'
+tmpl_xml local_tmpl_nontmpl.xml  nueapp   '<parameter name="L/E" variable_index="1" subchannels="fullosc"/>'
+
+# global_chi2 <test name>: the INFO-level best-fit chi2 from the test's file log.
+global_chi2() { sed -n 's/.*Global Best Fit chi^2: *\([-+0-9.eE]*\).*/\1/p' "logs/$1.full.log" | tail -n 1; }
+tmpl_equal() {  # <check name> <test A> <test B>
+    local a b; a=$(global_chi2 "$2"); b=$(global_chi2 "$3")
+    if [ -n "$a" ] && [ -n "$b" ] && awk -v a="$a" -v b="$b" 'BEGIN { d=a-b; if (d<0) d=-d; m=(a<0?-a:a); exit !(d <= 1e-5*(m>1?m:1)) }'; then
+        note "PASS  $1  (shared vs separate, all pinned, chi2: $a vs $b)"
+        PASS=$((PASS+1))
+    else
+        note "FAIL  $1  (shared vs separate pinned chi2 differ: '$a' vs '$b')"
+        FAIL=$((FAIL+1))
+    fi
+}
+SEPNAMES=(nu_ND_nue_fullosc nu_FD_nue_fullosc)
+SPLINES=(CrossSection1 CrossSection2 CrossSection3 CrossSection4 DetSys1 DetSys2 DetSys3
+         Flux1 Flux2 Flux3 FiducialVol_FD FluxNorm_FD FiducialVol_ND FluxNorm_ND)
+SPLINE_CV=(--inject-systs-cv CrossSection1 0.7 CrossSection2 -1.1 DetSys1 0.4 Flux2 -0.3 FluxNorm_ND 0.9)
+COMMON=(-x local_tmpl_sep.xml -t "$TAG" -n 1 -v 2 --seed 405 --preset fast)
+run_test t33atmplsep02    -l logs/t33atmplsep02.full.log -w 3 --use-fake-data --fix "${SEPNAMES[@]}" "${SPLINES[@]}" "${SPLINE_CV[@]}" \
+    -i nu_ND_nue_fullosc 0.05 nu_FD_nue_fullosc 0.05 --inject-cv nu_ND_nue_fullosc 0.02 nu_FD_nue_fullosc 0.02 global
+run_test t33ctmplsep08    -l logs/t33ctmplsep08.full.log -w 3 --use-fake-data --fix "${SEPNAMES[@]}" "${SPLINES[@]}" "${SPLINE_CV[@]}" \
+    -i nu_ND_nue_fullosc 0.05 nu_FD_nue_fullosc 0.05 --inject-cv nu_ND_nue_fullosc 0.8 nu_FD_nue_fullosc 0.8 global
+COMMON=(-x local_tmpl_shared.xml -t "$TAG" -n 1 -v 2 --seed 405 --preset fast)
+run_test t33btmplshared02 -l logs/t33btmplshared02.full.log -w 3 --use-fake-data --fix mu "${SPLINES[@]}" "${SPLINE_CV[@]}" \
+    -i mu 0.05 --inject-cv mu 0.02 global
+run_test t33dtmplshared08 -l logs/t33dtmplshared08.full.log -w 3 --use-fake-data --fix mu "${SPLINES[@]}" "${SPLINE_CV[@]}" \
+    -i mu 0.05 --inject-cv mu 0.8 global
+tmpl_equal t33etmplequal02 t33atmplsep02 t33btmplshared02
+tmpl_equal t33ftmplequal08 t33ctmplsep08 t33dtmplshared08
+run_test t33gtmplrecover  --use-fake-data -i mu 0.05 global
+mu_fit=$(sed -n 's/^mu : *//p' "${TAG}_t33gtmplrecover_global_fit.txt" 2>/dev/null)
+if [ -n "$mu_fit" ] && awk -v m="$mu_fit" 'BEGIN { d=m-0.05; if (d<0) d=-d; exit !(d < 1e-3) }'; then
+    note "PASS  t33htmplmu  (shared mu recovered: $mu_fit, injected 0.05)"
+    PASS=$((PASS+1))
+else
+    note "FAIL  t33htmplmu  (shared mu not recovered: '$mu_fit', injected 0.05)"
+    FAIL=$((FAIL+1))
+fi
+# gradcheck draws mu uniformly in [min,max] around an Asimov at default=: keep the box
+# tight, since the fullosc template is so large that a wide box puts every point at a
+# chi2 where the float central-FD reference itself is noise.
+COMMON=(-x local_tmpl_grad.xml -t "$TAG" -n 1 -v 2 --seed 405 --preset fast)
+run_test t33itmplgrad     -l logs/t33itmplgrad.full.log -w 3 --use-fake-data scale-test --tests gradcheck -N 200
+grad_rel=$(sed -n 's/.*\[GRADCHECK\] mode=analytic .*mean_rel=\([-+0-9.eE]*\).*/\1/p' logs/t33itmplgrad.full.log | tail -n 1)
+if [ -n "$grad_rel" ] && awk -v r="$grad_rel" 'BEGIN { exit !(r < 0.2) }'; then
+    note "PASS  t33itmplgradrel  (analytic vs central-full mean_rel $grad_rel)"
+    PASS=$((PASS+1))
+else
+    note "FAIL  t33itmplgradrel  (analytic vs central-full mean_rel '$grad_rel', want < 0.2)"
+    FAIL=$((FAIL+1))
+fi
+# Refused: zero-match pattern, a subchannel claimed twice, default= outside [min,max],
+# and subchannels= on a non-template model.
+COMMON=(-x local_tmpl_none.xml    -t "$TAG" -n 1 -v 2 --seed 405 --preset fast)
+expect_fail t33jtmplnomatch  --use-fake-data global
+COMMON=(-x local_tmpl_twice.xml   -t "$TAG" -n 1 -v 2 --seed 405 --preset fast)
+expect_fail t33ktmpltwice    --use-fake-data global
+COMMON=(-x local_tmpl_baddef.xml  -t "$TAG" -n 1 -v 2 --seed 405 --preset fast)
+expect_fail t33ltmplbaddef   --use-fake-data global
+COMMON=(-x local_tmpl_nontmpl.xml -t "$TAG" -n 1 -v 2 --seed 405 --preset fast)
+expect_fail t33mtmplnontmpl  --use-fake-data global
 COMMON=("${SAVED_COMMON[@]}")
 
 note "----------------------------------------------------------------------"

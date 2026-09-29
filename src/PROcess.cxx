@@ -113,17 +113,18 @@ namespace PROfit {
             systw_to_use = &cache.last_systw;
         } else if(try_incremental) {
             const size_t j       = (size_t)diff_idx;
+            const int    fc      = insyst.FactorColumn((int)j);   // j itself, or its spline_cross_quad group's column
             const size_t binning = insyst.spline_binnings[j];
 
             Eigen::VectorXf new_factor_j(nbins_var);
             if(binning == var_index) {
                 for(size_t k = 0; k < nbins_var; ++k)
-                    new_factor_j(k) = insyst.GetSplineShift((int)j, shifts(j), (int)k);
+                    new_factor_j(k) = insyst.GetSplineFactor(fc, shifts, (int)k);
             } else {
                 const size_t nbins_binning = inconfig.m_num_variable_bins_total[binning];
                 Eigen::VectorXf spline_shifts_one(nbins_binning);
                 for(size_t b = 0; b < nbins_binning; ++b)
-                    spline_shifts_one(b) = insyst.GetSplineShift((int)j, shifts(j), (int)b);
+                    spline_shifts_one(b) = insyst.GetSplineFactor(fc, shifts, (int)b);
                 // Transpose-free migration GEMV; the (constant) column sums are
                 // cached per binning instead of recomputed every call.
                 Eigen::VectorXf weighted_sum = inprop.variable_hist_storage.WeightedColSum(binning, var_index, spline_shifts_one);
@@ -142,7 +143,7 @@ namespace PROfit {
             systw_local.resize(nbins_var);
             bool ok = true;
             for(size_t k = 0; k < nbins_var; ++k) {
-                const float old_f = cache.central_factors(k, (Eigen::Index)j);
+                const float old_f = cache.central_factors(k, (Eigen::Index)fc);
                 if(std::abs(old_f) < kTiny) { ok = false; break; }
                 systw_local(k) = cache.last_systw(k) / old_f * new_factor_j(k);
             }
@@ -166,7 +167,7 @@ namespace PROfit {
                 size_t binning = insyst.spline_binnings[i];
                 if(binning == var_index) {
                     for(size_t k = 0; k < nbins_var; ++k) {
-                        const float f = insyst.GetSplineShift(i, shifts(i), (int)k);
+                        const float f = insyst.GetSplineFactor(i, shifts, (int)k);
                         factors(k, i) = f;
                         systw(k) *= f;
                     }
@@ -174,7 +175,7 @@ namespace PROfit {
                     const size_t nbins_binning = inconfig.m_num_variable_bins_total[binning];
                     Eigen::VectorXf spline_shifts_loc(nbins_binning);
                     for(size_t b = 0; b < nbins_binning; ++b)
-                        spline_shifts_loc(b) = insyst.GetSplineShift(i, shifts(i), (int)b);
+                        spline_shifts_loc(b) = insyst.GetSplineFactor(i, shifts, (int)b);
                     Eigen::VectorXf weighted_sum = inprop.variable_hist_storage.WeightedColSum(binning, var_index, spline_shifts_loc);
                     auto it_us = cache.unweighted_sums.find(binning);
                     if(it_us == cache.unweighted_sums.end())
@@ -259,15 +260,15 @@ namespace PROfit {
             size_t binning = insyst.spline_binnings[i];
             if(binning == var_index) {
                 for(size_t k = 0; k < nbins_var; ++k) {
-                    factors(k, i)  = insyst.GetSplineShift(i, shifts(i), (int)k);
-                    dfactors(k, i) = insyst.GetSplineShiftDeriv(i, shifts(i), (int)k);
+                    factors(k, i)  = insyst.GetSplineFactor(i, shifts, (int)k);
+                    dfactors(k, i) = insyst.GetSplineFactorDeriv(i, shifts, (int)k);
                 }
             } else {
                 const size_t nbins_binning = inconfig.m_num_variable_bins_total[binning];
                 Eigen::VectorXf spline_vals(nbins_binning), spline_derivs(nbins_binning);
                 for(size_t b = 0; b < nbins_binning; ++b) {
-                    spline_vals(b)   = insyst.GetSplineShift(i, shifts(i), (int)b);
-                    spline_derivs(b) = insyst.GetSplineShiftDeriv(i, shifts(i), (int)b);
+                    spline_vals(b)   = insyst.GetSplineFactor(i, shifts, (int)b);
+                    spline_derivs(b) = insyst.GetSplineFactorDeriv(i, shifts, (int)b);
                 }
                 // The migration factor is LINEAR in the spline values, so its derivative
                 // is the same GEMV applied to the per-bin spline derivatives.
@@ -325,15 +326,18 @@ namespace PROfit {
         }
         constexpr float kTiny = 1e-30f;
         for(size_t i = 0; i < nsplines; ++i) {
+            // d(systw)/d(shift_i) = (product of every column but the one shift_i lives in) * d(that column);
+            // for a spline_cross_quad member that column is the group's, not its own.
+            const size_t fc = (size_t)insyst.FactorColumn((int)i);
             for(size_t k = 0; k < nbins_var; ++k) {
-                const float f = factors(k, i);
-                float excl; // product of all OTHER splines' factors at bin k
+                const float f = factors(k, fc);
+                float excl; // product of all OTHER columns' factors at bin k
                 if(std::abs(f) > kTiny) {
                     excl = systw(k) / f;
                 } else {
                     excl = 1.0f;
                     for(size_t j = 0; j < nsplines; ++j)
-                        if(j != i) excl *= factors(k, j);
+                        if(j != fc) excl *= factors(k, j);
                 }
                 G(k, nphys + i) = excl * dfactors(k, i) * result(k);
             }
@@ -394,12 +398,12 @@ namespace PROfit {
                     // Each flat bin inherits the flux weight from its truth-E index.
                     for(long int flat = 0; flat < inmodel.n_phys_bins; ++flat) {
                         size_t e_idx = flat % n_E;
-                        pre_mig_weight(flat) *= insyst.GetSplineShift(i, shifts(i), e_idx);
+                        pre_mig_weight(flat) *= insyst.GetSplineFactor(i, shifts, e_idx);
                     }
                 } else if(binning == var_index) {
                     // Post-migration, same binning — direct multiplication on reco bins.
                     for(size_t k = 0; k < nbins_var; ++k) {
-                        post_mig_systw(k) *= insyst.GetSplineShift(i, shifts(i), k);
+                        post_mig_systw(k) *= insyst.GetSplineFactor(i, shifts, k);
                     }
                 } else {
                     // Post-migration, different binning — use matrix-vector multiplication.
@@ -407,7 +411,7 @@ namespace PROfit {
 
                     Eigen::VectorXf spline_shifts(nbins_binning);
                     for(size_t j = 0; j < nbins_binning; ++j) {
-                        spline_shifts(j) = insyst.GetSplineShift(i, shifts(i), j);
+                        spline_shifts(j) = insyst.GetSplineFactor(i, shifts, j);
                     }
 
                     // Compute weighted and unweighted sums transpose-free:
@@ -517,7 +521,7 @@ namespace PROfit {
                     int binning = insyst.spline_binnings[j];
                     const int spline_bin = inprop.VariableBinIndex(binning, i);
                     if(spline_bin < 0) continue; // outside this spline's binning: no shift
-                    systw *= insyst.GetSplineShift(j, shifts[j], spline_bin);
+                    systw *= insyst.GetSplineFactor(j, shifts, spline_bin);
                 }
                 float finalw = oscw * systw * add_w;
                 myspectrum.Fill(reco_bin, finalw);
@@ -560,13 +564,14 @@ namespace PROfit {
           spec = FillSpectra(inconfig, inprop, insyst, model, params, binned, var_index).Spec();
 
         }else{//currently never run
+            const Eigen::Map<const Eigen::VectorXf> throw_vec(throws.data(), throws.size());
             for(size_t i = 0; i<inprop.NEvent(); ++i){
                 float add_w = inprop.added_weights[i]; 
                 float systw = 1;
                 for(size_t j = 0; j < throws.size(); ++j) {
                     int binning = insyst.spline_binnings[j];
                     const int spline_bin = inprop.VariableBinIndex(binning, i);
-                    systw *= insyst.GetSplineShift(j, throws[j], spline_bin);
+                    systw *= insyst.GetSplineFactor(j, throw_vec, spline_bin);
                 }
                 if(inprop.VariableBinIndex(var_index, i) >= 0) {
                     float finalw = systw * add_w;

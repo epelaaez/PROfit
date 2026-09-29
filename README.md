@@ -49,8 +49,9 @@ and statistically rigorous fits and confidence regions.
   detector) once, save the posterior as a correlated prior, and re-use it in
   downstream fits, profiles, surfaces, and FC — projection without
   approximation [Under Development!]
-- **Multiple physics models** out of the box (3+1, 3+2, two-flavor, LBL,
-  simple scaling) with a clean base class for adding your own.
+- **Multiple physics models** out of the box (3+1, 3+2, two-flavor, LBL in
+  matter or vacuum with configurable baseline and density, simple scaling)
+  with a clean base class for adding your own.
 - **Deterministic and tested**: seeded runs are bit-reproducible, and a
   regression test suite covering every major workflow ships in
   [`tests/`](tests/README.md).
@@ -202,7 +203,7 @@ built automatically by CMake.
 
 | Component | How it's used | License |
 |---|---|---|
-| [NuFast-LBL](https://github.com/PeterDenton/NuFast-LBL) | Vendored in [`src/NuFastLBL.cxx`](src/NuFastLBL.cxx) — fast long-baseline oscillation probabilities in matter | MIT (© 2024 Peter B. Denton) |
+| [NuFast-LBL](https://github.com/PeterDenton/NuFast-LBL) | Vendored in [`src/NuFastLBL.cxx`](src/NuFastLBL.cxx) — fast long-baseline oscillation probabilities in matter and vacuum | MIT (© 2024 Peter B. Denton) |
 | [LBFGSpp](https://github.com/yixuan/LBFGSpp) | Fetched ([our fork](https://github.com/markrosslonergan/LBFGSpp)) — the L-BFGS-B bounded local minimizer at the heart of every fit | MIT (© Yixuan Qiu) |
 | [Eigen](https://gitlab.com/libeigen/eigen) 3.4.0 | Fetched — all internal linear algebra | MPL2 |
 | [CLI11](https://github.com/CLIUtils/CLI11) 2.3.2 | Vendored in [`inc/CLI11.h`](inc/CLI11.h) — command-line interface | 3-clause BSD (University of Cincinnati / Henry Schreiner) |

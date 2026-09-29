@@ -31,16 +31,23 @@ public:
 
 /**
  * @brief Template-fit model: floats the overall normalization of one or more subchannels.
- * @details A non-oscillation physics model. Each floated subchannel (named by a <parameter> in
- * the XML <model> section) becomes a free physics parameter equal to the multiplicative scale
- * applied to that subchannel's events — default 1 (nominal), bounded to [min, max] from the
- * parameter's "min"/"max" attributes. All non-floated subchannels are held fixed at scale 1.
+ * @details A non-oscillation physics model. Each <parameter> in the XML <model> section becomes
+ * a free physics parameter equal to the multiplicative scale applied to its subchannels' events,
+ * bounded to [min, max] from the parameter's "min"/"max" attributes, default 1 (nominal) unless
+ * its "default" attribute says otherwise (e.g. default="0": the CV, bkg-only seed and --fix sit
+ * at the no-signal hypothesis). Which subchannels a parameter scales:
+ *   - no "subchannels" attribute: its name is the exact subchannel fullname (one subchannel);
+ *   - subchannels="<regex>": every fullname the unanchored regex matches (MatchNames), all
+ *     driven by the one scale — e.g. a single signal strength shared by nu and nubar modes.
+ *     The name is then just the parameter's name.
+ * A subchannel claimed by two parameters is fatal; so is a zero-match pattern (at XML parse).
+ * All non-floated subchannels are held fixed at scale 1.
  *
  * Construction mirrors NullModel (no truth/kinematic grid: `ivars` empty, `n_phys_bins = 1`)
  * but is NOT trivial: the K+1 columns of H_combined separate the fixed remainder (column 0)
- * from each floated subchannel (columns 1..K). get_probs() returns the per-column scale factors
- * so the single GEMV in FillSpectra yields
- *     spec = hist_fixed + sum_k scale_k * hist_subchannel_k.
+ * from each parameter's subchannels (columns 1..K). get_probs() returns the per-column scale
+ * factors so the single GEMV in FillSpectra yields
+ *     spec = hist_fixed + sum_k scale_k * hist_k,   hist_k = sum of parameter k's subchannels.
  * A template fit therefore behaves exactly like an oscillation model to the fitter/surface/MCMC
  * code and inherits the FillSpectra phys/syst split-cache for free.
  *
@@ -51,8 +58,8 @@ class PROtemplate : public PROmodel {
 public:
     /**
      * @brief Construct the template-fit model.
-     * @param config  Parsed configuration; supplies the floated subchannel names and scale bounds
-     *                (m_model_parameter_names / _min / _max) and the subchannel<->reco-bin mapping.
+     * @param config  Parsed configuration; supplies the parameters (m_model_parameter_names /
+     *                _subchannels / _min / _max / _default) and the subchannel<->reco-bin mapping.
      * @param prop    MC event store; used to build H_combined.
      */
     PROtemplate(const PROconfig &config, const PROpeller &prop);

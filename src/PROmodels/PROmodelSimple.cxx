@@ -5,6 +5,7 @@
  */
 #include "PROmodels/PROmodelSimple.h"
 
+#include <algorithm>
 #include <unordered_map>
 
 namespace PROfit {
@@ -33,17 +34,36 @@ NullModel::NullModel(const PROpeller &prop) {
 PROtemplate::PROtemplate(const PROconfig &config, const PROpeller &prop) {
     const size_t K = config.m_model_parameter_names.size();
     if(K == 0) {
-        log<LOG_ERROR>(L"%1% || template model needs at least one <parameter> naming a subchannel to float. Terminating.") % __func__;
+        log<LOG_ERROR>(L"%1% || template model needs at least one <parameter> naming the subchannel(s) to float. Terminating.") % __func__;
         exit(EXIT_FAILURE);
     }
 
-    // Map each floated subchannel's global index -> column (1..K). Column 0 is the fixed
-    // remainder (every non-floated subchannel), permanently at scale 1.
-    std::unordered_map<size_t, int> subchan_to_col;
+    const std::vector<std::string> &names = config.m_model_parameter_names;
     for(size_t k = 0; k < K; ++k) {
-        // GetSubchannelIndex terminates with a clear error if the name is not a known subchannel.
-        size_t gsi = config.GetSubchannelIndex(config.m_model_parameter_names[k]);
-        subchan_to_col[gsi] = (int)(k + 1);
+        if(std::find(names.begin(), names.begin() + k, names[k]) != names.begin() + k) {
+            log<LOG_ERROR>(L"%1% || template parameter name '%2%' appears twice; names must be unique (--fix/--inject/--xvar select by name). Terminating.") % __func__ % names[k].c_str();
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    // Map each floated subchannel's global index -> column (1..K). Column 0 is the fixed
+    // remainder (every non-floated subchannel), permanently at scale 1. A subchannels= regex
+    // puts every matching subchannel into its parameter's column, so one scale drives them all.
+    std::unordered_map<size_t, int> subchan_to_col;
+    std::vector<std::vector<std::string>> floated(K);
+    for(size_t k = 0; k < K; ++k) {
+        const std::string &pattern = config.m_model_parameter_subchannels[k];
+        floated[k] = pattern.empty() ? std::vector<std::string>{names[k]}
+                                     : MatchNames(config.m_fullnames, pattern, "subchannels= of template parameter '" + names[k] + "'");
+        for(const std::string &fullname : floated[k]) {
+            // GetSubchannelIndex terminates with a clear error if the name is not a known subchannel.
+            auto [it, inserted] = subchan_to_col.emplace(config.GetSubchannelIndex(fullname), (int)(k + 1));
+            if(!inserted) {
+                log<LOG_ERROR>(L"%1% || subchannel '%2%' is claimed by template parameters '%3%' and '%4%'; each subchannel can float with at most one parameter. Terminating.")
+                    % __func__ % fullname.c_str() % names[it->second - 1].c_str() % names[k].c_str();
+                exit(EXIT_FAILURE);
+            }
+        }
     }
 
     // No truth grid: pure per-subchannel normalization (n_phys_bins == 1). Not trivial:
@@ -51,7 +71,7 @@ PROtemplate::PROtemplate(const PROconfig &config, const PROpeller &prop) {
     ivars = {};
     is_trivial = false;
 
-    // K+1 components: column 0 fixed (=1); column k+1 returns the scale of subchannel k.
+    // K+1 components: column 0 fixed (=1); column k+1 returns the scale of parameter k.
     model_functions.push_back([](const Eigen::VectorXf &, float){ return 1.0f; });
     prob_types.push_back(0);
     for(size_t k = 0; k < K; ++k) {
@@ -78,18 +98,22 @@ PROtemplate::PROtemplate(const PROconfig &config, const PROpeller &prop) {
     ub          = Eigen::VectorXf(K);
     default_val = Eigen::VectorXf(K);
     for(size_t k = 0; k < K; ++k) {
-        param_names.push_back(config.m_model_parameter_names[k]);
-        pretty_param_names.push_back(config.m_model_parameter_names[k]);
+        param_names.push_back(names[k]);
+        pretty_param_names.push_back(names[k]);
         pretty_param_units.push_back("");
         lb(k)          = config.m_model_parameter_min[k];
         ub(k)          = config.m_model_parameter_max[k];
-        default_val(k) = 1.0f; // nominal normalization
+        default_val(k) = config.m_model_parameter_default[k].value_or(1.0f); // 1 = nominal normalization
     }
     build_param_index();
 
-    log<LOG_INFO>(L"%1% || template model: floating %2% subchannel normalization(s).") % __func__ % K;
-    for(size_t k = 0; k < K; ++k)
-        log<LOG_INFO>(L"%1% || Param %2% = '%3%' scale in [%4%, %5%], default 1.") % __func__ % k % param_names[k].c_str() % lb(k) % ub(k);
+    log<LOG_INFO>(L"%1% || template model: %2% normalization parameter(s) floating %3% subchannel(s).") % __func__ % K % subchan_to_col.size();
+    for(size_t k = 0; k < K; ++k) {
+        std::string subs;
+        for(const std::string &s : floated[k]) subs += (subs.empty() ? "" : ", ") + s;
+        log<LOG_INFO>(L"%1% || Param %2% = '%3%' scale in [%4%, %5%], default %6%, scales: %7%")
+            % __func__ % k % param_names[k].c_str() % lb(k) % ub(k) % default_val(k) % subs.c_str();
+    }
 }
 
 Eigen::MatrixXf PROtemplate::get_probs(const Eigen::VectorXf &phys, const std::vector<std::vector<float>> &) const {

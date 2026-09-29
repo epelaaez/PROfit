@@ -33,13 +33,17 @@ short, seeded (`--seed 405 -n 1 --preset fast fast`) instance of each workflow:
 | t13 | `fc` (2 universes) |
 | t14 (×5) | full `fc-adaptive` chain: build-mesh → init-bank → print-bank → asimov → brazil |
 | t15–t16 | `mcmc` (1 chain), `scale-test` benchmark smoke |
+| t40–t42 | systematic selection: `--exclude-systs` by name+tag (MC-stat kept) and by plotname (MC-stat dropped), a tag-based `--syst-list`, and a typo'd name refused |
 | t17–t19 | PROjector: ND pre-fit → projected `global` → projected `fc` |
 | t20–t21 | PROjector negative tests (partial-channel and match-everything patterns must be refused) |
 | t22–t26 | `apply_to_subchannel`: process/plot/global with a spline restricted to ND, a covariance to FD, a flat to FD and a norm_to_covariance to ND numu; t25 refuses a zero-match pattern; t26 asserts exact zero blocks / flat splines (`check_applyto.C`) |
 | t26b–d | every systematic (incl. mcstat, norm, flat, norm_to_covariance) restricted to FD ⇒ total fractional covariance ND block exactly zero |
 | t26e–g | DetVar systematic (same ND file as CV and half-POT variation) restricted to the ND nue channel |
 | t26h–j | branch-order regression: an `incl_systematics="false"` branch first in a systematics-carrying MCFile must process and give the identical global fit |
+| t26l–o | one DetVar name in three sections (event-matched ND, FD, overlapping ND numu) is ONE systematic: per-section responses, CV-weighted average where sections overlap (`check_spline_response.C`); t26o refuses differing knob sets |
 | t27–t30 | regex patterns: alternation accepted; invalid regex and zero-match patterns refused |
+| t31–t32 | LBL 3ν models: matter `global` with per-event L+E parameters (own tag + process — its XML replaces the L/E variable with a lean 4-bin L and cuts E to 5 bins, since the 2D model grid is n_L×n_E global bins ×10 components and OOMs at the base binning); explicit legacy-default attributes (`density="3" electron_fraction="0.5" n_newton="0"`) bitwise-identical to no attributes; vacuum `global` from the single signed L/E and matter `global` in fixed-baseline E-only mode (`baseline="1300"`), both reusing the t00 caches; model options on a non-LBL tag refused. Fails by design on binaries predating `LBL_3nu-vacuum_angles` |
+| t33 | `template` model (reuses the t00 caches — the `<model>` block is not hashed): one `subchannels=` regex parameter `mu` (ND+FD nue fullosc, `default="0"`) vs the legacy one-exact-name-parameter-per-subchannel form. With every parameter pinned (`--fix` at `--inject-cv`/`--inject-systs-cv`) each global fit is a single χ² evaluation; the two forms must agree at mu=0.02 and 0.8 (t33e/f, χ² parsed from `-l … -w 3` file logs). The unpinned shared fit must recover the injected mu (t33h); `scale-test --tests gradcheck` in a tight box around the Asimov must give analytic mean_rel < 0.2 (t33i — a wide box on this huge template puts the float FD reference at noise-level χ²); zero-match pattern, doubly-claimed subchannel, `default=` outside `[min,max]` and `subchannels=` on a non-template tag refused. Fails by design on binaries predating `subchannels=` |
 
 Outputs land in `tests/runs/<TAG>/` with per-test logs in `logs/` and a
 PASS/FAIL `summary.txt`. Exit code = number of failures.

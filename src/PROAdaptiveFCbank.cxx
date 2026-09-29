@@ -421,6 +421,27 @@ static PEBankRecord run_one_pe(const AdaptivePEArgs &args)
         if (c < rec.chi2_osc) rec.chi2_osc = c;
     }
 
+    // Negative-Δχ² rescue, same as fc_worker: the osc fit missed a minimum
+    // the syst-only fit (a subset of its space) found, so retry it wider.
+    if (rec.chi2_syst < rec.chi2_osc) {
+        log<LOG_DEBUG>(L"%1% || Negative delta chi2 detected! chi2_syst=%2% < chi2_osc=%3%") % __func__ % rec.chi2_syst % rec.chi2_osc;
+        log<LOG_DEBUG>(L"%1% || Attempting enhanced global search") % __func__;
+
+        PROfitterConfig enhanced_config = *args.fitconfig;
+        enhanced_config.n_latin_points *= 2;
+        enhanced_config.n_swarm_particles = std::max(10, enhanced_config.n_swarm_particles * 2);
+        enhanced_config.n_localfit = std::max(5, enhanced_config.n_localfit + 2);
+
+        PROfitter fitter_osc_enhanced(ub_osc, lb_osc, enhanced_config, dseed(rng));
+        const float chi2_osc_enhanced = fitter_osc_enhanced.Fit(*metric, fitter_syst.best_fit);
+
+        if (chi2_osc_enhanced < rec.chi2_osc) {
+            log<LOG_DEBUG>(L"%1% || Enhanced search improved chi2_osc from %2% to %3%")
+                % __func__ % rec.chi2_osc % chi2_osc_enhanced;
+            rec.chi2_osc = chi2_osc_enhanced;
+        }
+    }
+
     rec.dchi2 = rec.chi2_syst - rec.chi2_osc;
     return rec;
 }

@@ -123,6 +123,19 @@ namespace PROfit{
     Eigen::VectorXf ShapeRescaleToData(const PROconfig &inconfig, const Eigen::VectorXf &full_spec, const Eigen::VectorXf &data, int other_index, Eigen::VectorXf *r_out = nullptr);
 
     /**
+     * @brief Shape-only projector about a collapsed prediction P.
+     * @details R = I - P 1^T / sum_c(P) on every collapsed (mode x detector x channel)
+     * block; identity on blocks with sum_c(P) <= 0. With P the (rescaled) prediction under
+     * test, R C R^T is the exact covariance of the residual after the per-channel rescale
+     * onto data (the MiniBooNE shape matrix taken about the prediction, not the nominal MC).
+     * @param inconfig       Analysis configuration.
+     * @param collapsed_pred Prediction in the collapsed bin space of @p other_index.
+     * @param other_index    Variable index.
+     * @return Sparse (block-dense) projector, collapsed x collapsed.
+     */
+    Eigen::SparseMatrix<float> ShapeProjectorCollapsed(const PROconfig &inconfig, const Eigen::VectorXf &collapsed_pred, int other_index);
+
+    /**
      * @brief Return the PROfit ASCII-art icon string.
      * @return Icon string for display at programme startup.
      */

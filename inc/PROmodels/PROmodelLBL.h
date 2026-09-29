@@ -13,46 +13,81 @@
 namespace PROfit {
 
 /**
- * @brief Standard three-flavour long-baseline oscillation model including matter effects.
- * @details Wraps the NuFastLBL library to compute the full 3x3 oscillation probability matrix in matter,
- * assuming a baseline of 1300 km (DUNE), Earth matter density 3 g/cc, and electron fraction Ye = 0.5.
- * All nine active-flavour transitions (nu_e, nu_mu, nu_tau → nu_e, nu_mu, nu_tau) are provided.
- * Parameters: dmsq_21, dmsq_31 [eV^2, linear], sin^2(theta_12), sin^2(theta_13), sin^2(theta_23) [linear],
- * delta_CP [rad, linear].  None of the six parameters are stored in log10 space.
+ * @brief Standard three-flavour long-baseline oscillation model, in matter or in vacuum.
+ * @details Wraps the NuFastLBL library (Denton, arXiv:2405.02400) to compute the full 3x3
+ * oscillation probability matrix. Two model tags share this class:
+ *  - `LBL_3nu-matter_angles` (legacy alias `LBL`): constant-density matter oscillations
+ *    via NuFastLBL::Probability_Matter_LBL.
+ *  - `LBL_3nu-vacuum_angles`: vacuum oscillations via NuFastLBL::Probability_Vacuum_LBL
+ *    (cheaper, and finite for every dmsq_31 including the Dmsqee=0 crossing where the
+ *    matter solver is singular).
+ *
+ * Kinematic inputs (event-by-event `<variable>`s, like every oscillation model);
+ * E is always signed, negative = antineutrino (NuFast's convention):
+ *  - `<parameter name="L">` [km] + `name="E"` [GeV]: exact per-event kinematics, for a
+ *    baseline that varies across the MC. The evaluation grid is n_L x n_E GLOBAL bins,
+ *    so keep both truth binnings lean. `baseline=` is a fatal conflict here.
+ *  - `name="E"` alone + the `baseline=` attribute [km, REQUIRED in this mode]: fixed
+ *    baseline, 1D grid over E — the cheap form most experiments want.
+ *  - A single signed `name="L/E"` [km/GeV]: vacuum only, since the matter potential
+ *    scales with E alone and the ratio underdetermines it. `baseline=` is fatal here.
+ *  - E == 0 (or L/E == 0) is treated as the no-oscillation limit (identity probabilities).
+ * NOTE (v3.0.4-dev): before this version the model took one `"L/E"` parameter that was
+ * silently passed to NuFast as E [GeV] at a fixed L = 1300 km — older LBL configs must
+ * migrate to the inputs above.
+ *
+ * Matter-only `<model>` attributes (the vacuum tag warns and ignores them; defaults
+ * are the legacy hardcoded values):
+ *  - `density=` [g/cm^3, >= 0, default 3 — note 3 is the legacy value, not DUNE's 2.848],
+ *  - `electron_fraction=` [(0,1], default 0.5],
+ *  - `n_newton=` [int 0-10, default 0; NuFast recommends 1 for many-year DUNE/HK precision].
+ *
+ * Parameters: dmsq_21, dmsq_31 [eV^2, linear], sin^2(theta_12), sin^2(theta_13),
+ * sin^2(theta_23) [linear], delta_CP [rad, linear]. None are stored in log10 space.
+ * The matter regime sets a model_constraint rejecting the narrow dmsq_31 band around
+ * 0 and around Dmsqee = 0 (dmsqee_guard) where NuFast's DMP solver is singular; the
+ * vacuum solver has no such band.
  */
 class PROLBL : public PROmodel {
 public:
-    static constexpr float rho_earth = 3; ///< Earth average matter density in g/cc used for MSW potential.
-    static constexpr float Ye_earth = 0.5; ///< Electron fraction of the Earth matter.
+    /// Which kinematic inputs the config supplied (see the class doc).
+    enum class InputMode { PairLE, EOnly, RatioLE };
+
+    // Legacy hardcoded values, kept as the attribute defaults.
+    static constexpr double default_density = 3.0;            ///< g/cm^3 (legacy; DUNE uses 2.848).
+    static constexpr double default_electron_fraction = 0.5;  ///< Electron fraction Ye.
+    static constexpr int default_n_newton = 0;                ///< NuFast Newton iterations.
+    /// Half-width [eV^2] of the excluded band around dmsq_31 = 0 and Dmsqee = 0 where
+    /// NuFast's matter solver is singular; enforced by model_constraint (matter only).
+    static constexpr float dmsqee_guard = 5e-5f;
 
     /**
      * @brief Construct the PROLBL model.
-     * @param prop          MC event store; used to build H_combined.
-     * @param parameter_map Map from physics variable name (e.g., "L/E") to variable index in PROpeller.
-     *                      Must contain the key "L/E".
+     * @param config PROconfig; supplies m_model_parameter_map ("L"+"E", or "L/E" for
+     *               vacuum) and the optional matter m_model_options.
+     * @param prop   MC event store; used to build H_combined.
+     * @param matter true for LBL_3nu-matter_angles, false for LBL_3nu-vacuum_angles.
      */
-    PROLBL(const PROpeller &prop, const std::map<std::string,int> &parameter_map);
-
-    /// @brief nu_e → nu_e survival probability via NuFastLBL. @param params Physics vector (6 params). @param le L/E [km/GeV]. @return P(nu_e→nu_e).
-    float Pee(const Eigen::VectorXf &params, float le);
-    /// @brief nu_e → nu_mu appearance probability via NuFastLBL. @param params Physics vector (6 params). @param le L/E [km/GeV]. @return P(nu_e→nu_mu).
-    float Pemu(const Eigen::VectorXf &params, float le);
-    /// @brief nu_e → nu_tau appearance probability via NuFastLBL. @param params Physics vector. @param le L/E [km/GeV]. @return P(nu_e→nu_tau).
-    float Petau(const Eigen::VectorXf &params, float le);
-    /// @brief nu_mu → nu_e appearance probability via NuFastLBL. @param params Physics vector. @param le L/E [km/GeV]. @return P(nu_mu→nu_e).
-    float Pmue(const Eigen::VectorXf &params, float le);
-    /// @brief nu_mu → nu_mu survival probability via NuFastLBL. @param params Physics vector. @param le L/E [km/GeV]. @return P(nu_mu→nu_mu).
-    float Pmumu(const Eigen::VectorXf &params, float le);
-    /// @brief nu_mu → nu_tau appearance probability via NuFastLBL. @param params Physics vector. @param le L/E [km/GeV]. @return P(nu_mu→nu_tau).
-    float Pmutau(const Eigen::VectorXf &params, float le);
-    /// @brief nu_tau → nu_e appearance probability via NuFastLBL. @param params Physics vector. @param le L/E [km/GeV]. @return P(nu_tau→nu_e).
-    float Ptaue(const Eigen::VectorXf &params, float le);
-    /// @brief nu_tau → nu_mu appearance probability via NuFastLBL. @param params Physics vector. @param le L/E [km/GeV]. @return P(nu_tau→nu_mu).
-    float Ptaumu(const Eigen::VectorXf &params, float le);
-    /// @brief nu_tau → nu_tau survival probability via NuFastLBL. @param params Physics vector. @param le L/E [km/GeV]. @return P(nu_tau→nu_tau).
-    float Ptautau(const Eigen::VectorXf &params, float le);
+    PROLBL(const PROconfig &config, const PROpeller &prop, bool matter);
 
     Eigen::MatrixXf get_probs(const Eigen::VectorXf &phys, const std::vector<std::vector<float>> &var_arrs) const override;
+
+    bool matter;              ///< Matter (NuFast Probability_Matter_LBL) vs vacuum regime.
+    InputMode input_mode;     ///< Kinematic input layout.
+    double baseline_km;       ///< Fixed baseline [km] (EOnly mode; unset otherwise).
+    double density;           ///< Matter density [g/cm^3] (matter regime only).
+    double electron_fraction; ///< Electron fraction Ye (matter regime only).
+    int n_newton;             ///< NuFast Newton-iteration count (matter regime only).
+
+private:
+    /**
+     * @brief Fill the 3x3 oscillation probability matrix at one kinematic point.
+     * @param params Physics vector (6 params).
+     * @param L      Baseline [km] (in RatioLE mode, the signed L/E with E = 1).
+     * @param E      True energy [GeV], negative = antineutrino. 0 = no-osc limit.
+     * @param out    Row-major [from][to] probabilities in flavour order (e, mu, tau).
+     */
+    void oscillate(const Eigen::VectorXf &params, float L, float E, float (*out)[3][3]) const;
 };
 
 }
