@@ -44,7 +44,8 @@ PROpt::PROpt(int argc, char **argv) {
             "Generate a true FC-style pseudo-experiment as fake data: spline Gaussian pulls (rejection-sampled "
             "within each spline's restrict bounds) + covariance-systematic bin shifts via Cholesky factor of the "
             "total covariance + Poisson stats variation. Combines with --inject (the injection sets the underlying "
-            "truth signal). Applied only to the i_prime variable. Mutually informative with --poisson-throw, but "
+            "truth signal) and --inject-systs (those splines are held at their injected value, all others are thrown). "
+            "Applied only to the i_prime variable. Mutually informative with --poisson-throw, but "
             "the pseudo-experiment already includes its own Poisson step — passing both is redundant.");
         app.add_flag("--scale-by-width", binwidth_scale, "Scale histgrams by 1/(bin width).");
         app.add_flag("--data-mc-ratio", data_mc_ratio, "For ratio plots, use data/pre-fit mc instead of data/best-fit mc.");
