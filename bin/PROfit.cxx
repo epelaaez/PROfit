@@ -23,6 +23,7 @@ int main(int argc, char* argv[])
     // (PROchi/PROCNP/Poisson) warn once and map.
     options.chi2 = PROmetric::canonicalizeMetricName(options.chi2);
     PROsyst::spline2cov_throws = options.syst_throws;
+    PROsyst::spline2cov_nthreads = options.nthread;
 
     log<LOG_WARNING>(L" %1% ") % getIcon().c_str();
 
