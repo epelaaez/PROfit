@@ -52,6 +52,7 @@ namespace PROfit {
             int bins;             ///< Number of analysis bins covered by this spline.
             int segments_per_bin; ///< Number of cubic segments per bin (equal to number of knot intervals).
             std::vector<SplineSegment> segments; ///< Flat list of spline segments, ordered bin-major.
+            float knot_hi = 0.0f; ///< Upper end of the last segment. Kept apart from spline_hi, which --fix overwrites with the fit bound.
     };
 
     /**
