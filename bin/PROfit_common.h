@@ -154,6 +154,7 @@ struct PROpt {
     bool with_covar = false, no_frac_syst = false;
     bool with_subcovar = false;
     int band_throws = 2500;
+    size_t syst_throws = 500;
     std::map<std::string, float> fake_data_osc_params;
     std::map<std::string, float> cv_osc_params;
     std::map<std::string, float> injected_systs;
