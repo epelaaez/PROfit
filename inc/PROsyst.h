@@ -182,6 +182,9 @@ namespace PROfit {
              */
             Eigen::MatrixXf spline2cov(int spline, const PROconfig &config, const PROpeller &prop, const PROmodel &model, const Eigen::VectorXf &params, uint32_t seed) const ;
 
+            /// Number of random throws spline2cov draws per spline (--syst-throws; default 500).
+            inline static size_t spline2cov_throws = 500;
+
             /* Function: given the systematic name, return corresponding fractional covariance matrix */
             Eigen::MatrixXf GrabMatrix(const std::string& sys) const;
             Eigen::MatrixXf GrabCorrMatrix(const std::string& sys) const;

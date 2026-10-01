@@ -22,6 +22,7 @@ int main(int argc, char* argv[])
     // canonical spelling (neyman/pearson/CNP/poisson); legacy aliases
     // (PROchi/PROCNP/Poisson) warn once and map.
     options.chi2 = PROmetric::canonicalizeMetricName(options.chi2);
+    PROsyst::spline2cov_throws = options.syst_throws;
 
     log<LOG_WARNING>(L" %1% ") % getIcon().c_str();
 
