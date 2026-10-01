@@ -7,6 +7,9 @@
 #include "PROtocall.h"
 #include <Eigen/Eigen>
 #include <mutex>
+#include <atomic>
+#include <thread>
+#include <algorithm>
 #include <random>
 #include <set>
 
@@ -616,13 +619,22 @@ namespace PROfit {
     Eigen::MatrixXf PROsyst::spline2cov(int spline, const PROconfig &config, const PROpeller &prop, const PROmodel &model, const Eigen::VectorXf &params, uint32_t seed) const {
         Eigen::MatrixXf cv = FillSpectra(config, prop, *this, model, params , true, other_index).Spec();
 
-        std::vector<Eigen::VectorXf> specs;
         // Distinct seed per throw: FillSplineRandomThrow now uses its seed
         // argument on every call (it used to hold a function-local static RNG
         // that ignored the seed after the first-ever call).
-        for(size_t i = 0; i < spline2cov_throws; ++i){
-            specs.push_back(FillSplineRandomThrow(config, prop, *this, model, params, spline, seed + (uint32_t)i, other_index).Spec());
-        }
+        // Throw i always uses seed+i and lands in specs[i], and the sum below runs
+        // in index order, so the result does not depend on the thread count.
+        std::vector<Eigen::VectorXf> specs(spline2cov_throws);
+        std::atomic<size_t> next{0};
+        auto worker = [&]() {
+            for(size_t i = next++; i < specs.size(); i = next++)
+                specs[i] = FillSplineRandomThrow(config, prop, *this, model, params, spline, seed + (uint32_t)i, other_index).Spec();
+        };
+        const size_t nthreads = std::max<size_t>(1, std::min(spline2cov_nthreads, specs.size()));
+        std::vector<std::thread> pool;
+        for(size_t t = 1; t < nthreads; ++t) pool.emplace_back(worker);
+        worker();
+        for(auto &th: pool) th.join();
 
         int nbins = config.m_num_variable_bins_total[other_index];
         Eigen::MatrixXf mat(nbins, nbins);
