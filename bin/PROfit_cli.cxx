@@ -181,6 +181,17 @@ PROpt::PROpt(int argc, char **argv) {
         profc_command->add_flag("--reuse", reuse_dist, "Reuse existing <tag>_<out>_FC.root file for pvalue calculation instead of throwing new universes.");
         profc_command->add_flag("--pval", pvalue, "Get FC pvalue")->excludes("--gof");
 
+        auto *fc_stat_only_throws_opt = profc_command->add_flag(
+            "--stat-only-throws", fc_stat_only_throws,
+            "Generate FC toys with Poisson fluctuations only (no systematic truth throws).");
+
+        auto *fc_syst_only_throws_opt = profc_command->add_flag(
+            "--syst-only-throws", fc_syst_only_throws,
+            "Generate FC toys with systematic truth throws only (no Poisson fluctuations).");
+
+        fc_stat_only_throws_opt->excludes(fc_syst_only_throws_opt);
+        fc_syst_only_throws_opt->excludes(fc_stat_only_throws_opt);
+
         // PROAdaptiveFC, adaptive FC pipeline. Slice 1: Wilks prepass + meta-mesh + diagnostics.
         afc_command = app.add_subcommand("fc-adaptive",
             "Adaptive Feldman-Cousins. Sub-modes (--mode): build-mesh, init-bank, "
