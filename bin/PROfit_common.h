@@ -146,6 +146,7 @@ struct PROpt {
     size_t maxevents;
     int global_seed = -1;
     std::string log_file = "";
+    std::string required_version = "";
     std::vector<std::string> fit_preset = {"grad-good","grad-fast"};
     bool preset_user_set = false; ///< True if -p/--preset was given on the command line (see resolve_fit_presets).
     inline static const std::unordered_set<std::string> allowed_preset = {"good","fast","overkill","sensitivity","grad-fast","grad-good","grad-deep","grad-overkill"};
