@@ -42,10 +42,11 @@ void fc_worker(fc_args args, MultiPROgressBar &progress) {
         Eigen::VectorXf throwC = Eigen::VectorXf::Constant(args.config.m_num_variable_bins_total_collapsed[args.config.i_prime], 0);
         // Bounded, OOB-safe truncated-Gaussian throws (shared helper; the old
         // do/while here could spin forever on unreachable restrict bounds).
+        // Unthrown splines sit at their prior centre (XML center= / PROjector θ̂), not 0.
         for(size_t i = 0; i < args.systs.GetNSplines(); i++) {
             throws(i+nphys) = args.throw_systematics
                 ? ThrowRestrictedSplinePull(args.systs, i, rng, d)
-                : 0.0f;
+                : (i < (size_t)args.systs.spline_centers.size() ? args.systs.spline_centers(i) : 0.0f);
         }
         for(size_t i = 0; i < args.config.m_num_variable_bins_total_collapsed[args.config.i_prime]; i++)
             throwC(i) = args.throw_systematics ? d(rng) : 0.0f;
@@ -60,9 +61,10 @@ void fc_worker(fc_args args, MultiPROgressBar &progress) {
             CollapseMatrix(args.config, shifted.Spec()) + args.L * throwC,
             CollapseMatrix(args.config, shifted.Error()));
 
+        // Without Poisson, clamp negative bins to 0 as PoissonVariation does.
         PROspec newSpec = args.throw_poisson
             ? PROspec::PoissonVariation(variedSpec, dseed(rng))
-            : variedSpec;
+            : PROspec(variedSpec.Spec().cwiseMax(0.0f), variedSpec.Error());
         PROdata data(newSpec.Spec(), newSpec.Error());
         //Metric Time
         // Same construction point as the data fit (carries shape_only etc.).
