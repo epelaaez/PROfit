@@ -202,6 +202,11 @@ struct PROpt {
     bool gof_pvalue = false;
     bool reuse_dist = false;
     bool pvalue = false;
+    // Classic FC pseudo-experiment composition. These flags change only what
+    // is fluctuated when a toy is generated; the fits still use the configured
+    // systematic model and statistical term.
+    bool fc_stat_only_throws = false;
+    bool fc_syst_only_throws = false;
 
     // fc-adaptive (slice 1: Wilks prepass + meta-mesh + diagnostics).
     std::string afc_mode_str = "init-bank";
