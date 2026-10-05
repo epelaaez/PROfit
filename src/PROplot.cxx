@@ -1304,6 +1304,15 @@ namespace PROfit{
         log<LOG_DEBUG>(L"%1% || Finishing Plotting 1D Histogram %2%") % __func__ % hist_titles.c_str();
     }
 
+    // Area-normalised ratio of two collapsed blocks: (A/ΣA)/(B/ΣB) = (A/B)·ΣB/ΣA. Returns
+    // that factor (1 if either block is empty). Relative band widths need no change: under
+    // --area-norm (implied by --shapeonly) the bands are already shape-only.
+    static float area_norm_ratio_factor(const Eigen::VectorXf &v, size_t off1, size_t n1, size_t off2, size_t n2) {
+        const float s1 = v.segment(off1, n1).sum();
+        const float s2 = v.segment(off2, n2).sum();
+        return (s1 > 0.0f && s2 > 0.0f) ? s2/s1 : 1.0f;
+    }
+
     // Ratio of the same channel between two detectors, drawn as a spectrum.
     // Uses the error-band covariance rather than TH1::Divide so the correlation
     // between detectors is propagated. For 2D channels the y-axis is summed,
@@ -1317,12 +1326,15 @@ namespace PROfit{
                                      const std::optional<PROerrorbar> &posterrband,
                                      const std::vector<size_t> &channel_offsets,
                                      const std::string &filename,
-                                     int other_index)
+                                     int other_index,
+                                     PlotOptions opt)
     {
         if(config.m_num_detectors < 2) return;
 
         // Deliberately empty: --plot-bounds ymax etc. refer to event counts, not ratios.
         PlotBounds ratio_bounds;
+        // The bands carry no normalisation freedom here, so the ratios must not either.
+        const bool area_norm = bool(opt&PlotOptions::AreaNormalized);
 
         auto sum_vec = [](const Eigen::VectorXf &v, size_t off, size_t bx, size_t ny) {
             float s = 0.0f;
@@ -1352,8 +1364,13 @@ namespace PROfit{
             const size_t ny = config.m_channel_variable_dims[ch][other_index] == 2
                             ? config.m_channel_variable_bins[ch][other_index].NBinsAlong(1) : 1;
             std::vector<float> edges = config.m_channel_variable_bins[ch][other_index].Edges(0);
+            const size_t nblk = nx*ny;
+            const float k_cv   = area_norm ? area_norm_ratio_factor(cv_coll, off1, nblk, off2, nblk) : 1.0f;
+            const float k_bf   = (area_norm && bf_coll) ? area_norm_ratio_factor(*bf_coll, off1, nblk, off2, nblk) : 1.0f;
+            const float k_data = (area_norm && data_coll) ? area_norm_ratio_factor(*data_coll, off1, nblk, off2, nblk) : 1.0f;
 
-            const std::string ratname = config.m_detector_plotnames[det1] + " / " + config.m_detector_plotnames[det2];
+            const std::string ratname = config.m_detector_plotnames[det1] + " / " + config.m_detector_plotnames[det2]
+                                      + (area_norm ? " (area normalized)" : "");
             const std::string xtitle   = config.GetChannelXAxisTitle(ch, other_index);
             const std::string title    = config.m_mode_plotnames[mode] + " " + config.m_channel_plotnames[ch]
                                        + ";" + xtitle + ";" + ratname;
@@ -1384,7 +1401,7 @@ namespace PROfit{
             for(size_t bx = 0; bx < nx; ++bx) {
                 const float a = sum_vec(cv_coll, off1, bx, ny);
                 const float b = sum_vec(cv_coll, off2, bx, ny);
-                const float r = (b != 0.0f) ? a/b : 0.0f;
+                const float r = (b != 0.0f) ? k_cv*a/b : 0.0f;
                 cv_rat->SetBinContent(bx+1, r);
 
                 if(errband && a != 0.0f && b != 0.0f) {
@@ -1401,7 +1418,7 @@ namespace PROfit{
                 if(bf_coll) {
                     const float ba = sum_vec(*bf_coll, off1, bx, ny);
                     const float bb = sum_vec(*bf_coll, off2, bx, ny);
-                    const float br = (bb != 0.0f) ? ba/bb : 0.0f;
+                    const float br = (bb != 0.0f) ? k_bf*ba/bb : 0.0f;
                     bf_rat->SetBinContent(bx+1, br);
                     if(posterrband && ba != 0.0f && bb != 0.0f) {
                         const Eigen::MatrixXf &C = posterrband->covariance;
@@ -1417,7 +1434,7 @@ namespace PROfit{
                 if(data_coll) {
                     const float da = sum_vec(*data_coll, off1, bx, ny);
                     const float db = sum_vec(*data_coll, off2, bx, ny);
-                    const float dr = (db != 0.0f) ? da/db : 0.0f;
+                    const float dr = (db != 0.0f) ? k_data*da/db : 0.0f;
                     data_rat->SetBinContent(bx+1, dr);
                     // data detectors are statistically independent
                     const float dvar = (da > 0.0f && db > 0.0f) ? (1.0f/da + 1.0f/db) : 0.0f;
@@ -1470,6 +1487,7 @@ namespace PROfit{
         if(config.m_num_channels < 2) return;
 
         PlotBounds ratio_bounds;
+        const bool area_norm = bool(opt&PlotOptions::AreaNormalized);
 
         auto sum_vec = [](const Eigen::VectorXf &v, size_t off, size_t bx, size_t ny) {
             float s = 0.0f;
@@ -1528,7 +1546,13 @@ namespace PROfit{
                     % __func__ % config.m_channel_names[ch1].c_str() % config.m_channel_names[ch2].c_str() % xt1.c_str() % xt2.c_str();
             }
 
-            const std::string ratname = config.m_channel_plotnames[ch1] + " / " + config.m_channel_plotnames[ch2];
+            const size_t n1 = nx*ny1, n2 = nx*ny2;
+            const float k_cv   = area_norm ? area_norm_ratio_factor(cv_coll, off1, n1, off2, n2) : 1.0f;
+            const float k_bf   = (area_norm && bf_coll) ? area_norm_ratio_factor(*bf_coll, off1, n1, off2, n2) : 1.0f;
+            const float k_data = (area_norm && data_coll) ? area_norm_ratio_factor(*data_coll, off1, n1, off2, n2) : 1.0f;
+
+            const std::string ratname = config.m_channel_plotnames[ch1] + " / " + config.m_channel_plotnames[ch2]
+                                      + (area_norm ? " (area normalized)" : "");
             const std::string title   = config.m_mode_plotnames[mode] + " " + config.m_detector_plotnames[det]
                                       + ";" + xt1 + ";" + ratname;
             const std::string sfx = "_chratspec_" + std::to_string(mode) + "_" + std::to_string(det)
@@ -1558,7 +1582,7 @@ namespace PROfit{
             for(size_t bx = 0; bx < nx; ++bx) {
                 const float a = sum_vec(cv_coll, off1, bx, ny1);
                 const float b = sum_vec(cv_coll, off2, bx, ny2);
-                const float r = (b != 0.0f) ? a/b : 0.0f;
+                const float r = (b != 0.0f) ? k_cv*a/b : 0.0f;
                 cv_rat->SetBinContent(bx+1, r);
 
                 if(errband && a != 0.0f && b != 0.0f) {
@@ -1578,7 +1602,7 @@ namespace PROfit{
                 if(bf_coll) {
                     const float ba = sum_vec(*bf_coll, off1, bx, ny1);
                     const float bb = sum_vec(*bf_coll, off2, bx, ny2);
-                    const float br = (bb != 0.0f) ? ba/bb : 0.0f;
+                    const float br = (bb != 0.0f) ? k_bf*ba/bb : 0.0f;
                     bf_rat->SetBinContent(bx+1, br);
                     if(posterrband && ba != 0.0f && bb != 0.0f) {
                         const Eigen::MatrixXf &C = posterrband->covariance;
@@ -1594,7 +1618,7 @@ namespace PROfit{
                 if(data_coll) {
                     const float da = sum_vec(*data_coll, off1, bx, ny1);
                     const float db = sum_vec(*data_coll, off2, bx, ny2);
-                    const float dr = (db != 0.0f) ? da/db : 0.0f;
+                    const float dr = (db != 0.0f) ? k_data*da/db : 0.0f;
                     data_rat->SetBinContent(bx+1, dr);
                     
                     // assumes the two channels are mutually exclusive selections (no correlation term...)
@@ -2318,7 +2342,7 @@ namespace PROfit{
             if(data)     data_coll = data->Spec();
             if(config.m_num_detectors > 1)
                 plot_detector_ratio_spectra(c, config, cv_coll, bf_coll, data_coll,
-                                            errband, posterrband, channel_offsets, filename, other_index);
+                                            errband, posterrband, channel_offsets, filename, other_index, opt);
             if(plot_channel_ratios && config.m_num_channels > 1)
                 plot_channel_ratio_spectra(c, config, cv_coll, bf_coll, data_coll,
                                            errband, posterrband, channel_offsets, filename, other_index, opt);

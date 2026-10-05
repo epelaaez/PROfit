@@ -193,8 +193,11 @@ namespace PROfit{
      * @param channel_offsets  Collapsed bin start of each mode/detector/channel, in loop order.
      * @param filename         Output PDF filename.
      * @param other_index      Variable index (default 0).
+     * @param opt              Plot options; with AreaNormalized each block is normalised to unit
+     *                         area before the ratio, matching the shape-only bands (--area-norm,
+     *                         implied by --shapeonly).
      */
-    void plot_detector_ratio_spectra(TCanvas &c, const PROconfig &config, const Eigen::VectorXf &cv_coll, const std::optional<Eigen::VectorXf> &bf_coll, const std::optional<Eigen::VectorXf> &data_coll, const std::optional<PROerrorbar> &errband, const std::optional<PROerrorbar> &posterrband, const std::vector<size_t> &channel_offsets, const std::string &filename, int other_index = 0);
+    void plot_detector_ratio_spectra(TCanvas &c, const PROconfig &config, const Eigen::VectorXf &cv_coll, const std::optional<Eigen::VectorXf> &bf_coll, const std::optional<Eigen::VectorXf> &data_coll, const std::optional<PROerrorbar> &errband, const std::optional<PROerrorbar> &posterrband, const std::vector<size_t> &channel_offsets, const std::string &filename, int other_index = 0, PlotOptions opt = PlotOptions{});
     void plot_channel_ratio_spectra(TCanvas &c, const PROconfig &config, const Eigen::VectorXf &cv_coll, const std::optional<Eigen::VectorXf> &bf_coll, const std::optional<Eigen::VectorXf> &data_coll, const std::optional<PROerrorbar> &errband, const std::optional<PROerrorbar> &posterrband, const std::vector<size_t> &channel_offsets, const std::string &filename, int other_index = 0, PlotOptions opt = PlotOptions{});
 
     /**
