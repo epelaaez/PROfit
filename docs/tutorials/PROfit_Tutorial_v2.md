@@ -2852,6 +2852,13 @@ builders then do the following.
   area-normalised. The bands are shape bands as above, and the χ² label, which
   is still the absolute χ², gets a small grey **"absolute χ²"** tag. Under
   `--shapeonly` the tag reads **"shape-only"**.
+- **Detector and channel ratio pages** (`ND / FD`, and `--plot-ratios`).
+  Under `--area-norm` (so also `--shapeonly`) each spectrum is normalised to
+  unit area per channel *before* dividing, for the CV, the best fit and the
+  data alike, and the axis reads "(area normalized)". The bands are shape
+  bands, so a ratio of raw rates would show offsets that neither the band nor
+  a shape-only χ² accounts for. The ratio therefore sits around 1 by
+  construction: only its energy dependence is tested, not the ND/FD rate.
 - **Fractional-systematics breakdowns and covariance plots.** These are the
   `_fractional_systematics.pdf` family, `_PROplot_Covar.pdf` and the ROOT
   `Covariance/` directory. Under `--shapeonly`, `plot` projects every
