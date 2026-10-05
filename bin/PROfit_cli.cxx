@@ -9,6 +9,7 @@ PROpt::PROpt(int argc, char **argv) {
         app.add_option("-w,--file-verbosity", FILE_LEVEL, "File (log) Verbosity Level [1-4]->[Error,Warning,Info,Debug].")->default_val(static_cast<log_level_t>(-1));
         app.add_flag("-b,--progress", progress_bar, "Use a progress bar when applicable.");
         app.add_option("-o,--output", output_tag,"Additional output filename quantifier")->default_str("v1");
+        app.add_option("--required-version", required_version, "Refuse to run unless this is exactly this PROfit version, e.g. v3.0.5 or 3.0.5-dev (leading v optional). A -dev build only matches its full -dev string. Useful in --config run cards.");
         app.add_option("-n, --nthread", nthread, "Number of threads to parallelize over.")->default_val(1);
         app.add_option("-m,--max", maxevents, "Max number of events to run over.");
         app.add_option("--syst-throws", syst_throws, "Number of random throws per spline when converting splines to covariance matrices (spline_to_covariance systematics, and the plot fractional-systematics/covariance breakdowns). Default 500.")->check(CLI::PositiveNumber);
@@ -367,6 +368,18 @@ PROpt::PROpt(int argc, char **argv) {
             }
 
             log_impl::EnableFileLogging(log_file, FILE_LEVEL);
+        }
+
+        if(!required_version.empty()) {
+            std::string wanted = required_version;
+            if(wanted[0] == 'v' || wanted[0] == 'V') wanted.erase(0, 1);
+            const std::string running = PROJECT_VERSION_STR;
+            if(wanted != running) {
+                log<LOG_ERROR>(L"%1% || This is PROfit v%2%, but --required-version asks for v%3%. Terminating.") % __func__ % running.c_str() % wanted.c_str();
+                if(running.rfind(wanted + "-", 0) == 0)
+                    log<LOG_ERROR>(L"%1% || A v%2% build is not the v%3% release. To accept this build, pass --required-version v%2%.") % __func__ % running.c_str() % wanted.c_str();
+                exit(1);
+            }
         }
 
         // The grad-* preset defaults only make sense when the analytic gradient is

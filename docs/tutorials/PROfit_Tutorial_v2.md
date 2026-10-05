@@ -727,6 +727,54 @@ interleaves and can be hard to read.
 `-n/--nthread N` parallelizes all fitting code. `-m/--max N` truncates the
 MC event loop (quick tests only).
 
+### Keeping the arguments in a file: `--config`
+
+Long command lines get hard to reproduce. Any argument from this tutorial can
+go in a TOML (or INI) file instead, passed with `--config`:
+
+```toml
+# tut_profile.toml
+xml      = "tutorial.xml"
+tag      = "TUT"
+output   = "probe_v1"
+nthread  = 8
+log      = "profile.log"
+progress = true
+inject   = ["dmsq", 1, "sinsq2thme", 0.01]
+preset   = ["grad-good", "grad-fast"]
+
+[profile]
+probe        = true
+probe-chunks = 2
+```
+
+```bash
+PROfit --config tut_profile.toml                  # runs the profile above
+PROfit --config tut_profile.toml -n 16 -o probe_v2  # command line overrides the file
+```
+
+- A key is the option's long name without the dashes (`nthread`,
+  `grad-mode`, `fit-options`). Flags take `true`/`false`, and multi-value
+  options take a TOML array.
+- Global options go at the top. Subcommand options go under a
+  `[subcommand]` section (`[profile]`, `[surface]`, `[fc-adaptive]`, ...).
+- A `[subcommand]` section also **runs** that subcommand, even if you don't
+  name it on the command line. If you name a different subcommand on the
+  command line, both run.
+- Anything given on the command line wins over the file. One run card can
+  therefore serve a whole study, with `-o`, `--seed`, `-i` etc. varied per
+  job.
+- INI syntax (`key=value`, with space-separated lists such as
+  `inject=dmsq 1 sinsq2thme 0.01`) is also accepted.
+- To tie a run card to a build, add `required-version = "v3.0.5"` (or pass
+  `--required-version v3.0.5`). PROfit then stops straight away unless it is
+  exactly that version, the one printed in the log header and on every plot.
+  A development build only matches its full string (`v3.0.5-dev`), not the
+  release it leads up to.
+- **Misspelled keys are silently ignored**: `nthreads = 8` leaves you on
+  one thread. The first log line echoes the xml, tag, output and nthread
+  PROfit actually picked up, which is a quick check.
+
 ---
 
 # 4. Subcommand `process` — loading your files
