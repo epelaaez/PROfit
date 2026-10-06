@@ -113,7 +113,9 @@ run_test t00process process
 # --- 1. Global fits across metrics and data options --------------------------
 run_test t01global        --use-fake-data global
 run_test t02globalcnp     --use-fake-data -c PROCNP global
-run_test t03globalpoisson --use-fake-data -c Poisson global
+# Poisson has no covariance term: it refuses covariance systs (incl. MCStat) unless excluded.
+run_test t03globalpoisson --use-fake-data -c Poisson --exclude-systs MCStat RPA_CCQE NormCCMEC CoulombCCQE MaCCRES MvCCRES global
+expect_fail t03cpoissoncov --use-fake-data -c poisson global
 run_test t03bglobalpearson --use-fake-data -c pearson global
 run_test t04statonly      --use-fake-data --statonly global
 run_test t05inject        --use-fake-data -i dmsq 1 sinsq2thme 0.01 global
@@ -140,7 +142,7 @@ run_test t12plotbkgsub    --use-fake-data plot --bkg-subtract background
 # per-universe metrics), and the width+area plot combination.
 run_test t12sglobal       --use-fake-data --shapeonly global
 run_test t12sglobalcnp    --use-fake-data --shapeonly -c CNP global
-run_test t12sglobalpois   --use-fake-data --shapeonly -c poisson global
+run_test t12sglobalpois   --use-fake-data --shapeonly -c poisson --exclude-systs MCStat RPA_CCQE NormCCMEC CoulombCCQE MaCCRES MvCCRES global
 run_test t12sprofile      --use-fake-data --shapeonly profile
 run_test t12sfc           --use-fake-data --shapeonly fc -u 2
 run_test t12splotwidth    --use-fake-data --shapeonly --scale-by-width plot

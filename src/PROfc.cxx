@@ -122,7 +122,8 @@ void fc_worker(fc_args args, MultiPROgressBar &progress) {
     } // end of cross-checks
     cached_seed_osc = fitter_osc.best_fit;    
 
-    Eigen::VectorXf t = Eigen::VectorXf::Map(throws.data(), throws.size());
+    // Splines only, indexed like spline_names (the writer and the --reuse reader both assume it).
+    Eigen::VectorXf t = throws.tail(nparams - nphys);
 
     // Evaluate all Eigen expressions to concrete VectorXf before constructing fc_out.
     Eigen::VectorXf best_phys  = args.gof_mode ? Eigen::VectorXf::Zero(nphys)

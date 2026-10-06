@@ -65,7 +65,9 @@ PRO3p2::PRO3p2(const PROpeller &prop, const std::map<std::string,int> &parameter
     default_val << -1, 0, -4, -4, -4, -4, 0.0f;
 }
 
-// Enforce |Ue4|^2 + |Ue5|^2 <= 1 and |Um4|^2 + |Um5|^2 <= 1
+// The e and mu rows must fit inside a unitary 5x5: row norms <= 1 and the rows orthogonal
+// (the last check, which also implies the column checks). The 4(a+b)^2 amplitude check is
+// stricter than unitarity when cos(phi54) < 0.
 int PRO3p2::UnitarityConstraint(const Eigen::VectorXf &v) {
     float Ue4sq = std::pow(10.0f, v(2));
     float Um4sq = std::pow(10.0f, v(3));
@@ -80,6 +82,12 @@ int PRO3p2::UnitarityConstraint(const Eigen::VectorXf &v) {
     
     // more careful with unitarity since tau and steriles are not specified and checking the max value of probability
     if(4*Um4sq*Ue4sq + 4*Um5sq*Ue5sq + 8*std::sqrt(Um4sq*Ue4sq*Um5sq*Ue5sq) >= 1.0f) return 0;
+
+    // Orthogonality via Cauchy-Schwarz on the light block:
+    // |Ue4 Um4* + Ue5 Um5*|^2 <= (1-|Ue4|^2-|Ue5|^2)(1-|Um4|^2-|Um5|^2), with phi54 the
+    // interference phase. Reduces to Ue4sq + Um4sq <= 1 in the 3+1 limit.
+    if(Ue4sq*Um4sq + Ue5sq*Um5sq + 2*std::sqrt(Ue4sq*Um4sq*Ue5sq*Um5sq)*std::cos(v(6))
+       > (1.0f - Ue4sq - Ue5sq)*(1.0f - Um4sq - Um5sq)) return 0;
 
     return 1;
 }

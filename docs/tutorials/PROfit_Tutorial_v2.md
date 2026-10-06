@@ -176,8 +176,9 @@ M  = stat  +  (collapsed, prediction-scaled fractional covariance)
 with a Gaussian pull term on every spline parameter (priors and centers
 configurable per systematic in the XML). `PROCNP` swaps the statistical term
 for the combined-Neyman-Pearson variance, and `Poisson` uses the
-Baker-Cousins likelihood-ratio sum (and ignores covariance systematics — it
-warns).
+Baker-Cousins likelihood-ratio sum. It has no covariance term, so it refuses
+to run while any covariance-type systematic (MC-stat included) is selected;
+drop them with `--exclude-systs`.
 
 **Asimov vs fake data.** Unless you say otherwise, the "data" in every fit is
 the central-value expectation itself (Asimov). You can inject an oscillation
@@ -386,8 +387,9 @@ The `<allowlist>` attributes:
   `restrict="lo,hi"` range, which becomes **mandatory** (and `prior=`,
   `center=`, and `<correlation>` entries are forbidden for it). Use it for
   a genuinely unconstrained scale factor you want measured, not pulled.
-  One caveat: FC/Brazil pseudo-experiment throws currently still sample a
-  truncated *Gaussian* for such splines, not the declared uniform.
+  FC/Brazil/fc-adaptive pseudo-experiment throws draw such splines flat
+  over the `restrict` range, matching the prior. (PROplot's pre-fit band
+  still throws them as N(0,1); that is display only.)
 * `mode="covariance_to_spline"` with `num_decomp_knobs=` promotes a
   covariance to its leading eigenmode splines (the same machinery PROjector
   uses — see section 9). `restrict` bounds a spline's allowed range.
@@ -456,8 +458,8 @@ its box is `[lo−1, hi−1]`, and there is **no Gaussian pull** (it is a
   `--syst-list`/`--exclude-systs` (it expands to its children), while
   `--fix` and `--inject-systs` take the individual `_bin<j>` names;
 * `prior=`, `center=`, `prior_type=`, `restrict=` and `<correlation>` are
-  refused for these entries; FC/Brazil throws share the uniform-spline
-  caveat above (truncated Gaussian, not uniform).
+  refused for these entries; FC/Brazil throws draw them flat over their
+  range, like any uniform-prior spline (see above).
 
 ### Coupling quadratic splines exactly: `spline_cross_quad`
 
@@ -558,8 +560,8 @@ sees. Notes:
   (this now also holds for plain `covariance_to_spline`); `--fix` and
   `--inject-systs` take the `_decomp_knob_<k>` names; a consumed source entry
   is no longer a fit object, so its own name resolves nowhere;
-* the usual uniform-spline caveats: PROplot's pre-fit band throws a truncated
-  Gaussian for these knobs (not meaningful), and so do FC/Brazil throws.
+* the usual uniform-spline caveat: PROplot's pre-fit band throws these knobs
+  as N(0,1) (not meaningful); FC/Brazil throws draw them flat over the knob box.
 
 ### Asymmetric errors from histogram sources: `<HistVarFiles>`
 
@@ -1112,8 +1114,11 @@ parameter point (zero-data bins are kept); `CNP` swaps the statistical
 variance for the combined
 Neyman-Pearson form `3/(1/d + 2/μ)` ([X. Ji et al.](https://arxiv.org/pdf/1903.07185))
 and is the **recommended** choice whenever bins can be low-statistics;
-`poisson` is the Baker-Cousins likelihood-ratio sum and ignores
-covariance-type systematics entirely (it will warn you). The legacy
+`poisson` is the Baker-Cousins likelihood-ratio sum. It has no covariance
+term, so it is a fatal error to run it with any covariance-type systematic
+(MC-stat included) still selected: remove them with `--exclude-systs`. Under
+PROjector every covariance must be promoted (`--projector-knobs -1`, no
+`--projector-keep-cov`). The legacy
 spellings `PROchi`, `PROCNP`, and `Poisson` still work as deprecated
 aliases (mapping to `neyman`/`CNP`/`poisson` with a one-time warning).
 Only `neyman` has the closed-form analytic gradient — `CNP`/`poisson`
@@ -2180,7 +2185,11 @@ coupling `g_e`, needs separate `L` and `E` parameters)*.
 ### `SBL_3+2_Usq` *(legacy: `3+2`)* — two-sterile model
 
 Seven parameters with a CP phase, so ν and ν̄ appearance differ. Unitarity
-constraints |Ue4|²+|Ue5|² ≤ 1 and |Uμ4|²+|Uμ5|² ≤ 1.
+constraints: |Ue4|²+|Ue5|² ≤ 1, |Uμ4|²+|Uμ5|² ≤ 1, and the e and μ rows
+orthogonal, |Ue4Uμ4* + Ue5Uμ5*|² ≤ (1−|Ue4|²−|Ue5|²)(1−|Uμ4|²−|Uμ5|²)
+(φ₅₄-dependent; the 3+1 limit is |Ue4|²+|Uμ4|² ≤ 1). The older appearance
+cap 4(|Ue4||Uμ4| + |Ue5||Uμ5|)² < 1 is also still applied; it is stricter
+than unitarity when cos φ₅₄ < 0.
 
 | # | name | meaning | fit space | bounds | default |
 |---|---|---|---|---|---|

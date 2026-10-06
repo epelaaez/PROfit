@@ -267,6 +267,8 @@ Eigen::VectorXf make_fakedata_params(Eigen::VectorXf &fake_data_osc_param_vector
 void make_param_vectors(Eigen::VectorXf &fakeDataParams, Eigen::VectorXf &CVParams, const PROconfig &config, const PROpt &options, const PROmodel &model, const PROsyst &systs, const Eigen::VectorXf &fake_data_osc_param_vector);
 void resolve_fit_presets(PROpt &options, const PROconfig &config, const PROmodel &model);
 void include_or_exclude_systs(std::vector<PROsyst> &variable_systs, const PROconfig &config, const PROpt &options);
+// Fatal if -c poisson would silently ignore a covariance-type systematic (incl. mcstat).
+void poisson_covariance_check(const PROpt &options, const PROconfig &config, const PROsyst &systs);
 // Re-lay the spline part of a [physics, splines] vector from old_names' order onto new_names'
 // by name; splines absent from old_names get 0.
 Eigen::VectorXf remap_spline_params(const Eigen::VectorXf &params, size_t nphys, const std::vector<std::string> &old_names, const std::vector<std::string> &new_names);

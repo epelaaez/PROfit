@@ -194,17 +194,20 @@ namespace PROfit{
     PROspec FillSplineRandomThrow(const PROconfig &inconfig, const PROpeller &inprop, const PROsyst &insyst,  const PROmodel &model,  const Eigen::VectorXf &cvparams, int spline, uint32_t seed, int other_index);
 
     /**
-     * @brief Throw one nuisance pull from N(0,1) truncated to spline @p i's allowed range.
-     * @details Never loops forever: OOB-safe spline_has_restrict lookup (covariance_to_spline
-     * knobs may not populate it), inverted-bounds tolerance, and bounded rejection attempts
-     * with a clamp-to-nearest-in-range fallback plus warning (pattern from commit 000b3d0).
+     * @brief Throw one nuisance pull from spline @p i's prior, truncated to its allowed range.
+     * @details Gaussian splines draw N(center, sigma) (spline_centers/spline_priors) by
+     * rejection; prior_type="uniform" splines draw flat over their restrict range, matching
+     * the zero pull they carry in the fit. Never loops forever: OOB-safe spline_has_restrict
+     * lookup (covariance_to_spline knobs may not populate it), inverted-bounds tolerance, and
+     * bounded rejection attempts with a clamp-to-nearest-in-range fallback plus warning
+     * (pattern from commit 000b3d0).
      * Shared by the FC pseudo-experiment generators (PROfc, PROAdaptiveFC) and the
      * pseudo-experiment CLI path.
      * @param insyst  Systematic object holding the spline bounds.
      * @param i       0-based spline index.
      * @param rng     Generator to draw from (caller owns seeding/threading).
      * @param d       N(0,1) distribution to draw with.
-     * @return The truncated Gaussian pull.
+     * @return The thrown pull (truncated Gaussian, or uniform for uniform-prior splines).
      */
     float ThrowRestrictedSplinePull(const PROsyst &insyst, size_t i, std::mt19937 &rng, std::normal_distribution<float> &d);
 
