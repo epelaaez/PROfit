@@ -12,8 +12,39 @@
 #include <algorithm>
 #include <random>
 #include <set>
+#include <limits>
 
 namespace PROfit {
+
+    namespace {
+        // Square-root factor L (cov = L L^T) of a symmetric PSD covariance: eigenvectors
+        // scaled by sqrt(eigenvalue), largest first, columns of dropped modes left zero.
+        // Double precision so the cutoff can sit at rounding level: the spectrum spans
+        // ~1e-12 of its maximum (MC stat and systematics on low-count bins), which a
+        // float-sized cutoff would discard.
+        Eigen::MatrixXf PSDSquareRoot(const Eigen::MatrixXf &cov, const char *caller) {
+            Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> es(cov.cast<double>());
+            if(es.info() != Eigen::Success) {
+                log<LOG_ERROR>(L"%1% | Eigendecomposition of the covariance failed.") % caller;
+                exit(EXIT_FAILURE);
+            }
+            const Eigen::VectorXd &evals = es.eigenvalues();
+            const double tol = evals.size() * std::numeric_limits<double>::epsilon() * evals.maxCoeff();
+            log<LOG_DEBUG>(L"%1% | Eigenvalues: %2% ") % caller % evals;
+
+            Eigen::MatrixXf L = Eigen::MatrixXf::Zero(cov.rows(), cov.cols());
+            Eigen::Index kept = 0;
+            for(Eigen::Index i = evals.size() - 1; i >= 0; --i)
+                if(evals(i) > tol)
+                    L.col(kept++) = (es.eigenvectors().col(i) * std::sqrt(evals(i))).cast<float>();
+            if(kept == 0) {
+                log<LOG_ERROR>(L"%1% | All eigenvalues are below tolerance, cannot sample. Blarg.") % caller;
+                exit(EXIT_FAILURE);
+            }
+            log<LOG_DEBUG>(L"%1% | Kept %2% of %3% modes") % caller % kept % evals.size();
+            return L;
+        }
+    }
 
     std::vector<std::pair<size_t,size_t>> PROsyst::ChannelBlocks(const PROconfig &config, int binning) {
         std::vector<std::pair<size_t,size_t>> blocks;
@@ -1833,7 +1864,7 @@ namespace PROfit {
 
     Eigen::MatrixXf PROsyst::DecomposeFractionalCovariance(const PROconfig &config, const Eigen::VectorXf &cv_vec) const {
         // Spline-only (no covariance systs): fractional_covariance is the
-        // ctor's all-zero placeholder, whose SVD has no singular value above
+        // ctor's all-zero placeholder, which has no eigenvalue above
         // tolerance. A zero factor is the correct no-op throw shift.
         if(n_covar == 0) {
             size_t nbins = config.m_num_variable_bins_total_collapsed[other_index < 0 ? (int)config.i_prime : other_index];
@@ -1842,8 +1873,8 @@ namespace PROfit {
         // The mutable last_decomp_* cache is written from this const method;
         // metric clones and throw helpers share PROsyst objects across
         // threads, so guard the cache. Function-local mutex keeps PROsyst
-        // copyable; contention is irrelevant on this cold path (the SVD below
-        // dominates).
+        // copyable; contention is irrelevant on this cold path (the
+        // eigendecomposition below dominates).
         static std::mutex decomp_cache_mutex;
         {
             std::lock_guard<std::mutex> lk(decomp_cache_mutex);
@@ -1852,68 +1883,14 @@ namespace PROfit {
         }
         Eigen::MatrixXf full_cov = cv_vec.asDiagonal() * fractional_covariance * cv_vec.asDiagonal();
         Eigen::MatrixXf coll = other_index < 0 ? CollapseMatrix(config, full_cov) : CollapseMatrix(config, full_cov, other_index);
-        /*Eigen::LDLT<Eigen::MatrixXf> ldlt(coll);
-          Eigen::MatrixXf L = ldlt.matrixL(); 
-          Eigen::VectorXf D_sqrt = ldlt.vectorD().array().sqrt();  
-          Eigen::PermutationMatrix<Eigen::Dynamic, Eigen::Dynamic> P(ldlt.transpositionsP());
-
-          if (ldlt.info() != Eigen::Success) {
-          log<LOG_ERROR>(L"%1% | Eigen LLT has failed!") % __func__ ;
-          Eigen::FullPivLU<Eigen::MatrixXf> lu_decomp(coll);
-          int rank = lu_decomp.rank();
-          int size = coll.rows();
-          if (!coll.isApprox(coll.transpose())) {
-          log<LOG_ERROR>(L"%1% | Matrix is not symmetric! Rank %2% and size %3%") % __func__ % rank % size ;
-          }
-          Eigen::SelfAdjointEigenSolver<Eigen::MatrixXf> eigensolver(coll);
-          if (eigensolver.eigenvalues().minCoeff() <= 0) {
-          log<LOG_ERROR>(L"%1% | Matrix is not positive semi definite, minCoeff is %2%. Rank %3% and size %4% ") % __func__ % eigensolver.eigenvalues().minCoeff() % rank % size;
-          }
-          Eigen::JacobiSVD<Eigen::MatrixXf> svd(coll);
-          log<LOG_ERROR>(L"%1% | Singular values: %2% ") % __func__ % svd.singularValues();
-
-          Eigen::IOFormat fmt(Eigen::StreamPrecision, Eigen::DontAlignCols, " ", "\n", "", "", "", "");
-          std::ostringstream oss;
-          oss << coll.format(fmt);
-          log<LOG_ERROR>(L"%1% | Matrix is %2% ") % __func__ % oss.str().c_str();
-          exit(EXIT_FAILURE);
-          }
-          return P * L * D_sqrt.asDiagonal();*/
-        Eigen::JacobiSVD<Eigen::MatrixXf> svd(coll, Eigen::ComputeThinU | Eigen::ComputeThinV);
-        const auto& U = svd.matrixU();
-        const auto& S = svd.singularValues();
-
-        log<LOG_DEBUG>(L"%1% | Singular values: %2% ") % __func__ % svd.singularValues();
-
-        Eigen::FullPivLU<Eigen::MatrixXf> lu_decomp(coll);
-        int rank = lu_decomp.rank();
-        int size = coll.rows();
-        log<LOG_DEBUG>(L"%1% | Matrix is Rank %2% and size %3%") % __func__ % rank % size ;
-
-        float tol = 1e-8f * S.maxCoeff(); // Some cutoff? is this value impactful on out matricies? need to test
-        std::vector<int> keep;
-        for (int i = 0; i < S.size(); ++i) {
-            if (S(i) > tol) keep.push_back(i);
-        }
-
-        if (keep.empty()) {
-            log<LOG_ERROR>(L"%1% | All singular values are below tolerance, cannot sample. Blarg.") % __func__;
-            exit(EXIT_FAILURE);
-        }
-
-        //going to keep only the singular values that give meaningful variance
-        Eigen::MatrixXf fallback_sampler = Eigen::MatrixXf::Zero(coll.rows(), coll.cols());
-        for (size_t i = 0; i < keep.size(); ++i) {
-            fallback_sampler.col(i) = U.col(keep[i]) * std::sqrt(S(keep[i]));
-        }
+        Eigen::MatrixXf L = PSDSquareRoot(coll, __func__);
 
         {
             std::lock_guard<std::mutex> lk(decomp_cache_mutex);
             last_decomp_spec = cv_vec;
-            last_decomp_mat = fallback_sampler;
+            last_decomp_mat = L;
         }
-        return fallback_sampler;
-
+        return L;
     }
 
     Eigen::MatrixXf PROsyst::DecomposeFractionalCovarianceFull(const PROconfig &config, const Eigen::VectorXf &cv_vec) const {
@@ -1929,34 +1906,7 @@ namespace PROfit {
                 return last_decomp_full_mat;
         }
         Eigen::MatrixXf full_cov = cv_vec.asDiagonal() * fractional_covariance * cv_vec.asDiagonal();
-
-        // full_cov is symmetric PSD by construction, so a self-adjoint
-        // eigendecomposition gives the same tolerance-clipped sampler as the
-        // JacobiSVD used for the (smaller) collapsed matrix, at lower cost on
-        // the full-bin dimension.
-        Eigen::SelfAdjointEigenSolver<Eigen::MatrixXf> es(full_cov);
-        if(es.info() != Eigen::Success) {
-            log<LOG_ERROR>(L"%1% | Eigendecomposition of full-space covariance failed.") % __func__;
-            exit(EXIT_FAILURE);
-        }
-        const Eigen::VectorXf &evals = es.eigenvalues();
-        const Eigen::MatrixXf &evecs = es.eigenvectors();
-
-        float tol = 1e-8f * evals.maxCoeff();
-        std::vector<int> keep;
-        for(int i = 0; i < evals.size(); ++i) {
-            if(evals(i) > tol) keep.push_back(i);
-        }
-
-        if(keep.empty()) {
-            log<LOG_ERROR>(L"%1% | All eigenvalues are below tolerance, cannot sample. Blarg.") % __func__;
-            exit(EXIT_FAILURE);
-        }
-
-        Eigen::MatrixXf sampler = Eigen::MatrixXf::Zero(full_cov.rows(), full_cov.cols());
-        for(size_t i = 0; i < keep.size(); ++i) {
-            sampler.col(i) = evecs.col(keep[i]) * std::sqrt(evals(keep[i]));
-        }
+        Eigen::MatrixXf sampler = PSDSquareRoot(full_cov, __func__);
 
         {
             std::lock_guard<std::mutex> lk(decomp_full_cache_mutex);

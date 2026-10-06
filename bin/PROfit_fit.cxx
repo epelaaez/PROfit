@@ -237,7 +237,7 @@ GlobalFitResult run_global_fit(const PROconfig &config, const PROpeller &prop, c
         const Eigen::VectorXf band_data = legacy_post ? Eigen::VectorXf() : data.Spec();
         if(errband_chain_degenerate) {
             log<LOG_INFO>(L"%1% || No free nuisance parameters; computing the post-fit error band analytically from the %2% covariance instead of MCMC.") % __func__ % (legacy_post ? "prior" : "data-constrained");
-            res.post_err_band = getCovarianceOnlyErrorBand(config, prop, metric.GetSysts(), metric.GetModel(), best_fit, config.i_prime, band_data, shape_norm, metric.ShapeOnly());
+            res.post_err_band = getCovarianceOnlyErrorBand(config, prop, metric.GetSysts(), metric.GetModel(), best_fit, config.i_prime, band_data, shape_norm, metric.ShapeOnly(), &metric);
             degenerate_mcmc_params(res.posteriors, res.spline_covariance, res.post_param_lo, res.post_param_hi);
         } else {
             Metropolis mh_post(simple_target{metric}, adaptive_proposal(metric, dseed(PROseed::global_rng), errband_fixed_pars), best_fit, dseed(PROseed::global_rng));
@@ -567,7 +567,7 @@ std::map<std::string, TObject *> draw_fit_result(const PROconfig &config, const 
     if(fitres.post_err_band && fitres.post_err_band->constrained
             && syst.GetNCovar() > 0 && fitres.fitter.best_fit.size()) {
         plotCovariancePosteriorPulls(config, prop, syst, model, fitres.fitter.best_fit,
-            data.Spec(), prefix+"_postfit_covariance_pulls.pdf", config.i_prime, &drawn_objs, metric.ShapeOnly());
+            data.Spec(), prefix+"_postfit_covariance_pulls.pdf", config.i_prime, &drawn_objs, metric.ShapeOnly(), &metric);
     }
 
     if(fitres.spline_covariance.size()) {

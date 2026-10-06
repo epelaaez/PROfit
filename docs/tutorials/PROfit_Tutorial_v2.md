@@ -2378,11 +2378,17 @@ the absolute covariance is built there and collapsed afterwards:
 ```
 Σ = collapse( diag(P_unc)·F·diag(P_unc) )   absolute covariance; P_unc is the
                                             UNCOLLAPSED spectrum matching F's dims
-Σ = U S Uᵀ                                  (eigendecomposition)
-L = U·√S        with modes below tolerance dropped (their columns are zero)
+Σ = U S Uᵀ                                  (eigendecomposition, double precision)
+L = U·√S        largest mode first; rounding-level modes dropped (zero columns)
 ```
 
-so that `Σ = L·Lᵀ` (up to the dropped below-tolerance modes), and a random
+The only modes dropped are those below `n·ε_double·max(S)`, i.e. numerical
+zeros of a rank-deficient Σ (and the slightly negative noise eigenvalues
+rounding produces). Σ's genuine spectrum spans ~10⁻¹² of its largest
+eigenvalue — MC-stat and systematics on low-count bins sit next to
+high-count ones — so a looser cutoff would silently delete real variance in
+exactly the bins where the statistical error is smallest. With that, `Σ = L·Lᵀ`
+to rounding, and a random
 spectrum fluctuation with exactly the covariance Σ is simply `L·g` with
 `g ~ N(0, 1)` per component. `L` is n_bins × n_bins with `k ≤ n_bins`
 non-zero columns (the rank). Each non-zero column of `L` is one independent
@@ -2494,17 +2500,27 @@ the data and a fixed spline point is **exactly Gaussian, with a mean and
 covariance you can write down**. So instead of fitting them, we compute the
 Gaussian and draw from it — once per chain step.
 
-First, restrict to the **contributing bins** `B`: bins that are active
-(`PROconfig::SetActiveBins` mask) **and** have `d_b > 0`. These are exactly
-the bins PROchi uses (its statistical term is `diag(max(d,1))` and zero-data
-bins are marginalized away), so the reconstruction is constrained by the same
-information the fit was — PROjector-masked channels, for example, cannot pull
-on anything. On those bins define:
+`C` is the fit metric's **own** statistical covariance (its per-bin variance,
+`PROmetric::GetStatVariances`), so the reconstruction uses the same
+statistical model the fit did:
+
+| `-c` | `C_b` | in the chain |
+|---|---|---|
+| `neyman` | `d_b` | constant |
+| `CNP` | `3/(1/d_b + 2/μ_b)`, `μ_b/2` if `d_b = 0` (μ = physics-only CV) | constant (physics is pinned in the band chain) |
+| `pearson` | `S_b`, the sample's own prediction | re-evaluated at every chain point |
+
+Restrict to the **contributing bins** `B`: bins that are active
+(`PROconfig::SetActiveBins` mask) **and** have `C_b > 0` — exactly the bins
+the fit's χ² uses (neyman drops zero-data bins; CNP and pearson keep every
+active bin), so the reconstruction is constrained by the same information the
+fit was — PROjector-masked channels, for example, cannot pull on anything. On
+those bins define:
 
 ```
-C   = diag( max(d_b, 1) )                 statistical covariance, b ∈ B
+C   = diag( C_b )                         statistical covariance, b ∈ B
 L_B = rows of L in B, zero columns dropped   (n_B × k)
-A   = 1_k + L_Bᵀ C⁻¹ L_B                  (k × k, factorized once, in double)
+A   = 1_k + L_Bᵀ C⁻¹ L_B                  (k × k, in double; refactorized only when C changes)
 ```
 
 Then for every chain step `i`, with residual `u⁽ⁱ⁾ = d − S⁽ⁱ⁾` on `B`:
@@ -2625,8 +2641,11 @@ Some things to note, which may not be obvious:
 * The constraint assumes the covariance systematics act **linearly and
   unboundedly** on the spectrum. The same assumption their presence in the
   χ² covariance already makes, so this is NOT the same as splines with a 3 sigma cutoff (but should be close)
-* `C = diag(max(d,1))` matches **PROchi**; for `PROCNP`/`Poisson` fits the
-  reconstruction is an approximation to the corresponding stat model.
+* `C` is the fit metric's own statistical variance, so neyman, CNP and pearson
+  bands all condition with the χ² they were fitted with. With no free splines
+  (the analytic path) the logged `uᵀ(C+Σ)⁻¹u` at the best fit reproduces that
+  fit χ² (to float rounding).
+  `poisson` has no covariance term; covariance systematics are refused there.
 * PROjector-masked channels (active-bins mask, zeroed data) are excluded
   from `B` automatically. Aka masked bins cannot pull on the systematics.
 * The post-fit band is a posterior **conditioned on the very data drawn on
@@ -2652,8 +2671,10 @@ parameters for a moment. C.0 built `Σ = L·Lᵀ`, so each non-zero column of `L
 is one independent mode of correlated variation; give each mode a knob
 `α_j`, so the prediction becomes `P(θ) + L·α`, and give each knob a unit
 Gaussian prior (that is what "the mode has size √S" already encoded into
-`L`), contributing a pull term `αᵀα`. With `C` the statistical covariance and
-`u ≡ d − P(θ)` the residual, the χ² with everything explicit is
+`L`), contributing a pull term `αᵀα`. With `C` the statistical covariance
+(it may depend on θ, as pearson's does, but never on α — so everything below
+holds at each fixed θ) and `u ≡ d − P(θ)` the residual, the χ² with
+everything explicit is
 
 ```
 χ²(θ, α) = (u − L·α)ᵀ C⁻¹ (u − L·α)  +  αᵀα  +  pulls(s)

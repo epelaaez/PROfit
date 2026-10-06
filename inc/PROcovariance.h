@@ -149,6 +149,12 @@ namespace PROfit{
              */
             std::vector<Eigen::Index> contributingBins() const override;
 
+            Eigen::VectorXf GetStatVariances(const Eigen::VectorXf &collapsed_prediction,
+                                             const Eigen::VectorXf &comparison,
+                                             const Eigen::VectorXf &param) const override {
+                return statisticalVariances(collapsed_prediction, comparison, &param);
+            }
+
             /**
              * @brief Compute the chi-squared contribution from a single analysis channel.
              * @param global_channel_index  Global channel index.

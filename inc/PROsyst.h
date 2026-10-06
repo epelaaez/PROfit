@@ -99,7 +99,7 @@ namespace PROfit {
      *   - accumulates a total fractional_covariance from all covariance-type systematics.
      *
      * During fitting, GetSplineShift() evaluates spline weights and
-     * DecomposeFractionalCovariance() provides the Cholesky decomposition of the total
+     * DecomposeFractionalCovariance() provides a square-root factor of the total
      * covariance for correlated throws.
      */
     class PROsyst {
@@ -413,6 +413,12 @@ namespace PROfit {
             PROspec GetSplineShiftedSpectrum(const PROconfig& config, const PROpeller& prop, std::vector<int> syst_nums, std::vector<float> shifts) const;
             PROspec GetSplineShiftedSpectrum(const PROconfig& config, const PROpeller& prop, std::vector<float> shifts) const;
 
+            /** @brief Square-root factor L of the collapsed absolute covariance.
+             *
+             *  L L^T = T^T diag(cv_vec) fractional_covariance diag(cv_vec) T (n_collapsed x
+             *  n_collapsed): eigenvectors scaled by sqrt(eigenvalue), largest first, from a
+             *  double-precision eigendecomposition. Only rounding-level eigenvalues (below
+             *  n * eps_double * max) are dropped, as zero columns. Cached on cv_vec. */
             Eigen::MatrixXf DecomposeFractionalCovariance(const PROconfig &config, const Eigen::VectorXf &cv_vec) const;
 
             /** @brief Full-bin (uncollapsed) analogue of DecomposeFractionalCovariance.
