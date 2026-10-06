@@ -663,6 +663,10 @@ namespace PROfit {
         float thi = has_r ? insyst.spline_restrict_hi[i] : insyst.spline_hi[i];
         if (tlo > thi) { const float t = tlo; tlo = thi; thi = t; }
 
+        // prior_type="uniform" has no Gaussian prior: throw flat over its allowed range.
+        if (i < insyst.spline_prior_types.size() && insyst.spline_prior_types[i] == SplinePriorType::Uniform)
+            return std::uniform_real_distribution<float>(tlo, thi)(rng);
+
         // Sample the spline's ACTUAL prior N(center, sigma), not a hardcoded N(0,1):
         // center/sigma default to 0/1 (identical behaviour for legacy configs) but honor
         // XML-configured priors and PROjector's constrained posterior. Note only the

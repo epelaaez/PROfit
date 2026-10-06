@@ -106,6 +106,10 @@ namespace PROfit {
         return mask;
     }
 
+    namespace {
+        const std::string kPromotedName = "PROjector_cov";
+    }
+
     size_t PROjectorPromoteCovariance(PROconfig &config, PROsyst &systs, size_t var_index,
                                       int num_decomp_knobs,
                                       const std::vector<std::string> &keep_covariance) {
@@ -132,7 +136,6 @@ namespace PROfit {
         const Eigen::MatrixXf promoted_frac = systs.SumMatrices(promote_names);
         const Eigen::MatrixXf old_total = systs.fractional_covariance;
 
-        static const std::string kPromotedName = "PROjector_cov";
         SystStruct ss(kPromotedName, 0);
         ss.num_decomp_knobs = num_decomp_knobs;
         ss.include_resid_cov = true;
@@ -230,6 +233,24 @@ namespace PROfit {
             return true;
         }
 
+        // PROpoisson has no covariance term: whatever promotion leaves as covariance (mcstat,
+        // kept covariances, residual eigenmodes) would silently drop out of the fit. Refuse it.
+        bool poissonCovarianceLeftover(const PROconfig &config, const PROsyst &systs,
+                                       const std::vector<std::string> &keep_covariance) {
+            std::vector<std::string> left;
+            if(systs.HasSyst(config.m_mcstat_systname)) left.push_back(config.m_mcstat_systname);
+            for(const std::string &name : keep_covariance)
+                if(name != config.m_mcstat_systname && systs.HasSyst(name)) left.push_back(name);
+            const std::string resid = kPromotedName + "_resid_cov";
+            if(systs.HasSyst(resid)) left.push_back(resid);
+            if(left.empty()) return false;
+            log<LOG_ERROR>(L"%1% || The poisson metric has no covariance term, but PROjector leaves these covariance "
+                    L"systematics unpromoted: %2%. Use --projector-knobs -1, no --projector-keep-cov, and "
+                    L"--exclude-systs for the MC-stat covariance (or a covariance metric: neyman/pearson/CNP).")
+                % __func__ % left;
+            return true;
+        }
+
     }
 
     bool PROjectorSetup(const PROjectorRunConfig &pjconf, PROconfig &config, PROsyst &systs,
@@ -242,15 +263,9 @@ namespace PROfit {
             log<LOG_ERROR>(L"%1% || --projector-prefit and --projector are mutually exclusive.") % __func__;
             return false;
         }
-        // All three metrics honor the config fit-region (active-bin) mask, so any of them
-        // is legal here. Poisson gets a reminder that it ignores covariance-type
-        // systematics: anything left unpromoted (residual modes, --projector-keep-cov,
-        // mcstat) silently drops out of a Poisson fit.
-        if(PROmetric::canonicalizeMetricName(chi2_name) == "poisson") {
-            log<LOG_WARNING>(L"%1% || PROjector with the Poisson metric: covariance-type systematics are ignored by "
-                    L"PROpoisson, so any unpromoted covariance (residual eigenmodes, --projector-keep-cov, mcstat) "
-                    L"will not enter the fit. Prefer --projector-knobs -1 and no kept covariances.") % __func__;
-        }
+        // Every metric honors the config fit-region (active-bin) mask, so any of them is legal
+        // here; Poisson additionally needs every covariance promoted (checked after promotion).
+        const bool poisson = PROmetric::canonicalizeMetricName(chi2_name) == "poisson";
 
         log<LOG_WARNING>(L"%1% || ############### PROjector %2% mode ###############")
             % __func__ % (pjconf.prefit_mode() ? "PRE-FIT" : "PROJECTED");
@@ -261,6 +276,7 @@ namespace PROfit {
 
             PROjectorPromoteCovariance(config, systs, config.i_prime,
                                        pjconf.num_decomp_knobs, pjconf.keep_covariance);
+            if(poisson && poissonCovarianceLeftover(config, systs, pjconf.keep_covariance)) return false;
 
             installFitRegion(config, matched_channels, /*complement=*/false);
             if(!maskAllData(config, matched_channels, /*complement=*/false, variable_data, data)) return false;
@@ -317,6 +333,7 @@ namespace PROfit {
             // and responses reproduce the pre-fit's; the name check below is the proof.
             PROjectorPromoteCovariance(config, systs, config.i_prime,
                                        c.num_decomp_knobs, c.keep_covariance);
+            if(poisson && poissonCovarianceLeftover(config, systs, c.keep_covariance)) return false;
 
             if(systs.spline_names.size() != c.nuisance_names.size()) {
                 log<LOG_ERROR>(L"%1% || PROjector constraint has %2% nuisance parameters but this run built %3%. "

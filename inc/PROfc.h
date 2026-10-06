@@ -41,7 +41,7 @@ namespace PROfit {
         Eigen::VectorXf best_phys_osc;
         Eigen::VectorXf best_fit_syst; ///< Full best-fit parameter vector from the syst-only fit.
         Eigen::VectorXf best_fit_osc;  ///< Full best-fit parameter vector from the oscillation fit.
-        Eigen::VectorXf syst_throw;    ///< Random systematic parameter throw used for this pseudo-experiment.
+        Eigen::VectorXf syst_throw;    ///< Spline pulls thrown for this pseudo-experiment, one per spline in spline_names order (no physics).
     };
 
     /**

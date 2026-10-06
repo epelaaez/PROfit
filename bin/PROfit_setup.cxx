@@ -389,6 +389,24 @@ void include_or_exclude_systs(std::vector<PROsyst> &variable_systs, const PROcon
     }
 }
 
+void poisson_covariance_check(const PROpt &options, const PROconfig &config, const PROsyst &systs) {
+    // PROjectorSetup does this check itself, after promotion has turned covariances into splines.
+    if(options.chi2 != "poisson" || options.projector_config.active()) return;
+
+    // mcstat lives outside covar_names unless --syst-list named it.
+    std::vector<std::string> covs = systs.covar_names;
+    if(systs.HasSyst(config.m_mcstat_systname)
+       && std::find(covs.begin(), covs.end(), config.m_mcstat_systname) == covs.end())
+        covs.push_back(config.m_mcstat_systname);
+    if(covs.empty()) return;
+
+    log<LOG_ERROR>(L"%1% || The poisson metric has no covariance term, so these covariance systematics would be "
+            L"silently ignored: %2%. Remove them with --exclude-systs, or use a covariance metric (neyman/pearson/CNP).")
+        % __func__ % covs;
+    log<LOG_ERROR>(L"Terminating.");
+    exit(EXIT_FAILURE);
+}
+
 Eigen::VectorXf remap_spline_params(const Eigen::VectorXf &params, size_t nphys,
                                     const std::vector<std::string> &old_names, const std::vector<std::string> &new_names) {
     Eigen::VectorXf out = Eigen::VectorXf::Zero(nphys + new_names.size());
