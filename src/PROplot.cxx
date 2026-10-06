@@ -367,7 +367,7 @@ namespace PROfit{
         return ebar;
     }
 
-    PROerrorbar getCovarianceOnlyErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const Eigen::VectorXf &params, int var_index, const Eigen::VectorXf &data_spec, bool shape_norm, bool shape_fit) {
+    PROerrorbar getCovarianceOnlyErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const Eigen::VectorXf &params, int var_index, const Eigen::VectorXf &data_spec, bool shape_norm, bool shape_fit, const PROmetric *metric) {
         Eigen::VectorXf cv = FillSpectra(config, prop, syst, model, params, true, var_index).Spec();
         // Shape-only fit: condition as the metric does, about the prediction rescaled onto
         // the data, with the covariance at that scale and projected onto shape.
@@ -387,7 +387,7 @@ namespace PROfit{
 
         // Data-constrained posterior of the covariance systematics (Putnam SBN
         // note Eqs. 7-8): with u = d - cv on the contributing bins (active and
-        // data > 0, PROchi convention, C = diag(max(data,1))), the prediction
+        // C > 0, C the fit metric's statistical variance), the prediction
         // shifts by Sigma(C+Sigma)^-1 u and the band covariance becomes
         // Sigma - Sigma(C+Sigma)^-1 Sigma. Exact here: with no free fit
         // parameters the Gaussian conditional is the whole posterior.
@@ -396,9 +396,10 @@ namespace PROfit{
         if(data_spec.size() != 0 && data_spec.size() != cv_coll.size()) {
             log<LOG_ERROR>(L"%1% || data_spec has %2% bins but variable %3% has %4% collapsed bins; ignoring the data constraint.") % __func__ % data_spec.size() % var_index % cv_coll.size();
         } else if(data_spec.size() != 0 && syst.GetNCovar() > 0) {
+            const Eigen::VectorXf stat = conditioningStatVariances(metric, config, var_index, cv_coll, data_spec, params);
             std::vector<int> contrib;
             for(int i = 0; i < data_spec.size(); ++i)
-                if(config.IsBinActive(var_index, i) && data_spec(i) > 0)
+                if(config.IsBinActive(var_index, i) && stat(i) > 0)
                     contrib.push_back(i);
             if(!contrib.empty()) {
                 const size_t nb = contrib.size();
@@ -409,11 +410,11 @@ namespace PROfit{
                 for(size_t a = 0; a < nb; ++a) {
                     K.col(a) = Sig_full.col(contrib[a]);
                     for(size_t b = 0; b < nb; ++b) M(a, b) = Sig_full(contrib[a], contrib[b]);
-                    M(a, a) += std::max<double>(data_spec(contrib[a]), 1.0);
+                    M(a, a) += stat(contrib[a]);
                     u(a) = data_spec(contrib[a]) - cv_coll(contrib[a]);
                 }
                 Eigen::LDLT<Eigen::MatrixXd> M_ldlt(M);
-                // With no free splines this equals the fit's chi^2 at params (Neyman).
+                // With no free splines this equals the fit's chi^2 at params.
                 log<LOG_INFO>(L"%1% || Data-constrained band: u^T (C+Sigma)^-1 u = %2% over %3% bins") % __func__ % u.dot(M_ldlt.solve(u)) % nb;
                 shift = (K * M_ldlt.solve(u)).cast<float>();
                 cov = (Sig_full - K * M_ldlt.solve(K.transpose())).cast<float>();
@@ -3790,7 +3791,7 @@ int plotPriorFractionalSystematicChannelRatios(const PROconfig &config, const PR
         delete c;
     }
 
-    int plotCovariancePosteriorPulls(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const Eigen::VectorXf &best_fit, const Eigen::VectorXf &data_spec, const std::string &filename, int var_index, std::map<std::string, TObject*> *drawn_objs, bool shape_fit) {
+    int plotCovariancePosteriorPulls(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const Eigen::VectorXf &best_fit, const Eigen::VectorXf &data_spec, const std::string &filename, int var_index, std::map<std::string, TObject*> *drawn_objs, bool shape_fit, const PROmetric *metric) {
         if(syst.GetNCovar() == 0) {
             log<LOG_INFO>(L"%1% || No covariance-type systematics; skipping the covariance posterior pull plot.") % __func__;
             return 1;
@@ -3815,10 +3816,11 @@ int plotPriorFractionalSystematicChannelRatios(const PROconfig &config, const PR
         Eigen::MatrixXf L = syst.DecomposeFractionalCovariance(config, cv);
         if(shape_fit) L = Eigen::MatrixXf(ShapeProjectorCollapsed(config, cv_coll, var_index) * L);
 
+        const Eigen::VectorXf stat = conditioningStatVariances(metric, config, var_index, cv_coll, data_spec, best_fit);
         std::vector<int> contrib;
         std::vector<char> in_fit(nbins_coll, 0);
         for(int i = 0; i < data_spec.size(); ++i)
-            if(config.IsBinActive(var_index, i) && data_spec(i) > 0) {
+            if(config.IsBinActive(var_index, i) && stat(i) > 0) {
                 contrib.push_back(i);
                 in_fit[i] = 1;
             }
@@ -3842,7 +3844,7 @@ int plotPriorFractionalSystematicChannelRatios(const PROconfig &config, const PR
         Eigen::VectorXd C_inv_red(nb), u_bf(nb);
         for(size_t i = 0; i < nb; ++i) {
             L_red.row(i) = L_shift.row(contrib[i]);
-            C_inv_red(i) = 1.0 / std::max<double>(data_spec(contrib[i]), 1.0);
+            C_inv_red(i) = 1.0 / stat(contrib[i]);
             u_bf(i) = data_spec(contrib[i]) - cv_coll(contrib[i]);
         }
         Eigen::MatrixXd inner = Eigen::MatrixXd::Identity(k, k)

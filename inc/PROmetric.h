@@ -234,6 +234,22 @@ namespace PROfit {
             }
 
             /**
+             * @brief Per-bin statistical variance of this metric's Gaussian term.
+             * @details Used to condition the covariance systematics on data (post-fit bands,
+             * covariance pulls) with the same C the fit used. Base default is the Neyman
+             * convention, the data itself; PROcovariance returns its own statisticalVariances().
+             * @param collapsed_prediction  Collapsed prediction (per-channel rescaled onto the
+             *                              data when shape-only), fitting variable.
+             * @param comparison            Collapsed data.
+             * @param param                 Full parameter vector at which the prediction was made.
+             */
+            virtual Eigen::VectorXf GetStatVariances([[maybe_unused]] const Eigen::VectorXf &collapsed_prediction,
+                                                     const Eigen::VectorXf &comparison,
+                                                     [[maybe_unused]] const Eigen::VectorXf &param) const {
+                return comparison;
+            }
+
+            /**
              * @brief Degrees of freedom of a chi2 minimum evaluated with this metric.
              * @details See PROndof for the counting rule. "Fixed" is read from is_fixed when it
              * has been populated (setBounds) OR from zero-width bounds: lb/ub when set, else
