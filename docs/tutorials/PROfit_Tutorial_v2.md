@@ -2378,11 +2378,17 @@ the absolute covariance is built there and collapsed afterwards:
 ```
 Σ = collapse( diag(P_unc)·F·diag(P_unc) )   absolute covariance; P_unc is the
                                             UNCOLLAPSED spectrum matching F's dims
-Σ = U S Uᵀ                                  (eigendecomposition)
-L = U·√S        with modes below tolerance dropped (their columns are zero)
+Σ = U S Uᵀ                                  (eigendecomposition, double precision)
+L = U·√S        largest mode first; rounding-level modes dropped (zero columns)
 ```
 
-so that `Σ = L·Lᵀ` (up to the dropped below-tolerance modes), and a random
+The only modes dropped are those below `n·ε_double·max(S)`, i.e. numerical
+zeros of a rank-deficient Σ (and the slightly negative noise eigenvalues
+rounding produces). Σ's genuine spectrum spans ~10⁻¹² of its largest
+eigenvalue — MC-stat and systematics on low-count bins sit next to
+high-count ones — so a looser cutoff would silently delete real variance in
+exactly the bins where the statistical error is smallest. With that, `Σ = L·Lᵀ`
+to rounding, and a random
 spectrum fluctuation with exactly the covariance Σ is simply `L·g` with
 `g ~ N(0, 1)` per component. `L` is n_bins × n_bins with `k ≤ n_bins`
 non-zero columns (the rank). Each non-zero column of `L` is one independent
@@ -2638,7 +2644,7 @@ Some things to note, which may not be obvious:
 * `C` is the fit metric's own statistical variance, so neyman, CNP and pearson
   bands all condition with the χ² they were fitted with. With no free splines
   (the analytic path) the logged `uᵀ(C+Σ)⁻¹u` at the best fit reproduces that
-  fit χ², up to the single-precision SVD that factors Σ = LLᵀ.
+  fit χ² (to float rounding).
   `poisson` has no covariance term; covariance systematics are refused there.
 * PROjector-masked channels (active-bins mask, zeroed data) are excluded
   from `B` automatically. Aka masked bins cannot pull on the systematics.
