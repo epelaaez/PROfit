@@ -176,8 +176,9 @@ M  = stat  +  (collapsed, prediction-scaled fractional covariance)
 with a Gaussian pull term on every spline parameter (priors and centers
 configurable per systematic in the XML). `PROCNP` swaps the statistical term
 for the combined-Neyman-Pearson variance, and `Poisson` uses the
-Baker-Cousins likelihood-ratio sum (and ignores covariance systematics — it
-warns).
+Baker-Cousins likelihood-ratio sum. It has no covariance term, so it refuses
+to run while any covariance-type systematic (MC-stat included) is selected;
+drop them with `--exclude-systs`.
 
 **Asimov vs fake data.** Unless you say otherwise, the "data" in every fit is
 the central-value expectation itself (Asimov). You can inject an oscillation
@@ -386,8 +387,9 @@ The `<allowlist>` attributes:
   `restrict="lo,hi"` range, which becomes **mandatory** (and `prior=`,
   `center=`, and `<correlation>` entries are forbidden for it). Use it for
   a genuinely unconstrained scale factor you want measured, not pulled.
-  One caveat: FC/Brazil pseudo-experiment throws currently still sample a
-  truncated *Gaussian* for such splines, not the declared uniform.
+  FC/Brazil/fc-adaptive pseudo-experiment throws draw such splines flat
+  over the `restrict` range, matching the prior. (PROplot's pre-fit band
+  still throws them as N(0,1); that is display only.)
 * `mode="covariance_to_spline"` with `num_decomp_knobs=` promotes a
   covariance to its leading eigenmode splines (the same machinery PROjector
   uses — see section 9). `restrict` bounds a spline's allowed range.
@@ -456,8 +458,8 @@ its box is `[lo−1, hi−1]`, and there is **no Gaussian pull** (it is a
   `--syst-list`/`--exclude-systs` (it expands to its children), while
   `--fix` and `--inject-systs` take the individual `_bin<j>` names;
 * `prior=`, `center=`, `prior_type=`, `restrict=` and `<correlation>` are
-  refused for these entries; FC/Brazil throws share the uniform-spline
-  caveat above (truncated Gaussian, not uniform).
+  refused for these entries; FC/Brazil throws draw them flat over their
+  range, like any uniform-prior spline (see above).
 
 ### Coupling quadratic splines exactly: `spline_cross_quad`
 
@@ -558,8 +560,8 @@ sees. Notes:
   (this now also holds for plain `covariance_to_spline`); `--fix` and
   `--inject-systs` take the `_decomp_knob_<k>` names; a consumed source entry
   is no longer a fit object, so its own name resolves nowhere;
-* the usual uniform-spline caveats: PROplot's pre-fit band throws a truncated
-  Gaussian for these knobs (not meaningful), and so do FC/Brazil throws.
+* the usual uniform-spline caveat: PROplot's pre-fit band throws these knobs
+  as N(0,1) (not meaningful); FC/Brazil throws draw them flat over the knob box.
 
 ### Asymmetric errors from histogram sources: `<HistVarFiles>`
 
@@ -726,6 +728,54 @@ interleaves and can be hard to read.
 
 `-n/--nthread N` parallelizes all fitting code. `-m/--max N` truncates the
 MC event loop (quick tests only).
+
+### Keeping the arguments in a file: `--config`
+
+Long command lines get hard to reproduce. Any argument from this tutorial can
+go in a TOML (or INI) file instead, passed with `--config`:
+
+```toml
+# tut_profile.toml
+xml      = "tutorial.xml"
+tag      = "TUT"
+output   = "probe_v1"
+nthread  = 8
+log      = "profile.log"
+progress = true
+inject   = ["dmsq", 1, "sinsq2thme", 0.01]
+preset   = ["grad-good", "grad-fast"]
+
+[profile]
+probe        = true
+probe-chunks = 2
+```
+
+```bash
+PROfit --config tut_profile.toml                  # runs the profile above
+PROfit --config tut_profile.toml -n 16 -o probe_v2  # command line overrides the file
+```
+
+- A key is the option's long name without the dashes (`nthread`,
+  `grad-mode`, `fit-options`). Flags take `true`/`false`, and multi-value
+  options take a TOML array.
+- Global options go at the top. Subcommand options go under a
+  `[subcommand]` section (`[profile]`, `[surface]`, `[fc-adaptive]`, ...).
+- A `[subcommand]` section also **runs** that subcommand, even if you don't
+  name it on the command line. If you name a different subcommand on the
+  command line, both run.
+- Anything given on the command line wins over the file. One run card can
+  therefore serve a whole study, with `-o`, `--seed`, `-i` etc. varied per
+  job.
+- INI syntax (`key=value`, with space-separated lists such as
+  `inject=dmsq 1 sinsq2thme 0.01`) is also accepted.
+- To tie a run card to a build, add `required-version = "v3.0.5"` (or pass
+  `--required-version v3.0.5`). PROfit then stops straight away unless it is
+  exactly that version, the one printed in the log header and on every plot.
+  A development build only matches its full string (`v3.0.5-dev`), not the
+  release it leads up to.
+- **Misspelled keys are silently ignored**: `nthreads = 8` leaves you on
+  one thread. The first log line echoes the xml, tag, output and nthread
+  PROfit actually picked up, which is a quick check.
 
 ---
 
@@ -1064,8 +1114,11 @@ parameter point (zero-data bins are kept); `CNP` swaps the statistical
 variance for the combined
 Neyman-Pearson form `3/(1/d + 2/μ)` ([X. Ji et al.](https://arxiv.org/pdf/1903.07185))
 and is the **recommended** choice whenever bins can be low-statistics;
-`poisson` is the Baker-Cousins likelihood-ratio sum and ignores
-covariance-type systematics entirely (it will warn you). The legacy
+`poisson` is the Baker-Cousins likelihood-ratio sum. It has no covariance
+term, so it is a fatal error to run it with any covariance-type systematic
+(MC-stat included) still selected: remove them with `--exclude-systs`. Under
+PROjector every covariance must be promoted (`--projector-knobs -1`, no
+`--projector-keep-cov`). The legacy
 spellings `PROchi`, `PROCNP`, and `Poisson` still work as deprecated
 aliases (mapping to `neyman`/`CNP`/`poisson` with a one-time warning).
 Only `neyman` has the closed-form analytic gradient — `CNP`/`poisson`
@@ -2132,7 +2185,11 @@ coupling `g_e`, needs separate `L` and `E` parameters)*.
 ### `SBL_3+2_Usq` *(legacy: `3+2`)* — two-sterile model
 
 Seven parameters with a CP phase, so ν and ν̄ appearance differ. Unitarity
-constraints |Ue4|²+|Ue5|² ≤ 1 and |Uμ4|²+|Uμ5|² ≤ 1.
+constraints: |Ue4|²+|Ue5|² ≤ 1, |Uμ4|²+|Uμ5|² ≤ 1, and the e and μ rows
+orthogonal, |Ue4Uμ4* + Ue5Uμ5*|² ≤ (1−|Ue4|²−|Ue5|²)(1−|Uμ4|²−|Uμ5|²)
+(φ₅₄-dependent; the 3+1 limit is |Ue4|²+|Uμ4|² ≤ 1). The older appearance
+cap 4(|Ue4||Uμ4| + |Ue5||Uμ5|)² < 1 is also still applied; it is stricter
+than unitarity when cos φ₅₄ < 0.
 
 | # | name | meaning | fit space | bounds | default |
 |---|---|---|---|---|---|
@@ -2321,11 +2378,17 @@ the absolute covariance is built there and collapsed afterwards:
 ```
 Σ = collapse( diag(P_unc)·F·diag(P_unc) )   absolute covariance; P_unc is the
                                             UNCOLLAPSED spectrum matching F's dims
-Σ = U S Uᵀ                                  (eigendecomposition)
-L = U·√S        with modes below tolerance dropped (their columns are zero)
+Σ = U S Uᵀ                                  (eigendecomposition, double precision)
+L = U·√S        largest mode first; rounding-level modes dropped (zero columns)
 ```
 
-so that `Σ = L·Lᵀ` (up to the dropped below-tolerance modes), and a random
+The only modes dropped are those below `n·ε_double·max(S)`, i.e. numerical
+zeros of a rank-deficient Σ (and the slightly negative noise eigenvalues
+rounding produces). Σ's genuine spectrum spans ~10⁻¹² of its largest
+eigenvalue — MC-stat and systematics on low-count bins sit next to
+high-count ones — so a looser cutoff would silently delete real variance in
+exactly the bins where the statistical error is smallest. With that, `Σ = L·Lᵀ`
+to rounding, and a random
 spectrum fluctuation with exactly the covariance Σ is simply `L·g` with
 `g ~ N(0, 1)` per component. `L` is n_bins × n_bins with `k ≤ n_bins`
 non-zero columns (the rank). Each non-zero column of `L` is one independent
@@ -2437,17 +2500,27 @@ the data and a fixed spline point is **exactly Gaussian, with a mean and
 covariance you can write down**. So instead of fitting them, we compute the
 Gaussian and draw from it — once per chain step.
 
-First, restrict to the **contributing bins** `B`: bins that are active
-(`PROconfig::SetActiveBins` mask) **and** have `d_b > 0`. These are exactly
-the bins PROchi uses (its statistical term is `diag(max(d,1))` and zero-data
-bins are marginalized away), so the reconstruction is constrained by the same
-information the fit was — PROjector-masked channels, for example, cannot pull
-on anything. On those bins define:
+`C` is the fit metric's **own** statistical covariance (its per-bin variance,
+`PROmetric::GetStatVariances`), so the reconstruction uses the same
+statistical model the fit did:
+
+| `-c` | `C_b` | in the chain |
+|---|---|---|
+| `neyman` | `d_b` | constant |
+| `CNP` | `3/(1/d_b + 2/μ_b)`, `μ_b/2` if `d_b = 0` (μ = physics-only CV) | constant (physics is pinned in the band chain) |
+| `pearson` | `S_b`, the sample's own prediction | re-evaluated at every chain point |
+
+Restrict to the **contributing bins** `B`: bins that are active
+(`PROconfig::SetActiveBins` mask) **and** have `C_b > 0` — exactly the bins
+the fit's χ² uses (neyman drops zero-data bins; CNP and pearson keep every
+active bin), so the reconstruction is constrained by the same information the
+fit was — PROjector-masked channels, for example, cannot pull on anything. On
+those bins define:
 
 ```
-C   = diag( max(d_b, 1) )                 statistical covariance, b ∈ B
+C   = diag( C_b )                         statistical covariance, b ∈ B
 L_B = rows of L in B, zero columns dropped   (n_B × k)
-A   = 1_k + L_Bᵀ C⁻¹ L_B                  (k × k, factorized once, in double)
+A   = 1_k + L_Bᵀ C⁻¹ L_B                  (k × k, in double; refactorized only when C changes)
 ```
 
 Then for every chain step `i`, with residual `u⁽ⁱ⁾ = d − S⁽ⁱ⁾` on `B`:
@@ -2568,8 +2641,11 @@ Some things to note, which may not be obvious:
 * The constraint assumes the covariance systematics act **linearly and
   unboundedly** on the spectrum. The same assumption their presence in the
   χ² covariance already makes, so this is NOT the same as splines with a 3 sigma cutoff (but should be close)
-* `C = diag(max(d,1))` matches **PROchi**; for `PROCNP`/`Poisson` fits the
-  reconstruction is an approximation to the corresponding stat model.
+* `C` is the fit metric's own statistical variance, so neyman, CNP and pearson
+  bands all condition with the χ² they were fitted with. With no free splines
+  (the analytic path) the logged `uᵀ(C+Σ)⁻¹u` at the best fit reproduces that
+  fit χ² (to float rounding).
+  `poisson` has no covariance term; covariance systematics are refused there.
 * PROjector-masked channels (active-bins mask, zeroed data) are excluded
   from `B` automatically. Aka masked bins cannot pull on the systematics.
 * The post-fit band is a posterior **conditioned on the very data drawn on
@@ -2595,8 +2671,10 @@ parameters for a moment. C.0 built `Σ = L·Lᵀ`, so each non-zero column of `L
 is one independent mode of correlated variation; give each mode a knob
 `α_j`, so the prediction becomes `P(θ) + L·α`, and give each knob a unit
 Gaussian prior (that is what "the mode has size √S" already encoded into
-`L`), contributing a pull term `αᵀα`. With `C` the statistical covariance and
-`u ≡ d − P(θ)` the residual, the χ² with everything explicit is
+`L`), contributing a pull term `αᵀα`. With `C` the statistical covariance
+(it may depend on θ, as pearson's does, but never on α — so everything below
+holds at each fixed θ) and `u ≡ d − P(θ)` the residual, the χ² with
+everything explicit is
 
 ```
 χ²(θ, α) = (u − L·α)ᵀ C⁻¹ (u − L·α)  +  αᵀα  +  pulls(s)
@@ -2852,6 +2930,13 @@ builders then do the following.
   area-normalised. The bands are shape bands as above, and the χ² label, which
   is still the absolute χ², gets a small grey **"absolute χ²"** tag. Under
   `--shapeonly` the tag reads **"shape-only"**.
+- **Detector and channel ratio pages** (`ND / FD`, and `--plot-ratios`).
+  Under `--area-norm` (so also `--shapeonly`) each spectrum is normalised to
+  unit area per channel *before* dividing, for the CV, the best fit and the
+  data alike, and the axis reads "(area normalized)". The bands are shape
+  bands, so a ratio of raw rates would show offsets that neither the band nor
+  a shape-only χ² accounts for. The ratio therefore sits around 1 by
+  construction: only its energy dependence is tested, not the ND/FD rate.
 - **Fractional-systematics breakdowns and covariance plots.** These are the
   `_fractional_systematics.pdf` family, `_PROplot_Covar.pdf` and the ROOT
   `Covariance/` directory. Under `--shapeonly`, `plot` projects every

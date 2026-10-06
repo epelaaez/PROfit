@@ -193,8 +193,11 @@ namespace PROfit{
      * @param channel_offsets  Collapsed bin start of each mode/detector/channel, in loop order.
      * @param filename         Output PDF filename.
      * @param other_index      Variable index (default 0).
+     * @param opt              Plot options; with AreaNormalized each block is normalised to unit
+     *                         area before the ratio, matching the shape-only bands (--area-norm,
+     *                         implied by --shapeonly).
      */
-    void plot_detector_ratio_spectra(TCanvas &c, const PROconfig &config, const Eigen::VectorXf &cv_coll, const std::optional<Eigen::VectorXf> &bf_coll, const std::optional<Eigen::VectorXf> &data_coll, const std::optional<PROerrorbar> &errband, const std::optional<PROerrorbar> &posterrband, const std::vector<size_t> &channel_offsets, const std::string &filename, int other_index = 0);
+    void plot_detector_ratio_spectra(TCanvas &c, const PROconfig &config, const Eigen::VectorXf &cv_coll, const std::optional<Eigen::VectorXf> &bf_coll, const std::optional<Eigen::VectorXf> &data_coll, const std::optional<PROerrorbar> &errband, const std::optional<PROerrorbar> &posterrband, const std::vector<size_t> &channel_offsets, const std::string &filename, int other_index = 0, PlotOptions opt = PlotOptions{});
     void plot_channel_ratio_spectra(TCanvas &c, const PROconfig &config, const Eigen::VectorXf &cv_coll, const std::optional<Eigen::VectorXf> &bf_coll, const std::optional<Eigen::VectorXf> &data_coll, const std::optional<PROerrorbar> &errband, const std::optional<PROerrorbar> &posterrband, const std::vector<size_t> &channel_offsets, const std::string &filename, int other_index = 0, PlotOptions opt = PlotOptions{});
 
     /**
@@ -335,6 +338,18 @@ namespace PROfit{
     PROerrorbar getErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const PROspec &cv_spec, const Eigen::VectorXf &cvparams, int other_index=0, size_t nthrows=2500, bool shape_norm=false);
 
     /**
+     * @brief Statistical variance C used to condition the covariance systematics on data.
+     * @details The fit metric's own (PROmetric::GetStatVariances: neyman the data, pearson the
+     * prediction, CNP the blend) when @p var_index is its fitting variable; otherwise, or with
+     * no metric, the Neyman convention (the data). Bins with C <= 0 do not constrain.
+     */
+    inline Eigen::VectorXf conditioningStatVariances(const PROmetric *metric, const PROconfig &config, int var_index, const Eigen::VectorXf &collapsed_prediction, const Eigen::VectorXf &data_spec, const Eigen::VectorXf &param) {
+        if(metric && var_index == (int)config.i_prime)
+            return metric->GetStatVariances(collapsed_prediction, data_spec, param);
+        return data_spec;
+    }
+
+    /**
      * @brief Compute an error band analytically from the covariance-type systematics alone.
      * @details Exact replacement for getMCMCErrorBand when the sampling chain has zero
      * free parameters (no spline nuisances, or all of them --fix'd): the chain never
@@ -354,13 +369,14 @@ namespace PROfit{
      *  collapsed data spectrum is given, the band is the data-constrained posterior of the
      *  covariance systematics (Putnam SBN note Eqs. 7-8): center shifted by
      *  Sigma(C+Sigma)^-1 u and covariance Sigma - Sigma(C+Sigma)^-1 Sigma, restricted to
-     *  active bins with data>0 (PROchi convention, C = diag(max(data,1))). Exact when the
+     *  active bins with C > 0, C = diag of @p metric's statistical variance
+     *  (conditioningStatVariances; the data when @p metric is null). Exact when the
      *  covariance systs are the only free parameters (the post-fit degenerate-chain path).
      *  @p shape_fit (shape-only fit, with data) conditions as the metric does: prediction
      *  rescaled onto the data, Sigma at that scale and projected onto shape before the
      *  conditioning. @p shape_norm (area-normalised display) projects the final band
      *  covariance onto shape (ShapeProjectorCollapsed). */
-    PROerrorbar getCovarianceOnlyErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const Eigen::VectorXf &params, int var_index=0, const Eigen::VectorXf &data_spec = Eigen::VectorXf(), bool shape_norm=false, bool shape_fit=false);
+    PROerrorbar getCovarianceOnlyErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const Eigen::VectorXf &params, int var_index=0, const Eigen::VectorXf &data_spec = Eigen::VectorXf(), bool shape_norm=false, bool shape_fit=false, const PROmetric *metric = nullptr);
 
     /**
      * @brief Result of getErrorBandBkgSubtracted: a signal-only error band plus the
@@ -457,8 +473,9 @@ namespace PROfit{
      * in pre-fit sigma units; labeled by index and share of total variance, sorted
      * descending); then the per-bin conditional shift divided by the pre-fit bin
      * sigma, with the posterior/pre-fit width ratio as the bar height (bins outside the fit
-     * — inactive or zero data — are hatched). Everything is evaluated analytically at the
-     * best fit, matching PROerrorbar::center_shift.
+     * — inactive, or zero statistical variance, i.e. zero data under neyman — are hatched).
+     * Everything is evaluated analytically at the best fit, matching PROerrorbar::center_shift.
+     * C is the fit metric's statistical variance (conditioningStatVariances).
      * @param config     Analysis configuration.
      * @param prop       MC event store.
      * @param syst       Systematics (must have covariance-type entries to plot anything).
@@ -469,10 +486,11 @@ namespace PROfit{
      * @param var_index  Variable (binning) index.
      * @param drawn_objs Optional map to receive named clones of the drawn graphs for
      *                   persistence in the output ROOT file.
+     * @param metric     Fit metric supplying C; null = Neyman (the data).
      * @return 0 if the PDF was drawn, 1 if skipped (no covariance systematics, mismatched
      *         data, or nothing to constrain).
      */
-    int plotCovariancePosteriorPulls(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const Eigen::VectorXf &best_fit, const Eigen::VectorXf &data_spec, const std::string &filename, int var_index, std::map<std::string, TObject*> *drawn_objs = nullptr, bool shape_fit = false);
+    int plotCovariancePosteriorPulls(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const Eigen::VectorXf &best_fit, const Eigen::VectorXf &data_spec, const std::string &filename, int var_index, std::map<std::string, TObject*> *drawn_objs = nullptr, bool shape_fit = false, const PROmetric *metric = nullptr);
 
     /**
      * @brief Compute a posterior error band using Markov Chain Monte Carlo sampling.
@@ -498,8 +516,10 @@ namespace PROfit{
      *                   each MCMC sample instead receives the data-constrained posterior pull
      *                   of the covariance systematics (G. Putnam, "How to Obtain Pull Terms
      *                   for Systematic Uncertainties Embedded in a Covariance Matrix", SBN
-     *                   note, May 2026), shrinking the post-fit band. center_shift then
-     *                   reports the ANALYTIC pull Sigma(C+Sigma)^-1 (d - cv) at the best
+     *                   note, May 2026), shrinking the post-fit band. C is @p metric's own
+     *                   statistical variance (conditioningStatVariances), re-evaluated per
+     *                   sample so pearson's prediction-valued C follows the chain. center_shift
+     *                   then reports the ANALYTIC pull Sigma(C+Sigma)^-1 (d - cv) at the best
      *                   fit (exactly 0 for Asimov), not the sample median. Pass this only
      *                   for post-fit bands; the pre-fit/prior band must stay unconstrained.
      * @param shape_norm Area-normalised plots: every finished sample is renormalised per channel
@@ -561,7 +581,7 @@ namespace PROfit{
             Eigen::MatrixXf post_hist_covar = Eigen::MatrixXf::Constant(cv_coll.size(), cv_coll.size(), 0);
             Eigen::VectorXf hist_diff_sum = Eigen::VectorXf::Zero(cv_coll.size());
             size_t nsteps = 0;
-            std::vector<Eigen::VectorXf> specs;
+            std::vector<Eigen::VectorXf> specs, values;
             std::vector<std::vector<float>> param_samples(nspline);
 
 	    std::function<void(const Eigen::VectorXf&)> action;
@@ -588,6 +608,7 @@ namespace PROfit{
                 action = [&](const Eigen::VectorXf &value) {
                     nsteps += 1;
                     specs.push_back(sample_spec(value));
+                    values.push_back(value);
                     for(int i = 0; i < nspline; ++i) {
                         posteriors[i].Fill(value(i+nphys));
                         param_samples[i].push_back(value(i+nphys));
@@ -614,15 +635,15 @@ namespace PROfit{
                 // (PROplot.cxx), which re-derives the same conditional to plot
                 // the mode pulls.
             
-                // Mark Note: Restrict the constraint to the bins the fit metric actually
-                // used, aka the active bins PR from a while back with data > 0 (PROchi drops zero-data bins
-                // and its stat term is diag(max(data,1))). PROjector-masked or
-                // empty bins must not pull on alpha.
+                // C is the fit metric's statistical variance; only the bins the fit used
+                // (active, C > 0) constrain, so PROjector-masked bins (and zero-data bins
+                // under neyman) never pull on alpha.
+                const Eigen::VectorXf stat_bf = conditioningStatVariances(&metric, config, var_index, cv_coll, data_spec, best_fit);
                 std::vector<int> contrib;
                 for(int i = 0; i < data_spec.size(); ++i)
-                    if(config.IsBinActive(var_index, i) && data_spec(i) > 0)
+                    if(config.IsBinActive(var_index, i) && stat_bf(i) > 0)
                         contrib.push_back(i);
-            
+
                 std::vector<int> modes;
                 for(int j = 0; j < L.cols(); ++j)
                     if(L.col(j).squaredNorm() > 0) modes.push_back(j);
@@ -633,23 +654,34 @@ namespace PROfit{
                     for(size_t j = 0; j < k; ++j)
                         L_shift.col(j) = L.col(modes[j]).cast<double>();
                     Eigen::MatrixXd L_red(nb, k);
-                    Eigen::VectorXd C_inv_red(nb);
-                    for(size_t i = 0; i < nb; ++i) {
+                    for(size_t i = 0; i < nb; ++i)
                         L_red.row(i) = L_shift.row(contrib[i]);
-                        C_inv_red(i) = 1.0 / std::max<double>(data_spec(contrib[i]), 1.0);
-                    }
-                    Eigen::MatrixXd inner = Eigen::MatrixXd::Identity(k, k)
-                                          + L_red.transpose() * C_inv_red.asDiagonal() * L_red;
-                    Eigen::LLT<Eigen::MatrixXd> inner_llt(inner);
-                    if(inner_llt.info() != Eigen::Success) {
-                        // inner is PD by construction. any failures here are float math noise from L. Clamp eigenvalues and retry.
-                        log<LOG_WARNING>(L"%1% || LLT of posterior pull matrix failed; clamping eigenvalues.") % __func__;
-                        Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> es(inner);
-                        inner = es.eigenvectors()
-                              * es.eigenvalues().cwiseMax(1e-12).asDiagonal()
-                              * es.eigenvectors().transpose();
+
+                    // A sample's C <= 0 drops that bin, as it would in the metric.
+                    auto inv_stat = [&](const Eigen::VectorXf &stat) {
+                        Eigen::VectorXd c_inv(nb);
+                        for(size_t i = 0; i < nb; ++i)
+                            c_inv(i) = stat(contrib[i]) > 0 ? 1.0 / stat(contrib[i]) : 0.0;
+                        return c_inv;
+                    };
+                    Eigen::VectorXd C_inv_red;
+                    Eigen::LLT<Eigen::MatrixXd> inner_llt;
+                    auto factorise = [&](const Eigen::VectorXd &c_inv) {
+                        C_inv_red = c_inv;
+                        Eigen::MatrixXd inner = Eigen::MatrixXd::Identity(k, k)
+                                              + L_red.transpose() * C_inv_red.asDiagonal() * L_red;
                         inner_llt.compute(inner);
-                    }
+                        if(inner_llt.info() != Eigen::Success) {
+                            // inner is PD by construction. any failures here are float math noise from L. Clamp eigenvalues and retry.
+                            log<LOG_WARNING>(L"%1% || LLT of posterior pull matrix failed; clamping eigenvalues.") % __func__;
+                            Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> es(inner);
+                            inner = es.eigenvectors()
+                                  * es.eigenvalues().cwiseMax(1e-12).asDiagonal()
+                                  * es.eigenvectors().transpose();
+                            inner_llt.compute(inner);
+                        }
+                    };
+                    factorise(inv_stat(stat_bf));
 
                     // Conditional pull at the best fit: L*alpha_min(d - cv) equals
                     // Sigma[:,contrib] (C+Sigma)^-1 (d - cv) by the push-through identity.
@@ -663,6 +695,9 @@ namespace PROfit{
                     for(size_t ai = 0; ai < nsteps; ++ai) {
                         for(size_t i = 0; i < k; ++i)
                             throws_k(i) = nd(PROseed::global_rng);
+                        // Refactorise only when C moved (pearson: every new chain point).
+                        const Eigen::VectorXd c_inv = inv_stat(conditioningStatVariances(&metric, config, var_index, specs.at(ai), data_spec, values.at(ai)));
+                        if(c_inv != C_inv_red) factorise(c_inv);
                         for(size_t i = 0; i < nb; ++i)
                             residual(i) = data_spec(contrib[i]) - specs.at(ai)(contrib[i]);
                         Eigen::VectorXd alpha_min =

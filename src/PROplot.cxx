@@ -292,7 +292,7 @@ namespace PROfit{
                         float shift = spline.segments[seg_offset + k].knot;
                         fixed_pts->SetPoint(k, shift, systs.GetSplineShift(i, shift, j));
                     }
-                    fixed_pts->SetPoint(nsegs, systs.spline_hi[i], systs.GetSplineShift(i, systs.spline_hi[i], j));
+                    fixed_pts->SetPoint(nsegs, spline.knot_hi, systs.GetSplineShift(i, spline.knot_hi, j));
 
                     float lo = systs.spline_has_restrict[i] ? systs.spline_restrict_lo[i] : systs.spline_lo[i];
                     float hi = systs.spline_has_restrict[i] ? systs.spline_restrict_hi[i] : systs.spline_hi[i];
@@ -367,7 +367,7 @@ namespace PROfit{
         return ebar;
     }
 
-    PROerrorbar getCovarianceOnlyErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const Eigen::VectorXf &params, int var_index, const Eigen::VectorXf &data_spec, bool shape_norm, bool shape_fit) {
+    PROerrorbar getCovarianceOnlyErrorBand(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const Eigen::VectorXf &params, int var_index, const Eigen::VectorXf &data_spec, bool shape_norm, bool shape_fit, const PROmetric *metric) {
         Eigen::VectorXf cv = FillSpectra(config, prop, syst, model, params, true, var_index).Spec();
         // Shape-only fit: condition as the metric does, about the prediction rescaled onto
         // the data, with the covariance at that scale and projected onto shape.
@@ -387,7 +387,7 @@ namespace PROfit{
 
         // Data-constrained posterior of the covariance systematics (Putnam SBN
         // note Eqs. 7-8): with u = d - cv on the contributing bins (active and
-        // data > 0, PROchi convention, C = diag(max(data,1))), the prediction
+        // C > 0, C the fit metric's statistical variance), the prediction
         // shifts by Sigma(C+Sigma)^-1 u and the band covariance becomes
         // Sigma - Sigma(C+Sigma)^-1 Sigma. Exact here: with no free fit
         // parameters the Gaussian conditional is the whole posterior.
@@ -396,9 +396,10 @@ namespace PROfit{
         if(data_spec.size() != 0 && data_spec.size() != cv_coll.size()) {
             log<LOG_ERROR>(L"%1% || data_spec has %2% bins but variable %3% has %4% collapsed bins; ignoring the data constraint.") % __func__ % data_spec.size() % var_index % cv_coll.size();
         } else if(data_spec.size() != 0 && syst.GetNCovar() > 0) {
+            const Eigen::VectorXf stat = conditioningStatVariances(metric, config, var_index, cv_coll, data_spec, params);
             std::vector<int> contrib;
             for(int i = 0; i < data_spec.size(); ++i)
-                if(config.IsBinActive(var_index, i) && data_spec(i) > 0)
+                if(config.IsBinActive(var_index, i) && stat(i) > 0)
                     contrib.push_back(i);
             if(!contrib.empty()) {
                 const size_t nb = contrib.size();
@@ -409,11 +410,11 @@ namespace PROfit{
                 for(size_t a = 0; a < nb; ++a) {
                     K.col(a) = Sig_full.col(contrib[a]);
                     for(size_t b = 0; b < nb; ++b) M(a, b) = Sig_full(contrib[a], contrib[b]);
-                    M(a, a) += std::max<double>(data_spec(contrib[a]), 1.0);
+                    M(a, a) += stat(contrib[a]);
                     u(a) = data_spec(contrib[a]) - cv_coll(contrib[a]);
                 }
                 Eigen::LDLT<Eigen::MatrixXd> M_ldlt(M);
-                // With no free splines this equals the fit's chi^2 at params (Neyman).
+                // With no free splines this equals the fit's chi^2 at params.
                 log<LOG_INFO>(L"%1% || Data-constrained band: u^T (C+Sigma)^-1 u = %2% over %3% bins") % __func__ % u.dot(M_ldlt.solve(u)) % nb;
                 shift = (K * M_ldlt.solve(u)).cast<float>();
                 cov = (Sig_full - K * M_ldlt.solve(K.transpose())).cast<float>();
@@ -1304,6 +1305,15 @@ namespace PROfit{
         log<LOG_DEBUG>(L"%1% || Finishing Plotting 1D Histogram %2%") % __func__ % hist_titles.c_str();
     }
 
+    // Area-normalised ratio of two collapsed blocks: (A/ΣA)/(B/ΣB) = (A/B)·ΣB/ΣA. Returns
+    // that factor (1 if either block is empty). Relative band widths need no change: under
+    // --area-norm (implied by --shapeonly) the bands are already shape-only.
+    static float area_norm_ratio_factor(const Eigen::VectorXf &v, size_t off1, size_t n1, size_t off2, size_t n2) {
+        const float s1 = v.segment(off1, n1).sum();
+        const float s2 = v.segment(off2, n2).sum();
+        return (s1 > 0.0f && s2 > 0.0f) ? s2/s1 : 1.0f;
+    }
+
     // Ratio of the same channel between two detectors, drawn as a spectrum.
     // Uses the error-band covariance rather than TH1::Divide so the correlation
     // between detectors is propagated. For 2D channels the y-axis is summed,
@@ -1317,12 +1327,15 @@ namespace PROfit{
                                      const std::optional<PROerrorbar> &posterrband,
                                      const std::vector<size_t> &channel_offsets,
                                      const std::string &filename,
-                                     int other_index)
+                                     int other_index,
+                                     PlotOptions opt)
     {
         if(config.m_num_detectors < 2) return;
 
         // Deliberately empty: --plot-bounds ymax etc. refer to event counts, not ratios.
         PlotBounds ratio_bounds;
+        // The bands carry no normalisation freedom here, so the ratios must not either.
+        const bool area_norm = bool(opt&PlotOptions::AreaNormalized);
 
         auto sum_vec = [](const Eigen::VectorXf &v, size_t off, size_t bx, size_t ny) {
             float s = 0.0f;
@@ -1352,8 +1365,13 @@ namespace PROfit{
             const size_t ny = config.m_channel_variable_dims[ch][other_index] == 2
                             ? config.m_channel_variable_bins[ch][other_index].NBinsAlong(1) : 1;
             std::vector<float> edges = config.m_channel_variable_bins[ch][other_index].Edges(0);
+            const size_t nblk = nx*ny;
+            const float k_cv   = area_norm ? area_norm_ratio_factor(cv_coll, off1, nblk, off2, nblk) : 1.0f;
+            const float k_bf   = (area_norm && bf_coll) ? area_norm_ratio_factor(*bf_coll, off1, nblk, off2, nblk) : 1.0f;
+            const float k_data = (area_norm && data_coll) ? area_norm_ratio_factor(*data_coll, off1, nblk, off2, nblk) : 1.0f;
 
-            const std::string ratname = config.m_detector_plotnames[det1] + " / " + config.m_detector_plotnames[det2];
+            const std::string ratname = config.m_detector_plotnames[det1] + " / " + config.m_detector_plotnames[det2]
+                                      + (area_norm ? " (area normalized)" : "");
             const std::string xtitle   = config.GetChannelXAxisTitle(ch, other_index);
             const std::string title    = config.m_mode_plotnames[mode] + " " + config.m_channel_plotnames[ch]
                                        + ";" + xtitle + ";" + ratname;
@@ -1384,7 +1402,7 @@ namespace PROfit{
             for(size_t bx = 0; bx < nx; ++bx) {
                 const float a = sum_vec(cv_coll, off1, bx, ny);
                 const float b = sum_vec(cv_coll, off2, bx, ny);
-                const float r = (b != 0.0f) ? a/b : 0.0f;
+                const float r = (b != 0.0f) ? k_cv*a/b : 0.0f;
                 cv_rat->SetBinContent(bx+1, r);
 
                 if(errband && a != 0.0f && b != 0.0f) {
@@ -1401,7 +1419,7 @@ namespace PROfit{
                 if(bf_coll) {
                     const float ba = sum_vec(*bf_coll, off1, bx, ny);
                     const float bb = sum_vec(*bf_coll, off2, bx, ny);
-                    const float br = (bb != 0.0f) ? ba/bb : 0.0f;
+                    const float br = (bb != 0.0f) ? k_bf*ba/bb : 0.0f;
                     bf_rat->SetBinContent(bx+1, br);
                     if(posterrband && ba != 0.0f && bb != 0.0f) {
                         const Eigen::MatrixXf &C = posterrband->covariance;
@@ -1417,7 +1435,7 @@ namespace PROfit{
                 if(data_coll) {
                     const float da = sum_vec(*data_coll, off1, bx, ny);
                     const float db = sum_vec(*data_coll, off2, bx, ny);
-                    const float dr = (db != 0.0f) ? da/db : 0.0f;
+                    const float dr = (db != 0.0f) ? k_data*da/db : 0.0f;
                     data_rat->SetBinContent(bx+1, dr);
                     // data detectors are statistically independent
                     const float dvar = (da > 0.0f && db > 0.0f) ? (1.0f/da + 1.0f/db) : 0.0f;
@@ -1470,6 +1488,7 @@ namespace PROfit{
         if(config.m_num_channels < 2) return;
 
         PlotBounds ratio_bounds;
+        const bool area_norm = bool(opt&PlotOptions::AreaNormalized);
 
         auto sum_vec = [](const Eigen::VectorXf &v, size_t off, size_t bx, size_t ny) {
             float s = 0.0f;
@@ -1528,7 +1547,13 @@ namespace PROfit{
                     % __func__ % config.m_channel_names[ch1].c_str() % config.m_channel_names[ch2].c_str() % xt1.c_str() % xt2.c_str();
             }
 
-            const std::string ratname = config.m_channel_plotnames[ch1] + " / " + config.m_channel_plotnames[ch2];
+            const size_t n1 = nx*ny1, n2 = nx*ny2;
+            const float k_cv   = area_norm ? area_norm_ratio_factor(cv_coll, off1, n1, off2, n2) : 1.0f;
+            const float k_bf   = (area_norm && bf_coll) ? area_norm_ratio_factor(*bf_coll, off1, n1, off2, n2) : 1.0f;
+            const float k_data = (area_norm && data_coll) ? area_norm_ratio_factor(*data_coll, off1, n1, off2, n2) : 1.0f;
+
+            const std::string ratname = config.m_channel_plotnames[ch1] + " / " + config.m_channel_plotnames[ch2]
+                                      + (area_norm ? " (area normalized)" : "");
             const std::string title   = config.m_mode_plotnames[mode] + " " + config.m_detector_plotnames[det]
                                       + ";" + xt1 + ";" + ratname;
             const std::string sfx = "_chratspec_" + std::to_string(mode) + "_" + std::to_string(det)
@@ -1558,7 +1583,7 @@ namespace PROfit{
             for(size_t bx = 0; bx < nx; ++bx) {
                 const float a = sum_vec(cv_coll, off1, bx, ny1);
                 const float b = sum_vec(cv_coll, off2, bx, ny2);
-                const float r = (b != 0.0f) ? a/b : 0.0f;
+                const float r = (b != 0.0f) ? k_cv*a/b : 0.0f;
                 cv_rat->SetBinContent(bx+1, r);
 
                 if(errband && a != 0.0f && b != 0.0f) {
@@ -1578,7 +1603,7 @@ namespace PROfit{
                 if(bf_coll) {
                     const float ba = sum_vec(*bf_coll, off1, bx, ny1);
                     const float bb = sum_vec(*bf_coll, off2, bx, ny2);
-                    const float br = (bb != 0.0f) ? ba/bb : 0.0f;
+                    const float br = (bb != 0.0f) ? k_bf*ba/bb : 0.0f;
                     bf_rat->SetBinContent(bx+1, br);
                     if(posterrband && ba != 0.0f && bb != 0.0f) {
                         const Eigen::MatrixXf &C = posterrband->covariance;
@@ -1594,7 +1619,7 @@ namespace PROfit{
                 if(data_coll) {
                     const float da = sum_vec(*data_coll, off1, bx, ny1);
                     const float db = sum_vec(*data_coll, off2, bx, ny2);
-                    const float dr = (db != 0.0f) ? da/db : 0.0f;
+                    const float dr = (db != 0.0f) ? k_data*da/db : 0.0f;
                     data_rat->SetBinContent(bx+1, dr);
                     
                     // assumes the two channels are mutually exclusive selections (no correlation term...)
@@ -2318,7 +2343,7 @@ namespace PROfit{
             if(data)     data_coll = data->Spec();
             if(config.m_num_detectors > 1)
                 plot_detector_ratio_spectra(c, config, cv_coll, bf_coll, data_coll,
-                                            errband, posterrband, channel_offsets, filename, other_index);
+                                            errband, posterrband, channel_offsets, filename, other_index, opt);
             if(plot_channel_ratios && config.m_num_channels > 1)
                 plot_channel_ratio_spectra(c, config, cv_coll, bf_coll, data_coll,
                                            errband, posterrband, channel_offsets, filename, other_index, opt);
@@ -3766,7 +3791,7 @@ int plotPriorFractionalSystematicChannelRatios(const PROconfig &config, const PR
         delete c;
     }
 
-    int plotCovariancePosteriorPulls(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const Eigen::VectorXf &best_fit, const Eigen::VectorXf &data_spec, const std::string &filename, int var_index, std::map<std::string, TObject*> *drawn_objs, bool shape_fit) {
+    int plotCovariancePosteriorPulls(const PROconfig &config, const PROpeller &prop, const PROsyst &syst, const PROmodel &model, const Eigen::VectorXf &best_fit, const Eigen::VectorXf &data_spec, const std::string &filename, int var_index, std::map<std::string, TObject*> *drawn_objs, bool shape_fit, const PROmetric *metric) {
         if(syst.GetNCovar() == 0) {
             log<LOG_INFO>(L"%1% || No covariance-type systematics; skipping the covariance posterior pull plot.") % __func__;
             return 1;
@@ -3791,10 +3816,11 @@ int plotPriorFractionalSystematicChannelRatios(const PROconfig &config, const PR
         Eigen::MatrixXf L = syst.DecomposeFractionalCovariance(config, cv);
         if(shape_fit) L = Eigen::MatrixXf(ShapeProjectorCollapsed(config, cv_coll, var_index) * L);
 
+        const Eigen::VectorXf stat = conditioningStatVariances(metric, config, var_index, cv_coll, data_spec, best_fit);
         std::vector<int> contrib;
         std::vector<char> in_fit(nbins_coll, 0);
         for(int i = 0; i < data_spec.size(); ++i)
-            if(config.IsBinActive(var_index, i) && data_spec(i) > 0) {
+            if(config.IsBinActive(var_index, i) && stat(i) > 0) {
                 contrib.push_back(i);
                 in_fit[i] = 1;
             }
@@ -3818,7 +3844,7 @@ int plotPriorFractionalSystematicChannelRatios(const PROconfig &config, const PR
         Eigen::VectorXd C_inv_red(nb), u_bf(nb);
         for(size_t i = 0; i < nb; ++i) {
             L_red.row(i) = L_shift.row(contrib[i]);
-            C_inv_red(i) = 1.0 / std::max<double>(data_spec(contrib[i]), 1.0);
+            C_inv_red(i) = 1.0 / stat(contrib[i]);
             u_bf(i) = data_spec(contrib[i]) - cv_coll(contrib[i]);
         }
         Eigen::MatrixXd inner = Eigen::MatrixXd::Identity(k, k)

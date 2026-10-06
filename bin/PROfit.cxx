@@ -22,6 +22,8 @@ int main(int argc, char* argv[])
     // canonical spelling (neyman/pearson/CNP/poisson); legacy aliases
     // (PROchi/PROCNP/Poisson) warn once and map.
     options.chi2 = PROmetric::canonicalizeMetricName(options.chi2);
+    PROsyst::spline2cov_throws = options.syst_throws;
+    PROsyst::spline2cov_nthreads = options.nthread;
 
     log<LOG_WARNING>(L" %1% ") % getIcon().c_str();
 
@@ -74,6 +76,7 @@ int main(int argc, char* argv[])
     // included in the fit.
     const std::vector<std::string> all_spline_names = variable_systs[config.i_prime].spline_names;
     include_or_exclude_systs(variable_systs, config, options);
+    poisson_covariance_check(options, config, variable_systs[config.i_prime]);
     // fakedataparams (the profile's injected-truth markers) must follow the fitted layout.
     fakedataparams = remap_spline_params(fakedataparams, model->nparams, all_spline_names, variable_systs[config.i_prime].spline_names);
 

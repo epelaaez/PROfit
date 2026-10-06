@@ -42,11 +42,14 @@ void fc_worker(fc_args args, MultiPROgressBar &progress) {
         Eigen::VectorXf throwC = Eigen::VectorXf::Constant(args.config.m_num_variable_bins_total_collapsed[args.config.i_prime], 0);
         // Bounded, OOB-safe truncated-Gaussian throws (shared helper; the old
         // do/while here could spin forever on unreachable restrict bounds).
+        // Unthrown splines sit at their prior centre (XML center= / PROjector θ̂), not 0.
         for(size_t i = 0; i < args.systs.GetNSplines(); i++) {
-            throws(i+nphys) = ThrowRestrictedSplinePull(args.systs, i, rng, d);
+            throws(i+nphys) = args.throw_systematics
+                ? ThrowRestrictedSplinePull(args.systs, i, rng, d)
+                : (i < (size_t)args.systs.spline_centers.size() ? args.systs.spline_centers(i) : 0.0f);
         }
         for(size_t i = 0; i < args.config.m_num_variable_bins_total_collapsed[args.config.i_prime]; i++)
-            throwC(i) = d(rng);
+            throwC(i) = args.throw_systematics ? d(rng) : 0.0f;
         // Fill the i_prime variable explicitly: the previous call passed an
         // EvalStrategy enum where FillSpectra takes `bool binned` and let
         // var_index default to 0, while the CollapseMatrix below collapses
@@ -54,7 +57,14 @@ void fc_worker(fc_args args, MultiPROgressBar &progress) {
         PROspec shifted = FillSpectra(args.config, args.prop, args.systs, *model, throws, args.binned, args.config.i_prime);
         log<LOG_DEBUG>(L"%1% || Shifted spectrum %2%\nfor throw %3%")
             % __func__ % shifted.Spec() % throws;
-        PROspec newSpec = PROspec::PoissonVariation(PROspec(CollapseMatrix(args.config, shifted.Spec()) + args.L * throwC, CollapseMatrix(args.config, shifted.Error())), dseed(rng));
+        PROspec variedSpec(
+            CollapseMatrix(args.config, shifted.Spec()) + args.L * throwC,
+            CollapseMatrix(args.config, shifted.Error()));
+
+        // Without Poisson, clamp negative bins to 0 as PoissonVariation does.
+        PROspec newSpec = args.throw_poisson
+            ? PROspec::PoissonVariation(variedSpec, dseed(rng))
+            : PROspec(variedSpec.Spec().cwiseMax(0.0f), variedSpec.Error());
         PROdata data(newSpec.Spec(), newSpec.Error());
         //Metric Time
         // Same construction point as the data fit (carries shape_only etc.).
@@ -112,7 +122,8 @@ void fc_worker(fc_args args, MultiPROgressBar &progress) {
     } // end of cross-checks
     cached_seed_osc = fitter_osc.best_fit;    
 
-    Eigen::VectorXf t = Eigen::VectorXf::Map(throws.data(), throws.size());
+    // Splines only, indexed like spline_names (the writer and the --reuse reader both assume it).
+    Eigen::VectorXf t = throws.tail(nparams - nphys);
 
     // Evaluate all Eigen expressions to concrete VectorXf before constructing fc_out.
     Eigen::VectorXf best_phys  = args.gof_mode ? Eigen::VectorXf::Zero(nphys)

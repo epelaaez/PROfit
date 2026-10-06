@@ -146,6 +146,7 @@ struct PROpt {
     size_t maxevents;
     int global_seed = -1;
     std::string log_file = "";
+    std::string required_version = "";
     std::vector<std::string> fit_preset = {"grad-good","grad-fast"};
     bool preset_user_set = false; ///< True if -p/--preset was given on the command line (see resolve_fit_presets).
     inline static const std::unordered_set<std::string> allowed_preset = {"good","fast","overkill","sensitivity","grad-fast","grad-good","grad-deep","grad-overkill"};
@@ -154,6 +155,7 @@ struct PROpt {
     bool with_covar = false, no_frac_syst = false;
     bool with_subcovar = false;
     int band_throws = 2500;
+    size_t syst_throws = 500;
     std::map<std::string, float> fake_data_osc_params;
     std::map<std::string, float> cv_osc_params;
     std::map<std::string, float> injected_systs;
@@ -201,6 +203,11 @@ struct PROpt {
     bool gof_pvalue = false;
     bool reuse_dist = false;
     bool pvalue = false;
+    // Classic FC pseudo-experiment composition. These flags change only what
+    // is fluctuated when a toy is generated; the fits still use the configured
+    // systematic model and statistical term.
+    bool fc_stat_only_throws = false;
+    bool fc_syst_only_throws = false;
 
     // fc-adaptive (slice 1: Wilks prepass + meta-mesh + diagnostics).
     std::string afc_mode_str = "init-bank";
@@ -260,6 +267,8 @@ Eigen::VectorXf make_fakedata_params(Eigen::VectorXf &fake_data_osc_param_vector
 void make_param_vectors(Eigen::VectorXf &fakeDataParams, Eigen::VectorXf &CVParams, const PROconfig &config, const PROpt &options, const PROmodel &model, const PROsyst &systs, const Eigen::VectorXf &fake_data_osc_param_vector);
 void resolve_fit_presets(PROpt &options, const PROconfig &config, const PROmodel &model);
 void include_or_exclude_systs(std::vector<PROsyst> &variable_systs, const PROconfig &config, const PROpt &options);
+// Fatal if -c poisson would silently ignore a covariance-type systematic (incl. mcstat).
+void poisson_covariance_check(const PROpt &options, const PROconfig &config, const PROsyst &systs);
 // Re-lay the spline part of a [physics, splines] vector from old_names' order onto new_names'
 // by name; splines absent from old_names get 0.
 Eigen::VectorXf remap_spline_params(const Eigen::VectorXf &params, size_t nphys, const std::vector<std::string> &old_names, const std::vector<std::string> &new_names);
