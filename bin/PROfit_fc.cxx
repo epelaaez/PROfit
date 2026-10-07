@@ -174,8 +174,7 @@ void run_fc(const PROconfig &config, const PROpeller &prop, PROmetric &metric, c
     }
 
     size_t FCthreads = options.nthread > options.nuniv ? options.nuniv : options.nthread;
-    Eigen::MatrixXf cv_vec = FillSpectra(config, prop, metric.GetSysts(), metric.GetModel(), CVParams , true,config.i_prime).Spec();
-    Eigen::MatrixXf L = metric.GetSysts().DecomposeFractionalCovariance(config, cv_vec);
+    Eigen::MatrixXf R = CovarianceThrowRoot(config, metric.GetSysts());
 
     std::vector<std::vector<float>> dchi2s;
     dchi2s.reserve(FCthreads);
@@ -228,7 +227,7 @@ void run_fc(const PROconfig &config, const PROpeller &prop, PROmetric &metric, c
         for(size_t i = 0; i < FCthreads; i++) {
             dchi2s.emplace_back();
             outs.emplace_back();
-            fc_args args{todo + (i >= addone), &dchi2s.back(), &outs.back(), config, prop, metric.GetSysts(), options.chi2, fakeDataParams, L, scanFitConfig,(*myseed.getThreadSeeds())[i], (int)i, !options.eventbyevent, gof_mode, options.shapeonly, throw_systematics, throw_poisson};
+            fc_args args{todo + (i >= addone), &dchi2s.back(), &outs.back(), config, prop, metric.GetSysts(), options.chi2, fakeDataParams, R, scanFitConfig,(*myseed.getThreadSeeds())[i], (int)i, !options.eventbyevent, gof_mode, options.shapeonly, throw_systematics, throw_poisson};
 
 
             threads.emplace_back([args, &fc_progress]() {

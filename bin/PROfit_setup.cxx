@@ -100,18 +100,16 @@ PROdata construct_data(std::vector<PROdata> &variable_data, bool use_real_data, 
             // (matching the variable_systs build, which also special-cases i_prime).
             if (options.pseudo_experiment && io == config.i_prime) {
                 // True FC-style pseudo-experiment for the i_prime variable.
-                // Pattern lifted verbatim from src/PROfc.cxx::fc_worker's per-PE body:
-                //   1. CV spectrum + Cholesky of the bin-bin covariance once.
-                //   2. Throw spline pulls Gaussian, rejection-sampled within restrict bounds.
-                //   3. Throw covariance bin shifts (Gaussian in standardised units).
-                //   4. Build shifted spectrum, add L*throwC to the collapsed spec, Poisson-variate.
+                // Same recipe as src/PROfc.cxx::fc_worker's per-PE body:
+                //   1. Throw spline pulls Gaussian, rejection-sampled within restrict bounds.
+                //   2. Build the shifted spectrum.
+                //   3. Add a covariance fluctuation scaled by that spectrum (ThrowCovarianceShift),
+                //      Poisson-variate.
                 std::normal_distribution<float> d;
                 const size_t nphys   = model.nparams;
                 const size_t nspline = variable_systs[io].GetNSplines();
 
-                PROspec cv_for_L = FillSpectra(config, prop, variable_systs[io], model,
-                                               fakedataparams, !options.eventbyevent, io);
-                Eigen::MatrixXf L_chol = variable_systs[io].DecomposeFractionalCovariance(config, cv_for_L.Spec());
+                const Eigen::MatrixXf frac_root = CovarianceThrowRoot(config, variable_systs[io]);
 
                 // Splines named in --inject-systs are held at their injected value; the rest are thrown.
                 std::vector<char> held(nspline, 0);
@@ -130,21 +128,18 @@ PROdata construct_data(std::vector<PROdata> &variable_data, bool use_real_data, 
                     throws((int)(i + nphys)) = ThrowRestrictedSplinePull(variable_systs[io], i, PROseed::global_rng, d);
                 }
 
-                const int nbins_coll = config.m_num_variable_bins_total_collapsed[io];
-                Eigen::VectorXf throwC(nbins_coll);
-                for (int i = 0; i < nbins_coll; ++i) throwC(i) = d(PROseed::global_rng);
-
                 PROspec shifted = FillSpectra(config, prop, variable_systs[io], model,
                                               throws, !options.eventbyevent, io);
                 PROspec newSpec = PROspec::PoissonVariation(
-                    PROspec(CollapseMatrix(config, shifted.Spec(), io) + L_chol * throwC,
+                    PROspec(CollapseMatrix(config, shifted.Spec(), io)
+                                + ThrowCovarianceShift(config, frac_root, shifted.Spec(), PROseed::global_rng, d, io),
                             CollapseMatrix(config, shifted.Error(), io)),
                     dseed(PROseed::global_rng));
 
                 const int nheld = (int)std::count(held.begin(), held.end(), 1);
                 log<LOG_INFO>(L"%1% || Generated FC-style pseudo-experiment for i_prime variable %2% "
-                              L"(splines thrown=%3%, held at injected value=%4%, cov bins thrown=%5%).")
-                    % __func__ % io % ((int)nspline - nheld) % nheld % nbins_coll;
+                              L"(splines thrown=%3%, held at injected value=%4%, cov modes thrown=%5%).")
+                    % __func__ % io % ((int)nspline - nheld) % nheld % (int)frac_root.cols();
 
                 // List the spline pulls (in sigma) that produced this pseudo-experiment.
                 std::string thrown_str;

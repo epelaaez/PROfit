@@ -74,7 +74,7 @@ PROdata generate_pseudo_experiment_data(
     const PROmodel  &model,
     const Eigen::VectorXf &fakeDataParams,
     bool binned,
-    const Eigen::MatrixXf &L_chol,
+    const Eigen::MatrixXf &frac_root,
     PROseed &proseed);
 
 // --------------------------------------------------------------------
@@ -88,7 +88,7 @@ void schedule_pes(const AdaptiveFCConfig &acfg,
                   const PROmodel  &model,
                   const PROfitterConfig &fitconfig,
                   PROseed &proseed,
-                  const Eigen::MatrixXf &L,
+                  const Eigen::MatrixXf &frac_root,
                   size_t xaxis_idx, size_t yaxis_idx,
                   const std::vector<float> &cell_x_model,
                   const std::vector<float> &cell_y_model,

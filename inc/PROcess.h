@@ -211,6 +211,37 @@ namespace PROfit{
      */
     float ThrowRestrictedSplinePull(const PROsyst &insyst, size_t i, std::mt19937 &rng, std::normal_distribution<float> &d);
 
+    /**
+     * @brief Square root R of the fractional covariance (R R^T = fractional_covariance),
+     *        for pseudo-experiment covariance throws.
+     * @details Uncollapsed and unscaled, so one R serves every physics point and every
+     * throw: ThrowCovarianceShift scales it by each pseudo-experiment's own prediction.
+     * Rounding-level modes are trimmed, so R has one column per kept mode, and none when
+     * the syst has no covariance-type systematics. Compute once per run, outside the
+     * throw loop (one uncollapsed eigendecomposition).
+     */
+    Eigen::MatrixXf CovarianceThrowRoot(const PROconfig &inconfig, const PROsyst &insyst);
+
+    /**
+     * @brief Collapsed covariance-systematic shift for one pseudo-experiment, thrown
+     *        around the metric's own covariance.
+     * @details Returns T (spec_full ∘ R α) with α ~ N(0, I), a Gaussian with covariance
+     * T diag(spec_full) F diag(spec_full) T^T — exactly the systematic term the χ² metric
+     * assumes at spec_full (CollapsedScaledCovariance). Pass the pseudo-experiment's own
+     * uncollapsed prediction (true physics + thrown splines). A covariance factored once
+     * at a reference spectrum (e.g. the no-oscillation CV) is only right at that spectrum:
+     * away from it the FC critical values are rescaled (appearance under-covers,
+     * disappearance over-covers).
+     * @param inconfig   Configuration (collapsing matrix).
+     * @param frac_root  R from CovarianceThrowRoot.
+     * @param spec_full  Uncollapsed prediction the fluctuation scales with.
+     * @param rng        Generator to draw from (caller owns seeding/threading).
+     * @param d          N(0,1) distribution to draw with.
+     * @param var_index  Variable whose collapsing matrix to use (config.i_prime for fits).
+     * @return Collapsed shift; zero, with no draws, when R has no columns.
+     */
+    Eigen::VectorXf ThrowCovarianceShift(const PROconfig &inconfig, const Eigen::MatrixXf &frac_root, const Eigen::VectorXf &spec_full, std::mt19937 &rng, std::normal_distribution<float> &d, int var_index);
+
 };
 
 #endif
