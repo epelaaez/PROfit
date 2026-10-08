@@ -901,16 +901,13 @@ AdaptiveFCResult run_adaptive_fc(
         silent_cfg.push_back({n_cells, "_silent"});
         MultiPROgressBar silent_progress(silent_cfg);
 
-        // Throw-invariant: CV spectrum + covariance decomposition (an SVD)
-        // hoisted out of the per-throw loop.
-        PROspec brazil_cv = FillSpectra(config, prop, systs, *model, fakeDataParams,
-                                        acfg.binned, config.i_prime);
-        Eigen::MatrixXf brazil_L = systs.DecomposeFractionalCovariance(config, brazil_cv.Spec());
+        // Throw-invariant fractional-covariance root, hoisted out of the per-throw loop.
+        const Eigen::MatrixXf brazil_frac_root = CovarianceThrowRoot(config, systs);
 
         for (int t_new = 0; t_new < n_new; ++t_new) {
             const int t_abs = n_existing + t_new;
             PROdata throw_data = generate_pseudo_experiment_data(
-                config, prop, systs, *model, fakeDataParams, acfg.binned, brazil_L, proseed);
+                config, prop, systs, *model, fakeDataParams, acfg.binned, brazil_frac_root, proseed);
 
             AsimovObs obs = compute_asimov_obs(
                 config, prop, systs, *model, fitconfig, throw_data,
@@ -1100,12 +1097,9 @@ AdaptiveFCResult run_adaptive_fc(
         std::vector<float> cell_x_model, cell_y_model;
         compute_cell_centers(mm, xlog, ylog, cell_x_model, cell_y_model);
 
-        // Cholesky factor of the total covariance — built once, reused across all
-        // cells and all PEs. Same construction as the brazil-band path
-        // (bin/PROfit.cxx:1586) and the existing fc block (bin/PROfit.cxx:2511).
-        PROspec cv = FillSpectra(config, prop, systs, *model, fakeDataParams,
-                                 acfg.binned, config.i_prime);
-        Eigen::MatrixXf L = systs.DecomposeFractionalCovariance(config, cv.Spec());
+        // Fractional-covariance root, built once and shared by all cells and PEs;
+        // each PE scales it by its own prediction (ThrowCovarianceShift).
+        const Eigen::MatrixXf frac_root = CovarianceThrowRoot(config, systs);
 
         log<LOG_INFO>(L"%1% || init-bank: starting PE generation for %2% cells "
                       L"(n_pe_min=%3%, n_pe_max=%4%, wilson_eps=%5%).")
@@ -1192,7 +1186,7 @@ AdaptiveFCResult run_adaptive_fc(
         cells_progress.initialize_display();
         cells_progress.start_display_thread();
 
-        schedule_pes(acfg, config, prop, systs, *model, fitconfig, proseed, L,
+        schedule_pes(acfg, config, prop, systs, *model, fitconfig, proseed, frac_root,
                      xaxis_idx, yaxis_idx, cell_x_model, cell_y_model,
                      bank, nthreads, cells_progress, 0, res);
 

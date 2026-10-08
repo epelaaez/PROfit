@@ -315,7 +315,7 @@ struct AdaptivePEArgs {
     const PROpeller *prop;
     const PROsyst   *systs;
     const PROmodel  *model;
-    const Eigen::MatrixXf *L;    ///< Cholesky factor of total covariance.
+    const Eigen::MatrixXf *R;    ///< Fractional-covariance root (CovarianceThrowRoot), scaled per PE by its own prediction.
     const PROfitterConfig *fitconfig;
     std::string chi2_kind;       ///< "neyman" | "pearson" | "CNP" | "poisson" (legacy aliases accepted)
     bool   binned;
@@ -379,19 +379,17 @@ static PEBankRecord run_one_pe(const AdaptivePEArgs &args)
         throws((int)(i + nphys)) = throw_restricted_spline(systs, i, rng, d);
     }
 
-    // Stat throw vector.
-    const int nbins_coll = config.m_num_variable_bins_total_collapsed[config.i_prime];
-    Eigen::VectorXf throwC(nbins_coll);
-    for (int i = 0; i < nbins_coll; ++i) throwC(i) = d(rng);
-
     // Build fake-data spectrum. Fill the i_prime variable explicitly: the
     // previous call passed an EvalStrategy enum where FillSpectra takes
     // `bool binned` and let var_index default to 0, while the CollapseMatrix
     // below collapses with the i_prime matrix — wrong-variable physics when
     // i_prime != 0.
     PROspec shifted = FillSpectra(config, prop, systs, model, throws, args.binned, config.i_prime);
+    // Covariance fluctuation scaled by this PE's own prediction (cell physics +
+    // thrown splines): the covariance the metric assumes at this cell.
+    const Eigen::VectorXf sys_shift = ThrowCovarianceShift(config, *args.R, shifted.Spec(), rng, d, config.i_prime);
     PROspec newSpec = PROspec::PoissonVariation(
-        PROspec(CollapseMatrix(config, shifted.Spec()) + (*args.L) * throwC,
+        PROspec(CollapseMatrix(config, shifted.Spec()) + sys_shift,
                 CollapseMatrix(config, shifted.Error())),
         dseed(rng));
     PROdata data(newSpec.Spec(), newSpec.Error());
@@ -478,7 +476,7 @@ void schedule_pes(const AdaptiveFCConfig &acfg,
                          const PROmodel  &model,
                          const PROfitterConfig &fitconfig,
                          PROseed &proseed,
-                         const Eigen::MatrixXf &L,
+                         const Eigen::MatrixXf &frac_root,
                          size_t xaxis_idx, size_t yaxis_idx,
                          const std::vector<float> &cell_x_model,
                          const std::vector<float> &cell_y_model,
@@ -573,7 +571,7 @@ void schedule_pes(const AdaptiveFCConfig &acfg,
                 args.prop   = &prop;
                 args.systs  = &systs;
                 args.model  = &model;
-                args.L      = &L;
+                args.R      = &frac_root;
                 args.fitconfig = &fitconfig;
                 args.chi2_kind = acfg.chi2;
                 args.binned    = acfg.binned;

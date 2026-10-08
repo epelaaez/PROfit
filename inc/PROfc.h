@@ -58,7 +58,7 @@ namespace PROfit {
         const PROsyst systs;             ///< Systematic object (copied per thread).
         std::string chi2;                ///< Name of the chi-squared type to use ("neyman", "pearson", "CNP", or "poisson"; legacy aliases accepted).
         const Eigen::VectorXf phy_params;///< True physics parameter point at which the FC test is evaluated.
-        const Eigen::MatrixXf L;         ///< Cholesky factor of the total covariance for correlated systematic throws.
+        const Eigen::MatrixXf R;         ///< Square root of the fractional covariance (CovarianceThrowRoot); scaled per throw by that throw's own prediction.
         PROfitterConfig fitconfig;       ///< Fitter configuration.
         uint32_t seed;                   ///< Random seed for this thread's pseudo-experiments.
         const int thread;                ///< Thread index (used to differentiate seeds).

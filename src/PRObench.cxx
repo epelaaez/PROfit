@@ -523,13 +523,10 @@ void run_grad_mode_fits(const PROconfig &config, const PROpeller &prop,
         const size_t io = config.i_prime;
         std::mt19937 rng(base_seed ^ 0x715c0deu);
         std::normal_distribution<float> nd;
-        // Cholesky factor of the covariance at the CV point (splines at
-        // nominal); recomputed per universe when the physics point is thrown.
-        Eigen::MatrixXf L;
-        if (throw_systs && !throw_phys) {
-            PROspec cv = FillSpectra(config, prop, syst, model, nominal, true, io);
-            L = syst.DecomposeFractionalCovariance(config, cv.Spec());
-        }
+        // Fractional-covariance root; each universe scales it by its own prediction,
+        // so a thrown physics point needs no re-factorization.
+        Eigen::MatrixXf frac_root;
+        if (throw_systs) frac_root = CovarianceThrowRoot(config, syst);
         for (int u = 0; u < n_universes; ++u) {
             Eigen::VectorXf tp = nominal;
             if (throw_phys) {
@@ -547,10 +544,6 @@ void run_grad_mode_fits(const PROconfig &config, const PROpeller &prop,
                     }
                     if (!model.model_constraint || model.model_constraint(tp.head(nphys))) break;
                 }
-                if (throw_systs) {
-                    PROspec cv = FillSpectra(config, prop, syst, model, tp, true, io);
-                    L = syst.DecomposeFractionalCovariance(config, cv.Spec());
-                }
             }
             if (throw_systs)
                 for (size_t i = 0; i < nspline; ++i)
@@ -558,12 +551,10 @@ void run_grad_mode_fits(const PROconfig &config, const PROpeller &prop,
             PROspec shifted = FillSpectra(config, prop, syst, model, tp, true, io);
             Eigen::VectorXf coll  = CollapseMatrix(config, shifted.Spec(), io);
             Eigen::VectorXf collE = CollapseMatrix(config, shifted.Error(), io);
-            if (throw_systs && L.size() > 0) {
-                Eigen::VectorXf throwC(coll.size());
-                for (Eigen::Index i = 0; i < throwC.size(); ++i) throwC(i) = nd(rng);
+            if (throw_systs && frac_root.cols() > 0) {
                 // Clamp: PoissonVariation zeroes negative bins with a warning
                 // per bin; do it silently here instead.
-                coll = (coll + L * throwC).cwiseMax(0.0f);
+                coll = (coll + ThrowCovarianceShift(config, frac_root, shifted.Spec(), rng, nd, io)).cwiseMax(0.0f);
             }
             PROspec pe = PROspec::PoissonVariation(PROspec(coll, collE),
                                                    base_seed + (uint32_t)u);

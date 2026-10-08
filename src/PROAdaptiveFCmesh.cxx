@@ -230,11 +230,12 @@ std::vector<PROmesh::AMRResult> generate_throws(
     const size_t N_phys_params = model.nparams;
     const size_t nbins_collapsed = (size_t)config.m_num_variable_bins_total_collapsed[config.i_prime];
 
-    // Build the CV spectrum and the Cholesky factor once — both are throw-independent.
+    // CV spectrum (stat-only throws) and the fractional-covariance root, both
+    // throw-independent; each throw scales the root by its own prediction.
     PROspec cv = FillSpectra(config, prop, systs, model, fakeDataParams, !acfg.binned ? false : true, config.i_prime);
     PROspec collapsed_cv = PROspec(CollapseMatrix(config, cv.Spec()),
                                    CollapseMatrix(config, cv.Error()));
-    Eigen::MatrixXf L = systs.DecomposeFractionalCovariance(config, cv.Spec());
+    const Eigen::MatrixXf frac_root = CovarianceThrowRoot(config, systs);
 
     // Convert acfg axis bounds back to *transformed* (log/lin) space — that's
     // what PROmesh expects and what PROsurf::FillSurfaceAMR uses (see line
@@ -261,9 +262,8 @@ std::vector<PROmesh::AMRResult> generate_throws(
     std::normal_distribution<float> d;
 
     for (int t = 0; t < acfg.n_throws; ++t) {
-        // Build this throw's parameter vector and stat-throw vector.
+        // Build this throw's parameter vector.
         Eigen::VectorXf throwp = fakeDataParams;
-        Eigen::VectorXf throwC = Eigen::VectorXf::Constant((int)nbins_collapsed, 0);
 
         if (!acfg.stat_only_throws) {
             // Truncated to each spline's allowed range — keeps the mesh throws
@@ -273,17 +273,14 @@ std::vector<PROmesh::AMRResult> generate_throws(
                 throwp((int)(i + N_phys_params)) = throw_restricted_spline(systs, i, PROseed::global_rng, d);
             }
         }
-        for (size_t i = 0; i < nbins_collapsed; ++i) {
-            throwC((int)i) = d(PROseed::global_rng);
-        }
-
         const bool binned_flag = acfg.binned;
         PROspec shifted = FillSpectra(config, prop, systs, model, throwp, binned_flag, config.i_prime);
 
         PROspec newSpec = acfg.stat_only_throws
             ? PROspec::PoissonVariation(collapsed_cv, dseed(proseed.global_rng))
             : PROspec::PoissonVariation(
-                  PROspec(CollapseMatrix(config, shifted.Spec()) + L * throwC,
+                  PROspec(CollapseMatrix(config, shifted.Spec())
+                              + ThrowCovarianceShift(config, frac_root, shifted.Spec(), PROseed::global_rng, d, config.i_prime),
                           CollapseMatrix(config, shifted.Error())),
                   dseed(proseed.global_rng));
         PROdata data(newSpec.Spec(), newSpec.Error());
@@ -749,9 +746,9 @@ void compute_cell_centers(const MetaMesh &mm,
 //
 //  Used by --mode brazil to generate one fake-data realisation per throw.
 // --------------------------------------------------------------------
-// The CV spectrum and its covariance decomposition (an SVD) are
-// throw-INVARIANT: the caller computes them once and passes L_chol in,
-// instead of redoing the factorization inside every brazil throw.
+// The fractional-covariance root is throw-INVARIANT: the caller computes it
+// once (CovarianceThrowRoot) and passes it in; each throw scales it by its own
+// prediction.
 PROdata generate_pseudo_experiment_data(
     const PROconfig &config,
     const PROpeller &prop,
@@ -759,7 +756,7 @@ PROdata generate_pseudo_experiment_data(
     const PROmodel  &model,
     const Eigen::VectorXf &fakeDataParams,
     bool binned,
-    const Eigen::MatrixXf &L_chol,
+    const Eigen::MatrixXf &frac_root,
     PROseed &proseed)
 {
     const size_t nphys   = model.nparams;
@@ -773,13 +770,10 @@ PROdata generate_pseudo_experiment_data(
         throws((int)(i + nphys)) = throw_restricted_spline(systs, i, PROseed::global_rng, d);
     }
 
-    const int nbins_coll = config.m_num_variable_bins_total_collapsed[config.i_prime];
-    Eigen::VectorXf throwC(nbins_coll);
-    for (int i = 0; i < nbins_coll; ++i) throwC(i) = d(PROseed::global_rng);
-
     PROspec shifted = FillSpectra(config, prop, systs, model, throws, binned, config.i_prime);
     PROspec newSpec = PROspec::PoissonVariation(
-        PROspec(CollapseMatrix(config, shifted.Spec(), config.i_prime) + L_chol * throwC,
+        PROspec(CollapseMatrix(config, shifted.Spec(), config.i_prime)
+                    + ThrowCovarianceShift(config, frac_root, shifted.Spec(), PROseed::global_rng, d, config.i_prime),
                 CollapseMatrix(config, shifted.Error(), config.i_prime)),
         dseed(proseed.global_rng));
     return PROdata(newSpec.Spec(), newSpec.Error());

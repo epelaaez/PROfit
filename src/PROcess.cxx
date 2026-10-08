@@ -690,4 +690,22 @@ namespace PROfit {
         }
         return x;
     }
+
+    Eigen::MatrixXf CovarianceThrowRoot(const PROconfig &inconfig, const PROsyst &insyst) {
+        const Eigen::Index n = insyst.fractional_covariance.rows();
+        if(insyst.GetNCovar() == 0 || n == 0) return Eigen::MatrixXf(n, 0);
+        // sqrt(diag(1) F diag(1)) = sqrt(F). Kept modes fill the leading columns.
+        const Eigen::MatrixXf R = insyst.DecomposeFractionalCovarianceFull(inconfig, Eigen::VectorXf::Ones(n));
+        Eigen::Index kept = 0;
+        while(kept < R.cols() && R.col(kept).squaredNorm() > 0.0f) ++kept;
+        return R.leftCols(kept);
+    }
+
+    Eigen::VectorXf ThrowCovarianceShift(const PROconfig &inconfig, const Eigen::MatrixXf &frac_root, const Eigen::VectorXf &spec_full, std::mt19937 &rng, std::normal_distribution<float> &d, int var_index) {
+        if(frac_root.cols() == 0)
+            return Eigen::VectorXf::Zero(inconfig.m_num_variable_bins_total_collapsed[var_index]);
+        Eigen::VectorXf alpha(frac_root.cols());
+        for(Eigen::Index i = 0; i < alpha.size(); ++i) alpha(i) = d(rng);
+        return CollapseMatrix(inconfig, Eigen::VectorXf(spec_full.cwiseProduct(frac_root * alpha)), var_index);
+    }
 };

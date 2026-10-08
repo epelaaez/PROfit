@@ -200,25 +200,25 @@ void run_surface(float &global_fit_chi2, Eigen::VectorXf &global_fit_result, con
         PROspec cv = FillSpectra(config, prop, metric.GetSysts(), metric.GetModel(), CVParams , true,config.i_prime);
 
         PROspec collapsed_cv = PROspec(CollapseMatrix(config, cv.Spec()), CollapseMatrix(config, cv.Error()));
-        Eigen::MatrixXf L = metric.GetSysts().DecomposeFractionalCovariance(config, cv.Spec());
+        const Eigen::MatrixXf frac_root = CovarianceThrowRoot(config, metric.GetSysts());
         for(size_t i = 0; i < (size_t)options.n_brazil_throws; ++i) {
             Eigen::VectorXf throwp = fakeDataParams;
-            Eigen::VectorXf throwC = Eigen::VectorXf::Constant(config.m_num_variable_bins_total_collapsed[config.i_prime], 0);
             // Shared truncated-Gaussian helper: samples each spline's actual prior
             // N(center, sigma) within its restrict bounds (the raw d(rng) here
             // ignored both, which was wrong for XML priors and for PROjector's
             // constrained posterior).
             for(size_t i = 0; i < metric.GetSysts().GetNSplines(); i++)
                 throwp(i+metric.GetModel().nparams) = ThrowRestrictedSplinePull(metric.GetSysts(), i, PROseed::global_rng, d);
-            for(size_t i = 0; i < config.m_num_variable_bins_total_collapsed[config.i_prime]; i++)
-                throwC(i) = d(PROseed::global_rng);
             bool binned = (options.eventbyevent ? PROmetric::EventByEvent : PROmetric::BinnedChi2) != 0;
             // Fill the fitting variable explicitly: the CollapseMatrix below uses the
             // i_prime collapsing matrix, so letting var_index default to 0 would mix
             // variables whenever i_prime != 0 (same fix as src/PROfc.cxx).
             PROspec shifted = FillSpectra(config, prop, metric.GetSysts(), metric.GetModel(), throwp, binned, config.i_prime);
+            // Covariance fluctuation scaled by this throw's own prediction (the covariance the metric assumes there).
             PROspec newSpec = options.statonly_brazil ? PROspec::PoissonVariation(collapsed_cv, dseed(myseed.global_rng)) :
-                PROspec::PoissonVariation(PROspec(CollapseMatrix(config, shifted.Spec()) + L * throwC, CollapseMatrix(config, shifted.Error())), dseed(myseed.global_rng));
+                PROspec::PoissonVariation(PROspec(CollapseMatrix(config, shifted.Spec())
+                                                      + ThrowCovarianceShift(config, frac_root, shifted.Spec(), PROseed::global_rng, d, config.i_prime),
+                                                  CollapseMatrix(config, shifted.Error())), dseed(myseed.global_rng));
             PROdata data(newSpec.Spec(), newSpec.Error());
             // Same construction point as the data fit (carries --shapeonly).
             PROmetric *brazil_metric = MakeMetric(options.chi2, config, prop, &metric.GetSysts(), metric.GetModel(), data,
