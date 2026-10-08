@@ -318,7 +318,8 @@ namespace PROfit {
                     lb(i) = GetModel().lb(i);
                 }
                 for(size_t i = nphys; i < nparams; ++i) {
-                    lb(i) = GetSysts().spline_lo[i-nphys];
+                    const size_t si = i - nphys;
+                    lb(i) = GetSysts().spline_has_restrict[si] ? GetSysts().spline_restrict_lo[si] : GetSysts().spline_lo[si];
                 }
                 return lb;
             }
@@ -331,7 +332,8 @@ namespace PROfit {
                     ub(i) = GetModel().ub(i);
                 }
                 for(size_t i = nphys; i < nparams; ++i) {
-                    ub(i) = GetSysts().spline_hi[i-nphys];
+                    const size_t si = i - nphys;
+                    ub(i) = GetSysts().spline_has_restrict[si] ? GetSysts().spline_restrict_hi[si] : GetSysts().spline_hi[si];
                 }
                 return ub;
             }

@@ -15,3 +15,6 @@ plotting_routines/.ipynb_checkpoints/
 # tutorial: keep the embedded figures, never the (multi-GB) run outputs
 docs/tutorials/tutorial_run/
 !docs/tutorials/figures/*.png
+# regression-suite outputs (tests/run_short_tests.sh) and Claude's on-disk scratch
+tests/runs/
+tests/claude_runs/

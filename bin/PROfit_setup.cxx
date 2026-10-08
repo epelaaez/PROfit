@@ -481,17 +481,22 @@ void set_global_bounds(Eigen::VectorXf &lb, Eigen::VectorXf &ub, std::vector<int
                 ub(i) = model.ub(i);
     }
     for(size_t i = model.nparams; i < model.nparams + systs.GetNSplines(); ++i) {
-                std::string name = systs.spline_names[i-model.nparams];
-                std::string pname =config.m_mcgen_variation_plotname_map.at(name); 
+                const size_t si = i - model.nparams;
+                std::string name = systs.spline_names[si];
+                std::string pname =config.m_mcgen_variation_plotname_map.at(name);
 
                 if( std::find(options.fixed_params.begin(), options.fixed_params.end(), name) != options.fixed_params.end() || std::find(options.fixed_params.begin(), options.fixed_params.end(), pname) != options.fixed_params.end()){
-                    log<LOG_INFO>(L"%1% || We are FIXING syst parameter %2% (%3%) at value %4% ") % __func__ % i % name.c_str() % CVParams(i);  
-                    systs.spline_hi[i-model.nparams] = CVParams(i);
-                    systs.spline_lo[i-model.nparams] = CVParams(i);
+                    log<LOG_INFO>(L"%1% || We are FIXING syst parameter %2% (%3%) at value %4% ") % __func__ % i % name.c_str() % CVParams(i);
+                    systs.spline_hi[si] = CVParams(i);
+                    systs.spline_lo[si] = CVParams(i);
+                    // Pin the restrict box too: every bound site reads it before spline_lo/hi.
+                    systs.spline_restrict_hi[si] = CVParams(i);
+                    systs.spline_restrict_lo[si] = CVParams(i);
                     fixed.at(i)=1;
                 }
-                lb(i) = systs.spline_lo[i-model.nparams];
-                ub(i) = systs.spline_hi[i-model.nparams];
+                // Same range profile/surface/FC use: restrict= when given, else the knob range.
+                lb(i) = systs.spline_has_restrict[si] ? systs.spline_restrict_lo[si] : systs.spline_lo[si];
+                ub(i) = systs.spline_has_restrict[si] ? systs.spline_restrict_hi[si] : systs.spline_hi[si];
 
     }
     if( (options.fixed_params.size()!=std::accumulate(fixed.begin(), fixed.end(), (size_t)0)) && !options.systs_only ){
