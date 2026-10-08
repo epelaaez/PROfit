@@ -662,6 +662,8 @@ namespace PROfit {
         float tlo = has_r ? insyst.spline_restrict_lo[i] : insyst.spline_lo[i];
         float thi = has_r ? insyst.spline_restrict_hi[i] : insyst.spline_hi[i];
         if (tlo > thi) { const float t = tlo; tlo = thi; thi = t; }
+        // A --fix'd spline has a zero-width range: it throws at its pinned value.
+        if (tlo == thi) return tlo;
 
         // prior_type="uniform" has no Gaussian prior: throw flat over its allowed range.
         if (i < insyst.spline_prior_types.size() && insyst.spline_prior_types[i] == SplinePriorType::Uniform)

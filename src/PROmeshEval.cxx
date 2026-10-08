@@ -22,11 +22,8 @@ EvalResult pinned_scan_eval(PROmetric &metric,
     const int nphys    = (int)m->GetModel().nparams;
     const int nspline  = (int)m->GetSysts().GetNSplines();
     const int n_full   = nphys + nspline;
-    Eigen::VectorXf lb(n_full), ub(n_full);
-    lb << m->GetModel().lb,
-          Eigen::VectorXf::Map(m->GetSysts().spline_lo.data(), m->GetSysts().spline_lo.size());
-    ub << m->GetModel().ub,
-          Eigen::VectorXf::Map(m->GetSysts().spline_hi.data(), m->GetSysts().spline_hi.size());
+    Eigen::VectorXf lb = m->LowerBound();
+    Eigen::VectorXf ub = m->UpperBound();
 
     // Pin the two scanned coordinates; the remaining n_full-2 parameters
     // are optimised by PROfitter.
