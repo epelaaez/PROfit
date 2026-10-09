@@ -1336,7 +1336,7 @@ namespace PROfit {
         std::vector<float> knobvals;
         for (size_t i = 0; i < syst.p_multi_spec.size(); ++i) {
             if (syst.knobval[i] > 0 && !found0) {
-                if (i > 0) {
+                if (syst.force_0_cv && i > 0) {
                     // Ratio is linear interpolation of the two universes around 0, not cv/cv
                     // The force_0_cv division then removes the same universe to CV normalisation
                     // it removes for knobs that have a real universe at 0
@@ -1347,9 +1347,9 @@ namespace PROfit {
                     ratios.push_back(r_lo + (r_hi - r_lo) * t);
                     log<LOG_INFO>(L"%1% || systematic %2% has no universe at knob 0; inserting a knot there interpolated between knobvals %3% and %4%") % __func__ % syst.systname.c_str() % k_lo % k_hi;
                 } else {
-                    // Nothing below 0 to interpolate from (e.g. a single variation at knob 1):
-                    // the knob-0 knot is the CV itself, as before.
-                    log<LOG_DEBUG>(L"%1% || systematic %2% has only positive knobvals; the inserted knob-0 knot is the CV (ratio 1)") % __func__ % syst.systname.c_str();
+                    // Without force_0_cv there is no normalisation to remove, and with nothing
+                    // below 0 to interpolate from: the knob-0 knot is the CV itself
+                    log<LOG_DEBUG>(L"%1% || systematic %2% has no universe at knob 0; the inserted knob-0 knot is the CV (ratio 1)") % __func__ % syst.systname.c_str();
                     ratios.push_back(*syst.p_cv / *syst.p_cv);
                 }
                 knobvals.push_back(0);
