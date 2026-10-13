@@ -187,6 +187,32 @@ namespace PROfit {
             /// Worker threads spline2cov spreads its throws over (-n; result is thread-count independent).
             inline static size_t spline2cov_nthreads = 1;
 
+            /// Gaussian kernel width, in bins, for smoothing spline ratios across reco bins before
+            /// the spline coefficients are built (--smooth-systs). 0 (default) disables smoothing.
+            inline static float smooth_sigma_bins = 0.0f;
+            /// Systematics --smooth-systs applies to (--smooth-systs-list). Empty = every eligible one.
+            inline static std::vector<std::string> smooth_syst_names;
+
+            /**
+             * @brief True if --smooth-systs should be applied to @p syst.
+             * @details Requires smooth_sigma_bins > 0, a mode built from MC spectra (not "norm" or
+             * "explicit_spline", which carry no MC statistical noise), and the name to be in
+             * smooth_syst_names when that list is non-empty.
+             */
+            static bool SmoothingApplies(const SystStruct &syst);
+
+            /**
+             * @brief In place: smooth every knob's variation/CV ratio across neighbouring reco bins.
+             * @details Uses PROsmooth::SmoothBlock on each (mode, detector, channel, subchannel) block
+             * of binning index @p binning separately, so nothing is smoothed across a subchannel or
+             * channel boundary; N-D channel binnings are smoothed along each axis. Weights are the
+             * CV effective event counts (content/error)^2, falling back to the CV content where the
+             * CV has no errors. Each block's CV-weighted rate change is preserved. Ratios that are
+             * identically 1 (the knob = 0 point) are left untouched so the spline stays exactly 1 there.
+             */
+            static void SmoothSplineRatios(const PROconfig &config, int binning, const PROspec &cv,
+                                           std::vector<PROspec> &ratios, float sigma_bins);
+
             /* Function: given the systematic name, return corresponding fractional covariance matrix */
             Eigen::MatrixXf GrabMatrix(const std::string& sys) const;
             Eigen::MatrixXf GrabCorrMatrix(const std::string& sys) const;
@@ -345,7 +371,7 @@ namespace PROfit {
             static bool isPositiveSemiDefinite(const Eigen::MatrixXf& in_matrix);
 
             /* Function: Fill splines assuming p_cv and p_multi_spec have been filled in the SystStruct*/
-            void FillSpline(const SystStruct& syst, bool unmirrored);
+            void FillSpline(const PROconfig& config, const SystStruct& syst, bool unmirrored);
 
             /* Function: For a "binned_unconstrained" systematic, synthesize one exactly-linear spline
              * per local bin of syst.binning: parameter theta = scale-1 (CV at 0), weight 1+theta in the

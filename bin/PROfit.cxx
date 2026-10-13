@@ -24,6 +24,8 @@ int main(int argc, char* argv[])
     options.chi2 = PROmetric::canonicalizeMetricName(options.chi2);
     PROsyst::spline2cov_throws = options.syst_throws;
     PROsyst::spline2cov_nthreads = options.nthread;
+    PROsyst::smooth_sigma_bins = options.smooth_systs;
+    PROsyst::smooth_syst_names = options.smooth_systs_list;
 
     log<LOG_WARNING>(L" %1% ") % getIcon().c_str();
 
@@ -39,6 +41,14 @@ int main(int argc, char* argv[])
     //Initilize configuration from the XML;
     // fit_variable (-1 unless --fit-variable was given) overrides the XML's fit="true" binning.
     PROconfig config(options.xmlname, options.rateonly, options.fit_variable);
+
+    if(options.smooth_systs > 0.0f) {
+        log<LOG_WARNING>(L"%1% || --smooth-systs: smoothing spline systematics with a Gaussian kernel of %2% bins (%3%).") % __func__ % options.smooth_systs
+            % (options.smooth_systs_list.empty() ? std::string("all eligible systematics") : std::to_string(options.smooth_systs_list.size()) + " listed systematic(s)").c_str();
+        for(const auto &name : options.smooth_systs_list)
+            if(config.m_mcgen_variation_type_map.count(name) == 0)
+                log<LOG_WARNING>(L"%1% || --smooth-systs-list: '%2%' is not a systematic in the XML and will be ignored.") % __func__ % name.c_str();
+    }
 
     // Process input files, save in prop and systsstructs
     PROpeller prop;

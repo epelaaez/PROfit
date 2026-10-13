@@ -156,6 +156,8 @@ struct PROpt {
     bool with_subcovar = false;
     int band_throws = 2500;
     size_t syst_throws = 500;
+    float smooth_systs = 0.0f;                  ///< --smooth-systs kernel width in bins; 0 = off.
+    std::vector<std::string> smooth_systs_list; ///< --smooth-systs-list; empty = all eligible systematics.
     std::map<std::string, float> fake_data_osc_params;
     std::map<std::string, float> cv_osc_params;
     std::map<std::string, float> injected_systs;
