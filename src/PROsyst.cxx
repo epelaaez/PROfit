@@ -1327,11 +1327,17 @@ namespace PROfit {
         }
     }
 
-    bool PROsyst::SmoothingApplies(const SystStruct &syst) {
-        if (!(smooth_sigma_bins > 0.0f)) return false;
-        if (syst.mode == "norm" || syst.mode == "explicit_spline") return false;
-        if (smooth_syst_names.empty()) return true;
-        return std::find(smooth_syst_names.begin(), smooth_syst_names.end(), syst.systname) != smooth_syst_names.end();
+    float PROsyst::SmoothingWidth(const PROconfig &config, const SystStruct &syst) {
+        if (smooth_disabled) return 0.0f;
+        if (syst.mode == "norm" || syst.mode == "explicit_spline") return 0.0f;
+        // A per-systematic XML setting wins, so smooth="0" opts out of --smooth-systs.
+        const auto xml = config.m_mcgen_variation_smooth.find(syst.systname);
+        if (xml != config.m_mcgen_variation_smooth.end()) return xml->second;
+        if (!(smooth_sigma_bins > 0.0f)) return 0.0f;
+        if (!smooth_syst_names.empty() &&
+            std::find(smooth_syst_names.begin(), smooth_syst_names.end(), syst.systname) == smooth_syst_names.end())
+            return 0.0f;
+        return smooth_sigma_bins;
     }
 
     void PROsyst::SmoothSplineRatios(const PROconfig &config, int binning, const PROspec &cv,
@@ -1434,9 +1440,10 @@ namespace PROfit {
         // --smooth-systs: smooth each knob's ratio across neighbouring reco bins to suppress MC
         // statistical fluctuations before the per-bin splines are built. Linear in the ratio, so
         // it commutes with the inflate step above.
-        if (SmoothingApplies(syst)) {
-            log<LOG_INFO>(L"%1% || Smoothing spline ratios for systematic %2% (Gaussian kernel, sigma = %3% bins)") % __func__ % syst.systname.c_str() % smooth_sigma_bins;
-            SmoothSplineRatios(config, syst.binning, *syst.p_cv, ratios, smooth_sigma_bins);
+        const float smooth_sigma = SmoothingWidth(config, syst);
+        if (smooth_sigma > 0.0f) {
+            log<LOG_INFO>(L"%1% || Smoothing spline ratios for systematic %2% (Gaussian kernel, sigma = %3% bins)") % __func__ % syst.systname.c_str() % smooth_sigma;
+            SmoothSplineRatios(config, syst.binning, *syst.p_cv, ratios, smooth_sigma);
         }
 
         // Check that we have a universe in addition to the CV

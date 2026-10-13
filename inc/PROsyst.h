@@ -192,14 +192,20 @@ namespace PROfit {
             inline static float smooth_sigma_bins = 0.0f;
             /// Systematics --smooth-systs applies to (--smooth-systs-list). Empty = every eligible one.
             inline static std::vector<std::string> smooth_syst_names;
+            /// --no-smooth-systs: disable all smoothing, including smooth= set in the XML.
+            inline static bool smooth_disabled = false;
 
             /**
-             * @brief True if --smooth-systs should be applied to @p syst.
-             * @details Requires smooth_sigma_bins > 0, a mode built from MC spectra (not "norm" or
-             * "explicit_spline", which carry no MC statistical noise), and the name to be in
-             * smooth_syst_names when that list is non-empty.
+             * @brief Kernel width in bins to smooth @p syst's spline ratios with; 0 = don't smooth.
+             * @details In order of precedence:
+             *   1. --no-smooth-systs, or a mode with no MC statistical noise ("norm",
+             *      "explicit_spline"): 0.
+             *   2. smooth="sigma" on the systematic in the XML (config.m_mcgen_variation_smooth),
+             *      including smooth="0" to opt a systematic out of --smooth-systs.
+             *   3. --smooth-systs sigma, if the systematic is in --smooth-systs-list (or the list is empty).
+             *   4. Otherwise 0.
              */
-            static bool SmoothingApplies(const SystStruct &syst);
+            static float SmoothingWidth(const PROconfig &config, const SystStruct &syst);
 
             /**
              * @brief In place: smooth every knob's variation/CV ratio across neighbouring reco bins.

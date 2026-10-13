@@ -158,6 +158,7 @@ struct PROpt {
     size_t syst_throws = 500;
     float smooth_systs = 0.0f;                  ///< --smooth-systs kernel width in bins; 0 = off.
     std::vector<std::string> smooth_systs_list; ///< --smooth-systs-list; empty = all eligible systematics.
+    bool no_smooth_systs = false;               ///< --no-smooth-systs: disable all smoothing, incl. smooth= in the XML.
     std::map<std::string, float> fake_data_osc_params;
     std::map<std::string, float> cv_osc_params;
     std::map<std::string, float> injected_systs;
