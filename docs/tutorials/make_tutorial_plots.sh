@@ -108,6 +108,8 @@ run_step plotbsub plot --bkg-subtract background
 run_step glob1   "${INJECT[@]}" global
 run_step globcnp -c CNP global
 run_step globpoi -c poisson global
+# Pull distributions need a fluctuated dataset (Asimov pulls are all 0).
+run_step globpe  --pseudo-experiment global
 
 # --- Section 6: profile ---------------------------------------------------------
 run_step prof1  "${INJECT[@]}" profile

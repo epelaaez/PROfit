@@ -570,6 +570,14 @@ std::map<std::string, TObject *> draw_fit_result(const PROconfig &config, const 
             data.Spec(), prefix+"_postfit_covariance_pulls.pdf", config.i_prime, &drawn_objs, metric.ShapeOnly(), &metric);
     }
 
+    // Pull distributions: every data-constrained nuisance pull, normalised to N(0,1)
+    // under the fitted model, one page per kind of systematic (inc/PROpulls.h).
+    if(fitres.fitter.best_fit.size()) {
+        PullSummary pulls = computePostfitPulls(config, prop, metric, fitres.fitter.best_fit,
+                fitres.fitter.lb, fitres.fitter.ub, data.Spec());
+        plotPostfitPullDistributions(pulls, prefix+"_postfit_pull_distributions.pdf", &drawn_objs);
+    }
+
     if(fitres.spline_covariance.size()) {
         Eigen::VectorXf inv_sqrt_diag_nuis = fitres.spline_covariance.diagonal().array().abs().max(1e-10f).sqrt().inverse();
         Eigen::MatrixXf corrmat_nuis = inv_sqrt_diag_nuis.asDiagonal() * fitres.spline_covariance * inv_sqrt_diag_nuis.asDiagonal();

@@ -250,6 +250,25 @@ namespace PROfit {
             }
 
             /**
+             * @brief Prior precision of the spline nuisances exactly as Pull() applies it.
+             * @details The inverse prior covariance when the priors are correlated (XML
+             * correlations or a PROjector external prior), else diag(1/sigma^2). Uniform-prior
+             * splines carry no pull, so their rows and columns are zero.
+             */
+            Eigen::MatrixXf SplinePriorPrecision() const {
+                Eigen::MatrixXf prec = correlated_systematics
+                    ? prior_covariance_inv
+                    : Eigen::MatrixXf(syst->spline_priors.array().square().inverse().matrix().asDiagonal());
+                for(size_t i = 0; i < syst->spline_prior_types.size(); ++i) {
+                    if(syst->spline_prior_types[i] == SplinePriorType::Uniform) {
+                        prec.row((Eigen::Index)i).setZero();
+                        prec.col((Eigen::Index)i).setZero();
+                    }
+                }
+                return prec;
+            }
+
+            /**
              * @brief Degrees of freedom of a chi2 minimum evaluated with this metric.
              * @details See PROndof for the counting rule. "Fixed" is read from is_fixed when it
              * has been populated (setBounds) OR from zero-width bounds: lb/ub when set, else

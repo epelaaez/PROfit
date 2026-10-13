@@ -91,6 +91,7 @@ grid TUT_plotbsub_PROplot_Variable_0_ErrorBand 2x2  1 2 3 4
 grid TUT_glob1_PROglobal_hists               2x2  1 2 3 4
 page TUT_glob1_PROglobal_postfit_correlation_matrix
 grid TUT_glob1_PROglobal_postfit_posteriors  2x2  1 5 8 11
+grid TUT_globpe_PROglobal_postfit_pull_distributions 1x2  1 2   # splines + covariance modes
 
 # --- Section 6: profile -------------------------------------------------------
 grid TUT_prof1_PROfile                       1x2  1 2

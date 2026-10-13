@@ -76,6 +76,7 @@ Appendices:
 * [Appendix C: the pre-fit and post-fit error bands, in full](#appendix-c-the-pre-fit-and-post-fit-error-bands-in-full)
 * [Appendix D: shape-only fits (`--shapeonly`), in full](#appendix-d-shape-only-fits---shapeonly-in-full)
 * [Appendix E: counting degrees of freedom (ndf)](#appendix-e-counting-degrees-of-freedom-ndf)
+* [Appendix F: post-fit pull distributions, in full](#appendix-f-post-fit-pull-distributions-in-full)
 
 ---
 
@@ -956,6 +957,7 @@ Outputs:
 * `TUT_glob1_PROglobal_hists.pdf` — pre-fit (blue/gray) vs post-fit (red) spectra + error bands, with a data/fit ratio panel
 * `TUT_glob1_PROglobal_postfit_correlation_matrix.pdf` (+ `_nuisance_only` version) — post-fit parameter correlations
 * `TUT_glob1_PROglobal_postfit_posteriors.pdf` — post-fit parameter constraints
+* `TUT_glob1_PROglobal_postfit_pull_distributions.pdf` — histograms of all nuisance pulls, which should look like N(0,1) when the model describes the data (all 0 for this Asimov fit). See [Are the pulls healthy?](#are-the-pulls-healthy-pull-distributions) below.
 * `TUT_glob1_PROglobal.root` — all of the above as ROOT objects
 
 The `global #chi^{2}/ndf` label on the post-fit pages uses
@@ -1127,6 +1129,112 @@ use the legacy `good`/`fast` presets. Adding a
 new metric
 is deliberately easy — they all implement the same `PROmetric` interface.
 
+### Are the pulls healthy? Pull distributions
+
+The posteriors and the profile 1σ plots show the systematics one at a time.
+The pull distribution asks about all of them at once: *if the systematic
+model and its priors are right, did the fit move each nuisance by a
+believable amount?* When the answer is yes, every pull is one draw from a
+unit Gaussian, so a histogram of all of them should look like N(0,1).
+
+Every `global` and `profile` run writes it. An Asimov fit is a poor
+example, because the fit never moves anything and every pull is exactly 0.
+So here is a pseudo-experiment, i.e. fake data thrown from the model itself:
+
+```bash
+PROfit -x tutorial.xml -t TUT -o globpe --seed 405 -n 8 --pseudo-experiment global
+```
+
+<img src="figures/TUT_globpe_PROglobal_postfit_pull_distributions.png" width="750"/>
+
+*`TUT_globpe_PROglobal_postfit_pull_distributions.pdf`, pages 1 and 2. Shaded:
+the pulls, one colour per page; dashed: the N(0,1) they should follow; red: a Gaussian fitted to
+them. The side panel compares the fit with what the model predicts for this
+histogram.*
+
+**What is plotted.** Not the familiar (θ̂ − θ₀)/σ_prior. That raw pull is
+narrower than N(0,1) even when everything is right, because the data only
+resolves part of each prior. PROfit plots the Demortier–Lyons pull instead
+
+```
+z = (θ̂ − θ₀) / √(σ²_prior − σ²_post)
+```
+
+which *is* N(0,1) when the model is right. It also has a plain reading: z is
+the tension between the prior and what the data alone say about that
+parameter, in units of their combined uncertainty. Appendix F derives both
+statements and shows how PROfit gets σ_post.
+
+**The four pages** sort the parameters by how they enter the fit:
+
+| Page | Parameters | Treatment |
+|---|---|---|
+| 1 | Gaussian-prior splines whose fit range covers θ₀ ± 3σ (ordinary −3…3 knobs, `covariance_to_spline` knobs) | z as above |
+| 2 | The covariance systematics, as eigenmodes of their summed covariance, each with prior N(0,1) | z of the data-constrained mode pull (the same modes as `_postfit_covariance_pulls.pdf`, Appendix C.4) |
+| 3 | Gaussian-prior splines with a fit bound inside 3σ (0…1 knobs, `NAME:f` norms with f > 1/3, narrow `restrict=`) | A knob stopped at its bound is drawn hatched and treated as *censored*; the fit accounts for it |
+| 4 | Uniform-prior splines (`prior_type="uniform"`, `binned_unconstrained`) | Their estimate is mapped onto a score that is also N(0,1) under the model |
+
+Parameters the data barely constrains are left out and counted under "Not
+shown", as are `--fix`'d ones (listed on page 4). "Barely" means the data
+reduced the prior variance by less than 5%, so z would be 0/0. In this config
+that removes the two FiducialVol knobs and 55 of the 100 covariance modes.
+
+**Reading the side panel:**
+
+* **Gaussian fit:** mean and width of the histogram (an unbinned maximum-
+  likelihood fit, which is binning-independent with a few dozen entries).
+* **If the model is right:** what to compare those against. Pulls of related
+  systematics are correlated, so the mean of one fit's histogram scatters by
+  more than 1/√N, and the histogram is *narrower* than 1. PROfit computes
+  both from the correlations (Appendix F.6). Here the 12 spline pulls predict
+  μ = 0 ± 0.47 and σ ≈ 0.88.
+* **Whitened χ²/ndf:** a single goodness-of-fit for the page that does handle
+  the correlations. Its p-value is the number to quote.
+* **Largest |z|:** which parameters drive any problem.
+
+**What a deviation tells you:**
+
+* *Too wide, or a large whitened χ²:* the data pulled the systematics further
+  than their priors allow. Priors that are too small, a missing systematic,
+  or data the model cannot describe. For example, `--pseudo-experiment` with
+  `--exclude-systs` deliberately keeps the excluded systematics in the fake
+  data. The fit cannot absorb them, and a Poisson fit of this config without
+  its covariances comes out 2.8 wide.
+* *Clearly narrower than the "if the model is right" width:* the priors are
+  more generous than the data supports.
+* *A shifted mean:* a group of correlated knobs moved together. Look at the
+  largest-|z| list and the post-fit correlation matrix.
+* *One outlier:* one systematic in tension with the data.
+
+The example shows one of these. The spline mean is +0.84 against
+0 ± 0.47, and the whitened p is 0.012, while the covariance modes on page 2
+are fine. That is not bad luck. Over 30 pseudo-experiments (physics fixed
+with `--syst-only`) this config's spline pulls average +0.56 with the right
+width (1.03). The offset is the
+same with `-c CNP`, and stays when the toys hold every spline at zero. It
+lives in a few weakly constrained knobs that move with the ND normalisation
+(CrossSection3/4, DetSys2/3, Flux3, FluxNorm_ND), whose
+fitted values are themselves pushed up. So the fit, not the priors, shifts
+them. A likely cause is that the χ² scales the systematic covariance with the
+current prediction, which rewards a slightly higher prediction when the data
+fluctuate. Over the same toys the covariance-mode pulls have widths of 1.00
+(CNP) and 1.04 (neyman). Pull distributions test the whole chain, fitter
+included.
+
+**Pooling many fits.** One fit is one draw. For a sharper test, run many
+pseudo-experiments and pool them, e.g. `-o pe1 --seed 1` up to
+`-o pe30 --seed 30`. The per-parameter
+values are in the ROOT tree `postfit_pulls` (`name`, `category` = page,
+`value`, `center`, `sigma_prior`, `sigma_post`, `var_reduction`, `raw_pull`,
+`pull`, `censored`, `used`), and the per-page fits are in
+`postfit_pull_fits`:
+
+```cpp
+TChain ch("postfit_pulls");
+ch.Add("TUT_pe*_PROglobal.root");
+ch.Draw("pull", "used && category==1");   // page-1 pulls of every toy
+```
+
 ---
 
 # 7. Subcommand `profile` — 1D profiled Δχ²
@@ -1159,7 +1267,7 @@ Outputs:
 * `TUT_prof1_PROfile.pdf` — the Δχ² curve for every parameter (physics first, then all nuisances with the prior in dashed red)
 * `TUT_prof1_PROfile_1sigma.pdf` (+ `_1sigma_detailed.pdf`) — post-fit ±1σ summary for all nuisance parameters at a glance (red star = injected truth, blue = global best fit, black = the per-profile minima on the scan grid)
 * `TUT_prof1_PROfile_hists.pdf` — pre-fit vs post-fit spectra (same as global's)
-* `TUT_prof1_PROfile_postfit_correlation_matrix.pdf`, `_postfit_posteriors.pdf`
+* `TUT_prof1_PROfile_postfit_correlation_matrix.pdf`, `_postfit_posteriors.pdf`, `_postfit_pull_distributions.pdf` (as for `global`; redrawn at the new minimum if the scan finds a lower one)
 * `TUT_prof1_PROfile.root` — every profile as a TGraph, plus the 1σ summary
 * `TUT_prof1_global_fit.txt` — the global best fit table
 
@@ -2993,6 +3101,327 @@ The log line reads e.g. `ndf = 100 bins - 2 phys - 0 uniform - 0 shape = 98`.
 Only the global post-fit label is a χ²/ndf. The per-channel and 2D
 projection labels are fixed-point comparisons with no pull and no parameter
 accounting, so they read χ²/nbins. A pathological setup can give ndf ≤ 0.
+
+---
+
+# Appendix F: post-fit pull distributions, in full
+
+This appendix explains what the pull-distribution pages
+([section 6](#are-the-pulls-healthy-pull-distributions)) plot and why. The
+central result is due to L. Demortier and L. Lyons, *"Everything you always
+wanted to know about pulls"*, CDF/ANAL/PUBLIC/5776 (2002). F.1–F.3 derive it
+three ways. F.4–F.5 extend it to PROfit's many correlated parameters and show
+how σ_post is computed, F.6 covers reading a whole histogram, F.7–F.8 the
+bounded and uniform pages, and F.9 the limits. The code is
+`computePostfitPulls` / `plotPostfitPullDistributions` (src/PROpulls.cxx).
+
+### F.0 What a pull should measure
+
+A nuisance θ has prior θ₀ ± σ_prior, and the fit returns θ̂ ± σ_post. The
+question is whether θ̂ landed where we should expect it. The naive pull is
+`(θ̂ − θ₀)/σ_prior`. Look at its two extremes:
+
+* **The data says nothing about θ.** The fit leaves θ at θ₀ every time, so
+  the naive pull is identically 0: a spike, not a Gaussian. Here
+  σ_post = σ_prior.
+* **The data measures θ perfectly.** Then θ̂ is the true value, and if the
+  prior is honest the true value is a draw from N(θ₀, σ_prior). The naive
+  pull is N(0,1). Here σ_post → 0.
+
+Real systematics sit in between, so each naive pull has its own width
+somewhere between 0 and 1, set by how well the data constrains that
+parameter. A histogram of naive pulls has no fixed expected shape. Dividing
+each one by the width it actually has fixes that, and that width turns out to
+be √(σ²_prior − σ²_post).
+
+### F.1 The prior is a measurement
+
+Demortier and Lyons' reading: a Gaussian prior is the same thing as an
+auxiliary measurement. Someone measured θ, got `a = θ₀`, and quoted the error
+σ_prior. The fit combines `a` with the data, and θ̂ ± σ_post is the best
+combination. The pull compares the auxiliary measurement with the combined
+result, `a − θ̂`. These two are correlated, because θ̂ contains `a`, so the
+error on their difference is not √(σ²_prior + σ²_post).
+
+The key fact is that for the best (minimum-variance) combination, the
+leftover `a − θ̂` is uncorrelated with θ̂. The proof is one line. The quantity
+`θ̂ + λ(a − θ̂)` is still an unbiased estimate of θ (since `a − θ̂` averages to
+zero), and its variance is
+
+```
+Var(θ̂ + λ(a − θ̂)) = Var(θ̂) + 2λ·Cov(θ̂, a − θ̂) + λ²·Var(a − θ̂)
+```
+
+If the covariance were non-zero, a small λ of the right sign would beat θ̂,
+contradicting that θ̂ is the best combination. So `Cov(θ̂, a − θ̂) = 0`.
+
+Now `a` splits into two uncorrelated pieces, `a = θ̂ + (a − θ̂)`, and their
+variances add, like the sides of a right triangle:
+
+```
+Var(a)    = Var(θ̂) + Var(a − θ̂)
+σ²_prior  = σ²_post + Var(a − θ̂)
+       ⇒   Var(a − θ̂) = σ²_prior − σ²_post
+```
+
+So the pull with unit width divides by √(σ²_prior − σ²_post). PROfit plots it
+with the sign flipped, so that positive z means the fit moved the parameter
+up:
+
+```
+z = (θ̂ − θ₀) / √(σ²_prior − σ²_post)
+```
+
+This holds when θ̂ really is the best combination and σ_post its error. That
+is exactly true of a χ² minimum in a model linear in its parameters with
+Gaussian errors (the Gauss–Markov theorem), which is the approximation used
+throughout (F.9).
+
+### F.2 Checking it by hand, and what z means
+
+Take one nuisance and let the data alone measure it as x ± σ_d. σ_d is how
+well the data would pin θ with no prior at all. The combination is
+
+```
+1/σ²_post = 1/σ²_prior + 1/σ²_d
+θ̂         = σ²_post · (θ₀/σ²_prior + x/σ²_d)
+⇒  θ̂ − θ₀ = (σ²_post/σ²_d) · (x − θ₀)
+```
+
+x and θ₀ are independent measurements, so `Var(x − θ₀) = σ²_d + σ²_prior`.
+Using `σ²_post = σ²_prior·σ²_d / (σ²_prior + σ²_d)`:
+
+```
+Var(θ̂ − θ₀)       = (σ²_post/σ²_d)² · (σ²_prior + σ²_d)       = σ⁴_prior / (σ²_prior + σ²_d)
+σ²_prior − σ²_post = σ²_prior − σ²_prior·σ²_d/(σ²_prior + σ²_d) = σ⁴_prior / (σ²_prior + σ²_d)   ✓
+```
+
+Divide one by the other and z simplifies to
+
+```
+z = (x − θ₀) / √(σ²_d + σ²_prior)
+```
+
+In plain words, **z is the difference between what the data alone says (x)
+and what the prior says (θ₀), in units of their combined error.** It measures
+the tension between data and prior, which is exactly what a pull should
+measure. The two extremes of F.0 come out right. As σ_d → ∞ the pull is 0/0:
+there is no information and nothing to test, and PROfit leaves such
+parameters out (F.4). As σ_d → 0 it becomes the naive pull. In between, the
+naive pull is narrower than z by the factor √(1 − σ²_post/σ²_prior).
+
+### F.3 The same result from the Bayesian side
+
+`--pseudo-experiment` does not move the auxiliary measurement. It draws the
+*truth* from the prior and the data around the truth. The law of total
+variance then gives the same identity in one line. For a Gaussian linear
+model, the posterior width σ_post is the same for every dataset and the
+posterior mean is θ̂, so
+
+```
+Var(θ) = E[ Var(θ | data) ] + Var( E[θ | data] )
+σ²_prior =       σ²_post     +      Var(θ̂)
+```
+
+Of the prior variance, σ²_post is what the data leaves unresolved. The rest,
+σ²_prior − σ²_post, is what the data resolves, and only that part makes θ̂
+move. Whichever way the pseudo-experiments are generated, z ~ N(0,1).
+
+### F.4 Many correlated parameters
+
+PROfit fits many nuisances together, plus physics parameters with no prior.
+Both arguments carry over with matrices. The leftover is uncorrelated with the
+estimate (F.1), or the total covariance splits (F.3):
+
+```
+V ≡ Cov(θ̂ − θ₀) = P − Σ_post
+```
+
+Here P is the prior covariance of the nuisances: diag(σ²), or the full matrix
+`Pull()` uses when XML `<correlation>`s or a PROjector constraint are present.
+Σ_post is the post-fit covariance of the same nuisances. Two details matter:
+
+* **Σ_post must be taken with every free parameter floating, physics
+  included**, not at fixed physics. A floating physics parameter can absorb
+  part of what a nuisance would otherwise explain. That widens Σ_post, and
+  the estimate θ̂ loses exactly that information too, so V shrinks by the same
+  amount. A Σ_post at fixed physics would overstate V and make every pull
+  look too small.
+* **`--fix`'d splines with correlated priors.** The prior of the free splines
+  is then the one *conditional* on the fixed values, with its centre and width
+  shifted. PROfit uses that conditional prior. Without correlations nothing
+  changes.
+
+Each pull uses its diagonal element, `z_i = (θ̂_i − θ₀_i)/√V_ii`. The ratio
+`r_i = V_ii/P_ii` is the fraction of the prior variance the data resolved.
+Below r = 5% the pull is 0/0 noise and is left out as "weakly constrained".
+In a linear model Σ_post depends on the response, the statistical variance
+and the priors, but not on the data values. The cut therefore picks the same
+parameters whatever the data, and cannot bias the histogram. (Neyman's
+C = data adds a mild data dependence.)
+
+### F.5 How PROfit computes Σ_post
+
+PROfit linearises the fit around the best fit and inverts the curvature of
+the χ², for all free parameters at once. Following Appendix C.4, each
+covariance mode (Σ = L·Lᵀ) gets a knob α_j with prior N(0,1), so the
+covariance systematics get pulls too:
+
+```
+x       = (φ, s, α)               free physics, free splines, one knob per covariance mode
+J       = ∂P/∂x at the best fit   collapsed prediction; φ and s by finite differences
+                                  (central, one-sided at a bound); the α columns are L
+C       = the fit metric's own statistical variance over the bins in the χ²
+          (data for neyman, μ for pearson and poisson, 3/(1/d + 2/μ) for CNP)
+Λ       = prior precision:  P⁻¹ for Gaussian splines (as Pull() applies it)
+                            1   for each α
+                            12/W² for physics and uniform splines (W = fit range)
+H       = Jᵀ C⁻¹ J + Λ
+Σ_post  = H⁻¹
+```
+
+This is the Gauss–Newton curvature of the χ², the same approximation as the
+`lin` gradient modes, and it is exact for a linear model.
+
+**The 12/W² term.** Physics parameters and uniform-prior splines have flat
+priors over their fit range, which has variance W²/12. With exactly zero
+there, a direction the data barely resolves could absorb its whole overlap
+with the nuisances, however tiny its slope. Δm² when sin²2θ ≈ 0 is the
+standard example. The box variance keeps such directions bounded, as the real
+fit range does.
+
+**The covariance-mode pulls** are `α̂ = A⁻¹LᵀC⁻¹u` from C.4, evaluated at the
+best fit (the joint minimum over (θ, α) puts α at exactly that conditional
+value). Their width is not C.4's A⁻¹, though. A⁻¹ is the width at *fixed* θ,
+while V needs the width with θ floating, and H⁻¹ supplies that.
+
+**Under `--shapeonly`**, J is the derivative of the per-channel rescaled
+prediction and L is projected onto shape, exactly as the metric does
+(Appendix D). A pure normalisation knob then has J = 0 and is reported as
+weakly constrained, not given a spurious pull.
+
+### F.6 Reading a whole histogram
+
+Each z_i is N(0,1), but the z's are correlated, because knobs that do similar
+things to the spectrum move together:
+
+```
+ρ_ij = V_ij / √(V_ii · V_jj)
+```
+
+That changes what one fit's histogram should look like. For the mean of n
+pulls, and for the spread of the histogram about that mean:
+
+```
+Var(z̄)                   = (1/n²) Σ_ij ρ_ij        (= 1/n if uncorrelated)
+E[ (1/n) Σ_i (z_i − z̄)² ] = 1 − Var(z̄)
+```
+
+The second line follows from `(1/n)Σ(z_i − z̄)² = (1/n)Σz_i² − z̄²`, with
+`E[(1/n)Σz_i²] = 1` and `E[z̄²] = Var(z̄)`. These are the "If the model is
+right" numbers on each page: μ = 0 ± √Var(z̄) and σ ≈ √(1 − Var(z̄)).
+Strongly correlated pulls give a large Var(z̄) and a narrow histogram, like
+the 12 spline pulls of section 6's example (σ ≈ 0.88).
+
+The test that uses the correlations fully is the **whitened χ²**. Change to
+coordinates in which the pulls are independent with unit variance. That
+transformation turns correlated noise into white noise, hence the name:
+
+```
+d = θ̂ − θ₀,     y = V^(−1/2) · d    ⇒    each y_i ~ N(0,1), independent
+q = yᵀy = dᵀ V⁻¹ d  ~  χ²(k)
+```
+
+PROfit evaluates q in the eigenbasis of ρ. It drops directions with
+eigenvalue below 0.01, which are combinations the model pins so tightly that
+the fit's convergence tolerance, not the data, sets them. k counts the rest.
+q is not computed on a page with censored entries (F.7), whose z are bounds
+rather than values.
+
+The fitted Gaussian is an unbinned maximum-likelihood fit: for uncensored
+pulls, simply their mean and RMS. Its quoted errors, σ/√n and σ/√(2n),
+assume independent entries. Judge the mean against √Var(z̄), not against
+them.
+
+### F.7 Bounded and one-sided splines (page 3)
+
+A knob whose fit range ends within 3σ of its centre can run into that end.
+Take a 0…1 knob with its prior centred on 0. It hits 0 whenever the data
+would prefer a negative value, which for an honest prior is about half the
+time. The fit then returns the bound, not the value the data wanted.
+
+Model this with a latent, unbounded estimate θ̃, whose z is the one from F.4
+(the linearisation ignores the bound), and let the fit return
+θ̂ = clamp(θ̃, lo, hi). At a bound we only know that the latent z lies beyond
+it:
+
+```
+θ̂ = lo   ⇒   z ≤ z_lo = (lo − θ₀)/√V        censored below
+θ̂ = hi   ⇒   z ≥ z_hi = (hi − θ₀)/√V        censored above
+```
+
+Censored entries are drawn hatched at their bound, on the side where the
+latent value lies. The Gaussian fit uses the censored likelihood (φ and Φ are
+the unit-Gaussian density and CDF):
+
+```
+L(μ, σ) =  Π_interior φ((z − μ)/σ)/σ  ×  Π_below Φ((z_lo − μ)/σ)  ×  Π_above [1 − Φ((z_hi − μ)/σ)]
+```
+
+It is maximised by expectation–maximisation. Each censored entry is replaced
+by the mean and variance of the current Gaussian truncated beyond its bound,
+for example below b, with a = (b − μ)/σ and λ = φ(a)/Φ(a):
+
+```
+E[z | z ≤ b]   = μ − σλ
+Var[z | z ≤ b] = σ²·(1 − aλ − λ²)
+```
+
+Then μ and σ are re-estimated, and the two steps repeat until nothing
+changes. The errors come from the curvature of ln L. A pile of hatched
+entries at one bound is therefore not a problem by itself; compare the fitted
+latent μ and σ with 0 and 1. Page-1 knobs that stop at ±3 are handled the
+same way.
+
+### F.8 Uniform-prior splines (page 4)
+
+A uniform prior has no pull term and no σ_prior, so F.1–F.4 do not apply.
+Ask the question directly instead. If the truth is anywhere in the box
+[lo, hi] with equal probability, and the data measures θ with error σ_d,
+where should θ̂ land? It lands at the truth smeared by N(0, σ²_d): a uniform
+convolved with a Gaussian, whose CDF is
+
+```
+F(t) = (1/W) ∫_lo^hi Φ((t − a)/σ_d) da  =  (σ_d/W) · [ G((t − lo)/σ_d) − G((t − hi)/σ_d) ]
+G(x) = x·Φ(x) + φ(x)                     (an integral of Φ: G′ = Φ)
+```
+
+Any continuous quantity passed through its own CDF is uniform on (0, 1). This
+is the probability integral transform. Therefore
+
+```
+z = Φ⁻¹( F(θ̂) )  ~  N(0, 1)
+```
+
+which puts page 4 on the same footing as the others. σ_d is the data-only
+width with everything else marginalised. From F.5, remove the parameter's own
+box term: 1/σ²_d = 1/Σ_post,ii − 12/W². A box edge is censored as in F.7. The
+parameter counts as weakly constrained unless σ²_d is below 95% of the box
+variance W²/12.
+
+### F.9 Limits
+
+* **Linearised at the best fit.** Exact when the prediction is linear in the
+  parameters and the errors are Gaussian. Strongly nonlinear splines,
+  physics near a boundary (Δm² is undefined when the mixing vanishes) and
+  very low-count bins (where neyman's C = data is a poor stand-in for
+  Poisson) all bend it.
+* **A pseudo-experiment tests the whole chain.** A deviation can come from
+  the fit itself rather than the priors. The shifted spline mean in section
+  6's example is such a case.
+* **An Asimov fit gives z ≡ 0** for everything: nothing fluctuated, so
+  nothing moved.
+* **One fit is one draw.** Pool pseudo-experiments for precision (section 6).
 
 ---
 
