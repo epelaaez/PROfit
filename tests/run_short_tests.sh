@@ -85,11 +85,40 @@ run_test() {
     fi
 }
 
+# run_test_tag <name> <otag> <args...> — run_test with an explicit -o, for
+# multi-stage workflows whose artifacts are keyed by -o (fc-adaptive).
+run_test_tag() {
+    local name="$1" otag="$2"; shift 2
+    local t0=$SECONDS
+    if timeout "$TIMEOUT" "$BIN" "${COMMON[@]}" -o "$otag" "$@" > "logs/$name.log" 2>&1; then
+        local nerr; nerr=$(grep -c "ERROR" "logs/$name.log" || true)
+        note "PASS  $name  ($((SECONDS-t0))s, ${nerr} ERROR lines)"
+        PASS=$((PASS+1))
+    else
+        local rc=$?
+        note "FAIL  $name  ($((SECONDS-t0))s, exit $rc) -- see logs/$name.log"
+        tail -n 5 "logs/$name.log" | sed 's/^/        /'
+        FAIL=$((FAIL+1))
+    fi
+}
+
 # expect_fail <name> <args...> — passes only if PROfit exits NONzero (validation
 # paths must refuse bad input loudly, not limp on).
 expect_fail() {
     local name="$1"; shift
     if timeout "$TIMEOUT" "$BIN" "${COMMON[@]}" -o "$name" "$@" > "logs/$name.log" 2>&1; then
+        note "FAIL  $name  (expected a refusal but PROfit exited 0)"
+        FAIL=$((FAIL+1))
+    else
+        note "PASS  $name  (correctly refused)"
+        PASS=$((PASS+1))
+    fi
+}
+
+# expect_fail_tag <name> <otag> <args...> — expect_fail with an explicit -o.
+expect_fail_tag() {
+    local name="$1" otag="$2"; shift 2
+    if timeout "$TIMEOUT" "$BIN" "${COMMON[@]}" -o "$otag" "$@" > "logs/$name.log" 2>&1; then
         note "FAIL  $name  (expected a refusal but PROfit exited 0)"
         FAIL=$((FAIL+1))
     else
@@ -153,11 +182,11 @@ run_test t13fc            --use-fake-data fc -u 2
 # --- 6. Adaptive FC pipeline (stages share -o so artifacts chain together) ----
 AFC=(fc-adaptive --throws 2 --prepass-amr-initial 4 4 --prepass-amr-levels 1
      --p-thresh 0.33 --baseline-level 1 "${AXES[@]}")
-run_test t14afcmesh   --use-fake-data "${AFC[@]}" --mode build-mesh
-run_test t14afcbank   --use-fake-data "${AFC[@]}" --mode init-bank --n-pe-min 1 --n-pe-max 2
-run_test t14afcprint  --use-fake-data "${AFC[@]}" --mode print-bank
-run_test t14afcasimov --use-fake-data "${AFC[@]}" --mode asimov
-run_test t14afcbrazil --use-fake-data "${AFC[@]}" --mode brazil --n-brazil-throws 2
+run_test_tag t14afcmesh   t14afc --use-fake-data "${AFC[@]}" --mode build-mesh
+run_test_tag t14afcbank   t14afc --use-fake-data "${AFC[@]}" --mode init-bank --n-pe-min 1 --n-pe-max 2
+run_test_tag t14afcprint  t14afc --use-fake-data "${AFC[@]}" --mode print-bank
+run_test_tag t14afcasimov t14afc --use-fake-data "${AFC[@]}" --mode asimov
+run_test_tag t14afcbrazil t14afc --use-fake-data "${AFC[@]}" --mode brazil --n-brazil-throws 2
 
 # --- 7. MCMC + benchmark smoke ------------------------------------------------
 run_test t15mcmc          --use-fake-data mcmc --nchains 1
@@ -501,6 +530,53 @@ COMMON=(-x local_tmpl_baddef.xml  -t "$TAG" -n 1 -v 2 --seed 405 --preset fast)
 expect_fail t33ltmplbaddef   --use-fake-data global
 COMMON=(-x local_tmpl_nontmpl.xml -t "$TAG" -n 1 -v 2 --seed 405 --preset fast)
 expect_fail t33mtmplnontmpl  --use-fake-data global
+COMMON=("${SAVED_COMMON[@]}")
+
+# --- 13. 3+1 FC: three physics parameters, two of them axes -------------------
+# The appearance parameterisation (dmsq, sinsq2thmue, xi) with the fake sample
+# routed through the 3+1 rules: fullosc -> mue (2), numu signal -> mumu (1),
+# nue intrinsic -> ee (3). model_rule is hashed, so this config has its own
+# process step. Keep xhi <= 0.3: the unitarity constraint sqrt(s)*cosh(xi) < 1
+# walls off larger sinsq2thmue. AFC needs an explicit treatment of the
+# non-axis xi: without one it is refused, with --fix xi it runs the xi slice.
+sed 's|<model tag="nueapp">|<model tag="SBL_3+1_sinsq2thmue">|' local_test.xml | awk '
+  /associated_subchannel/ { r = /_nue_fullosc"/ ? 2 : /_numu_signal"/ ? 1 : /_nue_intrinsic"/ ? 3 : -1 }
+  /model_rule/ && r >= 0 { sub(/"[0-9]+"/, "\"" r "\"") } { print }' > local_3p1.xml
+AX3=(--xvar sinsq2thmue --yvar dmsq --xlo 1e-4 --xhi 0.3 --ylo 1e-2 --yhi 1e2)
+AFC3=(fc-adaptive --throws 2 --prepass-amr-initial 3 3 --prepass-amr-levels 1
+      --p-thresh 0.33 --baseline-level 1 "${AX3[@]}")
+COMMON=(-x local_3p1.xml -t "${TAG}3p1" -n 1 -v 2 --seed 405 --preset fast)
+run_test t50p3process process
+run_test t51p3fc      --use-fake-data -i dmsq 1 sinsq2thmue 0.01 fc -u 2
+expect_fail t52p3afcpin --use-fake-data "${AFC3[@]}" --mode build-mesh
+run_test_tag t53p3afcmesh   t53p3afc --use-fake-data --fix xi "${AFC3[@]}" --mode build-mesh
+run_test_tag t53p3afcbank   t53p3afc --use-fake-data --fix xi "${AFC3[@]}" --mode init-bank --n-pe-min 1 --n-pe-max 1
+run_test_tag t53p3afcasimov t53p3afc --use-fake-data --fix xi "${AFC3[@]}" --mode asimov
+run_test_tag t53p3afcbrazil t53p3afc --use-fake-data --fix xi "${AFC3[@]}" --mode brazil --n-brazil-throws 2
+# Profile FC (xi profiled at the tested point): toy truth from the data's
+# conditional best fit (+ the observed statistic for --pval), and from -i.
+run_test t54p3fcprof    --use-fake-data -i dmsq 1 sinsq2thmue 0.01 fc -u 2 --profile-params xi --profile-truth data --pval
+run_test t55p3fcprofinj --use-fake-data -i dmsq 1 sinsq2thmue 0.01 xi 0.3 fc -u 2 --profile-params xi --profile-truth inject
+# A --fix'd parameter cannot be profiled: --profile-params must then fall back to
+# the plain FC, bitwise.
+run_test t56afcfixxi     --use-fake-data --fix xi -i dmsq 1 sinsq2thmue 0.01 fc -u 2
+run_test t56bfcfixxiprof --use-fake-data --fix xi -i dmsq 1 sinsq2thmue 0.01 fc -u 2 --profile-params xi
+if cmp -s "${TAG}3p1_t56afcfixxi_FC.csv" "${TAG}3p1_t56bfcfixxiprof_FC.csv"; then
+    note "PASS  t56cfcfixsame  (--profile-params of a --fix'd parameter gives the plain FC)"
+    PASS=$((PASS+1))
+else
+    note "FAIL  t56cfcfixsame  (--fix xi FC changed when xi is also listed in --profile-params)"
+    FAIL=$((FAIL+1))
+fi
+# Adaptive profile FC: xi profiled, each cell's toys at the conditional best fit
+# to the fake data. The bank is tied to that dataset, so asimov on other data
+# (a different -i) must be refused.
+AFC3P=("${AFC3[@]}" --profile-params xi)
+run_test_tag t57p3afcpmesh   t57p3afcp --use-fake-data "${AFC3P[@]}" --mode build-mesh
+run_test_tag t57p3afcpbank   t57p3afcp --use-fake-data "${AFC3P[@]}" --mode init-bank --n-pe-min 1 --n-pe-max 1
+run_test_tag t57p3afcpasimov t57p3afcp --use-fake-data "${AFC3P[@]}" --mode asimov
+run_test_tag t57p3afcpbrazil t57p3afcp --use-fake-data "${AFC3P[@]}" --mode brazil --n-brazil-throws 2
+expect_fail_tag t58p3afcpfp t57p3afcp --use-fake-data -i dmsq 1 sinsq2thmue 0.01 "${AFC3P[@]}" --mode asimov
 COMMON=("${SAVED_COMMON[@]}")
 
 note "----------------------------------------------------------------------"

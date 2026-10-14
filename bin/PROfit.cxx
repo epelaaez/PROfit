@@ -193,7 +193,7 @@ int main(int argc, char* argv[])
         run_fc(config, prop, *metric, data, CVParams, fakeDataParams, global_lb, global_ub, global_fixed, fitConfig, scanFitConfig, options, myseed);
     }
     if(*options.afc_command) {
-        run_afc(config, prop, *metric, data, fakeDataParams, scanFitConfig, options, myseed);
+        run_afc(config, prop, *metric, data, fakeDataParams, fitConfig, scanFitConfig, options, myseed);
     }
     if(*options.mcmc_command) {
         run_mcmc(config, *metric, global_lb, global_ub, fitConfig, options, myseed);

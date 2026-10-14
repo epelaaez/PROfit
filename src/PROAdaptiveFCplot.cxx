@@ -367,6 +367,63 @@ void plot_pebank_summary_pdf(const PEBank &bank,
         % __func__ % filename.c_str() % bank.n_cells % (long long)total_pes;
 }
 
+void plot_cell_value_map_pdf(const PEBank &bank,
+                             const std::vector<float> &cell_values,
+                             const std::string &title,
+                             const std::string &filename,
+                             const std::string &xlabel,
+                             const std::string &ylabel,
+                             const std::string &zlabel,
+                             bool logx, bool logy,
+                             bool xlog_axis, bool ylog_axis)
+{
+    if (bank.n_cells <= 0 || (int)cell_values.size() != bank.n_cells) {
+        log<LOG_WARNING>(L"%1% || plot_cell_value_map_pdf: %2% values for %3% cells, skipping %4%.")
+            % __func__ % (int)cell_values.size() % bank.n_cells % filename.c_str();
+        return;
+    }
+    AxisXform A{bank.x_lo, bank.x_hi, bank.y_lo, bank.y_hi,
+                bank.finest_nx, bank.finest_ny, xlog_axis, ylog_axis};
+    const int W = bank.finest_nx;
+    const int H = bank.finest_ny;
+    std::vector<double> ex(W + 1), ey(H + 1);
+    for (int i = 0; i <= W; ++i) ex[(size_t)i] = (double)A.i_to_x(i);
+    for (int j = 0; j <= H; ++j) ey[(size_t)j] = (double)A.j_to_y(j);
+
+    TCanvas c("cell_value_map", title.c_str(), 1000, 800);
+    c.SetLeftMargin(0.13);
+    c.SetRightMargin(0.16);
+    if (logx) c.SetLogx();
+    if (logy) c.SetLogy();
+    gStyle->SetPalette(kBird);
+    gStyle->SetOptStat(0);
+    TH2D h("cell_value_map", (title + ";" + xlabel + ";" + ylabel + ";" + zlabel).c_str(),
+           W, ex.data(), H, ey.data());
+    h.SetStats(0);
+    for (int c_idx = 0; c_idx < bank.n_cells; ++c_idx) {
+        const int i0 = bank.cell_i_bl[(size_t)c_idx];
+        const int j0 = bank.cell_j_bl[(size_t)c_idx];
+        const int sp = bank.cell_step [(size_t)c_idx];
+        for (int ii = i0; ii < i0 + sp && ii < W; ++ii)
+            for (int jj = j0; jj < j0 + sp && jj < H; ++jj)
+                h.SetBinContent(ii + 1, jj + 1, (double)cell_values[(size_t)c_idx]);
+    }
+    h.Draw("colz");
+    std::vector<std::unique_ptr<TBox>> boxes;
+    for (int c_idx = 0; c_idx < bank.n_cells; ++c_idx) {
+        const int i0 = bank.cell_i_bl[(size_t)c_idx];
+        const int j0 = bank.cell_j_bl[(size_t)c_idx];
+        const int sp = bank.cell_step [(size_t)c_idx];
+        boxes.push_back(std::make_unique<TBox>(A.i_to_x(i0), A.j_to_y(j0), A.i_to_x(i0 + sp), A.j_to_y(j0 + sp)));
+        boxes.back()->SetFillStyle(0);
+        boxes.back()->SetLineColor(kBlack);
+        boxes.back()->Draw();
+    }
+    drawVersionWatermark(&c);
+    c.Print(filename.c_str());
+    log<LOG_INFO>(L"%1% || wrote %2%.") % __func__ % filename.c_str();
+}
+
 // Multi-page PDF: one page per meta-mesh cell, three histograms per page —
 // χ²_syst / χ²_osc / Δχ² for the PEs banked at that cell. Uses the same
 // open/append/close pattern as plot_amr_throws_multipage_pdf (mirroring the
@@ -1026,7 +1083,8 @@ void save_asimov_root(
     const std::vector<float> &cl_targets,
     const std::vector<std::vector<CellVerdict>> &verdicts,
     const std::string &filename,
-    bool xlog_axis, bool ylog_axis)
+    bool xlog_axis, bool ylog_axis,
+    const std::vector<std::tuple<std::string, int, bool>> &profiled)
 {
     TFile fout(filename.c_str(), "RECREATE");
     if (fout.IsZombie()) {
@@ -1062,6 +1120,10 @@ void save_asimov_root(
         t.Branch(("crit_dchi2_cl_" + cl_label).c_str(), &crit_per_cl[k]);
         t.Branch(("verdict_cl_"    + cl_label).c_str(), &verdict_per_cl[k]);
     }
+    // Profile FC: each cell's conditional best fit of the profiled parameters (physical units).
+    std::vector<float> zhat(profiled.size(), 0.0f);
+    for (size_t p = 0; p < profiled.size(); ++p)
+        t.Branch(("zhat_" + std::get<0>(profiled[p])).c_str(), &zhat[p]);
 
     for (int idx = 0; idx < bank.n_cells; ++idx) {
         cell_idx   = idx;
@@ -1079,6 +1141,12 @@ void save_asimov_root(
             const auto &v = verdicts[k][(size_t)idx];
             crit_per_cl[k]    = v.crit_dchi2;
             verdict_per_cl[k] = !v.decidable ? -1 : (v.included ? 1 : 0);
+        }
+        for (size_t p = 0; p < profiled.size(); ++p) {
+            const auto &[name, pidx, is_log] = profiled[p];
+            const auto &phat = obs.cell_phys_hat[(size_t)idx];
+            const float v = (size_t)pidx < phat.size() ? phat[(size_t)pidx] : 0.0f;
+            zhat[p] = is_log ? std::pow(10.0f, v) : v;
         }
         t.Fill();
     }

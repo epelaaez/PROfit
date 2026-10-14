@@ -208,6 +208,9 @@ struct PROpt {
     // systematic model and statistical term.
     bool fc_stat_only_throws = false;
     bool fc_syst_only_throws = false;
+    std::vector<std::string> fc_profile_params; ///< Physics parameters profiled at the tested point (profile FC).
+    std::string fc_profile_truth = "data";     ///< Toy truth of the profiled parameters: data | inject.
+    std::map<std::string, float> fc_point;      ///< Tested physics point when it differs from -i.
 
     // fc-adaptive (slice 1: Wilks prepass + meta-mesh + diagnostics).
     std::string afc_mode_str = "init-bank";
@@ -219,6 +222,8 @@ struct PROpt {
     float afc_p_thresh = 0.05f;
     int   afc_baseline_level = 2;
     bool  afc_stat_only_throws = false;
+    bool  afc_legacy_nuisance_pin = false;
+    std::vector<std::string> afc_profile_params;
     std::string afc_xvar = "sinsq2thmm", afc_yvar = "dmsq";
     float afc_xlo = 1e-4f, afc_xhi = 1.0f, afc_ylo = 1e-2f, afc_yhi = 1e2f;
     bool  afc_logx = true, afc_logy = true;
@@ -283,7 +288,7 @@ void run_global(float &global_fit_chi2, Eigen::VectorXf &global_fit_result, cons
 void run_profile(float &global_fit_chi2, Eigen::VectorXf &global_fit_result, const PROconfig &config, const PROpeller &prop, PROmetric &metric, const PROdata &data, const Eigen::VectorXf &CVParams, const Eigen::VectorXf &fakedataparams, const Eigen::VectorXf &lb, const Eigen::VectorXf &ub, const std::vector<int> &fixed, const PROfitterConfig &fitConfig, PROfitterConfig &scanFitConfig, const PROpt &options, PROseed &myseed);
 void run_surface(float &global_fit_chi2, Eigen::VectorXf &global_fit_result, const PROconfig &config, const PROpeller &prop, PROmetric &metric, const PROdata &data, const Eigen::VectorXf &CVParams, const Eigen::VectorXf &fakeDataParams, const Eigen::VectorXf &lb, const Eigen::VectorXf &ub, const std::vector<int> &fixed, PROfitterConfig &fitConfig, PROfitterConfig &scanFitConfig, PROpt &options, PROseed &myseed);
 void run_fc(const PROconfig &config, const PROpeller &prop, PROmetric &metric, const PROdata &data, const Eigen::VectorXf &CVParams, const Eigen::VectorXf &fakeDataParams, const Eigen::VectorXf &lb, const Eigen::VectorXf &ub, const std::vector<int> &fixed, const PROfitterConfig &fitConfig, const PROfitterConfig &scanFitConfig, const PROpt &options, PROseed &myseed);
-void run_afc(const PROconfig &config, const PROpeller &prop, PROmetric &metric, const PROdata &data, const Eigen::VectorXf &fakeDataParams, const PROfitterConfig &scanFitConfig, const PROpt &options, PROseed &myseed);
+void run_afc(const PROconfig &config, const PROpeller &prop, PROmetric &metric, const PROdata &data, const Eigen::VectorXf &fakeDataParams, const PROfitterConfig &fitConfig, const PROfitterConfig &scanFitConfig, const PROpt &options, PROseed &myseed);
 void run_mcmc(const PROconfig &config, PROmetric &metric, const Eigen::VectorXf &lb, const Eigen::VectorXf &ub, const PROfitterConfig fitConfig, const PROpt &options, PROseed &myseed);
 void run_bench(const PROconfig &config, const PROpeller &prop, PROmetric &metric, const PROdata &data, const Eigen::VectorXf &fakeDataParams, const PROfitterConfig &fitConfig, const PROpt &options);
 void run_test(const PROconfig &config, const PROpeller &prop, PROmetric &metric, const PROdata &data, const Eigen::VectorXf &CVParams);

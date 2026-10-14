@@ -76,6 +76,7 @@ namespace PROfit {
         // Scan axes (mirror the `surface` subcommand semantics).
         std::string xvar = "sinsq2thmm";
         std::string yvar = "dmsq";
+        bool xvar_explicit = false, yvar_explicit = false; ///< Given on the CLI: an unknown name is then fatal instead of falling back.
         float x_lo = 1e-4f, x_hi = 1.0f;
         float y_lo = 1e-2f, y_hi = 1e2f;
         bool  logx = true, logy = true;
@@ -92,6 +93,23 @@ namespace PROfit {
         std::string chi2 = "neyman";
         bool        binned = true;
         bool        shape_only = false; ///< --shapeonly: every inner metric is built shape-only (must match the data fit).
+
+        // Physics bounds from the setup chain, carrying --fix / --syst-only pins.
+        // The AFC model is rebuilt from the XML, so without these the pins are lost.
+        Eigen::VectorXf phys_lb, phys_ub;
+        /// Pre-v3.1 behaviour for non-axis physics: bank and asimov pin them at
+        /// the model default while the Wilks prepass profiles them. Otherwise
+        /// every non-axis physics parameter must be --fix'd or profiled.
+        bool legacy_nuisance_pin = false;
+        /// Non-axis physics parameters to profile (NOvA profile construction):
+        /// they float in every constrained fit, and the bank's toys put them at
+        /// their conditional best fit to the analysed dataset in each cell.
+        std::vector<std::string> profile_params;
+        bool force = false; ///< --force: classify a dataset other than the one a profile bank was built for.
+        /// Fit configuration for the profile-mode fits to the analysed dataset (toy
+        /// truths, asimov observables): the global-fit settings, as fc's conditional
+        /// fit uses. Toy fits keep the scan settings.
+        PROfitterConfig data_fitconfig;
 
         // ---- PE-bank generation knobs ----
         // Per-cell PE generation follows an additive doubling rule:
@@ -226,7 +244,44 @@ namespace PROfit {
         float    chi2_osc  = 0.0f; ///< Best-fit chi^2 from the full (syst + osc) minimisation.
         float    dchi2     = 0.0f; ///< chi2_syst - chi2_osc.
         uint32_t seed      = 0;    ///< RNG seed used to generate this PE (for reproducibility).
+        std::vector<float> phys_hat; ///< Profile banks: constrained-fit best fit of each profiled parameter (manifest order, model space).
     };
+
+    /**
+     * @brief Where a bank's toys put the physics parameters that are not axes.
+     * @details Values 1 (fixed injected truth) and 3 (one bank per fixed truth
+     * z_k, the "z-sliced" bank) are reserved for the planned extensions.
+     */
+    enum class TruthSource : uint8_t {
+        LegacyPin      = 0, ///< Pinned (--fix value, else model default) in truth and fits. Every v2 bank.
+        ConditionalFit = 2, ///< NOvA profile construction: profiled physics floats in the constrained fit and
+                            ///< the truth is its conditional best fit, per cell, to the bank's dataset.
+    };
+
+    /**
+     * @brief What a profile bank was built for. Banks, archives and the
+     * classification run must agree on all of it.
+     */
+    struct ProfileManifest {
+        uint8_t  truth_source = (uint8_t)TruthSource::LegacyPin;
+        std::vector<int> profile_idx; ///< Physics indices floated in the constrained fits.
+        uint64_t data_fp = 0;         ///< Fingerprint of the dataset the truths were fitted to (DataFingerprint).
+        uint32_t config_hash = 0;
+        std::string model_tag;
+        std::string chi2;
+        uint8_t  shape_only = 0;
+
+        bool profiled() const { return truth_source != (uint8_t)TruthSource::LegacyPin; }
+        bool operator==(const ProfileManifest &o) const {
+            return truth_source == o.truth_source && profile_idx == o.profile_idx && data_fp == o.data_fp
+                && config_hash == o.config_hash && model_tag == o.model_tag && chi2 == o.chi2
+                && shape_only == o.shape_only;
+        }
+        bool operator!=(const ProfileManifest &o) const { return !(*this == o); }
+    };
+
+    /// 64-bit fingerprint of a dataset's collapsed spectrum (profile banks are data-dependent).
+    uint64_t DataFingerprint(const PROdata &data);
 
     /**
      * @brief Pseudo-experiment bank attached to a meta-mesh.
@@ -238,13 +293,20 @@ namespace PROfit {
      * The bank is the pre-unblinding artifact: classification at any threshold
      * is a sort+search over the per-cell vector, so the *same* bank serves the
      * Asimov sensitivity, Brazil-band, and real-data analyses without
-     * regenerating PEs.
+     * regenerating PEs. That holds for LegacyPin banks only: a profile bank
+     * (TruthSource::ConditionalFit) throws its toys at the conditional best
+     * fit to ONE dataset, so the real data needs its own bank, and a Brazil
+     * band classified against the Asimov's bank is the approximate (NOvA-style)
+     * construction.
      */
     struct PEBank {
         static constexpr uint32_t MAGIC = 0x41464342;  ///< 'AFCB' (Adaptive FC Bank).
-        static constexpr uint16_t VERSION = 2;
+        static constexpr uint16_t VERSION = 3;
         ///< v2: added cell footprint arrays (i_bl, j_bl, step, level) so the
         ///<     bank is self-describing without needing the MetaMesh sidecar.
+        ///< v3: profile banks (manifest, per-cell truths, per-PE phys_hat) as a
+        ///<     tail after the unchanged v2 payload. LegacyPin banks are still
+        ///<     written as v2, byte for byte.
 
         // Mesh footprint the bank was generated against. Used as a provenance
         // check at load time so we can refuse a (bank, mesh) mismatch.
@@ -271,6 +333,12 @@ namespace PROfit {
         std::vector<int> cell_j_bl;
         std::vector<int> cell_step;
         std::vector<int> cell_level;
+
+        // v3 (profile banks) only.
+        ProfileManifest manifest;
+        /// Toy truth of every physics parameter per cell (model space). Empty
+        /// for a cell whose truth is not computed yet (e.g. fresh after merge-bank).
+        std::vector<std::vector<float>> cell_truth_phys;
     };
 
     /**
@@ -303,10 +371,12 @@ namespace PROfit {
      * On-disk: <tag>_brazil.bin, magic + version + serialised struct.
      * Re-running --mode brazil --n-brazil-throws N appends N more throws
      * to whatever's already there (mirrors PEBank additive top-up).
+     * v2 (profile banks) appends the manifest and per-throw phys_hat after the
+     * unchanged v1 payload; LegacyPin archives are still written as v1.
      */
     struct BrazilArchive {
         static constexpr uint32_t MAGIC = 0x41464252;  ///< 'AFBR'
-        static constexpr uint16_t VERSION = 1;
+        static constexpr uint16_t VERSION = 2;
         // Footprint sanity check vs. the current bank at load time.
         int finest_nx = 0;
         int finest_ny = 0;
@@ -314,6 +384,9 @@ namespace PROfit {
         // Per-throw data. Outer index = throw, inner = cell.
         std::vector<float> per_throw_global_chi2;        ///< chi2_osc for each throw's global fit.
         std::vector<std::vector<float>> per_throw_dchi2; ///< dchi2_obs per cell, per throw.
+        // v2 (profile banks) only.
+        ProfileManifest manifest;
+        std::vector<std::vector<float>> per_throw_phys_hat; ///< [throw][cell * n_profiled + k]: conditional best fit per cell.
     };
 
     bool save_brazil_archive(const BrazilArchive &arc, const std::string &path);
@@ -323,6 +396,8 @@ namespace PROfit {
      * @brief Output bundle from run_adaptive_fc.
      */
     struct AdaptiveFCResult {
+        bool ok = true; ///< false when a stage could not load its inputs or refused to run.
+
         // Build-mesh fields.
         int  n_throws_done   = 0;
         int  n_meta_cells    = 0;

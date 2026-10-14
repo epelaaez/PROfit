@@ -44,6 +44,7 @@
 #include <boost/archive/binary_iarchive.hpp>
 #include <boost/archive/binary_oarchive.hpp>
 #include <boost/serialization/serialization.hpp>
+#include <boost/serialization/string.hpp>
 #include <boost/serialization/vector.hpp>
 
 // ====================================================================
@@ -99,6 +100,17 @@ void serialize(Archive &ar, PROfit::BrazilArchive &a, [[maybe_unused]] const uns
 }
 
 template <class Archive>
+void serialize(Archive &ar, PROfit::ProfileManifest &m, [[maybe_unused]] const unsigned int v) {
+    ar & m.truth_source;
+    ar & m.profile_idx;
+    ar & m.data_fp;
+    ar & m.config_hash;
+    ar & m.model_tag;
+    ar & m.chi2;
+    ar & m.shape_only;
+}
+
+template <class Archive>
 void serialize(Archive &ar, PROfit::MetaMesh &m, [[maybe_unused]] const unsigned int v) {
     ar & m.cells;
     ar & m.finest_nx;
@@ -121,11 +133,23 @@ bool save_bank(const PEBank &bank, const std::string &path) {
     }
     try {
         boost::archive::binary_oarchive oa(ofs);
+        // Legacy banks keep the v2 layout byte for byte; profile banks append a tail.
+        const bool profiled = bank.manifest.profiled();
         uint32_t magic = PEBank::MAGIC;
-        uint16_t version = PEBank::VERSION;
+        uint16_t version = profiled ? PEBank::VERSION : 2;
         oa & magic;
         oa & version;
         oa & const_cast<PEBank &>(bank); // boost serialize() takes non-const ref
+        if (profiled) {
+            oa & const_cast<ProfileManifest &>(bank.manifest);
+            oa & const_cast<std::vector<std::vector<float>> &>(bank.cell_truth_phys);
+            // phys_hat flattened per cell, in PE order.
+            std::vector<std::vector<float>> phat(bank.cell_pes.size());
+            for (size_t c = 0; c < bank.cell_pes.size(); ++c)
+                for (const auto &r : bank.cell_pes[c])
+                    phat[c].insert(phat[c].end(), r.phys_hat.begin(), r.phys_hat.end());
+            oa & phat;
+        }
     } catch (const std::exception &e) {
         log<LOG_ERROR>(L"%1% || save_bank: serialisation error: %2%") % __func__ % e.what();
         return false;
@@ -154,12 +178,31 @@ bool load_bank(PEBank &bank_out, const std::string &path) {
                 % __func__ % path.c_str() % magic % (uint32_t)PEBank::MAGIC;
             return false;
         }
-        if (version != PEBank::VERSION) {
-            log<LOG_ERROR>(L"%1% || load_bank: version mismatch in %2% (got %3%, expected %4%).")
+        if (version != 2 && version != PEBank::VERSION) {
+            log<LOG_ERROR>(L"%1% || load_bank: version mismatch in %2% (got %3%, expected 2 or %4%).")
                 % __func__ % path.c_str() % (int)version % (int)PEBank::VERSION;
             return false;
         }
         ia & bank_out;
+        bank_out.manifest = ProfileManifest{};
+        bank_out.cell_truth_phys.clear();
+        if (version >= 3) {
+            ia & bank_out.manifest;
+            ia & bank_out.cell_truth_phys;
+            std::vector<std::vector<float>> phat;
+            ia & phat;
+            const size_t nprof = bank_out.manifest.profile_idx.size();
+            for (size_t c = 0; c < bank_out.cell_pes.size() && c < phat.size(); ++c) {
+                auto &pes = bank_out.cell_pes[c];
+                if (phat[c].size() != pes.size() * nprof) {
+                    log<LOG_ERROR>(L"%1% || load_bank: %2% cell %3% has %4% phys_hat values for %5% PEs; corrupt bank.")
+                        % __func__ % path.c_str() % (int)c % (int)phat[c].size() % (int)pes.size();
+                    return false;
+                }
+                for (size_t k = 0; k < pes.size(); ++k)
+                    pes[k].phys_hat.assign(phat[c].begin() + k * nprof, phat[c].begin() + (k + 1) * nprof);
+            }
+        }
     } catch (const std::exception &e) {
         log<LOG_ERROR>(L"%1% || load_bank: deserialisation error: %2%") % __func__ % e.what();
         return false;
@@ -234,11 +277,17 @@ bool save_brazil_archive(const BrazilArchive &arc, const std::string &path) {
     }
     try {
         boost::archive::binary_oarchive oa(ofs);
+        // Legacy archives keep the v1 layout byte for byte; profile archives append a tail.
+        const bool profiled = arc.manifest.profiled();
         uint32_t magic = BrazilArchive::MAGIC;
-        uint16_t version = BrazilArchive::VERSION;
+        uint16_t version = profiled ? BrazilArchive::VERSION : 1;
         oa & magic;
         oa & version;
         oa & const_cast<BrazilArchive &>(arc);
+        if (profiled) {
+            oa & const_cast<ProfileManifest &>(arc.manifest);
+            oa & const_cast<std::vector<std::vector<float>> &>(arc.per_throw_phys_hat);
+        }
     } catch (const std::exception &e) {
         log<LOG_ERROR>(L"%1% || save_brazil_archive: serialisation error: %2%") % __func__ % e.what();
         return false;
@@ -265,12 +314,18 @@ bool load_brazil_archive(BrazilArchive &arc_out, const std::string &path) {
                 % __func__ % path.c_str() % magic % (uint32_t)BrazilArchive::MAGIC;
             return false;
         }
-        if (version != BrazilArchive::VERSION) {
-            log<LOG_ERROR>(L"%1% || load_brazil_archive: version mismatch in %2% (got %3%, expected %4%).")
+        if (version != 1 && version != BrazilArchive::VERSION) {
+            log<LOG_ERROR>(L"%1% || load_brazil_archive: version mismatch in %2% (got %3%, expected 1 or %4%).")
                 % __func__ % path.c_str() % (int)version % (int)BrazilArchive::VERSION;
             return false;
         }
         ia & arc_out;
+        arc_out.manifest = ProfileManifest{};
+        arc_out.per_throw_phys_hat.clear();
+        if (version >= 2) {
+            ia & arc_out.manifest;
+            ia & arc_out.per_throw_phys_hat;
+        }
     } catch (const std::exception &e) {
         log<LOG_ERROR>(L"%1% || load_brazil_archive: deserialisation error: %2%") % __func__ % e.what();
         return false;
@@ -280,7 +335,38 @@ bool load_brazil_archive(BrazilArchive &arc_out, const std::string &path) {
     return true;
 }
 
+uint64_t DataFingerprint(const PROdata &data) {
+    const Eigen::VectorXf spec = data.Spec();
+    uint64_t h[2] = {0, 0};
+    MurmurHash3_x64_128(spec.data(), (int)(spec.size() * sizeof(float)), (uint32_t)spec.size(), h);
+    return h[0] ^ h[1];
+}
+
 namespace afc {
+
+NuisanceSpec make_nuisance_spec(const PROmodel &model, const std::vector<int> &profile_idx) {
+    NuisanceSpec spec;
+    spec.free_mask.assign(model.nparams, 0);
+    spec.pin_val = Eigen::VectorXf(model.nparams);
+    for (size_t i = 0; i < model.nparams; ++i)
+        spec.pin_val(i) = model.lb(i) == model.ub(i) ? model.lb(i) : model.default_val(i);
+    for (int i : profile_idx) spec.free_mask[(size_t)i] = 1;
+    return spec;
+}
+
+std::vector<std::vector<float>> pinned_cell_truths(const NuisanceSpec &spec,
+                                                   size_t xaxis_idx, size_t yaxis_idx,
+                                                   const std::vector<float> &cell_x_model,
+                                                   const std::vector<float> &cell_y_model)
+{
+    std::vector<std::vector<float>> truths(cell_x_model.size());
+    for (size_t c = 0; c < truths.size(); ++c) {
+        truths[c].assign(spec.pin_val.data(), spec.pin_val.data() + spec.pin_val.size());
+        if (xaxis_idx < truths[c].size()) truths[c][xaxis_idx] = cell_x_model[c];
+        if (yaxis_idx < truths[c].size()) truths[c][yaxis_idx] = cell_y_model[c];
+    }
+    return truths;
+}
 
 // Truncated-Gaussian nuisance throws use the shared, bounded, OOB-safe
 // ThrowRestrictedSplinePull from PROcess.h (pattern from commit 000b3d0).
@@ -301,10 +387,10 @@ static float throw_restricted_spline(const PROsyst &systs, size_t i,
 //      the scheduler so a per-cell stop flag can interrupt mid-batch.
 //    • Uses std::unique_ptr<PROmetric> instead of raw new/delete so an
 //      early break doesn't leak.
-//    • Pinned coordinates: phy_params[xaxis_idx] = cell_x_model,
-//      phy_params[yaxis_idx] = cell_y_model — both in *model space*
-//      (log10 of the physical value for log-axis params). Other physics
-//      params set to model->default_val(i).
+//    • Toy truth per cell (truth_phys, model space): the axes at the cell
+//      centre, other physics at its --fix value or default, except profiled
+//      parameters (NuisanceSpec), which sit at the bank's per-cell truth and
+//      float in the constrained fit.
 // --------------------------------------------------------------------
 
 namespace {
@@ -320,9 +406,10 @@ struct AdaptivePEArgs {
     std::string chi2_kind;       ///< "neyman" | "pearson" | "CNP" | "poisson" (legacy aliases accepted)
     bool   binned;
     bool   shape_only = false;   ///< --shapeonly (must match the data fit's metric).
-    size_t xaxis_idx, yaxis_idx;
-    float  cell_x_model, cell_y_model; ///< Cell-center coords in *model space* (log10(phys) for log-axis params).
+    const float *truth_phys = nullptr;      ///< Toy truth of every physics param (model space); axes at the cell centre.
+    const NuisanceSpec *spec = nullptr;     ///< Which physics params float in the constrained fit.
     uint32_t seed;
+    FitTiming *timing = nullptr;  ///< Worker-local fit timings (log only).
 };
 
 // Run a single PE at the pinned cell coords. Returns the PEBankRecord with
@@ -347,19 +434,19 @@ static PEBankRecord run_one_pe(const AdaptivePEArgs &args)
     const size_t nspline = systs.GetNSplines();
     const size_t nparams = nphys + nspline;
 
-    // Build throw vector. Physics params: all at default, *except* the two
-    // axis params pinned to the cell center.
-    Eigen::VectorXf throws = Eigen::VectorXf::Zero((int)nparams);
-    for (size_t i = 0; i < nphys; ++i) throws((int)i) = model.default_val(i);
-    throws((int)args.xaxis_idx) = args.cell_x_model;
-    throws((int)args.yaxis_idx) = args.cell_y_model;
+    const NuisanceSpec &spec = *args.spec;
+    const bool profiled = spec.active();
 
-    // Bounds for the syst-only fit: pin all physics params; let splines vary.
+    Eigen::VectorXf throws = Eigen::VectorXf::Zero((int)nparams);
+    for (size_t i = 0; i < nphys; ++i) throws((int)i) = args.truth_phys[i];
+
+    // Bounds for the constrained fit: physics pinned at the truth, except
+    // profiled parameters; splines vary.
     Eigen::VectorXf lb_syst = Eigen::VectorXf::Constant((int)nparams, -3.0f);
     Eigen::VectorXf ub_syst = Eigen::VectorXf::Constant((int)nparams,  3.0f);
     for (size_t j = 0; j < nphys; ++j) {
-        lb_syst((int)j) = throws((int)j);
-        ub_syst((int)j) = throws((int)j);
+        lb_syst((int)j) = spec.free_mask[j] ? model.lb(j) : throws((int)j);
+        ub_syst((int)j) = spec.free_mask[j] ? model.ub(j) : throws((int)j);
     }
     Eigen::VectorXf lb_osc(lb_syst), ub_osc(ub_syst);
     for (size_t j = 0; j < nphys; ++j) {
@@ -402,18 +489,46 @@ static PEBankRecord run_one_pe(const AdaptivePEArgs &args)
         return rec;
     }
 
-    // Syst-only fit (physics params pinned at cell center).
+    FitTiming local_timing;
+    FitTiming &timing = args.timing ? *args.timing : local_timing;
+
+    // Constrained fit at the cell. Profiled parameters float: seed them where a
+    // data fit would look (truth physics, splines at their prior centres), in
+    // every basin of their range (ProfileLadderSeeds), and always at their
+    // default, whose log10 floor a Latin hypercube never reaches.
     PROfitter fitter_syst(ub_syst, lb_syst, *args.fitconfig, dseed(rng));
     metric->setBounds(lb_syst, ub_syst);
-    rec.chi2_syst = fitter_syst.Fit(*metric);
+    auto t0 = std::chrono::steady_clock::now();
+    if (profiled) {
+        Eigen::VectorXf truth_seed = throws;
+        for (size_t i = 0; i < nspline; ++i)
+            truth_seed((int)(nphys + i)) = i < (size_t)systs.spline_centers.size() ? systs.spline_centers(i) : 0.0f;
+        FixedSeed at_default{truth_seed, std::vector<int>(nparams, 0)};
+        for (size_t j = 0; j < nphys; ++j) {
+            if (spec.free_mask[j]) at_default.point((int)j) = model.default_val(j);
+            at_default.fixed[j] = 1;
+        }
+        std::vector<Eigen::VectorXf> seeds{truth_seed};
+        for (auto &x : ProfileLadderSeeds(*metric, truth_seed, lb_syst, ub_syst, spec.free_mask)) seeds.push_back(std::move(x));
+        rec.chi2_syst = fitter_syst.Fit(*metric, seeds, std::vector<FixedSeed>{at_default});
+        for (size_t j = 0; j < nphys; ++j)
+            if (spec.free_mask[j]) rec.phys_hat.push_back(fitter_syst.best_fit((int)j));
+    } else {
+        rec.chi2_syst = fitter_syst.Fit(*metric);
+    }
+    timing.constrained_us += FitTiming::since_us(t0);
     metric->freeParams();
 
     // Full (syst + osc) fit.
     PROfitter fitter_osc(ub_osc, lb_osc, *args.fitconfig, dseed(rng));
     metric->setBounds(lb_osc, ub_osc);
     std::vector<Eigen::VectorXf> seed_pts = {fitter_syst.best_fit};
+    t0 = std::chrono::steady_clock::now();
     rec.chi2_osc = fitter_osc.Fit(*metric, seed_pts);
+    timing.free_us += FitTiming::since_us(t0);
+    t0 = std::chrono::steady_clock::now();
     fitter_osc.calcFreqSeedPoints(*metric);
+    timing.harmonic_us += FitTiming::since_us(t0);
     for (size_t i = 0; i < fitter_osc.freq_seed_points.size(); ++i) {
         const float c = fitter_osc.freq_seed_values.at(i);
         if (c < rec.chi2_osc) rec.chi2_osc = c;
@@ -431,9 +546,13 @@ static PEBankRecord run_one_pe(const AdaptivePEArgs &args)
         enhanced_config.n_localfit = std::max(5, enhanced_config.n_localfit + 2);
 
         PROfitter fitter_osc_enhanced(ub_osc, lb_osc, enhanced_config, dseed(rng));
+        t0 = std::chrono::steady_clock::now();
         const float chi2_osc_enhanced = fitter_osc_enhanced.Fit(*metric, fitter_syst.best_fit);
+        timing.rescue_us += FitTiming::since_us(t0);
+        timing.n_rescue++;
 
         if (chi2_osc_enhanced < rec.chi2_osc) {
+            timing.n_rescue_improved++;
             log<LOG_DEBUG>(L"%1% || Enhanced search improved chi2_osc from %2% to %3%")
                 % __func__ % rec.chi2_osc % chi2_osc_enhanced;
             rec.chi2_osc = chi2_osc_enhanced;
@@ -441,6 +560,7 @@ static PEBankRecord run_one_pe(const AdaptivePEArgs &args)
     }
 
     rec.dchi2 = rec.chi2_syst - rec.chi2_osc;
+    timing.n++;
     return rec;
 }
 
@@ -477,16 +597,15 @@ void schedule_pes(const AdaptiveFCConfig &acfg,
                          const PROfitterConfig &fitconfig,
                          PROseed &proseed,
                          const Eigen::MatrixXf &frac_root,
-                         size_t xaxis_idx, size_t yaxis_idx,
-                         const std::vector<float> &cell_x_model,
-                         const std::vector<float> &cell_y_model,
+                         const NuisanceSpec &spec,
+                         const std::vector<std::vector<float>> &cell_truth,
                          PEBank &bank_out,
                          int nthreads,
                          MultiPROgressBar &progress,
                          int progress_bar_idx,
                          AdaptiveFCResult &result_out)
 {
-    const int n_cells = (int)cell_x_model.size();
+    const int n_cells = (int)cell_truth.size();
     if (n_cells == 0) return;
 
     // Preserve any pre-existing PEs (top-up support).
@@ -536,8 +655,11 @@ void schedule_pes(const AdaptiveFCConfig &acfg,
     std::atomic<int> cells_skipped_layer{0};  ///< level < update_layer
     std::atomic<int> cells_at_cap{0};         ///< existing already >= n_pe_max
     std::atomic<int> cells_topped_up{0};      ///< added PEs this run
+    FitTiming total_timing;
+    std::mutex timing_mu;
 
     auto worker = [&](int) {
+        FitTiming timing;
         while (true) {
             int c = next_cell.fetch_add(1);
             if (c >= n_cells) break;
@@ -576,11 +698,10 @@ void schedule_pes(const AdaptiveFCConfig &acfg,
                 args.chi2_kind = acfg.chi2;
                 args.binned    = acfg.binned;
                 args.shape_only = acfg.shape_only;
-                args.xaxis_idx = xaxis_idx;
-                args.yaxis_idx = yaxis_idx;
-                args.cell_x_model = cell_x_model[c];
-                args.cell_y_model = cell_y_model[c];
+                args.truth_phys = cell_truth[(size_t)c].data();
+                args.spec = &spec;
                 args.seed = pe_seed_for(c, i);
+                args.timing = &timing;
 
                 PEBankRecord rec = run_one_pe(args);
                 local_pes.push_back(rec);
@@ -590,6 +711,8 @@ void schedule_pes(const AdaptiveFCConfig &acfg,
             total_pes.fetch_add((int64_t)local_pes.size());
             bank_out.cell_pes[(size_t)c] = std::move(local_pes);
         }
+        std::lock_guard<std::mutex> lk(timing_mu);
+        total_timing += timing;
     };
 
     std::vector<std::thread> tpool;
@@ -602,6 +725,7 @@ void schedule_pes(const AdaptiveFCConfig &acfg,
     result_out.cells_topped_up     = cells_topped_up.load();
     result_out.mean_pes_per_cell   = n_cells > 0 ? (float)total_pes.load() / (float)n_cells : 0.0f;
 
+    total_timing.log_summary("init-bank");
     log<LOG_INFO>(L"%1% || schedule_pes done: cells=%2%, total_pes=%3%, mean=%4%, "
                   L"topped_up=%5%, at_cap=%6%, skipped_below_update_layer=%7%.")
         % __func__ % n_cells % (int64_t)total_pes.load()
@@ -631,13 +755,19 @@ AsimovObs compute_asimov_obs(
     PROseed &proseed,
     int nthreads,
     MultiPROgressBar &progress,
-    int bar_idx)
+    int bar_idx,
+    const NuisanceSpec &spec,
+    const std::vector<uint64_t> *cell_keys,
+    const std::vector<std::vector<float>> *cell_seed_phys,
+    bool snap_to_default)
 {
     AsimovObs obs;
     const int n_cells = (int)cell_x_model.size();
     obs.chi2_syst.assign(n_cells, 0.0f);
     obs.dchi2_obs.assign(n_cells, 0.0f);
     if (n_cells == 0) return obs;
+    const bool profiled = spec.active();
+    if (profiled) obs.cell_phys_hat.assign(n_cells, {});
 
     const size_t nphys   = model.nparams;
     const size_t nspline = systs.GetNSplines();
@@ -680,19 +810,27 @@ AsimovObs compute_asimov_obs(
         log<LOG_INFO>(L"%1% || asimov global fit: chi2_osc=%2%.") % __func__ % obs.chi2_osc_global;
     }
 
-    // ---- 2. Per-cell syst-only fits, parallel. -------------------------------
+    // ---- 2. Per-cell constrained fits, parallel. ------------------------------
     std::atomic<int> next_cell{0};
+    // Profile mode: a cell's fitter seed depends only on its footprint, not on
+    // --seed, so grid jobs with distinct seeds fit identical toy truths and
+    // their banks merge.
+    const uint32_t cell_seed_base = 0x5EEDu;
+
+    FitTiming total_timing;
+    std::mutex timing_mu;
 
     auto worker = [&](int thread_idx) {
         std::mt19937 thread_rng((*proseed.getThreadSeeds())[thread_idx]);
         auto metric = make_metric(asimov_data);
         if (!metric) return;
+        FitTiming timing;
 
         // Pre-build the spline bounds once (same for every cell).
         Eigen::VectorXf lb((int)nparams), ub((int)nparams);
         for (size_t j = 0; j < nphys; ++j) {
-            lb((int)j) = model.default_val(j);
-            ub((int)j) = model.default_val(j);
+            lb((int)j) = spec.free_mask[j] ? model.lb(j) : spec.pin_val(j);
+            ub((int)j) = spec.free_mask[j] ? model.ub(j) : spec.pin_val(j);
         }
         for (size_t j = nphys; j < nparams; ++j) {
             const size_t si = j - nphys;
@@ -712,18 +850,80 @@ AsimovObs compute_asimov_obs(
             ub((int)yaxis_idx) = cell_y_model[(size_t)c];
 
             metric->setBounds(lb, ub);
-            PROfitter fitter(ub, lb, fitconfig, dseed(thread_rng));
-            const float chi2_s = fitter.Fit(*metric);
-            obs.chi2_syst[(size_t)c] = chi2_s;
-            obs.dchi2_obs[(size_t)c] = chi2_s - obs.chi2_osc_global;
+            const auto t0 = std::chrono::steady_clock::now();
+            if (!profiled) {
+                PROfitter fitter(ub, lb, fitconfig, dseed(thread_rng));
+                const float chi2_s = fitter.Fit(*metric);
+                obs.chi2_syst[(size_t)c] = chi2_s;
+                obs.dchi2_obs[(size_t)c] = chi2_s - obs.chi2_osc_global;
+            } else {
+                const uint64_t key = cell_keys ? (*cell_keys)[(size_t)c] : (uint64_t)c;
+                uint32_t fit_seed = 0;
+                MurmurHash3_x86_32(&key, sizeof(key), cell_seed_base, &fit_seed);
+
+                // Seed at the given per-cell truth (else the pins), splines at their prior centres.
+                Eigen::VectorXf seed = Eigen::VectorXf::Zero((int)nparams);
+                const bool have_seed = cell_seed_phys && (*cell_seed_phys)[(size_t)c].size() == nphys;
+                for (size_t j = 0; j < nphys; ++j)
+                    seed((int)j) = have_seed ? (*cell_seed_phys)[(size_t)c][j] : spec.pin_val(j);
+                seed((int)xaxis_idx) = cell_x_model[(size_t)c];
+                seed((int)yaxis_idx) = cell_y_model[(size_t)c];
+                for (size_t i = 0; i < nspline && i < (size_t)systs.spline_centers.size(); ++i)
+                    seed((int)(nphys + i)) = systs.spline_centers(i);
+                FixedSeed at_default{seed, std::vector<int>(nparams, 0)};
+                for (size_t j = 0; j < nphys; ++j) {
+                    if (spec.free_mask[j]) at_default.point((int)j) = model.default_val(j);
+                    at_default.fixed[j] = 1;
+                }
+
+                std::vector<Eigen::VectorXf> seeds{seed};
+                for (auto &x : ProfileLadderSeeds(*metric, seed, lb, ub, spec.free_mask)) seeds.push_back(std::move(x));
+                PROfitter fitter(ub, lb, fitconfig, fit_seed);
+                float chi2_c = fitter.Fit(*metric, seeds, std::vector<FixedSeed>{at_default});
+                Eigen::VectorXf best = fitter.best_fit;
+                if (snap_to_default) {
+                    // A profiled parameter the data cannot see would sit wherever the
+                    // minimiser drifted along a flat direction: report its default.
+                    Eigen::VectorXf lb_d = lb, ub_d = ub;
+                    for (size_t j = 0; j < nphys; ++j)
+                        if (spec.free_mask[j]) lb_d((int)j) = ub_d((int)j) = model.default_val(j);
+                    metric->setBounds(lb_d, ub_d);
+                    PROfitter fitter_d(ub_d, lb_d, fitconfig, fit_seed ^ 0x9E3779B9u);
+                    const float chi2_d = fitter_d.Fit(*metric, std::vector<Eigen::VectorXf>{at_default.point});
+                    if (chi2_d - chi2_c < 1e-2f) {
+                        best = fitter_d.best_fit;
+                        chi2_c = std::min(chi2_c, chi2_d);
+                    }
+                }
+                obs.chi2_syst[(size_t)c] = chi2_c;
+                obs.cell_phys_hat[(size_t)c].assign(best.data(), best.data() + nphys);
+            }
+            timing.constrained_us += FitTiming::since_us(t0);
+            timing.n++;
             progress.increment_bar(bar_idx);
         }
+        std::lock_guard<std::mutex> lk(timing_mu);
+        total_timing += timing;
     };
 
     std::vector<std::thread> tpool;
     tpool.reserve((size_t)std::max(1, nthreads));
     for (int t = 0; t < std::max(1, nthreads); ++t) tpool.emplace_back(worker, t);
     for (auto &th : tpool) th.join();
+    total_timing.log_summary("asimov per-cell");
+
+    if (profiled) {
+        // A conditional fit can beat a global fit that missed its basin; the
+        // global minimum is then the best cell, so no observed dchi2 is negative.
+        const float best_cell = *std::min_element(obs.chi2_syst.begin(), obs.chi2_syst.end());
+        if (best_cell < obs.chi2_osc_global) {
+            log<LOG_WARNING>(L"%1% || a cell's constrained fit (chi2 %2%) beat the global fit (%3%); using it as the global minimum.")
+                % __func__ % best_cell % obs.chi2_osc_global;
+            obs.chi2_osc_global = best_cell;
+        }
+        for (int c = 0; c < n_cells; ++c)
+            obs.dchi2_obs[(size_t)c] = obs.chi2_syst[(size_t)c] - obs.chi2_osc_global;
+    }
 
     return obs;
 }

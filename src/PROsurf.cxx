@@ -108,7 +108,7 @@ PROsurf::PROsurf(PROmetric &metric,  size_t x_idx, size_t y_idx, size_t nbinsx, 
     for(size_t i = 0; i < nbinsx + 1; i++) {
         float edge_val = x_lo + i * (x_hi - x_lo) / nbinsx;
         if (llx == LogAxis) edge_val = std::pow(10, edge_val); // Now bin edges are back to linear space
-        if (metric.GetModel().is_log10[x_idx])
+        if (x_idx < metric.GetModel().nparams && metric.GetModel().is_log10[x_idx])
             edges_x(i) = std::log10(edge_val);
         else
             edges_x(i) = edge_val;
@@ -116,7 +116,7 @@ PROsurf::PROsurf(PROmetric &metric,  size_t x_idx, size_t y_idx, size_t nbinsx, 
     for(size_t i = 0; i < nbinsy + 1; i++) {
         float edge_val = y_lo + i * (y_hi - y_lo) / nbinsy;
         if (lly == LogAxis) edge_val = std::pow(10, edge_val); // Now bin edges are back to linear space
-        if (metric.GetModel().is_log10[y_idx])
+        if (y_idx < metric.GetModel().nparams && metric.GetModel().is_log10[y_idx])
             edges_y(i) = std::log10(edge_val);
         else
             edges_y(i) = edge_val;
@@ -916,14 +916,14 @@ void PROsurf::PlotCurve(const PROconfig &config, const PROmodel &model, const PR
     // Edges are stored in model's native space (log if is_log10, linear otherwise)
     // Convert to linear for ROOT histogram bin edges
     for(size_t i = 0; i < this->nbinsx+1; i++)
-        binedges_x.push_back(model.is_log10[xaxis_idx] ? std::pow(10, this->edges_x(i)) : this->edges_x(i));
+        binedges_x.push_back(xaxis_idx < model.nparams && model.is_log10[xaxis_idx] ? std::pow(10, this->edges_x(i)) : this->edges_x(i));
     for(size_t i = 0; i < this->nbinsy+1; i++)
-        binedges_y.push_back(model.is_log10[yaxis_idx] ? std::pow(10, this->edges_y(i)) : this->edges_y(i));
+        binedges_y.push_back(yaxis_idx < model.nparams && model.is_log10[yaxis_idx] ? std::pow(10, this->edges_y(i)) : this->edges_y(i));
 
      std::string xlabel = xaxis_idx < model.nparams ? model.pretty_param_names.at(xaxis_idx) : 
-            config.m_mcgen_variation_plotname_map.at(syst.spline_names.at(xaxis_idx));
+            config.m_mcgen_variation_plotname_map.at(syst.spline_names.at(xaxis_idx - model.nparams));
      std::string ylabel = yaxis_idx < model.nparams ? model.pretty_param_names.at(yaxis_idx) : 
-            config.m_mcgen_variation_plotname_map.at(syst.spline_names.at(yaxis_idx));
+            config.m_mcgen_variation_plotname_map.at(syst.spline_names.at(yaxis_idx - model.nparams));
     TH2D surf("surf", (";"+xlabel+";"+ylabel).c_str(), this->nbinsx, binedges_x.data(), this->nbinsy, binedges_y.data());
 
     TCanvas c1("c1", "PROcurve Analysis", 1600, 800);
@@ -941,8 +941,8 @@ void PROsurf::PlotCurve(const PROconfig &config, const PROmodel &model, const PR
     surf.Draw("COLZ");
     // Points are stored in the model's native space (log10 if is_log10, linear otherwise);
     // convert to the linear plot space only for axes that are actually log10.
-    auto to_plot_x = [&](float val){ return model.is_log10[xaxis_idx] ? std::pow(10.0f, val) : val; };
-    auto to_plot_y = [&](float val){ return model.is_log10[yaxis_idx] ? std::pow(10.0f, val) : val; };
+    auto to_plot_x = [&](float val){ return xaxis_idx < model.nparams && model.is_log10[xaxis_idx] ? std::pow(10.0f, val) : val; };
+    auto to_plot_y = [&](float val){ return yaxis_idx < model.nparams && model.is_log10[yaxis_idx] ? std::pow(10.0f, val) : val; };
     TMarker *markerA = new TMarker(to_plot_x(A[xaxis_idx]), to_plot_y(A[yaxis_idx]), 29);
     markerA->SetMarkerColor(kBlack);
     markerA->SetMarkerSize(3);

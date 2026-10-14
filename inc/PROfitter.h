@@ -23,8 +23,10 @@
 #include "LBFGSB.h"
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <random>
+#include <string>
 
 namespace PROfit {
 
@@ -749,6 +751,43 @@ namespace PROfit {
      * @param lb       Lower bounds for each dimension.
      */
     void recenter_latin_samples(std::vector<std::vector<float>> &samples, const Eigen::VectorXf &ub, const Eigen::VectorXf &lb);
+
+    /**
+     * @brief Start points in every basin of the profiled parameters of a constrained fit.
+     * @details For each parameter with free_mask[j] = 1, scans the metric at n_scan
+     * evenly spaced points of its range (an infinite bound becomes 4 units from the
+     * other, the range a Latin hypercube covers) with everything else at @p base, and
+     * returns @p base moved to the n_keep lowest local minima of that scan. A profiled
+     * 3+1 parameter has near-degenerate branches (|U_e4|^2 below or above 1/2 give the
+     * same disappearance amplitude), often against a constraint wall that depends on
+     * the other parameters, and a descent from one start only finds the nearer one.
+     * Costs n_scan evaluations per profiled parameter, no fits.
+     */
+    std::vector<Eigen::VectorXf> ProfileLadderSeeds(PROmetric &metric, const Eigen::VectorXf &base,
+                                                    const Eigen::VectorXf &lb, const Eigen::VectorXf &ub,
+                                                    const std::vector<uint8_t> &free_mask,
+                                                    int n_scan = 40, int n_keep = 3);
+
+    /**
+     * @brief Wall-clock split of the fits inside FC pseudo-experiments (fc, fc-adaptive).
+     * @details Diagnostics only: summed per worker, merged after the join and logged at
+     * INFO. Never written to an output file, since timings are not deterministic.
+     */
+    struct FitTiming {
+        uint64_t constrained_us = 0;   ///< Fit at the tested point (physics pinned or profiled).
+        uint64_t free_us = 0;          ///< Free (global) fit.
+        uint64_t harmonic_us = 0;      ///< calcFreqSeedPoints harmonic scan after the free fit.
+        uint64_t rescue_us = 0;        ///< Enhanced free fit after a negative delta chi^2.
+        uint64_t n = 0;                ///< Pseudo-experiments timed.
+        uint64_t n_rescue = 0;         ///< Rescue fits run.
+        uint64_t n_rescue_improved = 0;///< Rescue fits that lowered the free chi^2.
+
+        FitTiming &operator+=(const FitTiming &o);
+        /// One INFO line: mean seconds per pseudo-experiment for each stage.
+        void log_summary(const std::string &who) const;
+        /// Microseconds elapsed since @p t0.
+        static uint64_t since_us(std::chrono::steady_clock::time_point t0);
+    };
 
 }
 

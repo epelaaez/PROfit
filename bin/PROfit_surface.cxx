@@ -41,39 +41,19 @@ void run_surface(float &global_fit_chi2, Eigen::VectorXf &global_fit_result, con
     }
 
     //Define grid and Surface
-    size_t xaxis_idx = 1, yaxis_idx = 0;
-    if(const auto loc = std::find(metric.GetModel().param_names.begin(), metric.GetModel().param_names.end(), options.xvar); loc != metric.GetModel().param_names.end()) {
-        xaxis_idx = std::distance(metric.GetModel().param_names.begin(), loc);
-
-    } else if(const auto loc = std::find(metric.GetSysts().spline_names.begin(), metric.GetSysts().spline_names.end(), options.xvar); loc != metric.GetSysts().spline_names.end()) {
-        xaxis_idx = std::distance(metric.GetSysts().spline_names.begin(), loc);
-    } else {
-        for(const auto &[xml_name, plot_name]: config.m_mcgen_variation_plotname_map) {
-            if(options.xvar == plot_name) {
-                const auto loc = std::find(metric.GetSysts().spline_names.begin(), metric.GetSysts().spline_names.end(), xml_name);
-                if(loc != metric.GetSysts().spline_names.end()) {
-                    xaxis_idx = std::distance(metric.GetSysts().spline_names.begin(), loc);
-                }
-                break;
-            }
+    // An axis name given on the command line must exist; the unmatched built-in
+    // default (sinsq2thmm) keeps its historic fallback to x = 1, y = 0.
+    auto resolve_axis = [&](const std::string &name, const char *flag, size_t fallback) -> size_t {
+        if(auto idx = ResolveParamIndex(name, metric.GetModel(), metric.GetSysts(), config)) return *idx;
+        if(options.surface_command->get_option(flag)->count() > 0) {
+            log<LOG_ERROR>(L"%1% || %2% '%3%' is neither a physics parameter nor a spline.") % __func__ % flag % name.c_str();
+            exit(EXIT_FAILURE);
         }
-    }
-    if(const auto loc = std::find(metric.GetModel().param_names.begin(), metric.GetModel().param_names.end(), options.yvar); loc != metric.GetModel().param_names.end()) {
-        yaxis_idx = std::distance(metric.GetModel().param_names.begin(), loc);
-    } else if(const auto loc = std::find(metric.GetSysts().spline_names.begin(),metric.GetSysts().spline_names.end(), options.yvar); loc != metric.GetSysts().spline_names.end()) {
-        yaxis_idx = std::distance(metric.GetSysts().spline_names.begin(), loc);
-    } else {
-        for(const auto &[xml_name, plot_name]: config.m_mcgen_variation_plotname_map) {
-            if(options.yvar == plot_name) {
-                const auto loc = std::find(metric.GetSysts().spline_names.begin(), metric.GetSysts().spline_names.end(), xml_name);
-                if(loc != metric.GetSysts().spline_names.end()) {
-                    yaxis_idx = std::distance(metric.GetSysts().spline_names.begin(), loc);
-                }
-                break;
-            }
-        }
-
-    }
+        log<LOG_WARNING>(L"%1% || %2% default '%3%' not found in this model; falling back to parameter %4%.") % __func__ % flag % name.c_str() % fallback;
+        return fallback;
+    };
+    size_t xaxis_idx = resolve_axis(options.xvar, "--xvar", 1);
+    size_t yaxis_idx = resolve_axis(options.yvar, "--yvar", 0);
     size_t nbinsx = options.grid_size[0], nbinsy = options.grid_size[1];
     PROsurf surface(metric, xaxis_idx, yaxis_idx, nbinsx, options.logx ? PROsurf::LogAxis : PROsurf::LinAxis, options.xlo, options.xhi,
             nbinsy, options.logy ? PROsurf::LogAxis : PROsurf::LinAxis, options.ylo, options.yhi);
@@ -132,17 +112,20 @@ void run_surface(float &global_fit_chi2, Eigen::VectorXf &global_fit_result, con
     std::vector<float> binedges_x, binedges_y;
     // Edges are stored in model's native space (log if is_log10, linear otherwise)
     // Convert to linear for ROOT histogram bin edges
+    const size_t nphys = metric.GetModel().nparams;
+    const bool xlog = xaxis_idx < nphys && metric.GetModel().is_log10[xaxis_idx];
+    const bool ylog = yaxis_idx < nphys && metric.GetModel().is_log10[yaxis_idx];
     for(size_t i = 0; i < surface.nbinsx+1; i++)
-        binedges_x.push_back(metric.GetModel().is_log10[xaxis_idx] ? std::pow(10, surface.edges_x(i)) : surface.edges_x(i));
+        binedges_x.push_back(xlog ? std::pow(10, surface.edges_x(i)) : surface.edges_x(i));
     for(size_t i = 0; i < surface.nbinsy+1; i++)
-        binedges_y.push_back(metric.GetModel().is_log10[yaxis_idx] ? std::pow(10, surface.edges_y(i)) : surface.edges_y(i));
+        binedges_y.push_back(ylog ? std::pow(10, surface.edges_y(i)) : surface.edges_y(i));
 
     if(options.xlabel == "") 
-        options.xlabel = xaxis_idx < metric.GetModel().nparams ? metric.GetModel().pretty_param_names[xaxis_idx] : 
-            config.m_mcgen_variation_plotname_map.at(metric.GetSysts().spline_names[xaxis_idx]);
+        options.xlabel = xaxis_idx < nphys ? metric.GetModel().pretty_param_names[xaxis_idx] : 
+            config.m_mcgen_variation_plotname_map.at(metric.GetSysts().spline_names[xaxis_idx - nphys]);
     if(options.ylabel == "") 
-        options.ylabel = yaxis_idx < metric.GetModel().nparams ? metric.GetModel().pretty_param_names[yaxis_idx] : 
-            config.m_mcgen_variation_plotname_map.at(metric.GetSysts().spline_names[yaxis_idx]);
+        options.ylabel = yaxis_idx < nphys ? metric.GetModel().pretty_param_names[yaxis_idx] : 
+            config.m_mcgen_variation_plotname_map.at(metric.GetSysts().spline_names[yaxis_idx - nphys]);
     TH2D surf("surf", (";"+options.xlabel+";"+options.ylabel).c_str(), surface.nbinsx, binedges_x.data(), surface.nbinsy, binedges_y.data());
 
     for(size_t i = 0; i < surface.nbinsx; i++) {
