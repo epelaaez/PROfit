@@ -194,6 +194,9 @@ void run_process(PROpeller &prop, std::vector<std::vector<SystStruct>> &systsstr
                 PROpeller dvprop;
                 std::vector<std::vector<SystStruct>> dvsystsstructs;
                 PROcess_CAFAna(dvconfig, dvsystsstructs, dvprop, options.noxrootd);
+                // DetVar spectra come from per-event weights (NullModel, no splines); the
+                // dense hist matrices are never read and were nearly all of this binary.
+                dvprop.ClearHistStorage();
                 dvprops[key] = std::move(dvprop);
                 log<LOG_INFO>(L"%1% || Done processing DetVar file '%2%'") % __func__ % name.c_str();
             }
