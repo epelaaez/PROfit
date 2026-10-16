@@ -3,7 +3,7 @@
 
 /**
  * @file PROsmooth.h
- * @brief Weighted local-linear kernel smoothing of binned ratios (used by --smooth-systs).
+ * @brief Weighted local-linear kernel smoothing of binned ratios (used by smooth= in the XML).
  * @details Header-only and Eigen-only so it can be tested without ROOT. PROsyst calls
  * SmoothBlock once per (subchannel, knob) on the variation/CV ratio before the spline
  * coefficients are computed, so smoothing never crosses a subchannel or channel boundary.
@@ -110,6 +110,17 @@ namespace PROsmooth {
             for (Eigen::Index b = 0; b < y.size(); ++b)
                 if (w(b) > 0.0f && std::isfinite(y(b))) y(b) += shift;
         }
+    }
+
+    /**
+     * @brief First bin where smoothing broke the ratio: NaN/inf, or negative where @p raw was not
+     * (e.g. the local-linear fit extrapolating below zero at the edge of the range). -1 if none.
+     */
+    inline Eigen::Index FirstInvalidSmoothed(const Eigen::Ref<const Eigen::VectorXf> &raw,
+                                             const Eigen::Ref<const Eigen::VectorXf> &smoothed) {
+        for (Eigen::Index b = 0; b < smoothed.size() && b < raw.size(); ++b)
+            if (!std::isfinite(smoothed(b)) || (smoothed(b) < 0.0f && !(raw(b) < 0.0f))) return b;
+        return -1;
     }
 
 }  // namespace PROsmooth

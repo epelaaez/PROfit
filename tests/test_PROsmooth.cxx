@@ -3,6 +3,7 @@
 #include "PROsmooth.h"
 
 #include <cstdio>
+#include <limits>
 #include <random>
 
 using PROfit::PROsmooth::SmoothBlock;
@@ -86,6 +87,22 @@ int main() {
         rms_sm = std::sqrt(rms_sm / (n * ntoys));
         std::printf("       toy RMS(ratio - truth): raw %.4f -> smoothed %.4f\n", rms_raw, rms_sm);
         check(rms_sm < 0.7 * rms_raw, "smoothing reduces the ratio error on Poisson toys");
+    }
+
+    {   // FirstInvalidSmoothed: a ratio falling to zero at the edge makes the local-linear fit
+        // extrapolate below zero in the last bin, which FillSpline must refuse.
+        using PROfit::PROsmooth::FirstInvalidSmoothed;
+        Eigen::VectorXf y(10), cv = Eigen::VectorXf::Constant(10, 10.f);
+        y << 0.40f, 0.35f, 0.30f, 0.25f, 0.20f, 0.15f, 0.10f, 0.05f, 0.0f, 0.0f;
+        const Eigen::VectorXf raw = y;
+        SmoothBlock(y, cv, cv, {10}, 1.0f, true);
+        check(FirstInvalidSmoothed(raw, y) == 9 && y(9) < 0.0f, "ratio running to zero at the edge is flagged");
+
+        Eigen::VectorXf r(3), sm(3);
+        r << 1.0f, -0.2f, 0.9f;  sm << 1.0f, -0.1f, 0.95f;   // pre-existing negative: not smoothing's doing
+        check(FirstInvalidSmoothed(r, sm) == -1, "valid smoothing and pre-existing negatives pass");
+        sm(2) = std::numeric_limits<float>::quiet_NaN();
+        check(FirstInvalidSmoothed(r, sm) == 2, "NaN is flagged");
     }
 
     std::printf("%s (%d failure%s)\n", failures ? "FAILED" : "ALL PASSED", failures, failures == 1 ? "" : "s");

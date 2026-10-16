@@ -431,11 +431,11 @@ The `<allowlist>` attributes:
   start). Each subchannel is smoothed on its own (each axis of an N-D binning
   in turn) by a local-linear fit weighted by the CV effective event count,
   and keeps its CV-weighted rate change; the knob = 0 point stays exactly 1.
-  `smooth="0"` opts a systematic out of `--smooth-systs`, and the XML value
-  always takes precedence over the command line (only `--no-smooth-systs`
-  overrides it). Applies to `spline`, `spline_to_covariance` and `hist1d/2d`
-  (including DetVars); it is applied when the splines are built, so changing
-  it does not require re-running `process`.
+  `smooth="0"` (or no attribute) means no smoothing. Applies to `spline`,
+  `spline_to_covariance` and `hist1d/2d` (including DetVars), but not to
+  `spline_cross_quad` members. `smooth=` is part of the config hash, so
+  changing it invalidates existing `process` outputs and `fc-adaptive`
+  banks / brazil archives: re-run `process` and rebuild them.
 
 ### Freeing a whole distribution bin-by-bin: `binned_unconstrained`
 
@@ -695,9 +695,6 @@ multithreaded runs are statistically equivalent but not byte-identical.
 | `--fix dmsq Flux1` | fix parameters at CV (physics or splines) |
 | `--syst-only` | fix ALL physics parameters (nuisance-only fit) |
 | `--statonly` | drop systematics entirely |
-| `--smooth-systs 1` | smooth every eligible spline systematic's ratios with a Gaussian kernel of 1 bin (see `smooth=` above); systematics with `smooth=` in the XML keep their XML setting |
-| `--smooth-systs-list A B` | with `--smooth-systs`, smooth only these systematics |
-| `--no-smooth-systs` | turn all smoothing off, including `smooth=` in the XML (for with/without comparisons) |
 | `--shapeonly` (alias `--shape-only`) / `--rateonly` | shape-only or single-bin-normalisation analysis. Shape-only: in every collapsed channel (per mode × detector × channel) the *prediction* is rescaled onto the data's integral before the χ² (the data is never touched, so the statistical term is fixed and the χ² is exactly invariant under an overall rate change); that rescale removes the normalisation part of every spline, and the covariance systematics are projected onto shape (the MiniBooNE M_shape) about the current prediction at every evaluation. The systematics themselves stay physical. One dof per channel is lost; `fc`/brazil/`fc-adaptive` inherit the flag. Implies `--area-norm` for plots. Full details: [Appendix D](#appendix-d-shape-only-fits---shapeonly-in-full). |
 | `-c/--chi2 neyman\|pearson\|CNP\|poisson` | χ² metric (default `neyman`; legacy aliases `PROchi`/`PROCNP`/`Poisson`) |
 | `--grad-mode analytic` | gradient strategy: `analytic` (default, alias `exact`) / `central-full` / `one-sided-full` / `central-lin` (Gauss-Newton) / `one-sided-lin` |

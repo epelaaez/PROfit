@@ -113,7 +113,27 @@ void serialize(Archive &ar, PROfit::MetaMesh &m, [[maybe_unused]] const unsigned
 
 namespace PROfit {
 
-bool save_bank(const PEBank &bank, const std::string &path) {
+// Is an artifact stamped with config hash `stamped` (0 = written before stamping) usable with
+// `config`? Shared by load_bank / load_brazil_archive so every mode gets the check.
+static bool config_hash_ok(const char *fn, const std::string &path, uint32_t stamped, const PROconfig &config) {
+    if (stamped == config.hash) return true;
+    if (stamped == 0) {
+        const bool smoothed = std::any_of(config.m_mcgen_variation_smooth.begin(), config.m_mcgen_variation_smooth.end(),
+                                          [](const auto &kv) { return kv.second > 0.0f; });
+        if (!smoothed) {
+            log<LOG_WARNING>(L"%1% || %2% carries no config hash (older PROfit); cannot verify it matches this XML.") % fn % path.c_str();
+            return true;
+        }
+        log<LOG_ERROR>(L"%1% || %2% predates smooth= but this XML smooths systematics; refusing to mix them.") % fn % path.c_str();
+        return false;
+    }
+    log<LOG_ERROR>(L"%1% || %2% was made with config hash %3% but this XML has %4% (binning, systematics, smooth=, ... changed). "
+                   L"Mixing them gives silently wrong FC results; use the matching XML or a new -o tag.")
+        % fn % path.c_str() % stamped % config.hash;
+    return false;
+}
+
+bool save_bank(const PEBank &bank, const std::string &path, const PROconfig &config) {
     std::ofstream ofs(path, std::ios::binary);
     if (!ofs.is_open()) {
         log<LOG_ERROR>(L"%1% || save_bank: could not open %2% for writing.") % __func__ % path.c_str();
@@ -126,6 +146,8 @@ bool save_bank(const PEBank &bank, const std::string &path) {
         oa & magic;
         oa & version;
         oa & const_cast<PEBank &>(bank); // boost serialize() takes non-const ref
+        uint32_t config_hash = config.hash;  // v3, after the v2 payload
+        oa & config_hash;
     } catch (const std::exception &e) {
         log<LOG_ERROR>(L"%1% || save_bank: serialisation error: %2%") % __func__ % e.what();
         return false;
@@ -137,7 +159,7 @@ bool save_bank(const PEBank &bank, const std::string &path) {
     return true;
 }
 
-bool load_bank(PEBank &bank_out, const std::string &path) {
+bool load_bank(PEBank &bank_out, const std::string &path, const PROconfig &config) {
     std::ifstream ifs(path, std::ios::binary);
     if (!ifs.is_open()) {
         log<LOG_ERROR>(L"%1% || load_bank: could not open %2% for reading.") % __func__ % path.c_str();
@@ -154,16 +176,19 @@ bool load_bank(PEBank &bank_out, const std::string &path) {
                 % __func__ % path.c_str() % magic % (uint32_t)PEBank::MAGIC;
             return false;
         }
-        if (version != PEBank::VERSION) {
-            log<LOG_ERROR>(L"%1% || load_bank: version mismatch in %2% (got %3%, expected %4%).")
+        if (version < 2 || version > PEBank::VERSION) {
+            log<LOG_ERROR>(L"%1% || load_bank: version mismatch in %2% (got %3%, expected 2..%4%).")
                 % __func__ % path.c_str() % (int)version % (int)PEBank::VERSION;
             return false;
         }
         ia & bank_out;
+        bank_out.config_hash = 0;
+        if (version >= 3) ia & bank_out.config_hash;
     } catch (const std::exception &e) {
         log<LOG_ERROR>(L"%1% || load_bank: deserialisation error: %2%") % __func__ % e.what();
         return false;
     }
+    if (!config_hash_ok(__func__, path, bank_out.config_hash, config)) return false;
     int64_t total_pes = 0;
     for (const auto &v : bank_out.cell_pes) total_pes += (int64_t)v.size();
     log<LOG_INFO>(L"%1% || load_bank: read %2% (cells=%3%, total_pes=%4%).")
@@ -226,7 +251,7 @@ bool load_mesh(MetaMesh &mm_out, const std::string &path) {
 //  BrazilArchive boost-serialisation. Same magic+version+payload layout
 //  as save_bank / save_mesh.
 // --------------------------------------------------------------------
-bool save_brazil_archive(const BrazilArchive &arc, const std::string &path) {
+bool save_brazil_archive(const BrazilArchive &arc, const std::string &path, const PROconfig &config) {
     std::ofstream ofs(path, std::ios::binary);
     if (!ofs.is_open()) {
         log<LOG_ERROR>(L"%1% || save_brazil_archive: could not open %2% for writing.") % __func__ % path.c_str();
@@ -239,6 +264,8 @@ bool save_brazil_archive(const BrazilArchive &arc, const std::string &path) {
         oa & magic;
         oa & version;
         oa & const_cast<BrazilArchive &>(arc);
+        uint32_t config_hash = config.hash;  // v2, after the v1 payload
+        oa & config_hash;
     } catch (const std::exception &e) {
         log<LOG_ERROR>(L"%1% || save_brazil_archive: serialisation error: %2%") % __func__ % e.what();
         return false;
@@ -248,7 +275,7 @@ bool save_brazil_archive(const BrazilArchive &arc, const std::string &path) {
     return true;
 }
 
-bool load_brazil_archive(BrazilArchive &arc_out, const std::string &path) {
+bool load_brazil_archive(BrazilArchive &arc_out, const std::string &path, const PROconfig &config) {
     std::ifstream ifs(path, std::ios::binary);
     if (!ifs.is_open()) {
         log<LOG_ERROR>(L"%1% || load_brazil_archive: could not open %2% for reading.") % __func__ % path.c_str();
@@ -265,16 +292,19 @@ bool load_brazil_archive(BrazilArchive &arc_out, const std::string &path) {
                 % __func__ % path.c_str() % magic % (uint32_t)BrazilArchive::MAGIC;
             return false;
         }
-        if (version != BrazilArchive::VERSION) {
-            log<LOG_ERROR>(L"%1% || load_brazil_archive: version mismatch in %2% (got %3%, expected %4%).")
+        if (version < 1 || version > BrazilArchive::VERSION) {
+            log<LOG_ERROR>(L"%1% || load_brazil_archive: version mismatch in %2% (got %3%, expected 1..%4%).")
                 % __func__ % path.c_str() % (int)version % (int)BrazilArchive::VERSION;
             return false;
         }
         ia & arc_out;
+        arc_out.config_hash = 0;
+        if (version >= 2) ia & arc_out.config_hash;
     } catch (const std::exception &e) {
         log<LOG_ERROR>(L"%1% || load_brazil_archive: deserialisation error: %2%") % __func__ % e.what();
         return false;
     }
+    if (!config_hash_ok(__func__, path, arc_out.config_hash, config)) return false;
     log<LOG_INFO>(L"%1% || load_brazil_archive: read %2% (throws=%3%, n_cells=%4%).")
         % __func__ % path.c_str() % (int)arc_out.per_throw_dchi2.size() % arc_out.n_cells;
     return true;

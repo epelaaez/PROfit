@@ -39,21 +39,6 @@ PROpt::PROpt(int argc, char **argv) {
         app.add_option("--inject-systs-cv", cv_injected_systs, "Systematic shifts to inject.  as CV Map of name and shift value in sigmas. Only spline systs are supported right now.");
         app.add_option("--syst-list", syst_list, "Override list of systematics to use (note: all systs must be in the xml).");
         app.add_option("--exclude-systs", systs_excluded, "List of systematics to exclude.")->excludes("--syst-list"); 
-        app.add_option("--smooth-systs", smooth_systs,
-                       "Smooth spline systematics across neighbouring reco bins before the splines are built, to "
-                       "suppress MC statistical fluctuations in the variation/CV ratios. Value is the Gaussian kernel "
-                       "width in bins (e.g. 1); 0 (default) disables. Each subchannel is smoothed separately (each axis "
-                       "of an N-D binning in turn) with a local-linear fit weighted by the CV effective event count, and "
-                       "keeps its CV-weighted rate change. norm and explicit_spline systematics are never smoothed. "
-                       "A smooth=\"sigma\" attribute on a systematic in the XML takes precedence (smooth=\"0\" opts it out).")
-            ->check(CLI::NonNegativeNumber);
-        app.add_option("--smooth-systs-list", smooth_systs_list,
-                       "Only apply --smooth-systs to these systematics (default: every eligible one). "
-                       "Systematics with smooth= in the XML keep their XML setting.")
-            ->needs("--smooth-systs");
-        app.add_flag("--no-smooth-systs", no_smooth_systs,
-                     "Disable all spline smoothing, including smooth= set in the XML (e.g. for with/without comparisons).")
-            ->excludes("--smooth-systs");
 
         app.add_flag("--use-fake-data", use_fake_data, "Ignore any data XML or embedded <data> section and use fake (MC) data instead.");
         app.add_flag("--poisson-throw", poisson_throw, "Do a Poisson stats throw of fake data.");
