@@ -1343,8 +1343,7 @@ namespace PROfit {
             return;
         }
 
-        // Smoothing weights: CV effective event count (sum w)^2 / sum w^2 = (content/error)^2.
-        // Fall back to the content where the CV carries no errors; empty bins get weight 0.
+        // Weights: CV effective count (content/error)^2, or the content if there are no errors.
         Eigen::VectorXf w = Eigen::VectorXf::Zero(nbins);
         for (Eigen::Index b = 0; b < nbins; ++b) {
             if (!(c(b) > 0.0f) || !std::isfinite(c(b))) continue;
@@ -1352,8 +1351,7 @@ namespace PROfit {
             w(b) = has_err ? (c(b) / e(b)) * (c(b) / e(b)) : c(b);
         }
 
-        // The knob = 0 point (CV/CV, or force_0_cv-normalised) is exactly 1; skip it so
-        // floating-point round-off can't move the spline away from 1 at zero shift.
+        // Skip the knob = 0 ratio (exactly 1) so round-off can't move the spline off 1 there.
         std::vector<size_t> to_smooth;
         for (size_t k = 0; k < ratios.size(); ++k)
             if (!(ratios[k].Spec().array() == 1.0f).all()) to_smooth.push_back(k);
@@ -1430,16 +1428,12 @@ namespace PROfit {
             }
         }
 
-        // smooth= in the XML: smooth each knob's ratio across neighbouring reco bins to suppress MC
-        // statistical fluctuations before the per-bin splines are built. Linear in the ratio, so
-        // it commutes with the inflate step above.
         const float smooth_sigma = SmoothingWidth(config, syst);
         if (smooth_sigma > 0.0f) {
             log<LOG_INFO>(L"%1% || Smoothing spline ratios for systematic %2% (Gaussian kernel, sigma = %3% bins)") % __func__ % syst.systname.c_str() % smooth_sigma;
             std::vector<Eigen::VectorXf> raw;
             for (const PROspec &r : ratios) raw.push_back(r.Spec());
             SmoothSplineRatios(config, syst.binning, *syst.p_cv, ratios, smooth_sigma);
-            // A NaN or newly negative ratio would give a NaN/negative prediction at that knob.
             for (size_t k = 0; k < ratios.size(); ++k) {
                 const Eigen::Index b = PROsmooth::FirstInvalidSmoothed(raw[k], ratios[k].Spec());
                 if (b < 0) continue;

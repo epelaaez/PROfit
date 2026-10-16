@@ -1944,9 +1944,6 @@ int PROconfig::LoadFromXML(const std::string &filename){
                     }
                 }
                 if(smooth) {
-                    // Kernel width in bins for smoothing this systematic's spline ratios across reco
-                    // bins (PROsyst::SmoothSplineRatios). Included in CalcHash so that changing it
-                    // is caught by every hash-checked artifact, not silently mixed.
                     char *end;
                     const float smooth_val = std::strtof(smooth, &end);
                     while(*end == ' ' || *end == '\t') ++end;
@@ -3159,8 +3156,7 @@ void PROconfig::ResolveSplineCrossQuadMembers(){
                 log<LOG_ERROR>(L"Terminating.");
                 exit(EXIT_FAILURE);
             }
-            // The cross terms subtract the members' splines from the raw CROSS universes, so a
-            // smoothed member would leave its MC noise uncancelled in e_ij.
+            // e_ij subtracts the members' splines from raw universes; smoothing them breaks that.
             auto sm_it = m_mcgen_variation_smooth.find(name);
             if(sm_it != m_mcgen_variation_smooth.end() && sm_it->second > 0.0f){
                 log<LOG_ERROR>(L"%1% || ERROR: spline_cross_quad systematic '%2%': member '%3%' has smooth=\"%4%\". Smoothing is not supported for spline_cross_quad members; remove it.") % __func__ % parent.c_str() % name.c_str() % sm_it->second;
@@ -3276,8 +3272,7 @@ uint32_t PROconfig::CalcHash() const{
         unique_string << sysname << "*" << s;
     for (const auto& [sysname, f] : m_mcgen_variation_inflate)
         unique_string << sysname << "^" << f;
-    // smooth= changes the splines built from the cached SystStructs; smooth="0" is the same as
-    // no attribute, so only nonzero widths are hashed (and no smoothing leaves the hash unchanged).
+    // smooth="0" == no attribute, so only nonzero widths are hashed (old hashes stay valid).
     for (const auto& [sysname, w] : m_mcgen_variation_smooth)
         if (w > 0.0f) unique_string << sysname << "~s" << w;
 

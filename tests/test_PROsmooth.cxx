@@ -64,8 +64,7 @@ int main() {
         SmoothBlock(y, w, w, {nx, ny}, 1.2f, false);
         check((y - truth).cwiseAbs().maxCoeff() < tol, "2D plane reproduced (axis order correct)");
     }
-    {   // Toy MC: Poisson-fluctuated variation over a smooth truth. Smoothing should bring
-        // the ratio closer to the truth on average.
+    {   // Poisson toys: smoothing should bring the ratio closer to the truth.
         std::mt19937 rng(7);
         const int n = 30, ntoys = 200;
         double rms_raw = 0, rms_sm = 0;
@@ -89,9 +88,7 @@ int main() {
         check(rms_sm < 0.7 * rms_raw, "smoothing reduces the ratio error on Poisson toys");
     }
 
-    {   // A systematic can drive bins to zero (a real underfluctuation). Smoothing must keep them
-        // >= 0 -- neither the local-linear fit at the edge nor the rate correction may push them
-        // negative -- while still preserving the CV-weighted rate change.
+    {   // Ratios a systematic drives to zero must stay >= 0 with the rate still preserved.
         using PROfit::PROsmooth::FirstInvalidSmoothed;
         auto rate = [](const Eigen::VectorXf &v, const Eigen::VectorXf &c) { return (c.array() * (v.array() - 1.f)).sum(); };
 

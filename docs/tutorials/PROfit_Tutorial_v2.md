@@ -425,19 +425,12 @@ The `<allowlist>` attributes:
 * `scale_range="lo, hi"` — `binned_unconstrained` only: the multiplicative
   range every free bin may take (default `0, 10`; must contain 1).
 * `smooth="sigma"` — smooth this systematic's variation/CV ratios across
-  neighbouring reco bins before its splines are built, to suppress MC
-  statistical fluctuations (e.g. DetVars from limited-statistics samples).
-  `sigma` is a Gaussian kernel width in bins (`smooth="1"` is a reasonable
-  start). Each subchannel is smoothed on its own (each axis of an N-D binning
-  in turn) by a local-linear fit weighted by the CV effective event count,
-  and keeps its CV-weighted rate change; the knob = 0 point stays exactly 1.
-  Ratios a systematic drives to zero stay at zero: smoothing never makes a
-  ratio negative.
-  `smooth="0"` (or no attribute) means no smoothing. Applies to `spline`,
-  `spline_to_covariance` and `hist1d/2d` (including DetVars), but not to
-  `spline_cross_quad` members. `smooth=` is part of the config hash, so
-  changing it invalidates existing `process` outputs: re-run `process`, and
-  rebuild anything derived from them (e.g. `fc-adaptive` banks).
+  neighbouring reco bins (Gaussian kernel, `sigma` in bins; `"1"` is a good
+  start) to suppress MC statistical fluctuations, e.g. in DetVars. Each
+  subchannel is smoothed separately, keeping its rate change; ratios never go
+  negative. Applies to `spline`, `spline_to_covariance` and `hist1d/2d`, not
+  `spline_cross_quad` members. Part of the config hash: re-run `process` after
+  changing it.
 
 ### Freeing a whole distribution bin-by-bin: `binned_unconstrained`
 

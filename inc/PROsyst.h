@@ -187,22 +187,10 @@ namespace PROfit {
             /// Worker threads spline2cov spreads its throws over (-n; result is thread-count independent).
             inline static size_t spline2cov_nthreads = 1;
 
-            /**
-             * @brief Kernel width in bins to smooth @p syst's spline ratios with; 0 = don't smooth.
-             * @details smooth="sigma" on the systematic in the XML (config.m_mcgen_variation_smooth);
-             * always 0 for modes with no MC statistical noise ("norm", "explicit_spline").
-             */
+            /// smooth= kernel width (bins) for syst from the XML; 0 = off (always for norm/explicit_spline).
             static float SmoothingWidth(const PROconfig &config, const SystStruct &syst);
 
-            /**
-             * @brief In place: smooth every knob's variation/CV ratio across neighbouring reco bins.
-             * @details Uses PROsmooth::SmoothBlock on each (mode, detector, channel, subchannel) block
-             * of binning index @p binning separately, so nothing is smoothed across a subchannel or
-             * channel boundary; N-D channel binnings are smoothed along each axis. Weights are the
-             * CV effective event counts (content/error)^2, falling back to the CV content where the
-             * CV has no errors. Each block's CV-weighted rate change is preserved. Ratios that are
-             * identically 1 (the knob = 0 point) are left untouched so the spline stays exactly 1 there.
-             */
+            /// Smooth each knob's ratio within each subchannel (never across), rate-preserving.
             static void SmoothSplineRatios(const PROconfig &config, int binning, const PROspec &cv,
                                            std::vector<PROspec> &ratios, float sigma_bins);
 
