@@ -259,6 +259,15 @@ namespace PROfit{
             /** @brief Return the number of MC events stored in this PROpeller. */
             size_t NEvent() const {return added_weights.size();}
 
+            /**
+             * @brief Free the pre-binned (variable × variable) histogram matrices.
+             * @details They are dense in the uncollapsed bins of every variable pair, so they
+             * dominate the in-memory and serialized size. Afterwards FillSpectra with splines
+             * binned in a different variable, and scale(), must not be used on this
+             * PROpeller. DetVar propellers use neither.
+             */
+            void ClearHistStorage() { variable_hist_storage = PROhistStorage(); }
+
 
             /**
              * @brief Serialise this PROpeller to a binary file using Boost.Serialization.
