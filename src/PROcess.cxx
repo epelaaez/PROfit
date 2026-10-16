@@ -657,6 +657,19 @@ namespace PROfit {
         return PROspec(spec, spec.array().sqrt());
     }
 
+    std::optional<size_t> ResolveParamIndex(const std::string &name, const PROmodel &model, const PROsyst &systs, const PROconfig &config) {
+        if(auto loc = std::find(model.param_names.begin(), model.param_names.end(), name); loc != model.param_names.end())
+            return std::distance(model.param_names.begin(), loc);
+        if(auto loc = std::find(systs.spline_names.begin(), systs.spline_names.end(), name); loc != systs.spline_names.end())
+            return model.nparams + std::distance(systs.spline_names.begin(), loc);
+        for(const auto &[xml_name, plot_name] : config.m_mcgen_variation_plotname_map) {
+            if(name != plot_name) continue;
+            if(auto loc = std::find(systs.spline_names.begin(), systs.spline_names.end(), xml_name); loc != systs.spline_names.end())
+                return model.nparams + std::distance(systs.spline_names.begin(), loc);
+        }
+        return std::nullopt;
+    }
+
     float ThrowRestrictedSplinePull(const PROsyst &insyst, size_t i, std::mt19937 &rng, std::normal_distribution<float> &d) {
         const bool has_r = i < insyst.spline_has_restrict.size() && insyst.spline_has_restrict[i];
         float tlo = has_r ? insyst.spline_restrict_lo[i] : insyst.spline_lo[i];

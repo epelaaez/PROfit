@@ -44,34 +44,21 @@ using namespace afc;
 
 // ====================================================================
 //  Helpers — axis name → parameter/spline index resolution.
-//  Mirrors the lookup at bin/PROfit.cxx:1425-1457 used by the `surface`
-//  command. Kept local because the parent function is large and not yet
-//  factored out.
 // ====================================================================
 
-static size_t resolve_axis_index(const std::string &name,
-                                 const PROmodel &model,
-                                 const PROsyst  &systs,
-                                 const PROconfig &config,
-                                 size_t fallback)
+// An axis name the user typed must exist; the unmatched built-in default
+// (sinsq2thmm, absent from most models) keeps its historic fallback.
+static std::optional<size_t> resolve_axis_index(const std::string &name, bool explicit_name,
+                                                const PROmodel &model,
+                                                const PROsyst  &systs,
+                                                const PROconfig &config,
+                                                size_t fallback)
 {
-    if (auto loc = std::find(model.param_names.begin(), model.param_names.end(), name);
-        loc != model.param_names.end()) {
-        return std::distance(model.param_names.begin(), loc);
-    }
-    // Spline axes index the FULL [physics | spline] parameter vector that the
-    // callers pin/bound, so the spline position must be offset by nparams.
-    if (auto loc = std::find(systs.spline_names.begin(), systs.spline_names.end(), name);
-        loc != systs.spline_names.end()) {
-        return model.nparams + std::distance(systs.spline_names.begin(), loc);
-    }
-    for (const auto &[xml_name, plot_name] : config.m_mcgen_variation_plotname_map) {
-        if (name == plot_name) {
-            if (auto loc = std::find(systs.spline_names.begin(), systs.spline_names.end(), xml_name);
-                loc != systs.spline_names.end()) {
-                return model.nparams + std::distance(systs.spline_names.begin(), loc);
-            }
-        }
+    if (auto idx = ResolveParamIndex(name, model, systs, config)) return idx;
+    if (explicit_name) {
+        log<LOG_ERROR>(L"%1% || axis variable '%2%' is neither a physics parameter nor a spline.")
+            % __func__ % name.c_str();
+        return std::nullopt;
     }
     log<LOG_WARNING>(L"%1% || resolve_axis_index: axis variable '%2%' not found; falling back to %3%.")
         % __func__ % name.c_str() % fallback;
@@ -301,11 +288,148 @@ AdaptiveFCResult run_adaptive_fc(
 
     std::unique_ptr<PROmodel> model = get_model_from_string(config, prop);
 
+    // The fresh model carries the XML bounds; restore the setup chain's physics
+    // pins (--fix / --syst-only) so every fit below honours them.
+    if (acfg.phys_lb.size() == (Eigen::Index)model->nparams && acfg.phys_ub.size() == (Eigen::Index)model->nparams) {
+        model->lb = acfg.phys_lb;
+        model->ub = acfg.phys_ub;
+    }
+
     // Resolve axis names → indices using the same lookup the surface command uses.
-    const size_t xaxis_idx = resolve_axis_index(acfg.xvar, *model, systs, config, 1);
-    const size_t yaxis_idx = resolve_axis_index(acfg.yvar, *model, systs, config, 0);
+    const auto xaxis_opt = resolve_axis_index(acfg.xvar, acfg.xvar_explicit, *model, systs, config, 1);
+    const auto yaxis_opt = resolve_axis_index(acfg.yvar, acfg.yvar_explicit, *model, systs, config, 0);
+    if (!xaxis_opt || !yaxis_opt) {
+        res.ok = false;
+        return res;
+    }
+    const size_t xaxis_idx = *xaxis_opt;
+    const size_t yaxis_idx = *yaxis_opt;
     log<LOG_INFO>(L"%1% || resolved xvar='%2%' -> idx=%3%; yvar='%4%' -> idx=%5%.")
         % __func__ % acfg.xvar.c_str() % (int)xaxis_idx % acfg.yvar.c_str() % (int)yaxis_idx;
+
+    // --profile-params: non-axis physics profiled with the NOvA construction.
+    std::vector<int> profile_idx;
+    for (const auto &name : acfg.profile_params) {
+        const auto idx = ResolveParamIndex(name, *model, systs, config);
+        if (!idx || *idx >= model->nparams || *idx == xaxis_idx || *idx == yaxis_idx) {
+            log<LOG_ERROR>(L"%1% || --profile-params: '%2%' is not a non-axis physics parameter of %3%.")
+                % __func__ % name.c_str() % config.m_model_tag.c_str();
+            res.ok = false;
+            return res;
+        }
+        if (model->lb(*idx) == model->ub(*idx)) {
+            log<LOG_WARNING>(L"%1% || --profile-params: %2% is --fix'd, so it stays pinned.") % __func__ % name.c_str();
+            continue;
+        }
+        if (std::find(profile_idx.begin(), profile_idx.end(), (int)*idx) == profile_idx.end())
+            profile_idx.push_back((int)*idx);
+    }
+    std::sort(profile_idx.begin(), profile_idx.end());
+    if (!profile_idx.empty() && acfg.legacy_nuisance_pin) {
+        log<LOG_ERROR>(L"%1% || --profile-params and --legacy-nuisance-pin are contradictory.") % __func__;
+        res.ok = false;
+        return res;
+    }
+    const NuisanceSpec spec = make_nuisance_spec(*model, profile_idx);
+    // What a bank built by this run is for; classification modes require the bank to match.
+    ProfileManifest run_manifest;
+    if (!profile_idx.empty()) {
+        run_manifest.truth_source = (uint8_t)TruthSource::ConditionalFit;
+        run_manifest.profile_idx  = profile_idx;
+        run_manifest.data_fp      = DataFingerprint(data);
+        run_manifest.config_hash  = config.hash;
+        run_manifest.model_tag    = config.m_model_tag;
+        run_manifest.chi2         = acfg.chi2;
+        run_manifest.shape_only   = acfg.shape_only ? 1 : 0;
+    }
+    auto profiled_columns = [&](const ProfileManifest &m) {
+        std::vector<std::tuple<std::string, int, bool>> cols;
+        for (int i : m.profile_idx)
+            cols.emplace_back(model->param_names[(size_t)i], i, (bool)model->is_log10[(size_t)i]);
+        return cols;
+    };
+
+    // Physics that is not an axis needs an explicit treatment in every fitting
+    // mode: the bank and asimov pin it while the Wilks prepass profiles it, so
+    // leaving it free silently mixes a 3D slice with a 2D profiled mesh.
+    const bool fits_physics = acfg.mode == AdaptiveFCMode::BuildMesh || acfg.mode == AdaptiveFCMode::InitBank
+                           || acfg.mode == AdaptiveFCMode::Asimov    || acfg.mode == AdaptiveFCMode::Brazil;
+    if (fits_physics) {
+        for (size_t i = 0; i < model->nparams; ++i) {
+            if ((i == xaxis_idx || i == yaxis_idx) && model->lb(i) == model->ub(i)) {
+                log<LOG_ERROR>(L"%1% || axis parameter %2% is --fix'd; it cannot be scanned.")
+                    % __func__ % model->param_names[i].c_str();
+                res.ok = false;
+                return res;
+            }
+        }
+        std::string loose;
+        for (size_t i = 0; i < model->nparams; ++i)
+            if (i != xaxis_idx && i != yaxis_idx && model->lb(i) < model->ub(i) && !spec.free_mask[i])
+                loose += (loose.empty() ? "" : ", ") + model->param_names[i];
+        if (!loose.empty() && !acfg.legacy_nuisance_pin) {
+            if (model->nparams > 2) {
+                log<LOG_ERROR>(L"%1% || physics parameter(s) %2% are neither axes, fixed nor profiled. The bank would pin "
+                               L"them at their default while the Wilks prepass profiles them, which is not a 2D "
+                               L"construction. Profile them with --profile-params <name> (NOvA profile construction), "
+                               L"pin them with --fix <name> (an FC slice at that value), or pass --legacy-nuisance-pin "
+                               L"to reproduce the old behaviour.")
+                    % __func__ % loose.c_str();
+                res.ok = false;
+                return res;
+            }
+            log<LOG_WARNING>(L"%1% || physics parameter(s) %2% are neither axes nor fixed: the bank pins them at their "
+                             L"default while the Wilks prepass profiles them.")
+                % __func__ % loose.c_str();
+        }
+    }
+
+    // One map per profiled parameter of a per-cell physics vector (model space),
+    // drawn in physical units: the bank's toy truths, or a dataset's conditional best fits.
+    auto plot_profiled_maps = [&](const PEBank &bank, const std::vector<std::vector<float>> &cell_phys,
+                                  const std::string &what, const std::string &file_stem) {
+        const bool xlog_axis = (xaxis_idx < model->is_log10.size()) ? model->is_log10[xaxis_idx] : acfg.logx;
+        const bool ylog_axis = (yaxis_idx < model->is_log10.size()) ? model->is_log10[yaxis_idx] : acfg.logy;
+        const std::string xlabel = xaxis_idx < model->nparams ? model->pretty_param_names.at(xaxis_idx) : std::string("x");
+        const std::string ylabel = yaxis_idx < model->nparams ? model->pretty_param_names.at(yaxis_idx) : std::string("y");
+        for (int i : bank.manifest.profile_idx) {
+            std::vector<float> vals((size_t)bank.n_cells, 0.0f);
+            for (int c = 0; c < bank.n_cells; ++c) {
+                if ((size_t)c >= cell_phys.size() || (size_t)i >= cell_phys[(size_t)c].size()) continue;
+                const float v = cell_phys[(size_t)c][(size_t)i];
+                vals[(size_t)c] = model->is_log10[(size_t)i] ? std::pow(10.0f, v) : v;
+            }
+            plot_cell_value_map_pdf(bank, vals, what + " of " + model->pretty_param_names[(size_t)i],
+                                    acfg.output_tag + "_" + file_stem + "_" + model->param_names[(size_t)i] + ".pdf",
+                                    xlabel, ylabel, model->pretty_param_names[(size_t)i],
+                                    acfg.logx, acfg.logy, xlog_axis, ylog_axis);
+        }
+    };
+
+    auto bank_cell_keys = [](const PEBank &bank) {
+        std::vector<uint64_t> keys((size_t)bank.n_cells);
+        for (int c = 0; c < bank.n_cells; ++c)
+            keys[(size_t)c] = cell_footprint_key(bank.cell_i_bl[(size_t)c], bank.cell_j_bl[(size_t)c], bank.cell_step[(size_t)c]);
+        return keys;
+    };
+
+    // A bank (or archive) must have been built with the same profiled
+    // parameters, model, metric and config as this classification run.
+    auto check_manifest = [&](const ProfileManifest &m, const std::string &what) -> bool {
+        if (m.profile_idx != profile_idx) {
+            log<LOG_ERROR>(L"%1% || %2% was built %3% profiled parameters than this run's --profile-params; "
+                           L"pass the same --profile-params to every fc-adaptive stage.")
+                % __func__ % what.c_str() % (m.profile_idx.empty() ? "with no" : "with other");
+            return false;
+        }
+        if (m.profiled() && (m.config_hash != run_manifest.config_hash || m.model_tag != run_manifest.model_tag
+                             || m.chi2 != run_manifest.chi2 || m.shape_only != run_manifest.shape_only)) {
+            log<LOG_ERROR>(L"%1% || %2% was built for another config, model, metric or --shapeonly setting.")
+                % __func__ % what.c_str();
+            return false;
+        }
+        return true;
+    };
 
     // ---- Mode: merge-mesh ---------------------------------------------------
     // Union-merge >= 2 mesh binaries (--merge-input, filenames or globs
@@ -316,6 +440,7 @@ AdaptiveFCResult run_adaptive_fc(
         if (acfg.merge_inputs.size() < 2) {
             log<LOG_ERROR>(L"%1% || merge-mesh: need >= 2 --merge-input mesh binaries, got %2%.")
                 % __func__ % (int)acfg.merge_inputs.size();
+            res.ok = false;
             return res;
         }
         std::vector<MetaMesh> inputs(acfg.merge_inputs.size());
@@ -323,6 +448,7 @@ AdaptiveFCResult run_adaptive_fc(
             if (!load_mesh(inputs[m], acfg.merge_inputs[m])) {
                 log<LOG_ERROR>(L"%1% || merge-mesh: failed to load %2%.")
                     % __func__ % acfg.merge_inputs[m].c_str();
+                res.ok = false;
                 return res;
             }
             log<LOG_INFO>(L"%1% || merge-mesh input %2%: %3% (%4% cells, finest=%5%x%6%, max_levels=%7%).")
@@ -342,6 +468,7 @@ AdaptiveFCResult run_adaptive_fc(
                     % __func__ % acfg.merge_inputs[m].c_str()
                     % mm2.finest_nx % mm2.finest_ny % mm2.x_lo % mm2.x_hi % mm2.y_lo % mm2.y_hi
                     % mref.finest_nx % mref.finest_ny % mref.x_lo % mref.x_hi % mref.y_lo % mref.y_hi;
+                res.ok = false;
                 return res;
             }
         }
@@ -349,6 +476,7 @@ AdaptiveFCResult run_adaptive_fc(
         MetaMesh merged = merge_meta_meshes(inputs, acfg.baseline_level);
         if (merged.cells.empty()) {
             log<LOG_ERROR>(L"%1% || merge-mesh: merge failed (see errors above).") % __func__;
+            res.ok = false;
             return res;
         }
         const std::string mesh_out = acfg.output_tag + "_mesh.bin";
@@ -381,6 +509,7 @@ AdaptiveFCResult run_adaptive_fc(
     if (acfg.mode == AdaptiveFCMode::MergeBank) {
         if (acfg.merge_inputs.empty()) {
             log<LOG_ERROR>(L"%1% || merge-bank: need >= 1 --merge-input bank binaries.") % __func__;
+            res.ok = false;
             return res;
         }
         const std::string mesh_in = acfg.output_tag + "_mesh.bin";
@@ -389,6 +518,7 @@ AdaptiveFCResult run_adaptive_fc(
             log<LOG_ERROR>(L"%1% || merge-bank: required mesh artifact %2% not found. "
                            L"Run --mode merge-mesh (or build-mesh) first.")
                 % __func__ % mesh_in.c_str();
+            res.ok = false;
             return res;
         }
 
@@ -432,10 +562,24 @@ AdaptiveFCResult run_adaptive_fc(
         };
 
         int64_t total_carried = 0, total_dups = 0, total_dropped = 0;
+        bool first_input = true;
         for (const auto &path : acfg.merge_inputs) {
             PEBank in;
             if (!load_bank(in, path)) {
                 log<LOG_ERROR>(L"%1% || merge-bank: failed to load %2%.") % __func__ % path.c_str();
+                res.ok = false;
+                return res;
+            }
+            // Profile banks pool only with banks built for the same dataset and setup.
+            if (first_input) {
+                bank.manifest = in.manifest;
+                if (bank.manifest.profiled()) bank.cell_truth_phys.assign(mm.cells.size(), {});
+                first_input = false;
+            } else if (in.manifest != bank.manifest) {
+                log<LOG_ERROR>(L"%1% || merge-bank: %2% was built with a different profile manifest (profiled parameters, "
+                               L"dataset, config or metric) than %3%; refusing to merge.")
+                    % __func__ % path.c_str() % acfg.merge_inputs.front().c_str();
+                res.ok = false;
                 return res;
             }
             if (in.finest_nx != mm.finest_nx || in.finest_ny != mm.finest_ny
@@ -443,6 +587,7 @@ AdaptiveFCResult run_adaptive_fc(
                 || in.y_lo != mm.y_lo || in.y_hi != mm.y_hi) {
                 log<LOG_ERROR>(L"%1% || merge-bank: %2% has an incompatible grid footprint; refusing to merge.")
                     % __func__ % path.c_str();
+                res.ok = false;
                 return res;
             }
             int64_t carried = 0, dups = 0, dropped_pes = 0;
@@ -459,6 +604,19 @@ AdaptiveFCResult run_adaptive_fc(
                 }
                 ++matched_cells;
                 const int mi = it->second;
+                if (bank.manifest.profiled() && (size_t)c < in.cell_truth_phys.size() && !in.cell_truth_phys[(size_t)c].empty()) {
+                    auto &truth = bank.cell_truth_phys[(size_t)mi];
+                    if (truth.empty()) {
+                        truth = in.cell_truth_phys[(size_t)c];
+                    } else if (truth != in.cell_truth_phys[(size_t)c]) {
+                        log<LOG_ERROR>(L"%1% || merge-bank: cell (%2%,%3%,step %4%) has a different toy truth in %5%; "
+                                       L"its PEs were thrown elsewhere. Build the truths once (init-bank --n-pe-min 0) and "
+                                       L"share that bank with every job.")
+                            % __func__ % in.cell_i_bl[(size_t)c] % in.cell_j_bl[(size_t)c] % in.cell_step[(size_t)c] % path.c_str();
+                        res.ok = false;
+                        return res;
+                    }
+                }
                 for (const auto &pe : pes) {
                     if (seen[(size_t)mi].insert(pe_key(pe)).second) {
                         bank.cell_pes[(size_t)mi].push_back(pe);
@@ -522,6 +680,7 @@ AdaptiveFCResult run_adaptive_fc(
     if (acfg.mode == AdaptiveFCMode::MergeBrazil) {
         if (acfg.merge_inputs.empty()) {
             log<LOG_ERROR>(L"%1% || merge-brazil: need >= 1 --merge-input brazil archives.") % __func__;
+            res.ok = false;
             return res;
         }
         const std::string bank_in    = acfg.output_tag + "_bank.bin";
@@ -531,6 +690,7 @@ AdaptiveFCResult run_adaptive_fc(
             log<LOG_ERROR>(L"%1% || merge-brazil: failed to load %2%. "
                            L"Run --mode merge-bank / init-bank (same -o) first.")
                 % __func__ % bank_in.c_str();
+            res.ok = false;
             return res;
         }
         const int n_cells = bank.n_cells;
@@ -553,6 +713,7 @@ AdaptiveFCResult run_adaptive_fc(
         merged.finest_nx = bank.finest_nx;
         merged.finest_ny = bank.finest_ny;
         merged.n_cells   = n_cells;
+        merged.manifest  = bank.manifest;
 
         // Dedupe: hash -> accepted throw indices with that hash; exact byte
         // compare on match so a hash collision can never drop a real throw.
@@ -578,6 +739,7 @@ AdaptiveFCResult run_adaptive_fc(
             BrazilArchive in;
             if (!load_brazil_archive(in, path)) {
                 log<LOG_ERROR>(L"%1% || merge-brazil: failed to load %2%.") % __func__ % path.c_str();
+                res.ok = false;
                 return res;
             }
             if (in.finest_nx != bank.finest_nx || in.finest_ny != bank.finest_ny
@@ -589,6 +751,13 @@ AdaptiveFCResult run_adaptive_fc(
                     % __func__ % path.c_str()
                     % in.finest_nx % in.finest_ny % in.n_cells
                     % bank.finest_nx % bank.finest_ny % n_cells;
+                res.ok = false;
+                return res;
+            }
+            if (in.manifest != bank.manifest) {
+                log<LOG_ERROR>(L"%1% || merge-brazil: %2% was thrown against a bank with a different profile manifest; refusing to merge.")
+                    % __func__ % path.c_str();
+                res.ok = false;
                 return res;
             }
             int64_t carried = 0, dups = 0;
@@ -597,6 +766,7 @@ AdaptiveFCResult run_adaptive_fc(
                 if ((int)d.size() != n_cells) {
                     log<LOG_ERROR>(L"%1% || merge-brazil: %2% throw %3% has %4% cells (expected %5%) -- corrupt archive; refusing to merge.")
                         % __func__ % path.c_str() % (int)t % (int)d.size() % n_cells;
+                    res.ok = false;
                     return res;
                 }
                 const float g = in.per_throw_global_chi2[t];
@@ -609,6 +779,8 @@ AdaptiveFCResult run_adaptive_fc(
                 bucket.push_back(merged.per_throw_dchi2.size());
                 merged.per_throw_global_chi2.push_back(g);
                 merged.per_throw_dchi2.push_back(d);
+                if (merged.manifest.profiled())
+                    merged.per_throw_phys_hat.push_back(t < in.per_throw_phys_hat.size() ? in.per_throw_phys_hat[t] : std::vector<float>{});
                 ++carried;
             }
             log<LOG_INFO>(L"%1% || merge-brazil input %2%: throws carried=%3%, duplicate dropped=%4%.")
@@ -623,6 +795,7 @@ AdaptiveFCResult run_adaptive_fc(
         const int n_total = (int)merged.per_throw_dchi2.size();
         if (n_total == 0) {
             log<LOG_ERROR>(L"%1% || merge-brazil: no throws survived the merge; nothing written.") % __func__;
+            res.ok = false;
             return res;
         }
 
@@ -683,6 +856,7 @@ AdaptiveFCResult run_adaptive_fc(
         }
         log<LOG_INFO>(L"%1% || print-mesh: plotted %2% / %3% mesh file(s).")
             % __func__ % n_plotted % (int)mesh_files.size();
+        if (n_plotted == 0) res.ok = false;
         return res;
     }
 
@@ -693,6 +867,7 @@ AdaptiveFCResult run_adaptive_fc(
         PEBank bank;
         if (!load_bank(bank, bank_in)) {
             log<LOG_ERROR>(L"%1% || print-bank: failed to load %2%.") % __func__ % bank_in.c_str();
+            res.ok = false;
             return res;
         }
 
@@ -710,6 +885,11 @@ AdaptiveFCResult run_adaptive_fc(
         const std::string per_cell_pdf = acfg.output_tag + "_bank_per_cell.pdf";
         plot_pebank_pes_multipage_pdf(bank, per_cell_pdf, xlabel, ylabel,
                                       xlog_axis, ylog_axis);
+        if (bank.manifest.profiled()) {
+            log<LOG_INFO>(L"%1% || print-bank: profile bank (NOvA construction), %2% profiled parameter(s), dataset fingerprint %3%.")
+                % __func__ % (int)bank.manifest.profile_idx.size() % bank.manifest.data_fp;
+            plot_profiled_maps(bank, bank.cell_truth_phys, "Toy truth", "bank_truth");
+        }
 
         // Populate result for the caller (no PE generation in this mode).
         res.bank_path        = bank_in;
@@ -732,6 +912,7 @@ AdaptiveFCResult run_adaptive_fc(
         PEBank bank;
         if (!load_bank(bank, bank_in)) {
             log<LOG_ERROR>(L"%1% || asimov: failed to load %2%.") % __func__ % bank_in.c_str();
+            res.ok = false;
             return res;
         }
 
@@ -745,6 +926,23 @@ AdaptiveFCResult run_adaptive_fc(
         const PROdata &asimov_data = data;
         log<LOG_INFO>(L"%1% || asimov: classifying %2% cells against bank %3%; data nbins=%4%.")
             % __func__ % bank.n_cells % bank_in.c_str() % (int)asimov_data.Spec().size();
+        if (!check_manifest(bank.manifest, bank_in)) {
+            res.ok = false;
+            return res;
+        }
+        // A profile bank's toys sit at the conditional best fit to ONE dataset.
+        if (bank.manifest.profiled() && DataFingerprint(asimov_data) != bank.manifest.data_fp) {
+            if (!acfg.force) {
+                log<LOG_ERROR>(L"%1% || asimov: %2% is a profile bank built for a different dataset; its toy truths do not "
+                               L"apply to this one. Build a bank for this dataset (init-bank with the same data options), "
+                               L"or pass --force.")
+                    % __func__ % bank_in.c_str();
+                res.ok = false;
+                return res;
+            }
+            log<LOG_WARNING>(L"%1% || asimov: classifying a dataset other than the bank's (--force).") % __func__;
+        }
+        const std::vector<uint64_t> cell_keys = bank_cell_keys(bank);
 
         // Outer throws bar wasn't displayed in asimov mode (see PROfit.cxx),
         // so finish_all(false) — no display refresh on a never-shown bar.
@@ -756,12 +954,26 @@ AdaptiveFCResult run_adaptive_fc(
         asimov_progress.start_display_thread();
 
         AsimovObs obs = compute_asimov_obs(
-            config, prop, systs, *model, fitconfig, asimov_data,
+            config, prop, systs, *model, bank.manifest.profiled() ? acfg.data_fitconfig : fitconfig, asimov_data,
             acfg.chi2, acfg.binned, acfg.shape_only, xaxis_idx, yaxis_idx,
             bank.cell_center_x, bank.cell_center_y,
-            proseed, nthreads, asimov_progress, 0);
+            proseed, nthreads, asimov_progress, 0,
+            spec, &cell_keys, &bank.cell_truth_phys, /*snap_to_default=*/ true);
 
         asimov_progress.finish_all(true);
+        if (bank.manifest.profiled()) {
+            // On the bank's own dataset these are the bank truths again.
+            for (int i : bank.manifest.profile_idx) {
+                float max_diff = 0.0f;
+                for (int c = 0; c < bank.n_cells; ++c) {
+                    if (bank.cell_truth_phys[(size_t)c].size() <= (size_t)i) continue;
+                    max_diff = std::max(max_diff, std::abs(obs.cell_phys_hat[(size_t)c][(size_t)i] - bank.cell_truth_phys[(size_t)c][(size_t)i]));
+                }
+                log<LOG_INFO>(L"%1% || asimov: max |conditional best fit - bank truth| of %2% over cells: %3%.")
+                    % __func__ % model->param_names[(size_t)i].c_str() % max_diff;
+            }
+            plot_profiled_maps(bank, obs.cell_phys_hat, "Conditional best fit", "asimov_zhat");
+        }
 
         // Classify against the bank for every requested CL.
         const int min_pes_for_decision = std::max(10, acfg.n_pe_min);
@@ -798,7 +1010,7 @@ AdaptiveFCResult run_adaptive_fc(
         // ROOT artifact: contour TGraphs + per-cell TTree for downstream use.
         const std::string asimov_root = acfg.output_tag + "_asimov_contours.root";
         save_asimov_root(bank, obs, acfg.cl_targets, verdicts, asimov_root,
-                         xlog_axis, ylog_axis);
+                         xlog_axis, ylog_axis, profiled_columns(bank.manifest));
 
         // Populate result.
         res.bank_path     = bank_in;
@@ -842,8 +1054,23 @@ AdaptiveFCResult run_adaptive_fc(
         PEBank bank;
         if (!load_bank(bank, bank_in)) {
             log<LOG_ERROR>(L"%1% || brazil: failed to load %2%.") % __func__ % bank_in.c_str();
+            res.ok = false;
             return res;
         }
+
+        if (!check_manifest(bank.manifest, bank_in)) {
+            res.ok = false;
+            return res;
+        }
+        const bool profiled = bank.manifest.profiled();
+        if (profiled) {
+            log<LOG_WARNING>(L"%1% || brazil: profile bank. Every throw is classified against toys thrown at the bank "
+                             L"dataset's conditional best fit, not at its own: the NOvA-style approximate band.") % __func__;
+            if (DataFingerprint(data) != bank.manifest.data_fp)
+                log<LOG_WARNING>(L"%1% || brazil: the bank was built for a different dataset than this run's; its toy truths "
+                                 L"are that dataset's conditional best fits.") % __func__;
+        }
+        const std::vector<uint64_t> cell_keys = bank_cell_keys(bank);
 
         const int n_new    = std::max(1, acfg.n_brazil_throws);
         const int n_cells  = bank.n_cells;
@@ -855,6 +1082,7 @@ AdaptiveFCResult run_adaptive_fc(
         arc.finest_nx = bank.finest_nx;
         arc.finest_ny = bank.finest_ny;
         arc.n_cells   = n_cells;
+        arc.manifest  = bank.manifest;
         {
             std::ifstream test(brazil_bin, std::ios::binary);
             if (test.is_open()) {
@@ -863,9 +1091,11 @@ AdaptiveFCResult run_adaptive_fc(
                 if (load_brazil_archive(existing, brazil_bin)
                     && existing.n_cells   == n_cells
                     && existing.finest_nx == bank.finest_nx
-                    && existing.finest_ny == bank.finest_ny) {
+                    && existing.finest_ny == bank.finest_ny
+                    && existing.manifest  == bank.manifest) {
                     arc.per_throw_global_chi2 = std::move(existing.per_throw_global_chi2);
                     arc.per_throw_dchi2       = std::move(existing.per_throw_dchi2);
+                    arc.per_throw_phys_hat    = std::move(existing.per_throw_phys_hat);
                     log<LOG_INFO>(L"%1% || brazil: loaded existing archive %2% (%3% prior throws).")
                         % __func__ % brazil_bin.c_str() % (int)arc.per_throw_dchi2.size();
                 } else {
@@ -884,6 +1114,7 @@ AdaptiveFCResult run_adaptive_fc(
         // Reserve room for new throws so we can index by absolute throw_idx.
         arc.per_throw_global_chi2.resize((size_t)n_total, 0.0f);
         arc.per_throw_dchi2.resize((size_t)n_total);
+        if (profiled) arc.per_throw_phys_hat.resize((size_t)n_total);
         for (int t = n_existing; t < n_total; ++t) {
             arc.per_throw_dchi2[(size_t)t].assign((size_t)n_cells, 0.0f);
         }
@@ -913,11 +1144,18 @@ AdaptiveFCResult run_adaptive_fc(
                 config, prop, systs, *model, fitconfig, throw_data,
                 acfg.chi2, acfg.binned, acfg.shape_only, xaxis_idx, yaxis_idx,
                 bank.cell_center_x, bank.cell_center_y,
-                proseed, nthreads, silent_progress, 0);
+                proseed, nthreads, silent_progress, 0,
+                spec, &cell_keys, &bank.cell_truth_phys);
 
             arc.per_throw_global_chi2[(size_t)t_abs] = obs.chi2_osc_global;
             for (int c = 0; c < n_cells; ++c) {
                 arc.per_throw_dchi2[(size_t)t_abs][(size_t)c] = obs.dchi2_obs[(size_t)c];
+            }
+            if (profiled) {
+                auto &phat = arc.per_throw_phys_hat[(size_t)t_abs];
+                for (int c = 0; c < n_cells; ++c)
+                    for (int i : bank.manifest.profile_idx)
+                        phat.push_back(obs.cell_phys_hat[(size_t)c][(size_t)i]);
             }
 
             log<LOG_INFO>(L"%1% || brazil throw %2%/%3% (abs=%4%): chi2_osc_global=%5%.")
@@ -979,10 +1217,12 @@ AdaptiveFCResult run_adaptive_fc(
         PEBank bank;
         if (!load_bank(bank, bank_in)) {
             log<LOG_ERROR>(L"%1% || brazil-cleanup: failed to load %2%.") % __func__ % bank_in.c_str();
+            res.ok = false;
             return res;
         }
         if (acfg.cleanup_quantiles.empty()) {
             log<LOG_ERROR>(L"%1% || brazil-cleanup: empty --cleanup-quantiles.") % __func__;
+            res.ok = false;
             return res;
         }
         log<LOG_INFO>(L"%1% || brazil-cleanup: bank=%2% (%3% cells, grid geometry), contours from %4%, "
@@ -1003,6 +1243,7 @@ AdaptiveFCResult run_adaptive_fc(
                            L"(need brazil_cl_<CL>_<q>_seg* for the requested --cl / --cleanup-quantiles). "
                            L"Run --mode brazil (same -o) first, and check the CLs match.")
                 % __func__ % brazil_root.c_str();
+            res.ok = false;
             return res;
         }
         log<LOG_INFO>(L"%1% || brazil-cleanup: %2% saved contour curve(s) used.")
@@ -1077,6 +1318,7 @@ AdaptiveFCResult run_adaptive_fc(
             log<LOG_ERROR>(L"%1% || init-bank: required mesh artifact %2% not found. "
                            L"Run --mode build-mesh first.") % __func__ % mesh_path.c_str();
             progress.finish_all(false);
+            res.ok = false;
             return res;
         }
         log<LOG_INFO>(L"%1% || init-bank: loaded meta-mesh from %2% (cells=%3%).")
@@ -1124,6 +1366,7 @@ AdaptiveFCResult run_adaptive_fc(
             bank.cell_step.push_back(c.step);
             bank.cell_level.push_back(c.level);
         }
+        bank.manifest = run_manifest;
 
         // Top-up: try to carry forward an existing <tag>_bank.bin if its mesh
         // footprint matches. Each cell's PE list is preserved; schedule_pes
@@ -1138,7 +1381,17 @@ AdaptiveFCResult run_adaptive_fc(
                     && existing.finest_nx == bank.finest_nx
                     && existing.finest_ny == bank.finest_ny
                     && existing.max_levels == bank.max_levels) {
+                    // Never mix toys thrown at different truths into one cell.
+                    if (existing.manifest != bank.manifest) {
+                        log<LOG_ERROR>(L"%1% || init-bank: existing %2% was built with a different profile manifest "
+                                       L"(profiled parameters, dataset, config or metric). Use another -o, or delete it.")
+                            % __func__ % bank_path.c_str();
+                        progress.finish_all(false);
+                        res.ok = false;
+                        return res;
+                    }
                     bank.cell_pes = std::move(existing.cell_pes);
+                    bank.cell_truth_phys = std::move(existing.cell_truth_phys);
                     int64_t existing_total = 0;
                     for (const auto &v : bank.cell_pes) existing_total += (int64_t)v.size();
                     log<LOG_INFO>(L"%1% || init-bank top-up: loaded existing bank %2% (%3% PEs / %4% cells). Generating additional PEs to meet criterion.")
@@ -1148,6 +1401,48 @@ AdaptiveFCResult run_adaptive_fc(
                         % __func__ % bank_path.c_str();
                 }
             }
+        }
+
+        // Toy truths. Legacy: the pins with the axes at the cell. Profile bank:
+        // the profiled parameters at their conditional best fit to this run's
+        // dataset (NOvA construction), computed once per cell and kept for good.
+        std::vector<std::vector<float>> cell_truth =
+            pinned_cell_truths(spec, xaxis_idx, yaxis_idx, cell_x_model, cell_y_model);
+        if (bank.manifest.profiled()) {
+            if ((int)bank.cell_truth_phys.size() != bank.n_cells) bank.cell_truth_phys.assign((size_t)bank.n_cells, {});
+            std::vector<int> missing;
+            for (int c = 0; c < bank.n_cells; ++c)
+                if (bank.cell_truth_phys[(size_t)c].empty()) missing.push_back(c);
+            if (!missing.empty()) {
+                std::vector<float> mx, my;
+                std::vector<uint64_t> mkeys;
+                for (int c : missing) {
+                    mx.push_back(cell_x_model[(size_t)c]);
+                    my.push_back(cell_y_model[(size_t)c]);
+                    mkeys.push_back(cell_footprint_key(bank.cell_i_bl[(size_t)c], bank.cell_j_bl[(size_t)c], bank.cell_step[(size_t)c]));
+                }
+                log<LOG_INFO>(L"%1% || init-bank: profile bank; fitting the dataset at %2% cells for their toy truths.")
+                    % __func__ % (int)missing.size();
+                std::vector<std::pair<int, std::string>> tcfg{{(int)missing.size(), "AFC toy truths"}};
+                MultiPROgressBar truth_progress(tcfg);
+                AsimovObs tobs = compute_asimov_obs(
+                    config, prop, systs, *model, acfg.data_fitconfig, data,
+                    acfg.chi2, acfg.binned, acfg.shape_only, xaxis_idx, yaxis_idx,
+                    mx, my, proseed, nthreads, truth_progress, 0,
+                    spec, &mkeys, nullptr, /*snap_to_default=*/ true);
+                truth_progress.finish_all(false);
+                for (size_t k = 0; k < missing.size() && k < tobs.cell_phys_hat.size(); ++k)
+                    bank.cell_truth_phys[(size_t)missing[k]] = tobs.cell_phys_hat[k];
+            }
+            for (const auto &t : bank.cell_truth_phys) {
+                if (t.size() != model->nparams) {
+                    log<LOG_ERROR>(L"%1% || init-bank: the toy-truth fits failed for some cells (see errors above).") % __func__;
+                    progress.finish_all(false);
+                    res.ok = false;
+                    return res;
+                }
+            }
+            cell_truth = bank.cell_truth_phys;
         }
 
         // Stop the throws progress bar (never displayed in init-bank). Launch a
@@ -1187,8 +1482,7 @@ AdaptiveFCResult run_adaptive_fc(
         cells_progress.start_display_thread();
 
         schedule_pes(acfg, config, prop, systs, *model, fitconfig, proseed, frac_root,
-                     xaxis_idx, yaxis_idx, cell_x_model, cell_y_model,
-                     bank, nthreads, cells_progress, 0, res);
+                     spec, cell_truth, bank, nthreads, cells_progress, 0, res);
 
         cells_progress.finish_all(true);
 
@@ -1211,6 +1505,8 @@ AdaptiveFCResult run_adaptive_fc(
             const std::string per_cell_pdf = acfg.output_tag + "_bank_per_cell.pdf";
             plot_pebank_pes_multipage_pdf(bank, per_cell_pdf, xlabel, ylabel,
                                           xlog_axis, ylog_axis);
+            if (bank.manifest.profiled())
+                plot_profiled_maps(bank, bank.cell_truth_phys, "Toy truth", "bank_truth");
         }
 
         return res;
@@ -1220,6 +1516,7 @@ AdaptiveFCResult run_adaptive_fc(
     log<LOG_ERROR>(L"%1% || mode '%2%' is not yet implemented.")
         % __func__ % (int)acfg.mode;
     progress.finish_all(false);
+    res.ok = false;
     return res;
 }
 

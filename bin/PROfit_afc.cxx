@@ -1,6 +1,6 @@
 #include "PROfit_common.h"
 
-void run_afc(const PROconfig &config, const PROpeller &prop, PROmetric &metric, const PROdata &data, const Eigen::VectorXf &fakeDataParams, const PROfitterConfig &scanFitConfig, const PROpt &options, PROseed &myseed) {
+void run_afc(const PROconfig &config, const PROpeller &prop, PROmetric &metric, const PROdata &data, const Eigen::VectorXf &fakeDataParams, const PROfitterConfig &fitConfig, const PROfitterConfig &scanFitConfig, const PROpt &options, PROseed &myseed) {
     PROfit::AdaptiveFCConfig acfg;
     if      (options.afc_mode_str == "build-mesh") acfg.mode = PROfit::AdaptiveFCMode::BuildMesh;
     else if (options.afc_mode_str == "init-bank")  acfg.mode = PROfit::AdaptiveFCMode::InitBank;
@@ -34,6 +34,14 @@ void run_afc(const PROconfig &config, const PROpeller &prop, PROmetric &metric, 
     acfg.stat_only_throws = options.afc_stat_only_throws;
     acfg.xvar = options.afc_xvar;
     acfg.yvar = options.afc_yvar;
+    acfg.xvar_explicit = options.afc_command->get_option("--xvar")->count() > 0;
+    acfg.yvar_explicit = options.afc_command->get_option("--yvar")->count() > 0;
+    acfg.phys_lb = metric.GetModel().lb;
+    acfg.phys_ub = metric.GetModel().ub;
+    acfg.legacy_nuisance_pin = options.afc_legacy_nuisance_pin;
+    acfg.profile_params = options.afc_profile_params;
+    acfg.force = options.force;
+    acfg.data_fitconfig = fitConfig;
     acfg.x_lo = options.afc_xlo; acfg.x_hi = options.afc_xhi;
     acfg.y_lo = options.afc_ylo; acfg.y_hi = options.afc_yhi;
     acfg.logx = options.afc_logx; acfg.logy = options.afc_logy;
@@ -120,4 +128,9 @@ void run_afc(const PROconfig &config, const PROpeller &prop, PROmetric &metric, 
         % (int64_t)ares.total_pes_generated % ares.mean_pes_per_cell
         % ares.cells_topped_up % ares.cells_hit_n_pe_max;
 
+    if (!ares.ok) {
+        log<LOG_ERROR>(L"%1% || fc-adaptive --mode %2% failed (see errors above).")
+            % __func__ % options.afc_mode_str.c_str();
+        exit(EXIT_FAILURE);
+    }
 }

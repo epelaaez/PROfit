@@ -666,7 +666,7 @@ dataset from the command line:
 | `--inject-systs Flux1 1.0 DetSys2 -2.0` | shift spline systematics (in σ) into the fake data |
 | `--inject-cv` / `--inject-systs-cv` | same, but shift the *prediction* CV instead of the data |
 | `--poisson-throw` | Poisson-fluctuate the fake data |
-| `--pseudo-experiment` | full FC-style throw: spline pulls + covariance Cholesky shift + Poisson stats (combines with `--inject`) |
+| `--pseudo-experiment` | full FC-style throw: spline pulls + covariance shift at the toy's own prediction + Poisson stats (combines with `--inject`) |
 | `-d/--data file` | load real data from a separate file/XML (plot subcommand) |
 | `--use-fake-data` | ignore any embedded/external data and force MC fake data |
 | `--scale ND 0.5` | scale POT of subchannels matching a pattern |
@@ -1482,9 +1482,12 @@ for FC you risk the global best fit not lying on your grid at all — which
 invalidates the calibration. That's why `PROmodel.h` carries re-parameterized
 3+1 variants (`SBL_3+1_angles` and headline-amplitude parameterizations like
 `SBL_3+1_sinsq2thmue`): the plotted quantity becomes a direct 2D scan axis and
-PROfit's minimizer profiles smoothly over the leftover mixing freedom at each
-point. A full 3D scan is still the right tool for *understanding* 3+1 — but
-if the end goal is a contour in an effective angle, fit in that angle.
+`surface` profiles smoothly over the leftover mixing freedom at each point. A
+full 3D scan is still the right tool for *understanding* 3+1 — but if the end
+goal is a contour in an effective angle, fit in that angle. For an
+FC-calibrated contour the third parameter must be profiled explicitly
+(`--profile-params`): see
+[Three physics parameters: profile FC](#three-physics-parameters-profile-fc).
 
 ---
 
@@ -1505,14 +1508,22 @@ Options:
   --pval                      Get FC pvalue
   --reuse                     Recompute the p-values from an existing
                               <tag>_<out>_FC.root instead of throwing universes
+  --stat-only-throws          Poisson fluctuations only (no systematic throws)
+  --syst-only-throws          Systematic throws only (no Poisson fluctuation)
+  --profile-params TEXT ...   Physics parameters to profile at the tested point
+  --profile-truth TEXT [data] Toy truth of the profiled parameters: data | inject
+  --fc-point TEXT ...         Tested point, if different from the -i point
 ```
 
-At the injected point (`-i`, or CV if none), `fc` throws `-u` universes —
-each one a full pseudo-experiment: Gaussian spline pulls sampled from the
-priors, covariance-systematic shifts via Cholesky decomposition, and Poisson
-statistics — and for each universe runs both a nuisance-only fit and a free
-fit. The distribution of `Δχ² = χ²(fixed) - χ²(free)` is your empirical
-critical-value distribution at that point.
+At the tested point (`-i`, or CV if none; `--fc-point` overrides it), `fc`
+throws `-u` universes — each one a full pseudo-experiment: Gaussian spline
+pulls sampled from the priors, a covariance-systematic shift thrown at the
+universe's own prediction, and Poisson statistics — and for each universe
+runs both a fit at the tested point (nuisances only) and a free fit. The
+distribution of `Δχ² = χ²(fixed) - χ²(free)` is your empirical
+critical-value distribution at that point. The log prints its 68.3/90/95.4%
+quantiles; `--pval` compares the data's own Δχ² at the tested point against
+them.
 
 ```bash
 PROfit -x tutorial.xml -t TUT -o fc1 --seed 405 -n 8 \
@@ -1521,7 +1532,9 @@ PROfit -x tutorial.xml -t TUT -o fc1 --seed 405 -n 8 \
 
 Output is `TUT_fc1_FC.root` containing a TTree with, per universe, the two
 χ² values and the best-fit parameters — from which you extract the
-90%/95% quantiles and compare to the Wilks values. This is the honest but
+90%/95% quantiles and compare to the Wilks values — plus an `fc_meta` tree
+(also written as `TUT_fc1_FC_meta.txt`) recording the tested point, fixed and
+profiled parameters, metric, model, config hash, seed and throw mode. This is the honest but
 brute-force approach: to calibrate a whole *contour* you would repeat it at
 every grid point, which is exactly what `fc-adaptive` automates.
 
@@ -1531,18 +1544,17 @@ every grid point, which is exactly what `fc-adaptive` automates.
 re-runs only the observed fits on the (real or injected) data plus the
 empirical p-value calculation — no universes are thrown, so a `--gof`/
 `--pval` re-evaluation against an expensive stored Δχ² distribution takes
-minutes instead of days. Rules of the road, all of which are on you (the
-file carries **no** provenance metadata — nothing checks them):
+minutes instead of days. Rules of the road:
 
-* the reused file must come from the **same XML, injected point, χ² metric
-  (`-c`), and systematic selection** as the current invocation — a mismatch
-  silently compares an observed Δχ² against the wrong null distribution;
+* the file's `fc_meta` must match this run's tested point, fixed and
+  profiled parameters, toy truth, χ² metric, model and config hash, or the
+  run refuses (`--force` overrides). Files written before `fc_meta` existed
+  are accepted with a warning — for those the match is on you. The
+  systematic selection is not recorded: keep it the same;
 * `-u/--universes` is ignored under `--reuse` (the sample size is the file's
   entry count; there is no top-up mechanism);
-* **back up the FC.root first**: the run rewrites the file (and its CSV) in
-  place at the end, so an interrupted run can destroy the stored
-  distribution, and `--gof --reuse` on a `--pval`-capable file drops the
-  stored osc-fit nuisance record;
+* the reused FC.root and its CSV are left untouched (only fresh throws are
+  ever written);
 * `--pval --reuse` on a file produced with only `--gof` is refused (the
   needed branches are absent) — it falls back to fresh throws with a
   warning if the file is missing entirely;
@@ -1594,6 +1606,80 @@ Key knobs: `--p-thresh` (fraction of prepass throws that must refine a cell
 for it to enter the meta-mesh), `--baseline-level` (levels always kept),
 `--cl` (target CLs), `--update-layer` / `--update-only-layer` (target which
 refinement layers get new PEs on an `init-bank` re-run), `--stat-only-throws`.
+
+### Three physics parameters: profile FC
+
+With a 3+1 model you plot two parameters and the third, *z*, is a nuisance
+(ξ in `SBL_3+1_sinsq2thmue`, `sB` in `SBL_3+1_sinsq2thmumu`, `sinsqth24` in
+`SBL_3+1_sinsq2thee`). Without further options `fc` pins all three at the
+tested point, which tests the full 3D point: its Δχ² has three degrees of
+freedom (Wilks 6.25 at 90%), and its contours are not 2D contours. For a 2D
+plane, profile z instead (the NOvA "profile construction", also used by
+MINOS+ and MicroBooNE):
+
+* the test statistic minimises over z at the tested point:
+  `t = min_z χ²(μ, z) − χ²_min`, asymptotically 2 dof (4.61 at 90%);
+* the toys put z at its **conditional best fit to the analysed data** at
+  that point, ẑ(μ); the splines are thrown from their priors as before
+  (so this is NOvA's "hybrid": profile for physics nuisances,
+  Highland–Cousins for systematics).
+
+Here `tutorial_3p1.xml` is the tutorial config with
+`<model tag="SBL_3+1_sinsq2thmue">` and every `<branch>`'s `model_rule` mapped
+to the 3+1 rules (1 = νμ→νμ, 2 = νμ→νe, 3 = νe→νe; see the
+[model reference](#sbl_31_sinsq2thee--sbl_31_sinsq2thmumu--sbl_31_sinsq2thmue-legacy-31_3a--31_3b--31_3c--headline-amplitude-31-variants));
+`tests/run_short_tests.sh` builds one this way from the fake SBN config.
+
+```bash
+# one point, z = xi profiled, toy truth from the data's conditional best fit
+PROfit -x tutorial_3p1.xml -t T3 -o pfc --seed 405 -n 8 --use-fake-data \
+    fc -u 500 --profile-params xi --pval --fc-point sinsq2thmue 0.01 dmsq 1
+```
+
+`--profile-truth inject` throws the toys at the `-i` value of z instead (the
+FC distribution at a fixed true z). If the data cannot tell z values apart
+(pinning z at its default costs < 0.01 in χ²), ẑ is snapped to the default and
+the log says so. Per toy, `cbest_<z>` records where the constrained fit put z.
+`--fix xi` pins z instead: an FC slice at that value of z.
+
+The adaptive pipeline takes the same flag, and every stage must get it:
+
+```bash
+AFC="fc-adaptive --xvar sinsq2thmue --yvar dmsq --xlo 1e-4 --xhi 0.3 --profile-params xi"
+for m in build-mesh init-bank asimov brazil; do
+  PROfit -x tutorial_3p1.xml -t T3 -o pafc --seed 405 -n 8 --use-fake-data $AFC --mode $m
+done
+```
+
+What changes with a profile bank:
+
+* `init-bank` first fits the dataset at every cell (`<tag>_bank_truth_<z>.pdf`
+  maps ẑ) and throws that cell's toys there. The bank is therefore tied to
+  **one dataset**: `asimov` refuses data whose fingerprint differs from the
+  bank's (`--force` overrides), and the real data needs a bank of its own,
+  built with the real-data options.
+* `brazil` classifies every throw against the bank built at the Asimov's
+  ẑ, not at the throw's own: the approximate, NOvA-style band.
+* Banks are written as version 3 (v2 payload plus profile manifest, per-cell
+  truths and per-PE ẑ) and archives as version 2; older binaries cannot read
+  them. The manifest (profiled parameters, dataset, config, metric) must match
+  for top-up, `merge-bank` and `merge-brazil`.
+* Toy truths depend only on the cell footprint and the dataset, not on
+  `--seed` or `-n`, so grid jobs with distinct seeds produce mergeable banks.
+  Compute them once with `init-bank --n-pe-min 0` and ship that bank to the
+  jobs if you want to skip the per-job truth fits.
+* Without either `--profile-params` or `--fix`, a non-axis physics parameter is
+  refused for models with more than two physics parameters (old banks pinned
+  it at its default in the bank but profiled it in the prepass). Pass
+  `--legacy-nuisance-pin` to reproduce those banks.
+
+Two cautions. A profiled 3+1 parameter can have near-degenerate branches
+(|U_e4|² below or above ½ give the same νe-disappearance amplitude), so ẑ can
+jump between neighbouring cells, and two fitters can pick different branches
+where they differ by ~0.01 in χ². Each profiled fit is seeded in every basin
+of a coarse scan of z, but a very narrow basin against a unitarity wall can
+still be missed. And every toy is dearer: the constrained fit now has a free
+physics parameter, about 4x the pinned cost.
 
 ### Merging meshes and banks: `merge-mesh` and `merge-bank`
 

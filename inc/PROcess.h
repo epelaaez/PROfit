@@ -14,7 +14,9 @@
 #include <Eigen/Eigen>
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <random>
+#include <string>
 
 // PROfit include 
 #include "PROconfig.h"
@@ -210,6 +212,16 @@ namespace PROfit{
      * @return The thrown pull (truncated Gaussian, or uniform for uniform-prior splines).
      */
     float ThrowRestrictedSplinePull(const PROsyst &insyst, size_t i, std::mt19937 &rng, std::normal_distribution<float> &d);
+
+    /**
+     * @brief Index of a named parameter in the full [physics | splines] parameter vector.
+     * @details Matches a model parameter name, then a spline name, then a spline
+     * plotname. Spline indices are offset by model.nparams, so the result can pin or
+     * bound the parameter directly. Shared by the surface and fc-adaptive axis lookups
+     * and the --profile-params resolution.
+     * @return The index, or std::nullopt if nothing matches.
+     */
+    std::optional<size_t> ResolveParamIndex(const std::string &name, const PROmodel &model, const PROsyst &systs, const PROconfig &config);
 
     /**
      * @brief Square root R of the fractional covariance (R R^T = fractional_covariance),

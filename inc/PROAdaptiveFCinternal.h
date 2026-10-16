@@ -20,8 +20,10 @@
 
 #include <Eigen/Eigen>
 
+#include <algorithm>
 #include <cstdint>
 #include <string>
+#include <tuple>
 #include <vector>
 
 namespace PROfit {
@@ -81,6 +83,30 @@ PROdata generate_pseudo_experiment_data(
 //  PE bank, asimov observables, classification (src/PROAdaptiveFCbank.cxx)
 // --------------------------------------------------------------------
 
+// Treatment of the physics parameters in every per-cell constrained fit: the
+// axes are pinned at the cell, profiled parameters float, every other
+// parameter is pinned at pin_val.
+struct NuisanceSpec {
+    std::vector<uint8_t> free_mask; ///< 1 = profiled: floats in the constrained fit.
+    Eigen::VectorXf pin_val;        ///< Pinned value of each physics parameter (--fix value, else default).
+    bool active() const { return std::find(free_mask.begin(), free_mask.end(), (uint8_t)1) != free_mask.end(); }
+};
+NuisanceSpec make_nuisance_spec(const PROmodel &model, const std::vector<int> &profile_idx);
+
+// Footprint of a mesh cell as one key; equal footprints are the same cell
+// centre in any mesh of the same finest grid.
+inline uint64_t cell_footprint_key(int i_bl, int j_bl, int step) {
+    return ((uint64_t)(uint32_t)i_bl << 42) | ((uint64_t)(uint32_t)j_bl << 21) | (uint64_t)(uint32_t)step;
+}
+
+// Toy truth (physics, model space) of every cell: the spec's pins with the two
+// axes at the cell centre. Profile banks replace the profiled entries with
+// their conditional best fit.
+std::vector<std::vector<float>> pinned_cell_truths(const NuisanceSpec &spec,
+                                                   size_t xaxis_idx, size_t yaxis_idx,
+                                                   const std::vector<float> &cell_x_model,
+                                                   const std::vector<float> &cell_y_model);
+
 void schedule_pes(const AdaptiveFCConfig &acfg,
                   const PROconfig &config,
                   const PROpeller &prop,
@@ -89,27 +115,34 @@ void schedule_pes(const AdaptiveFCConfig &acfg,
                   const PROfitterConfig &fitconfig,
                   PROseed &proseed,
                   const Eigen::MatrixXf &frac_root,
-                  size_t xaxis_idx, size_t yaxis_idx,
-                  const std::vector<float> &cell_x_model,
-                  const std::vector<float> &cell_y_model,
+                  const NuisanceSpec &spec,
+                  const std::vector<std::vector<float>> &cell_truth,
                   PEBank &bank_out,
                   int nthreads,
                   MultiPROgressBar &progress,
                   int progress_bar_idx,
                   AdaptiveFCResult &result_out);
 
-// Observed Δχ² on the asimov dataset at every meta-mesh cell.
+// Observed Δχ² on a dataset at every meta-mesh cell.
 //
 // The global (syst+osc) fit is computed once — physics floats freely, so the
 // result is μ-independent. Per-cell fits then re-pin the two scanned axes at
-// each cell center and run a syst-only fit (splines float; non-scanned
-// physics params pinned at model->default_val(i)).
+// each cell center and run the constrained fit: splines float, profiled
+// physics floats, every other physics param is pinned (NuisanceSpec).
 struct AsimovObs {
     float chi2_osc_global = 0.0f;        ///< Single global best fit.
-    std::vector<float> chi2_syst;        ///< Per-cell syst-only chi^2.
+    std::vector<float> chi2_syst;        ///< Per-cell constrained chi^2.
     std::vector<float> dchi2_obs;        ///< chi2_syst[c] - chi2_osc_global per cell.
+    /// Profile mode: physics best fit of each cell's constrained fit (model space).
+    std::vector<std::vector<float>> cell_phys_hat;
 };
 
+// Profile mode (spec.active()) needs cell_keys: each cell's fitter seed is
+// hashed from its footprint, so a cell's result does not depend on the thread
+// count or the mesh it sits in. cell_seed_phys (optional) seeds each cell's fit,
+// e.g. with the bank truths. snap_to_default: a profiled parameter the data
+// cannot see (pinning it at its default costs < 0.01 in chi^2) reports its
+// default rather than wherever the minimiser drifted; costs one more fit per cell.
 AsimovObs compute_asimov_obs(
     const PROconfig &config,
     const PROpeller &prop,
@@ -126,7 +159,11 @@ AsimovObs compute_asimov_obs(
     PROseed &proseed,
     int nthreads,
     MultiPROgressBar &progress,
-    int bar_idx);
+    int bar_idx,
+    const NuisanceSpec &spec,
+    const std::vector<uint64_t> *cell_keys = nullptr,
+    const std::vector<std::vector<float>> *cell_seed_phys = nullptr,
+    bool snap_to_default = false);
 
 // Per-cell, per-CL verdict map produced by classify_against_bank.
 struct CellVerdict {
@@ -213,13 +250,28 @@ void plot_asimov_contour_pdf(
     float truth_x_phys,
     float truth_y_phys);
 
+// profiled: (name, physics index, is_log10) of each profiled parameter; adds a
+// zhat_<name> column (physical units) to the cells tree. Empty = legacy layout.
 void save_asimov_root(
     const PEBank &bank,
     const AsimovObs &obs,
     const std::vector<float> &cl_targets,
     const std::vector<std::vector<CellVerdict>> &verdicts,
     const std::string &filename,
-    bool xlog_axis, bool ylog_axis);
+    bool xlog_axis, bool ylog_axis,
+    const std::vector<std::tuple<std::string, int, bool>> &profiled = {});
+
+// One value per bank cell painted over its footprint (colz + cell borders),
+// e.g. the per-cell toy truth or conditional best fit of a profiled parameter.
+void plot_cell_value_map_pdf(const PEBank &bank,
+                             const std::vector<float> &cell_values,
+                             const std::string &title,
+                             const std::string &filename,
+                             const std::string &xlabel,
+                             const std::string &ylabel,
+                             const std::string &zlabel,
+                             bool logx, bool logy,
+                             bool xlog_axis, bool ylog_axis);
 
 // Flag finest-grid bins ([i * H + j]) traversed by the SAVED Brazil quantile
 // contour TGraphs in <tag>_brazil.root — the exact curve objects the band

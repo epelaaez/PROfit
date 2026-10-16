@@ -193,6 +193,18 @@ PROpt::PROpt(int argc, char **argv) {
         fc_stat_only_throws_opt->excludes(fc_syst_only_throws_opt);
         fc_syst_only_throws_opt->excludes(fc_stat_only_throws_opt);
 
+        profc_command->add_option("--profile-params", fc_profile_params,
+            "Physics parameters to profile at the tested point (NOvA profile construction): they float "
+            "in the constrained fit, so the test statistic is the profiled delta chi^2 of the remaining "
+            "parameters. Example for a 3+1 appearance plane: --profile-params xi")->expected(-1)->excludes("--gof");
+        profc_command->add_option("--profile-truth", fc_profile_truth,
+            "Toy truth of the profiled parameters. data: their conditional best fit to the analysed dataset "
+            "at the tested point (profile construction). inject: the -i / --fc-point value (the FC "
+            "distribution at a fixed true value).")->check(CLI::IsMember({"data", "inject"}))->default_val("data");
+        profc_command->add_option("--fc-point", fc_point,
+            "Physics point to test, if different from the -i point that builds the fake data. "
+            "Example: --fc-point dmsq 2 sinsq2thmue 0.003")->expected(-1);
+
         // PROAdaptiveFC, adaptive FC pipeline. Slice 1: Wilks prepass + meta-mesh + diagnostics.
         afc_command = app.add_subcommand("fc-adaptive",
             "Adaptive Feldman-Cousins. Sub-modes (--mode): build-mesh, init-bank, "
@@ -242,6 +254,15 @@ PROpt::PROpt(int argc, char **argv) {
             "Levels strictly below baseline-level are always kept in the meta-mesh.")->default_val(2);
         afc_command->add_flag("--stat-only-throws", afc_stat_only_throws,
             "Use only statistical throws (no systematic throws).");
+        afc_command->add_option("--profile-params", afc_profile_params,
+            "Non-axis physics parameters to profile (NOvA profile construction): they float in every "
+            "constrained fit, and init-bank throws each cell's toys at their conditional best fit to the "
+            "analysed dataset, so the bank belongs to that dataset. Pass the same list to every stage. "
+            "Example for a 3+1 appearance plane: --profile-params xi")->expected(-1);
+        afc_command->add_flag("--legacy-nuisance-pin", afc_legacy_nuisance_pin,
+            "Physics parameters that are not axes: reproduce pre-v3.1 banks, which pin them at the "
+            "model default in the bank/asimov fits while the Wilks prepass profiles them. Without "
+            "this flag every non-axis physics parameter must be --fix'd.");
         afc_command->add_option("--xvar", afc_xvar, "Name of x-axis variable.")->default_str("sinsq2thmm");
         afc_command->add_option("--yvar", afc_yvar, "Name of y-axis variable.")->default_str("dmsq");
         afc_command->add_option("--xlo", afc_xlo, "Lower x-axis limit.")->default_val(1e-4f);

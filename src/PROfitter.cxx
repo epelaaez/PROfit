@@ -1125,3 +1125,63 @@ std::vector<std::pair<float, float>> PROfitter::findSignificantMinima(const std:
     return minima;
 }
 
+
+FitTiming &FitTiming::operator+=(const FitTiming &o) {
+    constrained_us += o.constrained_us;
+    free_us += o.free_us;
+    harmonic_us += o.harmonic_us;
+    rescue_us += o.rescue_us;
+    n += o.n;
+    n_rescue += o.n_rescue;
+    n_rescue_improved += o.n_rescue_improved;
+    return *this;
+}
+
+void FitTiming::log_summary(const std::string &who) const {
+    if(n == 0) return;
+    const double per = 1e-6 / (double)n;
+    log<LOG_INFO>(L"%1% || %2% timing over %3% pseudo-experiments (s each): constrained %4%, free %5%, harmonic %6%, rescue %7% (%8% rescues, %9% improved).")
+        % __func__ % who.c_str() % n
+        % (constrained_us * per) % (free_us * per) % (harmonic_us * per) % (rescue_us * per)
+        % n_rescue % n_rescue_improved;
+}
+
+uint64_t FitTiming::since_us(std::chrono::steady_clock::time_point t0) {
+    return (uint64_t)std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t0).count();
+}
+
+std::vector<Eigen::VectorXf> PROfit::ProfileLadderSeeds(PROmetric &metric, const Eigen::VectorXf &base,
+                                                        const Eigen::VectorXf &lb, const Eigen::VectorXf &ub,
+                                                        const std::vector<uint8_t> &free_mask,
+                                                        int n_scan, int n_keep) {
+    std::vector<Eigen::VectorXf> seeds;
+    Eigen::VectorXf grad = Eigen::VectorXf::Zero(base.size());
+    for(size_t j = 0; j < free_mask.size(); ++j) {
+        if(!free_mask[j]) continue;
+        float lo = lb((int)j), hi = ub((int)j);
+        if(!std::isfinite(lo) && !std::isfinite(hi)) { lo = -2.0f; hi = 2.0f; }
+        else if(!std::isfinite(lo)) lo = hi - 4.0f;
+        else if(!std::isfinite(hi)) hi = lo + 4.0f;
+        std::vector<float> xs((size_t)n_scan), fs((size_t)n_scan);
+        Eigen::VectorXf x = base;
+        for(int k = 0; k < n_scan; ++k) {
+            xs[(size_t)k] = lo + ((float)k + 0.5f) * (hi - lo) / (float)n_scan;
+            x((int)j) = xs[(size_t)k];
+            const float f = metric(x, grad, false);
+            fs[(size_t)k] = std::isfinite(f) ? f : std::numeric_limits<float>::infinity();
+        }
+        std::vector<int> minima;
+        for(int k = 0; k < n_scan; ++k) {
+            if(!std::isfinite(fs[(size_t)k])) continue;
+            if((k == 0 || fs[(size_t)k] <= fs[(size_t)k - 1]) && (k == n_scan - 1 || fs[(size_t)k] <= fs[(size_t)k + 1]))
+                minima.push_back(k);
+        }
+        std::sort(minima.begin(), minima.end(), [&](int a, int b) { return fs[(size_t)a] < fs[(size_t)b]; });
+        for(int m = 0; m < (int)minima.size() && m < n_keep; ++m) {
+            Eigen::VectorXf s = base;
+            s((int)j) = xs[(size_t)minima[(size_t)m]];
+            seeds.push_back(std::move(s));
+        }
+    }
+    return seeds;
+}

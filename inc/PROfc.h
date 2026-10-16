@@ -39,9 +39,10 @@ namespace PROfit {
         /// Best-fit physics parameters from the oscillation fit, in the fitter's internal space
         /// (log10 where model->is_log10[i] is true).  Converted using model->param_names at output time.
         Eigen::VectorXf best_phys_osc;
-        Eigen::VectorXf best_fit_syst; ///< Full best-fit parameter vector from the syst-only fit.
+        Eigen::VectorXf best_fit_syst; ///< Spline best fit of the syst-only (constrained) fit.
         Eigen::VectorXf best_fit_osc;  ///< Full best-fit parameter vector from the oscillation fit.
         Eigen::VectorXf syst_throw;    ///< Spline pulls thrown for this pseudo-experiment, one per spline in spline_names order (no physics).
+        Eigen::VectorXf best_phys_syst;///< Physics best fit of the constrained fit, fitter space; differs from the truth only for profiled parameters.
     };
 
     /**
@@ -57,7 +58,7 @@ namespace PROfit {
         const PROpeller prop;            ///< MC event store (copied per thread).
         const PROsyst systs;             ///< Systematic object (copied per thread).
         std::string chi2;                ///< Name of the chi-squared type to use ("neyman", "pearson", "CNP", or "poisson"; legacy aliases accepted).
-        const Eigen::VectorXf phy_params;///< True physics parameter point at which the FC test is evaluated.
+        const Eigen::VectorXf phy_params;///< Toy truth; its physics part is the tested point, with profiled parameters at their truth.
         const Eigen::MatrixXf R;         ///< Square root of the fractional covariance (CovarianceThrowRoot); scaled per throw by that throw's own prediction.
         PROfitterConfig fitconfig;       ///< Fitter configuration.
         uint32_t seed;                   ///< Random seed for this thread's pseudo-experiments.
@@ -67,6 +68,12 @@ namespace PROfit {
         const bool shape_only;           ///< Build every pseudo-experiment metric in shape-only mode (must match the data fit; --shapeonly).
         const bool throw_systematics;    ///< If true, fluctuate spline and covariance systematics in the pseudo-experiment.
         const bool throw_poisson;        ///< If true, apply a Poisson fluctuation to the pseudo-experiment.
+        const Eigen::VectorXf phys_lb;   ///< Physics bounds of the free fit, carrying the setup's --fix / --syst-only pins.
+        const Eigen::VectorXf phys_ub;   ///< Upper counterpart of phys_lb.
+        FitTiming* timing;               ///< Output: this thread's fit timings (log only).
+        /// Profile FC: 1 = this physics parameter floats in the constrained fit. Empty = all
+        /// physics pinned at phy_params (the full-dimensional Neyman point).
+        const std::vector<uint8_t> free_mask;
     };
 
     /**
