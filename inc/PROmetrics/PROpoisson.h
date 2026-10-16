@@ -70,6 +70,18 @@ namespace PROfit{
             const PROconfig &GetConfig() const override { return config; }
 
             /**
+             * @brief Gaussian-equivalent per-bin variance: the prediction.
+             * @details Poisson has no Gaussian term; its Fisher information per bin is 1/mu, so
+             * linearised consumers (post-fit pull normalisation) see the right weight. Empty
+             * bins (mu = 0) carry no information and drop out.
+             */
+            Eigen::VectorXf GetStatVariances(const Eigen::VectorXf &collapsed_prediction,
+                                             [[maybe_unused]] const Eigen::VectorXf &comparison,
+                                             [[maybe_unused]] const Eigen::VectorXf &param) const override {
+                return collapsed_prediction;
+            }
+
+            /**
              * @brief Compute the Poisson log-likelihood ratio for a single analysis channel.
              * @param channel_index  Global channel index.
              * @param cv             Predicted spectrum.

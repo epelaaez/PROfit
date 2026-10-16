@@ -61,6 +61,10 @@ void run_profile(float &global_fit_chi2, Eigen::VectorXf &global_fit_result, con
         fitres.fitter.best_fit = profile.newglob_param;
         global_fit_chi2 = profile.newglob;
         global_fit_result = profile.newglob_param;
+        // Pull distributions follow the adopted minimum (replacing the pre-scan ones).
+        plotPostfitPullDistributions(computePostfitPulls(config, prop, metric, fitres.fitter.best_fit,
+                    fitres.fitter.lb, fitres.fitter.ub, data.Spec()),
+                options.final_output_tag+"_PROfile_postfit_pull_distributions.pdf", &drawn_objs);
     }
     log<LOG_INFO>(L"%1% || fakedataparams for Plot (true_params/red stars): %2%") % __func__ % fakedataparams;
     profile.Plot(config, metric.GetSysts(), metric.GetModel(), metric, myseed,
