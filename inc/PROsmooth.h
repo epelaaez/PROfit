@@ -72,6 +72,9 @@ namespace PROsmooth {
      * @param sigma  Gaussian kernel width in bins; <= 0 leaves y unchanged.
      * @param preserve_rate If true, add a constant to all populated bins so that the
      *               CV-weighted rate change sum(cv * (y - 1)) of the block is unchanged.
+     * @details A ratio that was >= 0 is never made negative: a systematic can drive a bin to
+     * zero (a real underfluctuation), and smoothing keeps such bins at >= 0. Bins that would go
+     * below zero are pinned at 0 and the rate correction is spread over the remaining bins.
      */
     inline void SmoothBlock(Eigen::Ref<Eigen::VectorXf> y,
                             const Eigen::Ref<const Eigen::VectorXf> &w,
@@ -88,6 +91,7 @@ namespace PROsmooth {
         for (Eigen::Index b = 0; b < y.size(); ++b)
             if (w(b) > 0.0f && std::isfinite(y(b))) { rate_before += cv(b) * (y(b) - 1.0); cv_sum += cv(b); }
 
+        const Eigen::VectorXf y0 = y;
         Eigen::VectorXf tmp(y.size());
         for (size_t d = 0; d < dims.size(); ++d) {
             const size_t n = dims[d];
@@ -102,19 +106,33 @@ namespace PROsmooth {
             y = tmp;
         }
 
-        if (preserve_rate && cv_sum > 0.0) {
-            double rate_after = 0.0;
+        // Rate correction, then pin any ratio that went from >= 0 to < 0 at 0 and spread the
+        // correction over the bins not yet pinned; repeat until nothing new is pinned.
+        std::vector<char> pinned(y.size(), 0);
+        for (Eigen::Index iter = 0; iter <= y.size(); ++iter) {
+            if (preserve_rate && cv_sum > 0.0) {
+                double rate_after = 0.0, free_cv = 0.0;
+                for (Eigen::Index b = 0; b < y.size(); ++b)
+                    if (w(b) > 0.0f && std::isfinite(y(b))) {
+                        rate_after += cv(b) * (y(b) - 1.0);
+                        if (!pinned[b]) free_cv += cv(b);
+                    }
+                if (free_cv > 0.0) {
+                    const float shift = (float)((rate_before - rate_after) / free_cv);
+                    for (Eigen::Index b = 0; b < y.size(); ++b)
+                        if (w(b) > 0.0f && std::isfinite(y(b)) && !pinned[b]) y(b) += shift;
+                }
+            }
+            bool newly_pinned = false;
             for (Eigen::Index b = 0; b < y.size(); ++b)
-                if (w(b) > 0.0f && std::isfinite(y(b))) rate_after += cv(b) * (y(b) - 1.0);
-            const float shift = (float)((rate_before - rate_after) / cv_sum);
-            for (Eigen::Index b = 0; b < y.size(); ++b)
-                if (w(b) > 0.0f && std::isfinite(y(b))) y(b) += shift;
+                if (!pinned[b] && y(b) < 0.0f && !(y0(b) < 0.0f)) { y(b) = 0.0f; pinned[b] = 1; newly_pinned = true; }
+            if (!newly_pinned) break;
         }
     }
 
     /**
      * @brief First bin where smoothing broke the ratio: NaN/inf, or negative where @p raw was not
-     * (e.g. the local-linear fit extrapolating below zero at the edge of the range). -1 if none.
+     * (SmoothBlock pins such bins at 0, so this is a backstop). -1 if none.
      */
     inline Eigen::Index FirstInvalidSmoothed(const Eigen::Ref<const Eigen::VectorXf> &raw,
                                              const Eigen::Ref<const Eigen::VectorXf> &smoothed) {

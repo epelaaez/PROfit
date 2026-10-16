@@ -431,6 +431,8 @@ The `<allowlist>` attributes:
   start). Each subchannel is smoothed on its own (each axis of an N-D binning
   in turn) by a local-linear fit weighted by the CV effective event count,
   and keeps its CV-weighted rate change; the knob = 0 point stays exactly 1.
+  Ratios a systematic drives to zero stay at zero: smoothing never makes a
+  ratio negative.
   `smooth="0"` (or no attribute) means no smoothing. Applies to `spline`,
   `spline_to_covariance` and `hist1d/2d` (including DetVars), but not to
   `spline_cross_quad` members. `smooth=` is part of the config hash, so

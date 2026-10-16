@@ -89,14 +89,26 @@ int main() {
         check(rms_sm < 0.7 * rms_raw, "smoothing reduces the ratio error on Poisson toys");
     }
 
-    {   // FirstInvalidSmoothed: a ratio falling to zero at the edge makes the local-linear fit
-        // extrapolate below zero in the last bin, which FillSpline must refuse.
+    {   // A systematic can drive bins to zero (a real underfluctuation). Smoothing must keep them
+        // >= 0 -- neither the local-linear fit at the edge nor the rate correction may push them
+        // negative -- while still preserving the CV-weighted rate change.
         using PROfit::PROsmooth::FirstInvalidSmoothed;
-        Eigen::VectorXf y(10), cv = Eigen::VectorXf::Constant(10, 10.f);
+        auto rate = [](const Eigen::VectorXf &v, const Eigen::VectorXf &c) { return (c.array() * (v.array() - 1.f)).sum(); };
+
+        Eigen::VectorXf y(10), cv = Eigen::VectorXf::Constant(10, 10.f);   // falls to zero at the edge
         y << 0.40f, 0.35f, 0.30f, 0.25f, 0.20f, 0.15f, 0.10f, 0.05f, 0.0f, 0.0f;
         const Eigen::VectorXf raw = y;
         SmoothBlock(y, cv, cv, {10}, 1.0f, true);
-        check(FirstInvalidSmoothed(raw, y) == 9 && y(9) < 0.0f, "ratio running to zero at the edge is flagged");
+        check(y.minCoeff() >= 0.0f && FirstInvalidSmoothed(raw, y) == -1, "ratio falling to zero at the edge stays >= 0");
+        check(std::abs(rate(y, cv) - rate(raw, cv)) < 1e-3f, "... and the rate change is still preserved");
+
+        Eigen::VectorXf y2(28), cv2(28);   // 14 x 2 block whose upper row drains to exactly zero
+        const float row[14] = {1.1f, 1.0f, 0.95f, 0.9f, 0.8f, 0.6f, 0.4f, 0.2f, 0.05f, 0.f, 0.f, 0.f, 0.f, 0.f};
+        for (int ix = 0; ix < 14; ++ix) { y2(2*ix) = 1.0f; y2(2*ix+1) = row[ix]; cv2(2*ix) = 8.f; cv2(2*ix+1) = 3.f; }
+        const Eigen::VectorXf raw2 = y2;
+        SmoothBlock(y2, cv2, cv2, {14, 2}, 1.0f, true);
+        check(y2.minCoeff() >= 0.0f && y2(2*13+1) == 0.0f, "2D row draining to zero keeps its zeros at 0");
+        check(std::abs(rate(y2, cv2) - rate(raw2, cv2)) < 1e-3f, "... and the rate change is still preserved");
 
         Eigen::VectorXf r(3), sm(3);
         r << 1.0f, -0.2f, 0.9f;  sm << 1.0f, -0.1f, 0.95f;   // pre-existing negative: not smoothing's doing
