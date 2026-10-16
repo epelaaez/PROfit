@@ -242,15 +242,9 @@ namespace PROfit {
      */
     struct PEBank {
         static constexpr uint32_t MAGIC = 0x41464342;  ///< 'AFCB' (Adaptive FC Bank).
-        static constexpr uint16_t VERSION = 3;
+        static constexpr uint16_t VERSION = 2;
         ///< v2: added cell footprint arrays (i_bl, j_bl, step, level) so the
         ///<     bank is self-describing without needing the MetaMesh sidecar.
-        ///< v3: added config_hash.
-
-        /// PROconfig::hash of the run that generated the PEs (0 = v2 bank, unknown). Stamped by
-        /// save_bank and checked by load_bank, so a bank is never topped up, merged or classified
-        /// against with a different config (including different smooth= systematics).
-        uint32_t config_hash = 0;
 
         // Mesh footprint the bank was generated against. Used as a provenance
         // check at load time so we can refuse a (bank, mesh) mismatch.
@@ -283,19 +277,17 @@ namespace PROfit {
      * @brief Persist a PEBank to disk via Boost binary archive.
      *
      * On-disk layout: magic + version + the serialised PEBank. Mirrors the
-     * pattern in src/PROcreate.cxx:25-69. Stamps `config.hash` into the bank.
+     * pattern in src/PROcreate.cxx:25-69.
      * @return true on success, false on any I/O or serialisation error.
      */
-    bool save_bank(const PEBank &bank, const std::string &path, const PROconfig &config);
+    bool save_bank(const PEBank &bank, const std::string &path);
 
     /**
-     * @brief Inverse of save_bank. Verifies magic, version and that the bank was made with
-     * `config` (its hash). A v2 bank (no hash) is accepted with a warning unless `config`
-     * uses smooth=, which did not exist when v2 banks were written.
+     * @brief Inverse of save_bank. Verifies magic + version on the way in.
      * @return true on success and `bank_out` populated; false otherwise (and
      *         `bank_out` left in an indeterminate state).
      */
-    bool load_bank(PEBank &bank_out, const std::string &path, const PROconfig &config);
+    bool load_bank(PEBank &bank_out, const std::string &path);
 
     /**
      * @brief Per-throw observables persisted from --mode brazil runs.
@@ -314,8 +306,7 @@ namespace PROfit {
      */
     struct BrazilArchive {
         static constexpr uint32_t MAGIC = 0x41464252;  ///< 'AFBR'
-        static constexpr uint16_t VERSION = 2;  ///< v2: added config_hash (as PEBank::config_hash).
-        uint32_t config_hash = 0;
+        static constexpr uint16_t VERSION = 1;
         // Footprint sanity check vs. the current bank at load time.
         int finest_nx = 0;
         int finest_ny = 0;
@@ -325,9 +316,8 @@ namespace PROfit {
         std::vector<std::vector<float>> per_throw_dchi2; ///< dchi2_obs per cell, per throw.
     };
 
-    /// As save_bank / load_bank (same config-hash stamp and check).
-    bool save_brazil_archive(const BrazilArchive &arc, const std::string &path, const PROconfig &config);
-    bool load_brazil_archive(BrazilArchive &arc_out, const std::string &path, const PROconfig &config);
+    bool save_brazil_archive(const BrazilArchive &arc, const std::string &path);
+    bool load_brazil_archive(BrazilArchive &arc_out, const std::string &path);
 
     /**
      * @brief Output bundle from run_adaptive_fc.

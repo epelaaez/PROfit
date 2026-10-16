@@ -434,8 +434,8 @@ The `<allowlist>` attributes:
   `smooth="0"` (or no attribute) means no smoothing. Applies to `spline`,
   `spline_to_covariance` and `hist1d/2d` (including DetVars), but not to
   `spline_cross_quad` members. `smooth=` is part of the config hash, so
-  changing it invalidates existing `process` outputs and `fc-adaptive`
-  banks / brazil archives: re-run `process` and rebuild them.
+  changing it invalidates existing `process` outputs: re-run `process`, and
+  rebuild anything derived from them (e.g. `fc-adaptive` banks).
 
 ### Freeing a whole distribution bin-by-bin: `binned_unconstrained`
 

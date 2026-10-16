@@ -374,9 +374,9 @@ AdaptiveFCResult run_adaptive_fc(
     // generated with the same --seed) are deduplicated: pooling correlated
     // duplicates would silently inflate the effective statistics.
     //
-    // NOTE: load_bank verifies each input bank's XML config hash (binning,
-    // systematics, smooth=, ...), but NOT the command-line fit settings
-    // (metric, preset, grad-mode). Pooling banks with mismatched fit settings
+    // NOTE: mesh/bank binaries carry no XML/fit-config provenance, so this
+    // CANNOT verify the input banks came from the same config, metric,
+    // preset, and grad-mode. Pooling banks with mismatched fit settings
     // mixes different Δχ² distributions — that discipline is on the caller.
     if (acfg.mode == AdaptiveFCMode::MergeBank) {
         if (acfg.merge_inputs.empty()) {
@@ -434,7 +434,7 @@ AdaptiveFCResult run_adaptive_fc(
         int64_t total_carried = 0, total_dups = 0, total_dropped = 0;
         for (const auto &path : acfg.merge_inputs) {
             PEBank in;
-            if (!load_bank(in, path, config)) {
+            if (!load_bank(in, path)) {
                 log<LOG_ERROR>(L"%1% || merge-bank: failed to load %2%.") % __func__ % path.c_str();
                 return res;
             }
@@ -483,7 +483,7 @@ AdaptiveFCResult run_adaptive_fc(
         int empty_cells = 0;
         for (const auto &v : bank.cell_pes) if (v.empty()) ++empty_cells;
         const std::string bank_out = acfg.output_tag + "_bank.bin";
-        if (save_bank(bank, bank_out, config)) {
+        if (save_bank(bank, bank_out)) {
             res.bank_path = bank_out;
             log<LOG_INFO>(L"%1% || merge-bank: wrote %2% -- %3% cells, %4% PEs carried "
                           L"(%5% duplicates + %6% unmatched dropped), %7% cells still empty. "
@@ -517,8 +517,8 @@ AdaptiveFCResult run_adaptive_fc(
     // (seed, dchi2) key. Generate grid archives with distinct --seed values;
     // duplicates are dropped here with a warning.
     //
-    // NOTE: like merge-bank, the XML config hash is verified on load, but
-    // pooling throws from mismatched metrics/presets is on the caller.
+    // NOTE: like merge-bank, archives carry no XML/fit-config provenance, so
+    // pooling throws from mismatched configs/metrics/presets is on the caller.
     if (acfg.mode == AdaptiveFCMode::MergeBrazil) {
         if (acfg.merge_inputs.empty()) {
             log<LOG_ERROR>(L"%1% || merge-brazil: need >= 1 --merge-input brazil archives.") % __func__;
@@ -527,7 +527,7 @@ AdaptiveFCResult run_adaptive_fc(
         const std::string bank_in    = acfg.output_tag + "_bank.bin";
         const std::string brazil_bin = acfg.output_tag + "_brazil.bin";
         PEBank bank;
-        if (!load_bank(bank, bank_in, config)) {
+        if (!load_bank(bank, bank_in)) {
             log<LOG_ERROR>(L"%1% || merge-brazil: failed to load %2%. "
                            L"Run --mode merge-bank / init-bank (same -o) first.")
                 % __func__ % bank_in.c_str();
@@ -576,7 +576,7 @@ AdaptiveFCResult run_adaptive_fc(
         int64_t total_carried = 0, total_dups = 0;
         for (const auto &path : acfg.merge_inputs) {
             BrazilArchive in;
-            if (!load_brazil_archive(in, path, config)) {
+            if (!load_brazil_archive(in, path)) {
                 log<LOG_ERROR>(L"%1% || merge-brazil: failed to load %2%.") % __func__ % path.c_str();
                 return res;
             }
@@ -626,7 +626,7 @@ AdaptiveFCResult run_adaptive_fc(
             return res;
         }
 
-        save_brazil_archive(merged, brazil_bin, config);
+        save_brazil_archive(merged, brazil_bin);
 
         // Re-classify all merged throws against the current bank and emit the
         // band outputs — same tail as --mode brazil (see aggregate_brazil_throws).
@@ -691,7 +691,7 @@ AdaptiveFCResult run_adaptive_fc(
     if (acfg.mode == AdaptiveFCMode::PrintBank) {
         const std::string bank_in = acfg.output_tag + "_bank.bin";
         PEBank bank;
-        if (!load_bank(bank, bank_in, config)) {
+        if (!load_bank(bank, bank_in)) {
             log<LOG_ERROR>(L"%1% || print-bank: failed to load %2%.") % __func__ % bank_in.c_str();
             return res;
         }
@@ -730,7 +730,7 @@ AdaptiveFCResult run_adaptive_fc(
     if (acfg.mode == AdaptiveFCMode::Asimov) {
         const std::string bank_in = acfg.output_tag + "_bank.bin";
         PEBank bank;
-        if (!load_bank(bank, bank_in, config)) {
+        if (!load_bank(bank, bank_in)) {
             log<LOG_ERROR>(L"%1% || asimov: failed to load %2%.") % __func__ % bank_in.c_str();
             return res;
         }
@@ -840,7 +840,7 @@ AdaptiveFCResult run_adaptive_fc(
         const std::string bank_in = acfg.output_tag + "_bank.bin";
         const std::string brazil_bin = acfg.output_tag + "_brazil.bin";
         PEBank bank;
-        if (!load_bank(bank, bank_in, config)) {
+        if (!load_bank(bank, bank_in)) {
             log<LOG_ERROR>(L"%1% || brazil: failed to load %2%.") % __func__ % bank_in.c_str();
             return res;
         }
@@ -860,12 +860,8 @@ AdaptiveFCResult run_adaptive_fc(
             if (test.is_open()) {
                 test.close();
                 BrazilArchive existing;
-                if (!load_brazil_archive(existing, brazil_bin, config)) {
-                    log<LOG_ERROR>(L"%1% || brazil: existing %2% cannot be extended (see above); move it aside or use a new -o tag.")
-                        % __func__ % brazil_bin.c_str();
-                    return res;
-                }
-                if (existing.n_cells   == n_cells
+                if (load_brazil_archive(existing, brazil_bin)
+                    && existing.n_cells   == n_cells
                     && existing.finest_nx == bank.finest_nx
                     && existing.finest_ny == bank.finest_ny) {
                     arc.per_throw_global_chi2 = std::move(existing.per_throw_global_chi2);
@@ -931,7 +927,7 @@ AdaptiveFCResult run_adaptive_fc(
         brazil_progress.finish_all(true);
 
         // (3) Persist the merged archive.
-        save_brazil_archive(arc, brazil_bin, config);
+        save_brazil_archive(arc, brazil_bin);
 
         // (4)+(5) Re-classify ALL throws (existing + new) against the current
         //     bank, apply the closed-contour filter, and aggregate per-cell
@@ -981,7 +977,7 @@ AdaptiveFCResult run_adaptive_fc(
         const std::string bank_in     = acfg.output_tag + "_bank.bin";
         const std::string brazil_root = acfg.output_tag + "_brazil.root";
         PEBank bank;
-        if (!load_bank(bank, bank_in, config)) {
+        if (!load_bank(bank, bank_in)) {
             log<LOG_ERROR>(L"%1% || brazil-cleanup: failed to load %2%.") % __func__ % bank_in.c_str();
             return res;
         }
@@ -1137,13 +1133,8 @@ AdaptiveFCResult run_adaptive_fc(
             if (test.is_open()) {
                 test.close();
                 PEBank existing;
-                if (!load_bank(existing, bank_path, config)) {
-                    log<LOG_ERROR>(L"%1% || init-bank: existing %2% cannot be topped up (see above); move it aside or use a new -o tag.")
-                        % __func__ % bank_path.c_str();
-                    progress.finish_all(false);
-                    return res;
-                }
-                if (existing.n_cells   == bank.n_cells
+                if (load_bank(existing, bank_path)
+                    && existing.n_cells   == bank.n_cells
                     && existing.finest_nx == bank.finest_nx
                     && existing.finest_ny == bank.finest_ny
                     && existing.max_levels == bank.max_levels) {
@@ -1201,7 +1192,7 @@ AdaptiveFCResult run_adaptive_fc(
 
         cells_progress.finish_all(true);
 
-        if (save_bank(bank, bank_path, config)) {
+        if (save_bank(bank, bank_path)) {
             res.bank_path = bank_path;
         }
 
