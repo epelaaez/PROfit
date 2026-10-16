@@ -1329,53 +1329,65 @@ namespace PROfit {
 
     float PROsyst::SmoothingWidth(const PROconfig &config, const SystStruct &syst) {
         if (syst.mode == "norm" || syst.mode == "explicit_spline") return 0.0f;
-        const auto xml = config.m_mcgen_variation_smooth.find(syst.systname);
-        return xml != config.m_mcgen_variation_smooth.end() ? xml->second : 0.0f;
+        const auto width = config.m_mcgen_variation_smooth.find(syst.systname);
+        return width != config.m_mcgen_variation_smooth.end() ? width->second : 0.0f;
     }
 
     void PROsyst::SmoothSplineRatios(const PROconfig &config, int binning, const PROspec &cv,
                                      std::vector<PROspec> &ratios, float sigma_bins) {
-        const Eigen::VectorXf &c = cv.Spec();
-        const Eigen::VectorXf &e = cv.Error();
-        const Eigen::Index nbins = c.size();
-        if (binning < 0 || binning >= (int)config.m_num_variables || nbins != (Eigen::Index)config.m_num_variable_bins_total[binning]) {
-            log<LOG_WARNING>(L"%1% || Spectrum size %2% does not match binning %3%; skipping smoothing.") % __func__ % nbins % binning;
+        const Eigen::VectorXf &cv_content = cv.Spec();
+        const Eigen::VectorXf &cv_error = cv.Error();
+        const Eigen::Index num_bins = cv_content.size();
+        if (binning < 0 || binning >= (int)config.m_num_variables || num_bins != (Eigen::Index)config.m_num_variable_bins_total[binning]) {
+            log<LOG_WARNING>(L"%1% || Spectrum size %2% does not match binning %3%; skipping smoothing.") % __func__ % num_bins % binning;
             return;
         }
 
-        // Weights: CV effective count (content/error)^2, or the content if there are no errors.
-        Eigen::VectorXf w = Eigen::VectorXf::Zero(nbins);
-        for (Eigen::Index b = 0; b < nbins; ++b) {
-            if (!(c(b) > 0.0f) || !std::isfinite(c(b))) continue;
-            const bool has_err = e.size() == nbins && e(b) > 0.0f && std::isfinite(e(b));
-            w(b) = has_err ? (c(b) / e(b)) * (c(b) / e(b)) : c(b);
+        // Weight of each bin: the CV effective event count (content/error)^2, or the content if
+        // the CV has no errors. Empty bins get 0 and are left unsmoothed.
+        const bool cv_has_errors = cv_error.size() == num_bins;
+        Eigen::VectorXf weight = Eigen::VectorXf::Zero(num_bins);
+        for (Eigen::Index bin = 0; bin < num_bins; ++bin) {
+            const float content = cv_content(bin);
+            if (!(content > 0.0f) || !std::isfinite(content)) continue;
+            const float error = cv_has_errors ? cv_error(bin) : 0.0f;
+            const bool usable_error = error > 0.0f && std::isfinite(error);
+            weight(bin) = usable_error ? (content / error) * (content / error) : content;
         }
 
         // Skip the knob = 0 ratio (exactly 1) so round-off can't move the spline off 1 there.
-        std::vector<size_t> to_smooth;
-        for (size_t k = 0; k < ratios.size(); ++k)
-            if (!(ratios[k].Spec().array() == 1.0f).all()) to_smooth.push_back(k);
-        if (to_smooth.empty()) return;
+        std::vector<size_t> knobs_to_smooth;
+        for (size_t knob = 0; knob < ratios.size(); ++knob) {
+            const bool exactly_one = (ratios[knob].Spec().array() == 1.0f).all();
+            if (!exactly_one) knobs_to_smooth.push_back(knob);
+        }
+        if (knobs_to_smooth.empty()) return;
 
-        size_t global_subchannel_index = 0, global_channel_index = 0;
-        for (size_t im = 0; im < config.m_num_modes; ++im)
-            for (size_t id = 0; id < config.m_num_detectors; ++id)
-                for (size_t ic = 0; ic < config.m_num_channels; ++ic) {
-                    const PROconfig::Binning &bins = config.GetChannelVariableBins(global_channel_index, binning);
-                    std::vector<size_t> dims;
-                    for (size_t d = 0; d < bins.NDim(); ++d) dims.push_back(bins.NBinsAlong(d));
-                    const size_t nb = bins.NBins();
-                    for (size_t isc = 0; isc < config.m_num_subchannels[ic]; ++isc) {
-                        const size_t start = config.GetGlobalVariableBinStart(global_subchannel_index + isc, binning);
-                        if (nb == 0 || start + nb > (size_t)nbins) continue;
-                        for (size_t k : to_smooth)
-                            PROsmooth::SmoothBlock(ratios[k].Spec().segment(start, nb),
-                                                   w.segment(start, nb), c.segment(start, nb),
-                                                   dims, sigma_bins, true);
-                    }
-                    global_subchannel_index += config.m_num_subchannels[ic];
-                    ++global_channel_index;
+        // Smooth each subchannel's block of bins on its own. The channels repeat for every
+        // (mode, detector), and each channel's subchannels share its binning.
+        const size_t num_channel_blocks = config.m_num_modes * config.m_num_detectors * config.m_num_channels;
+        size_t first_subchannel = 0;
+        for (size_t channel_block = 0; channel_block < num_channel_blocks; ++channel_block) {
+            const size_t channel = channel_block % config.m_num_channels;
+            const size_t num_subchannels = config.m_num_subchannels[channel];
+            const PROconfig::Binning &channel_bins = config.GetChannelVariableBins(channel_block, binning);
+            const size_t block_size = channel_bins.NBins();
+            std::vector<size_t> dims;
+            for (size_t axis = 0; axis < channel_bins.NDim(); ++axis)
+                dims.push_back(channel_bins.NBinsAlong(axis));
+
+            for (size_t subchannel = 0; subchannel < num_subchannels; ++subchannel) {
+                const size_t block_start = config.GetGlobalVariableBinStart(first_subchannel + subchannel, binning);
+                if (block_size == 0 || block_start + block_size > (size_t)num_bins) continue;
+                for (size_t knob : knobs_to_smooth) {
+                    PROsmooth::SmoothBlock(ratios[knob].Spec().segment(block_start, block_size),
+                                           weight.segment(block_start, block_size),
+                                           cv_content.segment(block_start, block_size),
+                                           dims, sigma_bins, true);
                 }
+            }
+            first_subchannel += num_subchannels;
+        }
     }
 
     void PROsyst::FillSpline(const PROconfig& config, const SystStruct& syst, bool unmirrored) {
@@ -1431,14 +1443,15 @@ namespace PROfit {
         const float smooth_sigma = SmoothingWidth(config, syst);
         if (smooth_sigma > 0.0f) {
             log<LOG_INFO>(L"%1% || Smoothing spline ratios for systematic %2% (Gaussian kernel, sigma = %3% bins)") % __func__ % syst.systname.c_str() % smooth_sigma;
-            std::vector<Eigen::VectorXf> raw;
-            for (const PROspec &r : ratios) raw.push_back(r.Spec());
+            std::vector<Eigen::VectorXf> unsmoothed;
+            for (const PROspec &ratio : ratios) unsmoothed.push_back(ratio.Spec());
             SmoothSplineRatios(config, syst.binning, *syst.p_cv, ratios, smooth_sigma);
-            for (size_t k = 0; k < ratios.size(); ++k) {
-                const Eigen::Index b = PROsmooth::FirstInvalidSmoothed(raw[k], ratios[k].Spec());
-                if (b < 0) continue;
+            for (size_t knob = 0; knob < ratios.size(); ++knob) {
+                const Eigen::VectorXf &smoothed = ratios[knob].Spec();
+                const Eigen::Index bad_bin = PROsmooth::FirstInvalidSmoothed(unsmoothed[knob], smoothed);
+                if (bad_bin < 0) continue;
                 log<LOG_ERROR>(L"%1% || Smoothing (sigma = %2% bins) made systematic %3% invalid at knob %4%, bin %5%: ratio %6% before, %7% after. Use a smaller smooth= or smooth=\"0\".")
-                    % __func__ % smooth_sigma % syst.systname.c_str() % knobvals[k] % b % raw[k](b) % ratios[k].Spec()(b);
+                    % __func__ % smooth_sigma % syst.systname.c_str() % knobvals[knob] % bad_bin % unsmoothed[knob](bad_bin) % smoothed(bad_bin);
                 log<LOG_ERROR>(L"Terminating.");
                 exit(EXIT_FAILURE);
             }
