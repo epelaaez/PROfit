@@ -1563,7 +1563,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 }
 
                 //check for known attributes
-                const std::vector<std::string> expected_attrs = {"name", "type", "plotname", "binning", "knobvals", "tag", "prior", "center", "prior_type", "force_0_cv", "include_only_weights", "scale","filename", "xvar", "yvar", "restrict", "mirror", "num_decomp_knobs", "include_resid_cov", "inflate", "weights", "apply_to_subchannel", "scale_range", "sources", "splines"};
+                const std::vector<std::string> expected_attrs = {"name", "type", "plotname", "binning", "knobvals", "tag", "prior", "center", "prior_type", "force_0_cv", "include_only_weights", "scale","filename", "xvar", "yvar", "restrict", "mirror", "num_decomp_knobs", "include_resid_cov", "inflate", "weights", "apply_to_subchannel", "scale_range", "sources", "splines", "smooth"};
                 for (const tinyxml2::XMLAttribute* attr = pAllowList->FirstAttribute(); attr; attr = attr->Next()) {
                     std::string name = attr->Name();
                     if (std::find(expected_attrs.begin(), expected_attrs.end(), name) == expected_attrs.end()) {
@@ -1586,6 +1586,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                 const char *restrict_str = pAllowList->Attribute("restrict");
                 const char *scale = pAllowList->Attribute("scale");
                 const char *inflate = pAllowList->Attribute("inflate");
+                const char *smooth = pAllowList->Attribute("smooth");
                 const char *filename = pAllowList->Attribute("filename");
                 const char *xvar = pAllowList->Attribute("xvar");
                 const char *yvar = pAllowList->Attribute("yvar");
@@ -1617,7 +1618,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                         throw std::invalid_argument(std::string("binned_unconstrained systematic '") + wt +
                             "' takes its range from scale_range=\"lo, hi\" (multiplicative scale units), not restrict=");
                     }
-                    if(knobs || filename || xvar || yvar || mirrored || num_decomp_knobs || include_resid_cov || weights || force_0_cv || include_only_weights_str || scale || inflate) {
+                    if(knobs || filename || xvar || yvar || mirrored || num_decomp_knobs || include_resid_cov || weights || force_0_cv || include_only_weights_str || scale || inflate || smooth) {
                         throw std::invalid_argument(std::string("binned_unconstrained systematic '") + wt +
                             "' only supports the attributes type, plotname, tag, binning, apply_to_subchannel and scale_range");
                     }
@@ -1662,7 +1663,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                         throw std::invalid_argument(std::string("covariance_to_spline_uniform systematic '") + wt +
                             "' cannot specify prior=, center= or prior_type= (its eigenmode knobs always float freely with a uniform prior)");
                     }
-                    if(binning || knobs || filename || xvar || yvar || mirrored || weights || force_0_cv || include_only_weights_str || scale || inflate || apply_to_subchannel) {
+                    if(binning || knobs || filename || xvar || yvar || mirrored || weights || force_0_cv || include_only_weights_str || scale || inflate || apply_to_subchannel || smooth) {
                         throw std::invalid_argument(std::string("covariance_to_spline_uniform systematic '") + wt +
                             "' only supports the attributes type, plotname, tag, num_decomp_knobs, include_resid_cov, restrict and sources (put scale=/inflate=/apply_to_subchannel= on the source entries)");
                     }
@@ -1690,7 +1691,7 @@ int PROconfig::LoadFromXML(const std::string &filename){
                         throw std::invalid_argument(std::string("spline_cross_quad systematic '") + wt +
                             "' requires splines=\"A, B, ...\" naming its member type=\"spline\" entries in pair order");
                     }
-                    if(knobs || prior || center || prior_type || restrict_str || filename || xvar || yvar || mirrored || num_decomp_knobs || include_resid_cov || weights || scale_range || inflate) {
+                    if(knobs || prior || center || prior_type || restrict_str || filename || xvar || yvar || mirrored || num_decomp_knobs || include_resid_cov || weights || scale_range || inflate || smooth) {
                         throw std::invalid_argument(std::string("spline_cross_quad systematic '") + wt +
                             "' only supports the attributes type, plotname, tag, binning, force_0_cv, include_only_weights, scale, apply_to_subchannel and splines (its knob values are derived from the pair count)");
                     }
@@ -1940,6 +1941,23 @@ int PROconfig::LoadFromXML(const std::string &filename){
                     if(!variation_type || std::find(inflatable_types.begin(), inflatable_types.end(), variation_type) == inflatable_types.end()) {
                         log<LOG_WARNING>(L"%1% || inflate is not supported for systematic %2% (type %3%); it will have no effect.")
                             % __func__ % wt.c_str() % (variation_type ? variation_type : "unspecified");
+                    }
+                }
+                if(smooth) {
+                    char *end;
+                    const float smooth_val = std::strtof(smooth, &end);
+                    while(*end == ' ' || *end == '\t') ++end;
+                    if(end == smooth || *end != '\0' || !std::isfinite(smooth_val) || smooth_val < 0.0f) {
+                        log<LOG_ERROR>(L"%1% || ERROR! smooth attribute for systematic %2% must be a non-negative number (kernel width in bins), got '%3%'") % __func__ % wt.c_str() % smooth;
+                        throw std::invalid_argument(std::string("smooth attribute for systematic '") + wt +
+                            "' must be a non-negative kernel width in bins, e.g. smooth=\"1\" (smooth=\"0\" = never smooth)");
+                    }
+                    m_mcgen_variation_smooth[wt] = smooth_val;
+                    log<LOG_INFO>(L"%1% || Parsed smooth=%2% for systematic %3%") % __func__ % smooth_val % wt.c_str();
+                    const std::vector<std::string> smoothable_types = {"spline", "spline_to_covariance", "hist1d", "hist2d"};
+                    if(std::find(smoothable_types.begin(), smoothable_types.end(), variation_type) == smoothable_types.end()) {
+                        log<LOG_WARNING>(L"%1% || smooth is not supported for systematic %2% (type %3%); it will have no effect.")
+                            % __func__ % wt.c_str() % variation_type;
                     }
                 }
                 if(mirrored) {
@@ -3138,6 +3156,13 @@ void PROconfig::ResolveSplineCrossQuadMembers(){
                 log<LOG_ERROR>(L"Terminating.");
                 exit(EXIT_FAILURE);
             }
+            // e_ij subtracts the members' splines from raw universes; smoothing them breaks that.
+            auto sm_it = m_mcgen_variation_smooth.find(name);
+            if(sm_it != m_mcgen_variation_smooth.end() && sm_it->second > 0.0f){
+                log<LOG_ERROR>(L"%1% || ERROR: spline_cross_quad systematic '%2%': member '%3%' has smooth=\"%4%\". Smoothing is not supported for spline_cross_quad members; remove it.") % __func__ % parent.c_str() % name.c_str() % sm_it->second;
+                log<LOG_ERROR>(L"Terminating.");
+                exit(EXIT_FAILURE);
+            }
             // The additive group factor 1 + sum(s_i - 1) + sum e_ij eta_i eta_j assumes s_i(0) = 1.
             auto kv_it = m_mcgen_variation_knobval_override.find(name);
             const bool explicit_zero = kv_it != m_mcgen_variation_knobval_override.end()
@@ -3247,6 +3272,9 @@ uint32_t PROconfig::CalcHash() const{
         unique_string << sysname << "*" << s;
     for (const auto& [sysname, f] : m_mcgen_variation_inflate)
         unique_string << sysname << "^" << f;
+    // smooth="0" == no attribute, so only nonzero widths are hashed (old hashes stay valid).
+    for (const auto& [sysname, w] : m_mcgen_variation_smooth)
+        if (w > 0.0f) unique_string << sysname << "~s" << w;
 
     for(const auto& vec: m_branch_variables){
         for(const auto& br: vec){

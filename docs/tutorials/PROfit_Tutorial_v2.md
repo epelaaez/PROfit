@@ -425,6 +425,13 @@ The `<allowlist>` attributes:
   POT-normalised CV, so set their `pot=`/`scale=` as for the matching MC files.
 * `scale_range="lo, hi"` — `binned_unconstrained` only: the multiplicative
   range every free bin may take (default `0, 10`; must contain 1).
+* `smooth="sigma"` — smooth this systematic's variation/CV ratios across
+  neighbouring reco bins (Gaussian kernel, `sigma` in bins; `"1"` is a good
+  start) to suppress MC statistical fluctuations, e.g. in DetVars. Each
+  subchannel is smoothed separately, keeping its rate change; ratios never go
+  negative. Applies to `spline`, `spline_to_covariance` and `hist1d/2d`, not
+  `spline_cross_quad` members. Part of the config hash: re-run `process` after
+  changing it.
 
 ### Freeing a whole distribution bin-by-bin: `binned_unconstrained`
 

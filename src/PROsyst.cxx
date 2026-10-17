@@ -5,6 +5,7 @@
 #include "PROcreate.h"
 #include "PROlog.h"
 #include "PROtocall.h"
+#include "PROsmooth.h"
 #include <Eigen/Eigen>
 #include <mutex>
 #include <atomic>
@@ -257,7 +258,7 @@ namespace PROfit {
             ScopeSystStructSpectra(config, syst, syst.mode == "covariance" ? other_index : syst.binning);
             if(syst.mode == "spline" || syst.mode == "norm" || syst.mode == "hist1d" || syst.mode == "hist2d" || syst.mode == "explicit_spline") {
                 bool unmirrored = config.m_mcgen_variation_unmirrored.find(syst.systname) != config.m_mcgen_variation_unmirrored.end();
-                FillSpline(syst, unmirrored);
+                FillSpline(config, syst, unmirrored);
                 bool is_flux = config.has_flux_tag(syst.systname);
                 spline_is_pre_migration.push_back(is_flux);
                 log<LOG_DEBUG>(L"%1% || Spline '%2%' classified as %3%") % __func__ % syst.systname.c_str()
@@ -277,7 +278,7 @@ namespace PROfit {
                 }
                 // Build spline first, then convert to covariance matrix
                 bool unmirrored = config.m_mcgen_variation_unmirrored.find(syst.systname) != config.m_mcgen_variation_unmirrored.end();
-                FillSpline(syst, unmirrored);
+                FillSpline(config, syst, unmirrored);
                 size_t spline_idx = splines.size() - 1;
 
                 // Build temporary priors/centers for the current spline list (including the
@@ -1326,7 +1327,70 @@ namespace PROfit {
         }
     }
 
-    void PROsyst::FillSpline(const SystStruct& syst, bool unmirrored) {
+    float PROsyst::SmoothingWidth(const PROconfig &config, const SystStruct &syst) {
+        if (syst.mode == "norm" || syst.mode == "explicit_spline") return 0.0f;
+        const auto width = config.m_mcgen_variation_smooth.find(syst.systname);
+        return width != config.m_mcgen_variation_smooth.end() ? width->second : 0.0f;
+    }
+
+    void PROsyst::SmoothSplineRatios(const PROconfig &config, int binning, const PROspec &cv,
+                                     std::vector<PROspec> &ratios, float sigma_bins) {
+        const Eigen::VectorXf &cv_content = cv.Spec();
+        const Eigen::VectorXf &cv_error = cv.Error();
+        const Eigen::Index num_bins = cv_content.size();
+        if (binning < 0 || binning >= (int)config.m_num_variables || num_bins != (Eigen::Index)config.m_num_variable_bins_total[binning]) {
+            log<LOG_WARNING>(L"%1% || Spectrum size %2% does not match binning %3%; skipping smoothing.") % __func__ % num_bins % binning;
+            return;
+        }
+
+        // Weight of each bin: the CV effective event count (content/error)^2, or the content if
+        // the CV has no errors. Empty bins get 0 and are left unsmoothed.
+        const bool cv_has_errors = cv_error.size() == num_bins;
+        Eigen::VectorXf weight = Eigen::VectorXf::Zero(num_bins);
+        for (Eigen::Index bin = 0; bin < num_bins; ++bin) {
+            const float content = cv_content(bin);
+            if (!(content > 0.0f) || !std::isfinite(content)) continue;
+            const float error = cv_has_errors ? cv_error(bin) : 0.0f;
+            const bool usable_error = error > 0.0f && std::isfinite(error);
+            weight(bin) = usable_error ? (content / error) * (content / error) : content;
+        }
+
+        // Skip the knob = 0 ratio (exactly 1) so round-off can't move the spline off 1 there.
+        std::vector<size_t> knobs_to_smooth;
+        for (size_t knob = 0; knob < ratios.size(); ++knob) {
+            const bool exactly_one = (ratios[knob].Spec().array() == 1.0f).all();
+            if (!exactly_one) knobs_to_smooth.push_back(knob);
+        }
+        if (knobs_to_smooth.empty()) return;
+
+        // Smooth each subchannel's block of bins on its own. The channels repeat for every
+        // (mode, detector), and each channel's subchannels share its binning.
+        const size_t num_channel_blocks = config.m_num_modes * config.m_num_detectors * config.m_num_channels;
+        size_t first_subchannel = 0;
+        for (size_t channel_block = 0; channel_block < num_channel_blocks; ++channel_block) {
+            const size_t channel = channel_block % config.m_num_channels;
+            const size_t num_subchannels = config.m_num_subchannels[channel];
+            const PROconfig::Binning &channel_bins = config.GetChannelVariableBins(channel_block, binning);
+            const size_t block_size = channel_bins.NBins();
+            std::vector<size_t> dims;
+            for (size_t axis = 0; axis < channel_bins.NDim(); ++axis)
+                dims.push_back(channel_bins.NBinsAlong(axis));
+
+            for (size_t subchannel = 0; subchannel < num_subchannels; ++subchannel) {
+                const size_t block_start = config.GetGlobalVariableBinStart(first_subchannel + subchannel, binning);
+                if (block_size == 0 || block_start + block_size > (size_t)num_bins) continue;
+                for (size_t knob : knobs_to_smooth) {
+                    PROsmooth::SmoothBlock(ratios[knob].Spec().segment(block_start, block_size),
+                                           weight.segment(block_start, block_size),
+                                           cv_content.segment(block_start, block_size),
+                                           dims, sigma_bins, true);
+                }
+            }
+            first_subchannel += num_subchannels;
+        }
+    }
+
+    void PROsyst::FillSpline(const PROconfig& config, const SystStruct& syst, bool unmirrored) {
         std::vector<PROspec> ratios;
         ratios.reserve(syst.p_multi_spec.size());
 
@@ -1389,6 +1453,23 @@ namespace PROfit {
             for (PROspec& ratio : ratios) {
                 Eigen::VectorXf& v = ratio.Spec();
                 v = (1.0f + syst.inflate * (v.array() - 1.0f)).matrix();
+            }
+        }
+
+        const float smooth_sigma = SmoothingWidth(config, syst);
+        if (smooth_sigma > 0.0f) {
+            log<LOG_INFO>(L"%1% || Smoothing spline ratios for systematic %2% (Gaussian kernel, sigma = %3% bins)") % __func__ % syst.systname.c_str() % smooth_sigma;
+            std::vector<Eigen::VectorXf> unsmoothed;
+            for (const PROspec &ratio : ratios) unsmoothed.push_back(ratio.Spec());
+            SmoothSplineRatios(config, syst.binning, *syst.p_cv, ratios, smooth_sigma);
+            for (size_t knob = 0; knob < ratios.size(); ++knob) {
+                const Eigen::VectorXf &smoothed = ratios[knob].Spec();
+                const Eigen::Index bad_bin = PROsmooth::FirstInvalidSmoothed(unsmoothed[knob], smoothed);
+                if (bad_bin < 0) continue;
+                log<LOG_ERROR>(L"%1% || Smoothing (sigma = %2% bins) made systematic %3% invalid at knob %4%, bin %5%: ratio %6% before, %7% after. Use a smaller smooth= or smooth=\"0\".")
+                    % __func__ % smooth_sigma % syst.systname.c_str() % knobvals[knob] % bad_bin % unsmoothed[knob](bad_bin) % smoothed(bad_bin);
+                log<LOG_ERROR>(L"Terminating.");
+                exit(EXIT_FAILURE);
             }
         }
 
