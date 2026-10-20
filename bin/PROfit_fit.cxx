@@ -548,6 +548,33 @@ std::map<std::string, TObject *> draw_fit_result(const PROconfig &config, const 
             drawn_objs[name] = obj;
     }
 
+    // Raw band ingredients, so a downstream chi^2 can be formed against the curves the plots draw
+    auto write_band = [&](const std::optional<PROerrorbar> &band, const std::string &tag) {
+        if(!band) return;
+        const int n = band->covariance.rows();
+        TH2D *cov = new TH2D((tag+"_band_covariance").c_str(),
+                (tag+" band covariance (raw collapsed counts^2);collapsed bin;collapsed bin").c_str(),
+                n, 0, n, n, 0, n);
+        cov->SetDirectory(nullptr);
+        for(int i = 0; i < n; ++i)
+            for(int j = 0; j < n; ++j)
+                cov->SetBinContent(i+1, j+1, band->covariance(i, j));
+        drawn_objs[tag+"_band_covariance"] = cov;
+
+        auto write_vec = [&](const Eigen::VectorXf &v, const std::string &suffix, const std::string &title) {
+            TH1D *h = new TH1D((tag+"_band_"+suffix).c_str(), (tag+" band "+title+";collapsed bin").c_str(), v.size(), 0, v.size());
+            h->SetDirectory(nullptr);
+            for(int i = 0; i < v.size(); ++i) h->SetBinContent(i+1, v(i));
+            drawn_objs[tag+"_band_"+suffix] = h;
+        };
+        write_vec(band->error_point, "error_point", "centre before the data-constrained shift (raw counts)");
+        write_vec(band->center_shift, "center_shift", "data-constrained shift of the centre (raw counts)");
+        write_vec(band->error_down, "error_down", "lower half-width about centre+shift (raw counts)");
+        write_vec(band->error_up, "error_up", "upper half-width about centre+shift (raw counts)");
+    };
+    write_band(fitres.err_band, "prefit");
+    write_band(fitres.post_err_band, "postfit");
+
     TCanvas c;
     if(fitres.posteriors.size()) {
         c.Print((prefix+"_postfit_posteriors.pdf[").c_str());
